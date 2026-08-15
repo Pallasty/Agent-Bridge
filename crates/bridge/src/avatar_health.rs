@@ -65,7 +65,51 @@ pub fn heartbeat_label(label: Option<&str>, project: &str) -> String {
         })
 }
 
+/// Reject labels that cannot safely serve as a single launchd/file-name component.
+///
+/// Explicit heartbeat labels are identifiers, not paths. Keep the historical
+/// trim/identity behavior in [`heartbeat_label`], then validate the resolved
+/// value at every health-projection boundary before it reaches HOME, launchctl,
+/// a plist, or a store key.
+pub fn validate_heartbeat_label(label: &str) -> Result<()> {
+    if label.is_empty() {
+        anyhow::bail!("invalid heartbeat label: empty labels are not allowed");
+    }
+    if label.len() > 255 {
+        anyhow::bail!("invalid heartbeat label: exceeds 255 bytes");
+    }
+    if matches!(label, "." | "..") {
+        anyhow::bail!("invalid heartbeat label: dot path components are not allowed");
+    }
+    if !label
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        anyhow::bail!("invalid heartbeat label: use only ASCII letters, digits, '-', '_', or '.'");
+    }
+    Ok(())
+}
+
+/// Resolve the shared health identity without touching the filesystem, a
+/// process, or the StateStore. Composition roots use this before acquiring
+/// their own resources so malformed explicit labels cannot cause earlier
+/// effects.
+pub fn resolve_heartbeat_health_identity(
+    label_arg: Option<&str>,
+    project_arg: Option<&str>,
+) -> Result<(String, String)> {
+    let project = project_arg
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("agent-bridge")
+        .to_string();
+    let label = heartbeat_label(label_arg, &project);
+    validate_heartbeat_label(&label)?;
+    Ok((project, label))
+}
+
 pub fn heartbeat_plist_path(label: &str) -> Result<PathBuf> {
+    validate_heartbeat_label(label)?;
     Ok(home_dir()?
         .join("Library")
         .join("LaunchAgents")
@@ -73,6 +117,7 @@ pub fn heartbeat_plist_path(label: &str) -> Result<PathBuf> {
 }
 
 pub fn heartbeat_log_path(label: &str, suffix: &str) -> Result<PathBuf> {
+    validate_heartbeat_label(label)?;
     Ok(home_dir()?
         .join("Library")
         .join("Logs")
@@ -124,6 +169,7 @@ pub fn parse_launchctl_print(output: &str, domain: &str, target: &str) -> Launch
 }
 
 pub fn probe_launchd(label: &str) -> Result<LaunchdProbe> {
+    validate_heartbeat_label(label)?;
     let domain = launchd_domain()?;
     let target = format!("{domain}/{label}");
     let output = std::process::Command::new("launchctl")
@@ -188,46 +234,6 @@ pub fn parse_plist_program_arguments(contents: &str) -> Vec<String> {
     args
 }
 
-fn probe_binary_help(binary: Option<&Path>) -> (Option<bool>, Option<bool>, Option<String>) {
-    let Some(binary) = binary else {
-        return (
-            None,
-            None,
-            Some("missing ProgramArguments binary".to_string()),
-        );
-    };
-    if !binary.exists() {
-        return (
-            Some(false),
-            Some(false),
-            Some(format!("binary does not exist: {}", binary.display())),
-        );
-    }
-    let output = std::process::Command::new(binary)
-        .args(["avatar", "--help"])
-        .output();
-    match output {
-        Ok(output) => {
-            let mut text = String::new();
-            text.push_str(&String::from_utf8_lossy(&output.stdout));
-            text.push_str(&String::from_utf8_lossy(&output.stderr));
-            let sync = output.status.success() && text.contains("sync-presence");
-            let health = output.status.success() && text.contains("heartbeat-health");
-            let error = if output.status.success() {
-                None
-            } else {
-                Some(format!("avatar --help exited with {}", output.status))
-            };
-            (Some(sync), Some(health), error)
-        }
-        Err(err) => (
-            Some(false),
-            Some(false),
-            Some(format!("avatar --help failed: {err}")),
-        ),
-    }
-}
-
 fn heartbeat_binary_json(plist: &Path) -> Value {
     let args = std::fs::read_to_string(plist)
         .ok()
@@ -235,16 +241,28 @@ fn heartbeat_binary_json(plist: &Path) -> Value {
         .unwrap_or_default();
     let binary_path = args.first().map(PathBuf::from);
     let exists = binary_path.as_ref().map(|p| p.exists()).unwrap_or(false);
-    let (supports_sync_presence, supports_heartbeat_health, error) =
-        probe_binary_help(binary_path.as_deref());
-    let missing_command = matches!(supports_sync_presence, Some(false));
+    let configured_sync_presence = matches!(
+        (
+            args.get(1).map(String::as_str),
+            args.get(2).map(String::as_str)
+        ),
+        (Some("avatar"), Some("sync-presence"))
+    );
+    let error = match binary_path.as_ref() {
+        None => Some("missing ProgramArguments binary".to_string()),
+        Some(binary) if !exists => Some(format!("binary does not exist: {}", binary.display())),
+        Some(_) => None,
+    };
     json!({
         "path": binary_path.as_ref().map(|p| path_string(p)),
         "exists": exists,
         "program_arguments": args,
-        "supports_sync_presence": supports_sync_presence,
-        "supports_heartbeat_health": supports_heartbeat_health,
-        "missing_command": missing_command,
+        "probe_mode": "passive_program_arguments",
+        "executable_invoked": false,
+        "configured_sync_presence": configured_sync_presence,
+        "supports_sync_presence": Value::Null,
+        "supports_heartbeat_health": Value::Null,
+        "missing_command": !configured_sync_presence,
         "error": error,
     })
 }
@@ -272,12 +290,7 @@ pub async fn heartbeat_health(
     project_arg: Option<&str>,
     stale_secs: i64,
 ) -> Result<Value> {
-    let project = project_arg
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("agent-bridge")
-        .to_string();
-    let label = heartbeat_label(label_arg, &project);
+    let (project, label) = resolve_heartbeat_health_identity(label_arg, project_arg)?;
     let stale_secs = stale_secs.clamp(30, 86_400);
     let generated_at = unix_now();
     let plist_path = heartbeat_plist_path(&label)?;
@@ -360,7 +373,8 @@ pub async fn heartbeat_health(
         }
         "binary_missing" => "binary_missing: heartbeat binary path is missing".to_string(),
         "binary_missing_command" => {
-            "binary_missing_command: heartbeat binary does not support sync-presence".to_string()
+            "binary_missing_command: plist ProgramArguments does not configure avatar sync-presence"
+                .to_string()
         }
         "not_loaded" => "not_loaded: launchd heartbeat job is not loaded".to_string(),
         _ => status.to_string(),
@@ -385,6 +399,162 @@ pub async fn heartbeat_health(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heartbeat_paths_reject_non_component_labels() {
+        for label in [
+            "/tmp/escape",
+            "../escape",
+            "nested/escape",
+            "nested\\escape",
+            "bad label",
+            "bad\nlabel",
+        ] {
+            assert!(
+                heartbeat_plist_path(label).is_err(),
+                "unsafe heartbeat label should be rejected: {label:?}"
+            );
+            assert!(
+                heartbeat_log_path(label, "out").is_err(),
+                "unsafe heartbeat label should be rejected: {label:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn heartbeat_health_identity_accepts_legacy_safe_labels_and_rejects_unsafe_ones() {
+        assert_eq!(
+            resolve_heartbeat_health_identity(Some(" custom.label "), Some("ignored"))
+                .expect("safe custom label"),
+            ("ignored".to_string(), "custom.label".to_string())
+        );
+        assert_eq!(
+            resolve_heartbeat_health_identity(None, Some("Agent Bridge")).expect("default label"),
+            (
+                "Agent Bridge".to_string(),
+                "com.agentbridge.avatar-heartbeat.agent-bridge".to_string()
+            )
+        );
+        for label in ["/tmp/escape", "../escape", "bad label", "bad\nlabel", "雪"] {
+            assert!(
+                resolve_heartbeat_health_identity(Some(label), Some("agent-bridge")).is_err(),
+                "unsafe heartbeat label should be rejected: {label:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn heartbeat_binary_projection_never_executes_plist_program() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let sentinel = temp.path().join("sentinel");
+        let marker = temp.path().join("invoked");
+        std::fs::write(
+            &sentinel,
+            format!(
+                "#!/bin/sh\nprintf invoked > '{}'\nprintf 'sync-presence heartbeat-health\\n'\n",
+                marker.display()
+            ),
+        )
+        .expect("write sentinel");
+        let mut permissions = std::fs::metadata(&sentinel)
+            .expect("stat sentinel")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&sentinel, permissions).expect("make sentinel executable");
+
+        let plist = temp.path().join("heartbeat.plist");
+        std::fs::write(
+            &plist,
+            format!(
+                r#"<dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{}</string>
+    <string>avatar</string>
+    <string>sync-presence</string>
+  </array>
+</dict>
+"#,
+                sentinel.display()
+            ),
+        )
+        .expect("write plist");
+
+        let binary = heartbeat_binary_json(&plist);
+
+        assert!(
+            !marker.exists(),
+            "heartbeat health must not execute ProgramArguments[0]"
+        );
+        assert_eq!(
+            binary.get("probe_mode").and_then(Value::as_str),
+            Some("passive_program_arguments")
+        );
+        assert_eq!(
+            binary.get("executable_invoked").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            binary
+                .get("configured_sync_presence")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(
+            binary
+                .get("supports_sync_presence")
+                .is_some_and(Value::is_null),
+            "passive projection must not claim executable support"
+        );
+        assert!(
+            binary
+                .get("supports_heartbeat_health")
+                .is_some_and(Value::is_null),
+            "passive projection must not claim executable support"
+        );
+    }
+
+    #[test]
+    fn heartbeat_binary_projection_marks_non_heartbeat_contract_missing() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let binary_path = temp.path().join("configured-binary");
+        std::fs::write(&binary_path, b"not executed").expect("write binary fixture");
+        let plist = temp.path().join("heartbeat.plist");
+        std::fs::write(
+            &plist,
+            format!(
+                r#"<dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{}</string>
+    <string>avatar</string>
+    <string>heartbeat-health</string>
+  </array>
+</dict>
+"#,
+                binary_path.display()
+            ),
+        )
+        .expect("write plist");
+
+        let binary = heartbeat_binary_json(&plist);
+
+        assert_eq!(
+            binary
+                .get("configured_sync_presence")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(binary.get("missing_command").and_then(Value::as_bool), Some(true));
+        assert!(
+            binary
+                .get("supports_sync_presence")
+                .is_some_and(Value::is_null)
+        );
+    }
 
     #[test]
     fn heartbeat_label_sanitizes_project() {

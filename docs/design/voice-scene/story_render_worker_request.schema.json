@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_worker_request.v1",
+  "title": "Agent-Bridge fixed-fixture Story render Worker request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "fixture", "authorization"],
+  "properties": {
+    "protocol": {"const": "agent_bridge.story-render-worker.v1"},
+    "request_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preflight", "chapter", "preflight_sha256", "execution_contract_sha256"],
+      "properties": {
+        "preflight": {"const": "fixed_s602_fixture_only"},
+        "chapter": {"const": 2},
+        "preflight_sha256": {"const": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"},
+        "execution_contract_sha256": {"const": "24edc82e885c7f8e5a934019e78530f0d70a482e15ec04c52824395fef1e0fe8"}
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id", "contract_sha256", "preflight_sha256", "output_directory", "action", "issued_at", "expires_at", "single_use_nonce", "issuer", "subject", "key_id", "mac_sha256"],
+      "properties": {
+        "authorization_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "contract_sha256": {"const": "be4bfc12d9adeda14b8d20048b91baaaf903f155a3fca5bd3413b2b649f7334d"},
+        "preflight_sha256": {"const": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"},
+        "output_directory": {"type": "string", "pattern": "^/home/pallasting/\\.agent-bridge-secure/story-render/outputs/[0-9a-f]{32}$"},
+        "action": {"const": "render"},
+        "issued_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"},
+        "expires_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"},
+        "single_use_nonce": {"type": "string", "minLength": 1, "maxLength": 256},
+        "issuer": {"type": "string", "minLength": 1, "maxLength": 256},
+        "subject": {"type": "string", "minLength": 1, "maxLength": 256},
+        "key_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "mac_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

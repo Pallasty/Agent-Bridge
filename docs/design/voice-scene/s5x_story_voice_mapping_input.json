@@ -1,0 +1,25 @@
+{
+  "source": {
+    "sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566"
+  },
+  "cast_registry": [
+    {
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "kind": "narrator",
+      "display_name": "旁白",
+      "voice_profile": {"version": 1}
+    },
+    {
+      "speaker_id": "speaker_e6003d6d0222150b5ab3",
+      "kind": "character",
+      "display_name": "林默",
+      "voice_profile": {"version": 1}
+    },
+    {
+      "speaker_id": "speaker_54151648be8fd67718fc",
+      "kind": "character",
+      "display_name": "苏岚",
+      "voice_profile": {"version": 1}
+    }
+  ]
+}

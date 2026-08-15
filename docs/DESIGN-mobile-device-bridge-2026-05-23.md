@@ -54,15 +54,37 @@ Implemented a small Android-first MCP surface in
   saved to disk by default or returned inline when requested.
 - `mobile_health`: collect focus, foreground package, recent logcat
   crash/error markers, and optional UI/canvas analysis in one compact result.
+- `mobile_debug_bundle`: collect a bounded local diagnostic directory with a
+  JSON manifest, focus state, package details, recent logcat, crash-dropbox
+  excerpts, UI XML, and an optional screenshot. It creates a new private
+  directory (`0700` on Unix), private files (`0600`), and preserves partial
+  results when one source is unavailable.
 - `mobile_ui_snapshot`: run `uiautomator dump`, return XML plus a compact node
   summary suitable for selector choice. It now reports whether the visible tree
   is semantic, canvas-only, or SurfaceView-dominated.
+- `mobile_wait_for_ui`: poll bounded UIAutomator snapshots until a full
+  selector is present or absent. It supports consecutive-snapshot stability,
+  compact matched nodes, and a hard total wait budget independent of the
+  per-ADB timeout.
 - `mobile_logcat_tail`: return recent `logcat` lines, optionally filtered.
 - `mobile_install_apk`: install or reinstall an APK on a selected device.
 - `mobile_launch_app`: launch an app package or component.
 - `mobile_click`: click by coordinates, or resolve one matching UI node and
   click the center of its bounds.
 - `mobile_input_text`: send text through `adb shell input text`.
+- `mobile_projection_start`: replace any prior companion projection Activity,
+  generate an in-memory one-use token, bind a random private-LAN port, and open
+  a short-lived title/text projection consent page. It returns no token and
+  never presses the consent button or starts the companion service.
+- `mobile_projection_status`: inspect one session or recent sessions without
+  touching the device. It reports observed pulls and uses deliberately honest
+  lifecycle phases: an idle authenticated client is not called disconnected.
+- `mobile_projection_update`: replace title/text within an active consented
+  session while preserving its endpoint, token, expiry, and zero-authority
+  boundary. Status distinguishes host-side revision update from authenticated
+  delivery of that revision to the device.
+- `mobile_projection_stop`: stop the host listener early and force-stop the
+  selected companion package, without starting any background service.
 - `mobile_apple_status`: read-only Apple mobile readiness probe for Xcode,
   libimobiledevice, third-party iOS tools, and USB-visible iPhone/iPad/iPod
   devices.
@@ -85,6 +107,56 @@ Implemented a small Android-first MCP surface in
   source. Structured state remains the first read path.
 - Do not expose arbitrary `adb shell` in the mobile bridge. `shell_exec` already
   exists for explicit raw command escape hatches.
+- Projection payloads are authenticated but not encrypted. Do not project
+  secrets, require the device holder's explicit consent, cap each listener at
+  600 seconds, and report every authority bit as false.
+
+## 2026-08-11 Projection Tool Addendum
+
+The recovered Android companion and target-SDK-35 compatibility work made the
+projection protocol usable, but starting it still required an operator to
+coordinate a token environment variable, host process, expiry, and ADB extras.
+`mobile_projection_start` closes that product-integration gap:
+
+1. resolve one authorized ADB device;
+2. generate 32 random bytes from the host OS without returning them;
+3. bind `ProjectionSession` to a caller-selected private/link-local address and
+   an OS-selected port;
+4. use `am start -S` so an expired or active prior projection cannot absorb the
+   new Intent or keep polling;
+5. open the consent Activity and return `awaiting_device_consent` metadata;
+6. serve the zero-authority frame from an in-process thread until expiry or MCP
+   process shutdown.
+
+The first live attempt exposed Android Activity reuse: a successful `am start`
+could leave an expired Activity visible because the existing top instance did
+not rerun `onCreate`. The `-S` replacement rule was added before acceptance.
+The corrected MCP stdio path then replaced the old screen, required the device
+holder to press **Allow and connect**, rendered the authenticated frame, and
+stopped polling after **Disconnect**. `CompanionService` remained absent.
+
+Lifecycle control was added after that first acceptance pass. Starting a new
+session now stops older listeners for the same device serial. Runtime state is
+kept in-process with bounded retention and exposes pull count, last-pull time,
+consent observation, listener state, and stop/end state. The status phases are
+`awaiting_consent`, `connected_recently`, `connected_then_idle`, `stopped`, and
+`expired`; because the current polling protocol has no explicit disconnect
+event, `connected_then_idle` intentionally does not claim one.
+
+The projection frame is now revisioned inside the same short-lived session.
+Updates do not reopen the Activity, extend TTL, change the token, or start a
+service. The listener reports both `current_revision` and
+`last_served_revision`; only equality (or a later served revision) proves that
+an authenticated device pull observed the current content. One in-flight poll
+may still receive the prior revision, so update itself returns
+`updated_awaiting_authenticated_pull` rather than claiming delivery.
+
+Physical-device acceptance on 2026-08-11 used serial
+`3K661F0178H00000`. After the holder pressed **Allow and connect**, status
+reported `connected_recently` with authenticated pulls. `mobile_projection_stop`
+returned a successful ADB force-stop, status changed to `stopped`, the listener
+ended, and both `pidof` and `dumpsys activity services` showed no remaining
+companion process or service.
 
 ## Implementation Path
 
@@ -266,12 +338,6 @@ most useful when it bundles state and preserves structured fallbacks:
 ## Open Follow-Ups
 
 - Add WebView CDP attachment for debuggable WebViews.
-- Add app debug bundle collection: package info, focused activity, recent
-  logcat, tombstones/crash snippets, UI XML, and optional screenshot. The new
-  `mobile_health` tool is the compact first step; this follow-up is the larger
-  artifact bundle.
-- Consider a later `mobile_wait_for_text` helper once selector matching is
-  proven stable.
 - If full Xcode becomes available, expand Apple support in this order:
   simulator/device install and launch -> WDA/XCUITest UI snapshot -> selector
   actions. Until then, keep iOS support to `mobile_apple_status`,

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_cpu_int4_single_frame_loop_probe.schema.json",
+  "title": "Agent-Bridge CPU INT4 single codec-frame loop probe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "snapshot",
+    "models",
+    "runtime",
+    "probe",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_cpu_int4_single_frame_loop_probe.v1"
+    },
+    "status": {
+      "enum": ["blocked", "single_codec_frame_loop_passed_no_audio"]
+    },
+    "snapshot": {"type": "string", "minLength": 1},
+    "models": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "executable", "provider"],
+      "properties": {
+        "name": {"const": "onnxruntime"},
+        "version": {"type": "string", "minLength": 1},
+        "executable": {"type": "string", "minLength": 1},
+        "provider": {"const": "CPUExecutionProvider"}
+      }
+    },
+    "probe": {"type": ["object", "null"]},
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "missing_models": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "created_inference_sessions",
+        "execution_count",
+        "talker_execution_count",
+        "predictor_execution_count",
+        "residual_embed_execution_count",
+        "selected_codec_ids",
+        "sampled_codec_ids",
+        "generated_codec_frame_count",
+        "cache_feedback_count_per_sequence",
+        "decoded_waveform",
+        "rendered_audio",
+        "played_audio",
+        "used_gpu",
+        "imported_community_python"
+      ],
+      "properties": {
+        "created_inference_sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "execution_count": {"type": "integer", "minimum": 0, "maximum": 36},
+        "talker_execution_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "predictor_execution_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "residual_embed_execution_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "selected_codec_ids": {"type": "boolean"},
+        "sampled_codec_ids": {"const": false},
+        "generated_codec_frame_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "cache_feedback_count_per_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "decoded_waveform": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "used_gpu": {"const": false},
+        "imported_community_python": {"const": false}
+      }
+    }
+  }
+}

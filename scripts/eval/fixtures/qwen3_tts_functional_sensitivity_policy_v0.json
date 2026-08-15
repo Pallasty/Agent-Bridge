@@ -1,0 +1,184 @@
+{
+  "schema": "agent_bridge.qwen3_tts.functional_sensitivity_policy.v0",
+  "status": "FROZEN_ONE_MODULE_ONE_CASE_SMOKE_ONLY",
+  "inputs": {
+    "activation_plan_sha256": "d87deeeadf81aaba2d010bded7c60e8b0bd8f74419b6e6a132a46d1d9fd2fb12",
+    "activation_gate_sha256": "369f7af4d964a5d285be8dd00865faf107060e8973003611c9329821113da8c9",
+    "activation_capture_sha256": "365b9f9e9b7cd5a3b9890945ed8f4428cc9aa51b1c3dc3a448b1bdf2847fb4b4",
+    "perturbation_scope_sha256": "4a4abee2cdc336ea68af14413dacb7f91ea3a2c039ce51a058fdd5a37e97e7ec",
+    "token_boundary_probe_sha256": "b04ec6601722221c4cf1df1f00c3d9d48c687711046d55dea52c5fbd25f00421",
+    "runtime_manifest_sha256": "ec365c6890d01dfa4a24df2d181f9991461a689528c83b8ad9e223f2066b2ddc",
+    "corpus_sha256": "9193f6e5359fcf3ecd9c0a5a2726886908ffa3a266ab7597f283629e710a7afd",
+    "thresholds_sha256": "2b37447912a7e5af68ab1db724689fad8065c6ccba61a7609e6118dde63cc56d"
+  },
+  "source_assets": [
+    {
+      "partition": "talker",
+      "bytes": 3833402552,
+      "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137"
+    },
+    {
+      "partition": "speech_tokenizer_codec",
+      "bytes": 682293092,
+      "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+    }
+  ],
+  "functional_runtime_source_pins": [
+    {
+      "package": "qwen_tts",
+      "relative_path": "__init__.py",
+      "bytes": 839,
+      "sha256": "ea52de59d070fde366467a6902d0edcfc1b0575b8c570a0c71020c41d6a593ed",
+      "reason": "pre-import package entrypoint used by the isolated functional trial"
+    },
+    {
+      "package": "transformers",
+      "relative_path": "__init__.py",
+      "bytes": 47000,
+      "sha256": "7eb0743ed843f24c1d4e8b8daf4b18249cb81403b4571a70c00be0a4c0a67bd4",
+      "reason": "pre-import package entrypoint used by Qwen generation"
+    },
+    {
+      "package": "transformers",
+      "relative_path": "generation/utils.py",
+      "bytes": 210102,
+      "sha256": "a20024b1e82ed5361a524d238d2197be5407abc91297dd9888c57e8284d63fef",
+      "reason": "GenerationMixin controls the T+1 talker and T predictor-step alignment used by this trial"
+    },
+    {
+      "package": "safetensors",
+      "relative_path": "__init__.py",
+      "bytes": 210,
+      "sha256": "92c988289b8c225a92f25e487ad5d7a1eb7e326eec0fedfc6b75e6f04d85e32f",
+      "reason": "pre-import SafeTensors entrypoint used for exact BF16 source access"
+    },
+    {
+      "package": "safetensors",
+      "relative_path": "torch.py",
+      "bytes": 20312,
+      "sha256": "f3f476d1f8c04fe65fa3797426556a0b7afa43f8c4db9db6b799c7cf84748f3d",
+      "reason": "PyTorch SafeTensors adapter used for exact BF16 source access"
+    },
+    {
+      "package": "safetensors",
+      "relative_path": "_safetensors_rust.abi3.so",
+      "bytes": 1091856,
+      "sha256": "bc2fe2bfd2264af61c12fdea6d32b44318c4701ace0f697b4f35110cb0a1e4af",
+      "reason": "native SafeTensors reader implementation used by safe_open"
+    }
+  ],
+  "target": {
+    "module": "talker.model.layers.6.mlp.gate_proj",
+    "tensor": "talker.model.layers.6.mlp.gate_proj.weight",
+    "family": "feed_forward_or_projection",
+    "shape": [
+      6144,
+      2048
+    ],
+    "elements": 12582912,
+    "source_dtype": "BF16",
+    "runtime_dtype": "float16",
+    "joint_risk_score": 0.25263157894736843,
+    "selection": "explicit lowest joint-risk row by (joint_risk_score,module), not scope array order"
+  },
+  "case": {
+    "id": "zh-short-neutral-serena",
+    "speaker": "Serena",
+    "language": "Chinese"
+  },
+  "quantizer": {
+    "identity": "ab_qwen_quant_groupwise_symmetric_q8_reference_v0",
+    "source": "exact BF16 tensor from pinned SafeTensors",
+    "grouping": "row-local contiguous C-order groups",
+    "group_size": 128,
+    "require_input_dimension_divisible_by_group_size": true,
+    "scale_math": "f64 max_abs / 127",
+    "rounding": "half_away_from_zero",
+    "qmin": -127,
+    "qmax": 127,
+    "zero_group": "all q and dequant values exactly zero",
+    "dequant_runtime_dtype": "float16",
+    "scale_storage": "none_in_fake_quant_proxy",
+    "packing": "none",
+    "no_scale_storage_or_packing_claim": true
+  },
+  "execution": {
+    "trial_id": "qwen3-tts-q2-fs-v0-l6-gate-proj-zh-short-neutral-serena-001",
+    "claim_path": "/Users/pallasting/.local/state/agent-bridge/qwen3-evaluation-ledger/qwen3-tts-q2-fs-v0-l6-gate-proj-zh-short-neutral-serena-001.claim.json",
+    "result_path": "/Users/pallasting/.local/state/agent-bridge/qwen3-evaluation-ledger/qwen3-tts-q2-fs-v0-l6-gate-proj-zh-short-neutral-serena-001.result.json",
+    "one_shot_claim_o_excl": true,
+    "claim_is_never_automatically_deleted": true,
+    "claim_and_result_parent_directory_fsync": true,
+    "gate_evaluator_sha256": "d64e16e1887cc527dc0b794ac6014fae580ffaec15ab3bf3f600a87d7faf38e8",
+    "device": "mps",
+    "runtime_dtype": "float16",
+    "processes": 1,
+    "modules": 1,
+    "cases": 1,
+    "fake_trials": 1,
+    "explicit_cli_flag": "--execute-frozen-one-trial",
+    "trial_order": [
+      "control_before",
+      "single_module_fake_q8_forward_proxy",
+      "restore_forward_and_verify_parameter_manifest",
+      "control_after"
+    ],
+    "do_sample": false,
+    "subtalker_dosample": false,
+    "max_new_tokens": 256,
+    "speech_tokenizer_decode": "intercepted_before_codec_and_returns_zero_sample_sentinel",
+    "audio_decode": false,
+    "audio_write": false,
+    "owner_only_nonblocking_lock": true,
+    "offline_local_snapshot_only": true
+  },
+  "measurements": {
+    "realized_codes": [
+      "canonical_sha256",
+      "time_steps",
+      "relative_length_drift",
+      "per_codebook_agreement",
+      "first_codebook_agreement",
+      "full_frame_agreement",
+      "element_mismatch_fraction",
+      "common_prefix_frames",
+      "first_divergent_frame",
+      "first_codebook_normalized_edit_distance"
+    ],
+    "bounded_logits": {
+      "source": "raw logits captured by non-mutating forward hooks on talker.codec_head and code_predictor.lm_head.0..14",
+      "retained_in_receipt": "aggregate metrics only; no full logits",
+      "top_k": 8,
+      "metrics": [
+        "aligned_steps",
+        "control_to_fake_kl_mean",
+        "jensen_shannon_mean",
+        "top1_agreement",
+        "top8_retention",
+        "centered_logit_nrmse"
+      ]
+    },
+    "fake_divergence_classification": "observational_only_no_tensor_precision_acceptance_threshold",
+    "restoration_hard_gate": "control_before and control_after codes must be bit exact"
+  },
+  "restoration": {
+    "weight_mutation_forbidden": true,
+    "forward_proxy_only": true,
+    "parameter_manifest_before_after_exact": true,
+    "target_runtime_weight_sha256_before_after_exact": true,
+    "target_parameter_identity_data_ptr_version_exact": true,
+    "forward_instance_shadow_restored": true,
+    "control_replay_codes_exact": true
+  },
+  "authorization": {
+    "allows_exactly_one_module_one_case_fake_q8_smoke": true,
+    "allows_additional_module_or_case": false,
+    "allows_weight_mutation": false,
+    "allows_quantized_weight_writing": false,
+    "allows_packing_or_scale_storage_claim": false,
+    "allows_runtime_candidate_generation": false,
+    "allows_worker_socket_use": false,
+    "allows_audio_decode_write_or_playback": false,
+    "allows_runtime_wiring_fallback_deployment_or_promotion": false
+  }
+}

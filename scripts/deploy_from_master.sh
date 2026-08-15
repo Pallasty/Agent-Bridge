@@ -11,16 +11,18 @@
 # live-wrong). See lesson_deploy_race_stale_branch_binary_clobber_20260603.
 #
 # This script enforces the discipline that prevents that:
-#   1. build from the LATEST origin/master (the superset of every merged lane),
+#   1. build from the LATEST selected remote/master (the superset of every merged lane),
 #      never a stale branch;
 #   2. re-fetch after the potentially long release build and refuse to deploy
-#      when origin/master advanced during that build;
+#      when the selected remote/master advanced during that build;
 #   3. anti-regression gate: the new binary must still contain every lane
 #      feature-marker the CURRENTLY-deployed binary has (catches a stale build);
 #   4. back up the current .real before overwriting (so a clobber is recoverable
 #      — the clobbering lane on 2026-06-03 did NOT back ours up);
-#   5. never touch the wrapper (only .real);
-#   6. remind to /mcp reconnect (a running MCP server keeps the old binary).
+#   5. install repository-matched Python runtime assets at a stable path (the
+#      release build worktree is disposable and cannot be a runtime dependency);
+#   6. never touch the wrapper (only .real);
+#   7. remind to /mcp reconnect (a running MCP server keeps the old binary).
 #
 # Companion to scripts/wrapper/install.sh (which installs the WRAPPER; this
 # installs the BINARY). Honors the same env vars.
@@ -35,9 +37,15 @@
 # Env:
 #   AGENT_BRIDGE_INSTALL_DIR   install dir (default ~/.local/bin)
 #   AGENT_BRIDGE_REAL_BIN      real binary path (default $INSTALL_DIR/agent-bridge.real)
-#   CARGO_TARGET_DIR           build target dir (default ~/.cache/agent-bridge-deploy-target,
-#                              kept OFF /Data so the ntfs-3g volume filling up can't
-#                              ENOSPC the release build; honored if you set it)
+#   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
+#                              (default ~/.local/share/ab-tts/audio_embody.py)
+#   AGENT_BRIDGE_RUNTIME_ASSET_DIR stable script directory
+#                              (default ~/.local/lib/agent-bridge/scripts)
+#   CARGO_TARGET_DIR           build target root (default ~/.cache/agent-bridge-deploy-target,
+#                              with one child per master SHA to prevent cross-ref artifact reuse;
+#                              kept OFF /Data so ntfs-3g pressure cannot ENOSPC the release build)
+#   AGENT_BRIDGE_DEPLOY_REMOTE git remote containing authoritative master
+#                              (default: origin; use github after GitHub migration)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,6 +54,22 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="${AGENT_BRIDGE_INSTALL_DIR:-$HOME/.local/bin}"
 REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
+ASSET_SOURCE_ROOT="$REPO"
+ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
+ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
+RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
+RUNTIME_ASSETS=(
+    desktop_action.py
+    desktop_confirm_store.py
+    desktop_grant.py
+    desktop_invoke.py
+    desktop_snapshot.py
+    desktop_steer.py
+    desktop_verify.py
+    vision_grounding_ocr.py
+)
+DEPLOY_REMOTE="${AGENT_BRIDGE_DEPLOY_REMOTE:-origin}"
+MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 
 # Lane feature-markers. The gate asserts: every marker present in the CURRENT
 # deployed binary is also present in the NEW one (new may add more — superset OK).
@@ -114,7 +138,11 @@ markers_in() {
 }
 
 CLEANUP_WT=""
-cleanup() { [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true; }
+CLEANUP_RUNTIME_STAGE=""
+cleanup() {
+    [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
+    [ -n "$CLEANUP_RUNTIME_STAGE" ] && rm -rf "$CLEANUP_RUNTIME_STAGE" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 # ---- 1. obtain the NEW binary (build from latest master, or --use-binary) ----
@@ -128,10 +156,12 @@ if [ -n "$USE_BINARY" ]; then
     say "WARNING: --use-binary skips the build-from-master guarantee."
     say "         Only the regression gate + backup protect this deploy."
 else
-    say ">> fetching origin/master ..."
-    git -C "$REPO" fetch origin --quiet
-    MASTER_SHA="$(git -C "$REPO" rev-parse origin/master)"
-    PROVENANCE="origin/master @ ${MASTER_SHA:0:7}"
+    git -C "$REPO" remote get-url "$DEPLOY_REMOTE" >/dev/null 2>&1 ||
+        die "configured deploy remote does not exist: $DEPLOY_REMOTE"
+    say ">> fetching $DEPLOY_REMOTE/master ..."
+    git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+    MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
+    PROVENANCE="$DEPLOY_REMOTE/master @ ${MASTER_SHA:0:7}"
     # Build in a worktree placed as a SIBLING of the repo so the cross-repo path
     # dep (crates/seed-bridge -> ../../../AiOT/rust/seed_neuron) resolves natively
     # without symlinks. AiOT is always a sibling of the repo on every node.
@@ -165,33 +195,58 @@ else
     # worktrees' target/ dirs fill to 100%, ENOSPC-ing the release build
     # mid-link (hit twice on 2026-06-19 by two agents; both had to set
     # CARGO_TARGET_DIR=/home by hand to recover). Redirecting it off /Data is the
-    # root fix. A stable shared path also keeps cargo's dependency cache warm
-    # across deploys (deps are most of the build); cargo's own target lock makes
-    # concurrent deploys serialize safely. Honor an operator-set CARGO_TARGET_DIR.
+    # root fix. A SHA-scoped path prevents concurrent builds from different
+    # worktrees from reusing a binary compiled from another ref. Cargo's target
+    # lock serializes writes, but does not prove final executable provenance.
+    # Honor an operator-set CARGO_TARGET_DIR as the root of this scoped path.
     # See lesson_data_fills_from_worktree_targets_deploy_builds_there_20260619.
-    DEPLOY_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    DEPLOY_TARGET_ROOT="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    DEPLOY_TARGET_DIR="$DEPLOY_TARGET_ROOT/$MASTER_SHA"
     mkdir -p "$DEPLOY_TARGET_DIR" || die "cannot create build target dir $DEPLOY_TARGET_DIR"
     say ">> cargo build --release --bin agent-bridge"
     say "   (target dir: $DEPLOY_TARGET_DIR — off /Data; takes several minutes) ..."
     ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge )
     NEW_BIN="$DEPLOY_TARGET_DIR/release/agent-bridge"
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
+    BUILT_VERSION="$("$NEW_BIN" --version 2>&1)" ||
+        die "built binary does not execute for provenance verification"
+    case "$BUILT_VERSION" in
+        *"${MASTER_SHA:0:12}"*) ;;
+        *) die "built binary provenance mismatch: expected ${MASTER_SHA:0:12}, got: $BUILT_VERSION" ;;
+    esac
+    say "OK: built binary reports master ${MASTER_SHA:0:12}."
 fi
+
+# A normal deploy must install scripts from the exact detached master snapshot
+# that produced NEW_BIN, never from the caller's possibly stale/dirty worktree.
+# Otherwise two same-SHA deploys launched from different worktrees can end with
+# the correct binary but whichever caller's runtime assets happened to run last.
+# --use-binary has no verified source snapshot, so it deliberately retains the
+# documented repository-matched behavior and uses the invoking checkout.
+if [ -z "$USE_BINARY" ]; then
+    ASSET_SOURCE_ROOT="$BUILD_DIR"
+fi
+ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
+[ -f "$ADAPTER_SOURCE" ] || die "deploy-source audio adapter missing: $ADAPTER_SOURCE"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
+        die "deploy-source runtime asset missing: $ASSET_SOURCE_ROOT/scripts/$asset"
+done
 
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
 # ---- 2. post-build master recheck ----
 # A release build can take tens of minutes. Another lane may merge during that
-# window, making this artifact stale even though it came from origin/master at
+# window, making this artifact stale even though it came from remote/master at
 # build start. Re-check before the first live-state mutation (backup/copy).
 if [ -z "$USE_BINARY" ]; then
-    say ">> rechecking origin/master after build ..."
-    git -C "$REPO" fetch origin --quiet
-    CURRENT_MASTER_SHA="$(git -C "$REPO" rev-parse origin/master)"
+    say ">> rechecking $DEPLOY_REMOTE/master after build ..."
+    git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+    CURRENT_MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
     if [ "$CURRENT_MASTER_SHA" != "$MASTER_SHA" ]; then
-        die "origin/master advanced during the release build (${MASTER_SHA:0:7} -> ${CURRENT_MASTER_SHA:0:7}); refusing to deploy a stale artifact before backup/copy. Re-run the deploy from the new master."
+        die "$DEPLOY_REMOTE/master advanced during the release build (${MASTER_SHA:0:7} -> ${CURRENT_MASTER_SHA:0:7}); refusing to deploy a stale artifact before backup/copy. Re-run the deploy from the new master."
     fi
-    say "OK: origin/master is still ${MASTER_SHA:0:7}."
+    say "OK: $DEPLOY_REMOTE/master is still ${MASTER_SHA:0:7}."
 fi
 
 # ---- 3. anti-regression gate vs the currently-deployed binary ----
@@ -207,7 +262,7 @@ if [ -f "$REAL_PATH" ]; then
         printf '  - %s\n' $missing
         die "regression detected — new binary drops a capability the live one has.
        This usually means it was built from a STALE branch, not latest master.
-       Refusing to clobber. Rebuild from origin/master."
+       Refusing to clobber. Rebuild from the authoritative remote/master."
     fi
     say "OK: new binary is a superset of the current deployed binary's markers."
 else
@@ -224,6 +279,8 @@ say "  source     : $PROVENANCE"
 say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"
 say "  wrapper    : $WRAPPER_PATH (left untouched)"
+say "  adapter    : $ADAPTER_SOURCE -> $ADAPTER_PATH"
+say "  runtime    : ${#RUNTIME_ASSETS[@]} scripts from $ASSET_SOURCE_ROOT -> $RUNTIME_ASSET_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     say
@@ -252,6 +309,50 @@ if [ -f "$REAL_PATH" ]; then
     say ">> backed up current binary -> $bak"
 fi
 
+# Install the repository-matched adapter before the binary. A brief
+# interruption can therefore leave the old binary with a backward-compatible
+# newer adapter, never the newer voice schema with a silently older adapter.
+mkdir -p "$(dirname "$ADAPTER_PATH")"
+if [ -f "$ADAPTER_PATH" ]; then
+    adapter_bak="$ADAPTER_PATH.bak-deploy-$(date +%Y%m%dT%H%M%S)"
+    cp "$ADAPTER_PATH" "$adapter_bak"
+    say ">> backed up current audio adapter -> $adapter_bak"
+fi
+adapter_stage="$ADAPTER_PATH.stage.$$"
+cp "$ADAPTER_SOURCE" "$adapter_stage"
+chmod +x "$adapter_stage"
+mv -f "$adapter_stage" "$ADAPTER_PATH"
+cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
+    die "installed audio adapter differs from repository source"
+say ">> deployed matched audio adapter -> $ADAPTER_PATH"
+
+# Install script-backed MCP assets at a stable path. The release binary embeds
+# its disposable build worktree in CARGO_MANIFEST_DIR, so compile-time fallback
+# alone breaks as soon as the deploy cleanup removes that worktree. Stage the
+# complete dependency set, then swap the directory as one repository-matched
+# unit before installing the binary that resolves it.
+mkdir -p "$(dirname "$RUNTIME_ASSET_DIR")"
+runtime_stage="$RUNTIME_ASSET_DIR.stage.$$"
+CLEANUP_RUNTIME_STAGE="$runtime_stage"
+rm -rf "$runtime_stage"
+mkdir -p "$runtime_stage"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    install -m 755 "$ASSET_SOURCE_ROOT/scripts/$asset" "$runtime_stage/$asset"
+done
+if [ -e "$RUNTIME_ASSET_DIR" ]; then
+    runtime_bak="$RUNTIME_ASSET_DIR.bak-deploy-$(date +%Y%m%dT%H%M%S)"
+    mv "$RUNTIME_ASSET_DIR" "$runtime_bak"
+    if ! mv "$runtime_stage" "$RUNTIME_ASSET_DIR"; then
+        mv "$runtime_bak" "$RUNTIME_ASSET_DIR" || true
+        die "failed to activate staged runtime assets"
+    fi
+    say ">> backed up current runtime assets -> $runtime_bak"
+else
+    mv "$runtime_stage" "$RUNTIME_ASSET_DIR"
+fi
+CLEANUP_RUNTIME_STAGE=""
+say ">> deployed matched runtime assets -> $RUNTIME_ASSET_DIR"
+
 cp -f "$NEW_BIN" "$REAL_PATH"
 say ">> deployed -> $REAL_PATH"
 copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
@@ -268,6 +369,14 @@ say
 say "=== post-deploy verification ==="
 dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
 [ "$dep_size" = "$new_size" ] || die "deployed size $dep_size != built $new_size (copy failed?)"
+cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
+    die "post-deploy audio adapter parity check failed"
+say "audio adapter parity: OK ($ADAPTER_PATH)"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    cmp -s "$ASSET_SOURCE_ROOT/scripts/$asset" "$RUNTIME_ASSET_DIR/$asset" ||
+        die "post-deploy runtime asset parity check failed: $asset"
+done
+say "runtime asset parity: OK (${#RUNTIME_ASSETS[@]} scripts in $RUNTIME_ASSET_DIR)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086
@@ -307,6 +416,8 @@ if [ "$stale" -gt 0 ]; then
     printf '%s\n' "$stale_list"
 fi
 if [ -n "${bak:-}" ]; then say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"; fi
+if [ -n "${adapter_bak:-}" ]; then say "      adapter rollback: cp '$adapter_bak' '$ADAPTER_PATH'"; fi
+if [ -n "${runtime_bak:-}" ]; then say "      runtime rollback: mv '$RUNTIME_ASSET_DIR' '${RUNTIME_ASSET_DIR}.failed' && mv '$runtime_bak' '$RUNTIME_ASSET_DIR'"; fi
 # Explicit success: the final command above must not leave a nonzero status (a
 # bare `[ -n "" ] && …` on a first install returns 1 and, as the last command
 # under `set -e`, would falsely report deploy failure to callers checking $?).

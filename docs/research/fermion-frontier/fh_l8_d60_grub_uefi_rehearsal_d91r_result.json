@@ -1,0 +1,20 @@
+{
+  "status": "VERIFIED_D91R_UEFI_GRUB_KERNEL_ROOTFS_CHAIN_PASS",
+  "attempt_count": 5,
+  "uefi_grub_kernel_chain_pass": true,
+  "rootfs_switch_and_systemd_basic_pass": true,
+  "multi_user_target_required": false,
+  "multi_user_target_pass": false,
+  "grub_prompt_and_kernel_panic_absent": true,
+  "mmc_and_host_untouched": true,
+  "virtual_rehearsal_admitted": true,
+  "physical_sd_boot_proven": false,
+  "mmc_write_authorized": false,
+  "bootloader_change_authorized": false,
+  "host_reboot_authorized": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PASS_D91R_VIRTUAL_UEFI_CHAIN_PHYSICAL_MEDIA_AUTHORITY_STILL_CLOSED",
+  "next_gate": "OWNER_ADMIT_SEPARATE_D92_PHYSICAL_MMC_MATERIALIZATION_AND_FIRMWARE_BOOT_GATE"
+}

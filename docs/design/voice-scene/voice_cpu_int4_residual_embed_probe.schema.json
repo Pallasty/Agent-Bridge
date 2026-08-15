@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_cpu_int4_residual_embed_probe.schema.json",
+  "title": "Agent-Bridge CPU INT4 residual-embed probe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "snapshot",
+    "model",
+    "runtime",
+    "probe",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_cpu_int4_residual_embed_probe.v1"
+    },
+    "status": {
+      "enum": ["blocked", "residual_embed_probe_passed_no_forwarding"]
+    },
+    "snapshot": {"type": "string", "minLength": 1},
+    "model": {"const": "cpu_int4/residual_embed.onnx"},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "executable", "provider"],
+      "properties": {
+        "name": {"const": "onnxruntime"},
+        "version": {"type": "string", "minLength": 1},
+        "executable": {"type": "string", "minLength": 1},
+        "provider": {"const": "CPUExecutionProvider"}
+      }
+    },
+    "probe": {"type": ["object", "null"]},
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "created_inference_session",
+        "executed_graphs",
+        "execution_count",
+        "forwarded_step_embedding",
+        "generated_codec_frame",
+        "decoded_waveform",
+        "played_audio",
+        "used_gpu",
+        "imported_community_python"
+      ],
+      "properties": {
+        "created_inference_session": {"type": "boolean"},
+        "executed_graphs": {"type": "boolean"},
+        "execution_count": {"type": "integer", "minimum": 0, "maximum": 2},
+        "forwarded_step_embedding": {"const": false},
+        "generated_codec_frame": {"const": false},
+        "decoded_waveform": {"const": false},
+        "played_audio": {"const": false},
+        "used_gpu": {"const": false},
+        "imported_community_python": {"const": false}
+      }
+    }
+  }
+}

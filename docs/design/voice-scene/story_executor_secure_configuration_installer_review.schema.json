@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_secure_configuration_installer_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "boundaries", "blockers", "implementation_present", "installation_authorized", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_secure_configuration_installer_review.v1"},
+    "status": {"const": "story_executor_secure_configuration_installer_reviewable"},
+    "decision": {"const": "installer_source_accepted_installation_still_blocked"},
+    "evidence": {"type": "object"},
+    "boundaries": {"type": "object", "minProperties": 28, "additionalProperties": {"const": true}},
+    "blockers": {"const": ["owner_authorized_secure_configuration_installation_not_granted", "executor_invocation_not_authorized"]},
+    "implementation_present": {"const": true},
+    "installation_authorized": {"const": false},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 12, "additionalProperties": {"const": false}},
+    "review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"fixed_path_installer_implemented": true, "atomic_no_replace_publication_implemented": true, "prepublication_owned_rollback_implemented": true, "postpublication_recovery_gate_implemented": true, "secure_configuration_installed": false, "real_key_generated": false, "executor_invoked": false}},
+    "next_gate": {"const": "owner_authorized_story_executor_secure_configuration_installation"}
+  },
+  "additionalProperties": false
+}

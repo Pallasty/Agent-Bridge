@@ -548,6 +548,15 @@ CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_codex_host
     ON mcp_tool_calls(codex_host, ts DESC);
 "#;
 
+// Version-less additive telemetry attribution rung. Schema version 43 is
+// owned by truth-evidence identity, so this local-only nullable column must not
+// advance schema_meta. Old binaries keep writing NULL; new MCP processes write
+// a random per-process UUID. No client/user identifier is persisted.
+const SCHEMA_MCP_SESSION_ATTRIBUTION_INDEX: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_mcp_session
+    ON mcp_tool_calls(mcp_session_id, ts ASC, id ASC);
+"#;
+
 // v30 — XM (cross-machine messaging) v0.1. Adds `read_at` timestamp on
 // agent_messages so the P-XM-7 GC pass can apply the "touched within 7 days"
 // semantic (created OR read inside the window). NULL = unread.
@@ -1879,6 +1888,25 @@ impl SqliteStore {
             temporal_evidence::migrate_or_verify_v43(c, None)?;
             #[cfg(feature = "episode-observation-slice-b")]
             episode_observation_slice_b::migrate_or_verify(c)?;
+            let mcp_session_exists: i64 = c
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('mcp_tool_calls') \
+                     WHERE name='mcp_session_id'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if mcp_session_exists == 0 {
+                if let Err(error) = c.execute(
+                    "ALTER TABLE mcp_tool_calls ADD COLUMN mcp_session_id TEXT",
+                    [],
+                ) {
+                    if !error.to_string().contains("duplicate column name") {
+                        return Err(error);
+                    }
+                }
+            }
+            c.execute_batch(SCHEMA_MCP_SESSION_ATTRIBUTION_INDEX)?;
             Ok(())
         })
         .await
@@ -2958,15 +2986,27 @@ async fn wait_for_embedding_model_if_cold_fallback(backend_name: &str, content: 
         return;
     }
 
-    let max_wait_ms = std::env::var("AGENT_BRIDGE_ONNX_COLD_WRITE_WAIT_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(30_000)
-        .min(120_000);
+    let max_wait_ms = embedding_cold_write_wait_ms(
+        std::env::var("AGENT_BRIDGE_ONNX_COLD_WRITE_WAIT_MS")
+            .ok()
+            .as_deref(),
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(max_wait_ms);
     while !crate::vector::model_init_done() && std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
+}
+
+/// Keep foreground memory writes responsive while the optional ONNX model is
+/// initializing. A hash fallback is explicitly labelled as such and the
+/// existing reindex sweep can repair it after the model becomes ready, so a
+/// 30-second foreground stall buys little practical continuity. Deployments
+/// that prefer first-write embedding quality can still raise the budget.
+fn embedding_cold_write_wait_ms(configured: Option<&str>) -> u64 {
+    configured
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(2_000)
+        .min(120_000)
 }
 
 async fn perceive_with_cold_fallback_retry(
@@ -3023,8 +3063,46 @@ fn memory_import_embed_batch_size() -> usize {
         .clamp(1, 128)
 }
 
+fn memory_import_skip_embeddings_from(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Sync services can defer embedding expensive imported active records, then
+/// fill them with the existing explicit reindex path once the node is idle.
+/// Default-on preserves the interactive/MCP import contract.
+fn memory_import_embeddings_enabled() -> bool {
+    !memory_import_skip_embeddings_from(
+        std::env::var("AGENT_BRIDGE_MEMORY_IMPORT_SKIP_EMBEDDINGS")
+            .ok()
+            .as_deref(),
+    )
+}
+
 fn memory_import_record_needs_embedding(record: &MemoryRecord) -> bool {
     record.status.is_empty() || record.status == "active"
+}
+
+/// Return the records that need vectors for a memory import. Keeping this
+/// separate from the backend invocation makes the headless-sync policy
+/// directly testable without loading an embedding model.
+fn memory_import_embedding_indices(
+    actions: &[ImportAction],
+    parsed: &[MemoryRecord],
+    embeddings_enabled: bool,
+) -> Vec<usize> {
+    actions
+        .iter()
+        .enumerate()
+        .filter(|(i, action)| {
+            embeddings_enabled
+                && !matches!(action, ImportAction::Skip)
+                && memory_import_record_needs_embedding(&parsed[*i])
+        })
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// Gate for dimension-aware stale repair inside `memory_reindex_embeddings`.
@@ -3046,6 +3124,1333 @@ fn reindex_should_sweep_mismatched_dims(
     dominant_dim: Option<usize>,
 ) -> bool {
     only_stale && dominant_dim == Some(expected_dim)
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+const CODEBASE_INDEX_A1_MAX_BATCH_ROWS: usize = 65_536;
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+const CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS: usize = 4_096;
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Default)]
+struct CodebaseIndexA1TypedBatch {
+    symbols: Vec<CodebaseSymbol>,
+    imports: Vec<crate::CodebaseImport>,
+    calls: Vec<crate::CodebaseCall>,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+impl CodebaseIndexA1TypedBatch {
+    fn len(&self) -> usize {
+        self.symbols.len() + self.imports.len() + self.calls.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Default)]
+struct CodebaseIndexA1Sequence {
+    symbols: u64,
+    imports: u64,
+    calls: u64,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+struct CodebaseIndexA1StagingReceipt {
+    indexed_files: u32,
+    symbols: u32,
+    imports: u32,
+    calls: u32,
+    emitted_batches: u64,
+    max_accumulator_rows: usize,
+    max_extractor_output_rows: usize,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+struct CodebaseIndexA1StagingStorageEvidence {
+    file_bytes: u64,
+    file_path: PathBuf,
+    device: u64,
+    mount_point: PathBuf,
+    filesystem_type: String,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a1_staging_storage_evidence(
+    staging_path: &Path,
+) -> Result<CodebaseIndexA1StagingStorageEvidence> {
+    let file_path = std::fs::canonicalize(staging_path).map_err(|error| {
+        Error::Backend(format!(
+            "codebase_index A1 staging canonical path {staging_path:?}: {error}"
+        ))
+    })?;
+    let metadata = std::fs::metadata(&file_path).map_err(|error| {
+        Error::Backend(format!(
+            "codebase_index A1 staging metadata {file_path:?}: {error}"
+        ))
+    })?;
+    #[cfg(unix)]
+    let device = {
+        use std::os::unix::fs::MetadataExt;
+        metadata.dev()
+    };
+    #[cfg(not(unix))]
+    let device = 0;
+    #[cfg(target_os = "linux")]
+    let (mount_point, filesystem_type) =
+        codebase_index_a1_linux_mount_identity(&file_path, device)?;
+    #[cfg(not(target_os = "linux"))]
+    let (mount_point, filesystem_type) = (PathBuf::new(), "unsupported_non_linux".to_string());
+
+    Ok(CodebaseIndexA1StagingStorageEvidence {
+        file_bytes: metadata.len(),
+        file_path,
+        device,
+        mount_point,
+        filesystem_type,
+    })
+}
+
+#[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
+fn codebase_index_a1_linux_mount_identity(path: &Path, device: u64) -> Result<(PathBuf, String)> {
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")
+        .map_err(|error| Error::Backend(format!("codebase_index A1 read mountinfo: {error}")))?;
+    let (major, minor) = codebase_index_a1_linux_device_major_minor(device);
+    codebase_index_a1_linux_mount_identity_from(&mountinfo, path, major, minor).ok_or_else(|| {
+        Error::Backend(format!(
+            "codebase_index A1 no mountinfo entry for staging path {path:?} on device {major}:{minor}"
+        ))
+    })
+}
+
+#[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
+fn codebase_index_a1_linux_device_major_minor(device: u64) -> (u64, u64) {
+    // Linux userspace `major()` / `minor()` encoding from sys/sysmacros.h.
+    let major = ((device >> 8) & 0x0000_0fff) | ((device >> 32) & 0xffff_f000);
+    let minor = (device & 0x0000_00ff) | ((device >> 12) & 0xffff_ff00);
+    (major, minor)
+}
+
+#[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
+fn codebase_index_a1_linux_mount_identity_from(
+    mountinfo: &str,
+    path: &Path,
+    expected_major: u64,
+    expected_minor: u64,
+) -> Option<(PathBuf, String)> {
+    struct MountCandidate {
+        depth: usize,
+        mount_id: u64,
+        parent_id: u64,
+        mount_point: PathBuf,
+        filesystem_type: String,
+    }
+
+    let mut candidates = Vec::new();
+
+    for line in mountinfo.lines() {
+        let Some((mount_fields, filesystem_fields)) = line.split_once(" - ") else {
+            continue;
+        };
+        let mut fields = mount_fields.split_whitespace();
+        let Some(mount_id) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let Some(parent_id) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let Some(device_field) = fields.next() else {
+            continue;
+        };
+        let Some((major, minor)) = device_field.split_once(':').and_then(|(major, minor)| {
+            Some((major.parse::<u64>().ok()?, minor.parse::<u64>().ok()?))
+        }) else {
+            continue;
+        };
+        if (major, minor) != (expected_major, expected_minor) {
+            continue;
+        }
+        let Some(encoded_mount_point) = fields.nth(1) else {
+            continue;
+        };
+        let Some(filesystem_type) = filesystem_fields.split_whitespace().next() else {
+            continue;
+        };
+        let mount_point = PathBuf::from(
+            encoded_mount_point
+                .replace("\\040", " ")
+                .replace("\\011", "\t")
+                .replace("\\012", "\n")
+                .replace("\\134", "\\"),
+        );
+        if !path.starts_with(&mount_point) {
+            continue;
+        }
+        let depth = mount_point.components().count();
+        candidates.push(MountCandidate {
+            depth,
+            mount_id,
+            parent_id,
+            mount_point,
+            filesystem_type: filesystem_type.to_string(),
+        });
+    }
+
+    let deepest = candidates.iter().map(|candidate| candidate.depth).max()?;
+    let mut leaves = candidates.iter().filter(|candidate| {
+        candidate.depth == deepest
+            && !candidates.iter().any(|other| {
+                other.depth == deepest
+                    && other.mount_point == candidate.mount_point
+                    && other.parent_id == candidate.mount_id
+            })
+    });
+    let active = leaves.next()?;
+    // A single namespace should expose one active leaf for a concrete path.
+    // Ambiguity is not canonical evidence, so fail closed instead of guessing.
+    if leaves.next().is_some() {
+        return None;
+    }
+    Some((active.mount_point.clone(), active.filesystem_type.clone()))
+}
+
+#[cfg(all(
+    test,
+    feature = "codebase-index-bounded-native-a1",
+    target_os = "linux"
+))]
+mod codebase_index_a1_mount_tests {
+    use super::*;
+
+    #[test]
+    fn mount_identity_rejects_wrong_device_and_prefers_active_overmount() {
+        // Mount IDs are identifiers, not stack-order sequence numbers: an ID
+        // can be reused after unmount.  The active overmount is the same-path
+        // leaf (100, whose parent is 900), even though its ID is smaller.  The
+        // wrong-device row is deliberately numerically greatest so the test
+        // also proves that st_dev filtering is authoritative.
+        let mountinfo = "9999 1 0:39 / /4TNVMe1 rw - autofs-wrong systemd-1 rw\n\
+                         900 1 259:4 / /4TNVMe1 rw - f2fs-lower /dev/nvme0n1 rw\n\
+                         100 900 259:4 / /4TNVMe1 rw - f2fs-active /dev/nvme0n1 rw\n";
+
+        let identity = codebase_index_a1_linux_mount_identity_from(
+            mountinfo,
+            Path::new("/4TNVMe1/eval/rows.sqlite3"),
+            259,
+            4,
+        )
+        .expect("match the actual file device");
+
+        assert_eq!(
+            identity,
+            (PathBuf::from("/4TNVMe1"), "f2fs-active".to_string())
+        );
+        assert_eq!(codebase_index_a1_linux_device_major_minor(64_514), (252, 2));
+        assert_eq!(codebase_index_a1_linux_device_major_minor(2_054), (8, 6));
+    }
+}
+
+struct CodebaseIndexTransactionReceipt {
+    autocommit_before: bool,
+    autocommit_during: bool,
+    autocommit_after: bool,
+    authoritative_transaction_ns: u64,
+}
+
+struct CodebaseIndexFullVecReceipt {
+    stats: CodebaseIndexStats,
+    extraction_and_accumulation_ns: u64,
+    writer: CodebaseIndexTransactionReceipt,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a1_strategy_from_env() -> Option<crate::CodebaseIndexA1DispatchStrategy> {
+    codebase_index_dispatch_strategy_from_env(
+        "AB_CODEBASE_INDEX_A1_STRATEGY",
+        "AB_CODEBASE_INDEX_A1_BATCH_ROWS",
+        "AB_CODEBASE_INDEX_A1_STAGING_PARENT",
+    )
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a2_strategy_from_env() -> Option<crate::CodebaseIndexA1DispatchStrategy> {
+    codebase_index_dispatch_strategy_from_env(
+        "AB_CODEBASE_INDEX_A2_STRATEGY",
+        "AB_CODEBASE_INDEX_A2_BATCH_ROWS",
+        "AB_CODEBASE_INDEX_A2_STAGING_PARENT",
+    )
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_dispatch_strategy_from_env(
+    strategy_key: &str,
+    batch_rows_key: &str,
+    staging_parent_key: &str,
+) -> Option<crate::CodebaseIndexA1DispatchStrategy> {
+    let strategy = std::env::var(strategy_key).ok()?;
+    let batch_rows = std::env::var(batch_rows_key)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|rows| (1..=CODEBASE_INDEX_A1_MAX_BATCH_ROWS).contains(rows))
+        .unwrap_or(CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+    let staging_parent = std::env::var_os(staging_parent_key).map(PathBuf::from);
+
+    match strategy.to_ascii_lowercase().as_str() {
+        "native_chunk_staged_v0" | "native-chunk-staged-v0" => {
+            Some(crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(
+                crate::CodebaseIndexA1Options {
+                    batch_rows,
+                    failpoint: None,
+                    staging_parent,
+                },
+            ))
+        }
+        "full_vec" | "fullvec" | "fullvec_a1" => {
+            Some(crate::CodebaseIndexA1DispatchStrategy::FullVec)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_env_dispatch_selection() -> (
+    crate::CodebaseIndexA1DispatchStrategy,
+    crate::CodebaseIndexA1DispatchReceipt,
+) {
+    let a2_requested = std::env::var("AB_CODEBASE_INDEX_A2_STRATEGY").ok();
+    let a1_requested = std::env::var("AB_CODEBASE_INDEX_A1_STRATEGY").ok();
+    let a2 = codebase_index_a2_strategy_from_env();
+    let a1 = codebase_index_a1_strategy_from_env();
+    let (namespace, strategy, requested_strategy, fallback_reason) = if let Some(strategy) = a2 {
+        ("a2", strategy, a2_requested, None)
+    } else if let Some(strategy) = a1 {
+        let fallback_reason = a2_requested
+            .as_deref()
+            .map(|_| "a2_strategy_unknown".to_string());
+        (
+            "a1",
+            strategy,
+            a2_requested.or(a1_requested),
+            fallback_reason,
+        )
+    } else {
+        let fallback_reason = if a2_requested.is_some() {
+            Some("a2_and_a1_strategy_unknown".to_string())
+        } else if a1_requested.is_some() {
+            Some("a1_strategy_unknown".to_string())
+        } else {
+            None
+        };
+        (
+            "default",
+            crate::CodebaseIndexA1DispatchStrategy::FullVec,
+            a2_requested.or(a1_requested),
+            fallback_reason,
+        )
+    };
+    let (effective_strategy, batch_rows, staging_parent_configured) = match &strategy {
+        crate::CodebaseIndexA1DispatchStrategy::FullVec => ("full_vec".to_string(), None, false),
+        crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => (
+            "native_chunk_staged_v0".to_string(),
+            Some(options.batch_rows),
+            options.staging_parent.is_some(),
+        ),
+    };
+    (
+        strategy,
+        crate::CodebaseIndexA1DispatchReceipt {
+            selected_namespace: namespace.to_string(),
+            requested_strategy,
+            effective_strategy,
+            fallback_reason,
+            batch_rows,
+            staging_parent_configured,
+        },
+    )
+}
+
+impl SqliteStore {
+    /// Run the environment-selected codebase index path and return its
+    /// structured dispatch provenance. This remains feature-gated and
+    /// default-off; the ordinary trait method discards the receipt.
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    pub async fn codebase_index_with_env_dispatch(
+        &self,
+        root_path: &str,
+        languages: &[String],
+    ) -> Result<crate::CodebaseIndexA1EnvDispatchOutcome> {
+        let (strategy, dispatch) = codebase_index_env_dispatch_selection();
+        let stats = match strategy {
+            crate::CodebaseIndexA1DispatchStrategy::FullVec => self
+                .codebase_index_full_vec_with_timing(root_path, languages)
+                .await
+                .map(|receipt| receipt.stats)?,
+            crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => self
+                .codebase_index_bounded_native_a1(root_path, languages, options)
+                .await
+                .map(|outcome| outcome.stats)?,
+        };
+        Ok(crate::CodebaseIndexA1EnvDispatchOutcome { stats, dispatch })
+    }
+
+    async fn codebase_index_full_vec_with_timing(
+        &self,
+        root_path: &str,
+        languages: &[String],
+    ) -> Result<CodebaseIndexFullVecReceipt> {
+        use crate::codebase::{detect_language, extract_calls, extract_imports, extract_symbols};
+        use walkdir::WalkDir;
+
+        let start = std::time::Instant::now();
+        let root = root_path.to_string();
+        let langs = languages.to_vec();
+        let root_for_walk = root.clone();
+        let extraction_started = std::time::Instant::now();
+        let (all_symbols, all_imports, all_calls, indexed_files) =
+            tokio::task::spawn_blocking(move || {
+                let mut symbols: Vec<CodebaseSymbol> = Vec::new();
+                let mut imports: Vec<crate::CodebaseImport> = Vec::new();
+                let mut calls: Vec<crate::CodebaseCall> = Vec::new();
+                let mut count = 0_u32;
+                for entry in WalkDir::new(&root_for_walk)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_entry(|entry| {
+                        let name = entry.file_name().to_str().unwrap_or("");
+                        !matches!(
+                            name,
+                            ".git"
+                                | "target"
+                                | "node_modules"
+                                | ".venv"
+                                | "__pycache__"
+                                | ".mypy_cache"
+                                | "dist"
+                                | "build"
+                        )
+                    })
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| entry.file_type().is_file())
+                {
+                    let path = entry.path();
+                    let Some(language) = detect_language(path) else {
+                        continue;
+                    };
+                    if !langs.is_empty() && !langs.iter().any(|item| item.as_str() == language) {
+                        continue;
+                    }
+                    let file_path = path.to_string_lossy().to_string();
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        symbols.extend(extract_symbols(&content, &file_path, language));
+                        imports.extend(extract_imports(&content, &file_path, language));
+                        calls.extend(extract_calls(&content, &file_path, language));
+                        count += 1;
+                    }
+                }
+                (symbols, imports, calls, count)
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("codebase_index blocking: {error}")))?;
+        let extraction_and_accumulation_ns = duration_ns(extraction_started.elapsed());
+
+        let symbol_count = all_symbols.len() as u32;
+        let import_count = all_imports.len() as u32;
+        let call_count = all_calls.len() as u32;
+        let root_for_return = root_path.to_string();
+        let indexed_at = now_secs();
+        let writer = self
+            .conn
+            .call(
+                move |connection| -> RusqliteResult<CodebaseIndexTransactionReceipt> {
+                    let autocommit_before = connection.is_autocommit();
+                    let transaction_started = std::time::Instant::now();
+                    let transaction = connection.savepoint()?;
+                    let autocommit_during = transaction.is_autocommit();
+                    transaction.execute(
+                        "DELETE FROM codebase_symbols WHERE root_path = ?1",
+                        params![root],
+                    )?;
+                    transaction.execute(
+                        "DELETE FROM codebase_imports WHERE root_path = ?1",
+                        params![root],
+                    )?;
+                    transaction.execute(
+                        "DELETE FROM codebase_calls WHERE root_path = ?1",
+                        params![root],
+                    )?;
+                    let mut symbol_statement = transaction.prepare(
+                        "INSERT INTO codebase_symbols
+                         (file_path, line, col, kind, name, signature, language, root_path,
+                          indexed_at, embedding)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
+                    )?;
+                    for symbol in &all_symbols {
+                        symbol_statement.execute(params![
+                            symbol.file_path,
+                            symbol.line,
+                            symbol.col,
+                            symbol.kind,
+                            symbol.name,
+                            symbol.signature,
+                            symbol.language,
+                            root,
+                            indexed_at
+                        ])?;
+                    }
+                    drop(symbol_statement);
+                    let mut import_statement = transaction.prepare(
+                        "INSERT INTO codebase_imports
+                         (file_path, line, language, raw, target, alias, root_path, indexed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    )?;
+                    for import in &all_imports {
+                        import_statement.execute(params![
+                            import.file_path,
+                            import.line,
+                            import.language,
+                            import.raw,
+                            import.target,
+                            import.alias,
+                            root,
+                            indexed_at
+                        ])?;
+                    }
+                    drop(import_statement);
+                    let mut call_statement = transaction.prepare(
+                        "INSERT INTO codebase_calls
+                         (file_path, line, language, caller, callee, root_path, indexed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    )?;
+                    for call in &all_calls {
+                        call_statement.execute(params![
+                            call.file_path,
+                            call.line,
+                            call.language,
+                            call.caller,
+                            call.callee,
+                            root,
+                            indexed_at
+                        ])?;
+                    }
+                    drop(call_statement);
+                    transaction.commit()?;
+                    let authoritative_transaction_ns = duration_ns(transaction_started.elapsed());
+                    let autocommit_after = connection.is_autocommit();
+                    Ok(CodebaseIndexTransactionReceipt {
+                        autocommit_before,
+                        autocommit_during,
+                        autocommit_after,
+                        authoritative_transaction_ns,
+                    })
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("codebase_index write: {error}")))?;
+
+        Ok(CodebaseIndexFullVecReceipt {
+            stats: CodebaseIndexStats {
+                indexed_files,
+                symbols: symbol_count,
+                imports: import_count,
+                calls: call_count,
+                duration_ms: start.elapsed().as_millis() as u64,
+                root_path: root_for_return,
+                dispatch: None,
+            },
+            extraction_and_accumulation_ns,
+            writer,
+        })
+    }
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+impl SqliteStore {
+    /// Read evaluation PRAGMAs from the exact connection that owns indexing.
+    ///
+    /// This seam deliberately issues no PRAGMA assignments: it lets the A1
+    /// evaluator compare authoritative connection state before and after each
+    /// algorithm without repairing drift on an observer connection.
+    pub async fn codebase_index_pragmas_a1(&self) -> Result<crate::CodebaseIndexA1PragmaEvidence> {
+        self.conn
+            .call(|connection| -> RusqliteResult<_> {
+                let databases = connection
+                    .prepare("PRAGMA database_list")?
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(1)?,
+                            PathBuf::from(row.get::<_, String>(2)?),
+                        ))
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                let (database_names, database_files) = databases.into_iter().unzip();
+                Ok(crate::CodebaseIndexA1PragmaEvidence {
+                    journal_mode: connection
+                        .query_row("PRAGMA journal_mode", [], |row| row.get(0))?,
+                    synchronous: connection
+                        .query_row("PRAGMA synchronous", [], |row| row.get(0))?,
+                    wal_autocheckpoint: connection.query_row(
+                        "PRAGMA wal_autocheckpoint",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                    cache_size: connection.query_row("PRAGMA cache_size", [], |row| row.get(0))?,
+                    cache_spill: connection
+                        .query_row("PRAGMA cache_spill", [], |row| row.get(0))?,
+                    temp_store: connection.query_row("PRAGMA temp_store", [], |row| row.get(0))?,
+                    mmap_size: connection.query_row("PRAGMA mmap_size", [], |row| row.get(0))?,
+                    foreign_keys: connection
+                        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))?,
+                    busy_timeout_ms: connection
+                        .query_row("PRAGMA busy_timeout", [], |row| row.get(0))?,
+                    locking_mode: connection
+                        .query_row("PRAGMA locking_mode", [], |row| row.get(0))?,
+                    autocommit: connection.is_autocommit(),
+                    database_names,
+                    database_files,
+                })
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("codebase_index A1 PRAGMA read: {error}")))
+    }
+
+    /// Evaluation-only timing seam over the exact FullVec implementation used
+    /// by [`StateStore::codebase_index`].
+    pub async fn codebase_index_full_vec_a1(
+        &self,
+        root_path: &str,
+        languages: &[String],
+    ) -> Result<crate::CodebaseIndexA1FullVecOutcome> {
+        let receipt = self
+            .codebase_index_full_vec_with_timing(root_path, languages)
+            .await?;
+        Ok(crate::CodebaseIndexA1FullVecOutcome {
+            stats: receipt.stats,
+            telemetry: crate::CodebaseIndexA1FullVecTelemetry {
+                strategy: "full_vec".to_string(),
+                extraction_and_accumulation_ns: receipt.extraction_and_accumulation_ns,
+                authoritative_transaction_ns: receipt.writer.authoritative_transaction_ns,
+                autocommit_before: receipt.writer.autocommit_before,
+                autocommit_during: receipt.writer.autocommit_during,
+                autocommit_after: receipt.writer.autocommit_after,
+            },
+        })
+    }
+
+    /// Evaluation-only staged native path for the A1 memory-wall experiment.
+    ///
+    /// The default [`StateStore::codebase_index`] implementation and every MCP
+    /// caller remain unchanged. Extraction is materialized into a private
+    /// temporary SQLite database in bounded owned batches. Only after staging
+    /// completes does one authoritative savepoint replace the requested root.
+    pub async fn codebase_index_bounded_native_a1(
+        &self,
+        root_path: &str,
+        languages: &[String],
+        options: crate::CodebaseIndexA1Options,
+    ) -> Result<crate::CodebaseIndexA1Outcome> {
+        if options.batch_rows == 0 || options.batch_rows > CODEBASE_INDEX_A1_MAX_BATCH_ROWS {
+            return Err(Error::Backend(format!(
+                "codebase_index A1 batch_rows must be in 1..={CODEBASE_INDEX_A1_MAX_BATCH_ROWS}"
+            )));
+        }
+        if matches!(
+            options.failpoint,
+            Some(crate::CodebaseIndexA1Failpoint::AfterStagingBatch(0))
+                | Some(crate::CodebaseIndexA1Failpoint::AfterSymbolRows(0))
+                | Some(crate::CodebaseIndexA1Failpoint::AfterImportRows(0))
+                | Some(crate::CodebaseIndexA1Failpoint::AfterCallRows(0))
+        ) {
+            return Err(Error::Backend(
+                "codebase_index A1 row-count failpoints must be positive".to_string(),
+            ));
+        }
+
+        let started = std::time::Instant::now();
+        let root = root_path.to_string();
+        let languages = languages.to_vec();
+        let staging_parent_was_explicit = options.staging_parent.is_some();
+        let staging_dir_result = match options.staging_parent.as_deref() {
+            Some(parent) => tempfile::Builder::new()
+                .prefix("ab-codebase-index-a1-")
+                .tempdir_in(parent),
+            None => tempfile::Builder::new()
+                .prefix("ab-codebase-index-a1-")
+                .tempdir(),
+        };
+        let staging_dir = staging_dir_result
+            .map_err(|error| Error::Backend(format!("codebase_index A1 staging dir: {error}")))?;
+        let staging_path = staging_dir.path().join("rows.sqlite3");
+        let staging_path_for_worker = staging_path.clone();
+        let root_for_worker = root.clone();
+        let batch_rows = options.batch_rows;
+        let failpoint = options.failpoint;
+        let staging_started = std::time::Instant::now();
+        let staging = tokio::task::spawn_blocking(move || {
+            build_codebase_index_a1_staging(
+                &staging_path_for_worker,
+                &root_for_worker,
+                &languages,
+                batch_rows,
+                failpoint,
+            )
+        })
+        .await
+        .map_err(|error| Error::Backend(format!("codebase_index A1 blocking: {error}")))??;
+        let extraction_and_staging_ns = duration_ns(staging_started.elapsed());
+        let staging_storage = codebase_index_a1_staging_storage_evidence(&staging_path)?;
+
+        // Match the legacy sampling point: extraction has fully completed
+        // before the single indexed_at value is generated.
+        let indexed_at = now_secs();
+        let root_for_writer = root.clone();
+        let staging_path_for_writer = staging_path.clone();
+        let expected_counts = (staging.symbols, staging.imports, staging.calls);
+        let failpoint = options.failpoint;
+        let writer = self
+            .conn
+            .call(move |connection| {
+                replay_codebase_index_a1_staging(
+                    connection,
+                    &staging_path_for_writer,
+                    &root_for_writer,
+                    indexed_at,
+                    expected_counts,
+                    failpoint,
+                )
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("codebase_index A1 write: {error}")))?;
+
+        // Cleanup happens after the authoritative commit, so failure cannot be
+        // reported as an operation failure without creating a false rollback
+        // signal for callers. Keep the committed outcome and expose cleanup as
+        // evidence instead.
+        let staging_cleanup_succeeded = match staging_dir.close() {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, "codebase_index A1 post-commit staging cleanup failed");
+                false
+            }
+        };
+        let total_rows = u64::from(staging.symbols)
+            .saturating_add(u64::from(staging.imports))
+            .saturating_add(u64::from(staging.calls));
+        let declared_live_row_bound = options
+            .batch_rows
+            .saturating_add(staging.max_extractor_output_rows.saturating_sub(1));
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+        Ok(crate::CodebaseIndexA1Outcome {
+            stats: CodebaseIndexStats {
+                indexed_files: staging.indexed_files,
+                symbols: staging.symbols,
+                imports: staging.imports,
+                calls: staging.calls,
+                duration_ms,
+                root_path: root,
+                dispatch: None,
+            },
+            telemetry: crate::CodebaseIndexA1Telemetry {
+                strategy: "native_chunk_staged_v0".to_string(),
+                batch_rows: options.batch_rows,
+                emitted_batches: staging.emitted_batches,
+                max_accumulator_rows: staging.max_accumulator_rows,
+                max_extractor_output_rows: staging.max_extractor_output_rows,
+                declared_live_row_bound,
+                staging_rows: total_rows,
+                staging_file_bytes: staging_storage.file_bytes,
+                staging_file_path: staging_storage.file_path,
+                staging_file_device: staging_storage.device,
+                staging_file_mount_point: staging_storage.mount_point,
+                staging_file_filesystem_type: staging_storage.filesystem_type,
+                staging_parent_was_explicit,
+                staging_cleanup_succeeded,
+                staging_transaction_committed: true,
+                authoritative_transaction_committed: true,
+                autocommit_before: writer.autocommit_before,
+                autocommit_during: writer.autocommit_during,
+                autocommit_after: writer.autocommit_after,
+                extraction_and_staging_ns,
+                authoritative_transaction_ns: writer.authoritative_transaction_ns,
+                indexed_at,
+            },
+        })
+    }
+
+    /// Evaluation-only explicit strategy dispatch over the A1 codebase index
+    /// variants. Explicit `strategy` selection is opt-in; default runtime path
+    /// remains [`StateStore::codebase_index`] unless callers invoke this seam.
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    pub async fn codebase_index_with_a1_strategy(
+        &self,
+        root_path: &str,
+        languages: &[String],
+        strategy: crate::CodebaseIndexA1DispatchStrategy,
+    ) -> Result<crate::CodebaseIndexA1DispatchOutcome> {
+        match strategy {
+            crate::CodebaseIndexA1DispatchStrategy::FullVec => self
+                .codebase_index_full_vec_a1(root_path, languages)
+                .await
+                .map(crate::CodebaseIndexA1DispatchOutcome::FullVec),
+            crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => self
+                .codebase_index_bounded_native_a1(root_path, languages, options)
+                .await
+                .map(crate::CodebaseIndexA1DispatchOutcome::NativeChunkStagedV0),
+        }
+    }
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn build_codebase_index_a1_staging(
+    staging_path: &Path,
+    root_path: &str,
+    languages: &[String],
+    batch_rows: usize,
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+) -> Result<CodebaseIndexA1StagingReceipt> {
+    use crate::codebase::{detect_language, extract_calls, extract_imports, extract_symbols};
+    use walkdir::WalkDir;
+
+    let mut connection = rusqlite::Connection::open(staging_path)
+        .map_err(|error| Error::Backend(format!("codebase_index A1 staging open: {error}")))?;
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode=OFF;
+             PRAGMA synchronous=OFF;
+             PRAGMA foreign_keys=ON;
+             PRAGMA cache_size=-2048;
+             CREATE TABLE a1_symbols (
+                 seq INTEGER PRIMARY KEY,
+                 file_path TEXT NOT NULL,
+                 line INTEGER NOT NULL,
+                 col INTEGER NOT NULL,
+                 kind TEXT NOT NULL,
+                 name TEXT NOT NULL,
+                 signature TEXT NOT NULL,
+                 language TEXT NOT NULL
+             );
+             CREATE TABLE a1_imports (
+                 seq INTEGER PRIMARY KEY,
+                 file_path TEXT NOT NULL,
+                 line INTEGER NOT NULL,
+                 language TEXT NOT NULL,
+                 raw TEXT NOT NULL,
+                 target TEXT NOT NULL,
+                 alias TEXT
+             );
+             CREATE TABLE a1_calls (
+                 seq INTEGER PRIMARY KEY,
+                 file_path TEXT NOT NULL,
+                 line INTEGER NOT NULL,
+                 language TEXT NOT NULL,
+                 caller TEXT NOT NULL,
+                 callee TEXT NOT NULL
+             );",
+        )
+        .map_err(|error| Error::Backend(format!("codebase_index A1 staging schema: {error}")))?;
+    let transaction = connection.transaction().map_err(|error| {
+        Error::Backend(format!("codebase_index A1 staging transaction: {error}"))
+    })?;
+    let mut batch = CodebaseIndexA1TypedBatch::default();
+    let mut sequence = CodebaseIndexA1Sequence::default();
+    let mut emitted_batches = 0_u64;
+    let mut max_accumulator_rows = 0_usize;
+    let mut max_extractor_output_rows = 0_usize;
+    let mut indexed_files = 0_u32;
+
+    for entry in WalkDir::new(root_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_str().unwrap_or("");
+            !matches!(
+                name,
+                ".git"
+                    | "target"
+                    | "node_modules"
+                    | ".venv"
+                    | "__pycache__"
+                    | ".mypy_cache"
+                    | "dist"
+                    | "build"
+            )
+        })
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let path = entry.path();
+        let Some(language) = detect_language(path) else {
+            continue;
+        };
+        if !languages.is_empty() && !languages.iter().any(|item| item.as_str() == language) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let file_path = path.to_string_lossy().to_string();
+        let symbols = extract_symbols(&content, &file_path, language);
+        let imports = extract_imports(&content, &file_path, language);
+        let calls = extract_calls(&content, &file_path, language);
+        max_extractor_output_rows = max_extractor_output_rows.max(
+            symbols
+                .len()
+                .saturating_add(imports.len())
+                .saturating_add(calls.len()),
+        );
+        indexed_files = indexed_files.checked_add(1).ok_or_else(|| {
+            Error::Backend("codebase_index A1 indexed_files overflow".to_string())
+        })?;
+
+        for symbol in symbols {
+            batch.symbols.push(symbol);
+            max_accumulator_rows = max_accumulator_rows.max(batch.len());
+            if batch.len() == batch_rows {
+                flush_codebase_index_a1_batch(&transaction, &mut batch, &mut sequence)?;
+                emitted_batches = emitted_batches.saturating_add(1);
+                inject_codebase_index_a1_staging_failpoint(failpoint, emitted_batches)?;
+            }
+        }
+        for import in imports {
+            batch.imports.push(import);
+            max_accumulator_rows = max_accumulator_rows.max(batch.len());
+            if batch.len() == batch_rows {
+                flush_codebase_index_a1_batch(&transaction, &mut batch, &mut sequence)?;
+                emitted_batches = emitted_batches.saturating_add(1);
+                inject_codebase_index_a1_staging_failpoint(failpoint, emitted_batches)?;
+            }
+        }
+        for call in calls {
+            batch.calls.push(call);
+            max_accumulator_rows = max_accumulator_rows.max(batch.len());
+            if batch.len() == batch_rows {
+                flush_codebase_index_a1_batch(&transaction, &mut batch, &mut sequence)?;
+                emitted_batches = emitted_batches.saturating_add(1);
+                inject_codebase_index_a1_staging_failpoint(failpoint, emitted_batches)?;
+            }
+        }
+    }
+    if !batch.is_empty() {
+        flush_codebase_index_a1_batch(&transaction, &mut batch, &mut sequence)?;
+        emitted_batches = emitted_batches.saturating_add(1);
+        inject_codebase_index_a1_staging_failpoint(failpoint, emitted_batches)?;
+    }
+    if let Some(crate::CodebaseIndexA1Failpoint::AfterStagingBatch(target)) = failpoint {
+        return Err(Error::Backend(format!(
+            "A1 injected failpoint: after_staging_batch target {target} was not reached"
+        )));
+    }
+    transaction
+        .commit()
+        .map_err(|error| Error::Backend(format!("codebase_index A1 staging commit: {error}")))?;
+
+    Ok(CodebaseIndexA1StagingReceipt {
+        indexed_files,
+        symbols: u32::try_from(sequence.symbols)
+            .map_err(|_| Error::Backend("codebase_index A1 symbol count overflow".to_string()))?,
+        imports: u32::try_from(sequence.imports)
+            .map_err(|_| Error::Backend("codebase_index A1 import count overflow".to_string()))?,
+        calls: u32::try_from(sequence.calls)
+            .map_err(|_| Error::Backend("codebase_index A1 call count overflow".to_string()))?,
+        emitted_batches,
+        max_accumulator_rows,
+        max_extractor_output_rows,
+    })
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn inject_codebase_index_a1_staging_failpoint(
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+    emitted_batches: u64,
+) -> Result<()> {
+    if matches!(
+        failpoint,
+        Some(crate::CodebaseIndexA1Failpoint::AfterStagingBatch(target))
+            if target == emitted_batches
+    ) {
+        return Err(Error::Backend(format!(
+            "A1 injected failpoint: after_staging_batch {emitted_batches}"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn flush_codebase_index_a1_batch(
+    transaction: &rusqlite::Transaction<'_>,
+    batch: &mut CodebaseIndexA1TypedBatch,
+    sequence: &mut CodebaseIndexA1Sequence,
+) -> Result<()> {
+    {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO a1_symbols
+                 (seq, file_path, line, col, kind, name, signature, language)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(|error| Error::Backend(format!("codebase_index A1 stage symbols: {error}")))?;
+        for row in batch.symbols.drain(..) {
+            sequence.symbols = sequence.symbols.saturating_add(1);
+            statement
+                .execute(params![
+                    sequence.symbols,
+                    row.file_path,
+                    row.line,
+                    row.col,
+                    row.kind,
+                    row.name,
+                    row.signature,
+                    row.language
+                ])
+                .map_err(|error| {
+                    Error::Backend(format!("codebase_index A1 stage symbol row: {error}"))
+                })?;
+        }
+    }
+    {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO a1_imports
+                 (seq, file_path, line, language, raw, target, alias)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )
+            .map_err(|error| Error::Backend(format!("codebase_index A1 stage imports: {error}")))?;
+        for row in batch.imports.drain(..) {
+            sequence.imports = sequence.imports.saturating_add(1);
+            statement
+                .execute(params![
+                    sequence.imports,
+                    row.file_path,
+                    row.line,
+                    row.language,
+                    row.raw,
+                    row.target,
+                    row.alias
+                ])
+                .map_err(|error| {
+                    Error::Backend(format!("codebase_index A1 stage import row: {error}"))
+                })?;
+        }
+    }
+    {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO a1_calls
+                 (seq, file_path, line, language, caller, callee)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .map_err(|error| Error::Backend(format!("codebase_index A1 stage calls: {error}")))?;
+        for row in batch.calls.drain(..) {
+            sequence.calls = sequence.calls.saturating_add(1);
+            statement
+                .execute(params![
+                    sequence.calls,
+                    row.file_path,
+                    row.line,
+                    row.language,
+                    row.caller,
+                    row.callee
+                ])
+                .map_err(|error| {
+                    Error::Backend(format!("codebase_index A1 stage call row: {error}"))
+                })?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn replay_codebase_index_a1_staging(
+    connection: &mut rusqlite::Connection,
+    staging_path: &Path,
+    root_path: &str,
+    indexed_at: i64,
+    expected_counts: (u32, u32, u32),
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+) -> RusqliteResult<CodebaseIndexTransactionReceipt> {
+    let staging = rusqlite::Connection::open_with_flags(
+        staging_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let autocommit_before = connection.is_autocommit();
+    if !autocommit_before {
+        return Err(codebase_index_a1_contract_error(
+            "authoritative connection was already in a transaction",
+        ));
+    }
+    let transaction_started = std::time::Instant::now();
+    let transaction = connection.savepoint()?;
+    let autocommit_during = transaction.is_autocommit();
+    transaction.execute(
+        "DELETE FROM codebase_symbols WHERE root_path = ?1",
+        params![root_path],
+    )?;
+    inject_codebase_index_a1_authoritative_failpoint(
+        failpoint,
+        crate::CodebaseIndexA1Failpoint::AfterDeleteSymbols,
+        "after_delete_symbols",
+    )?;
+    transaction.execute(
+        "DELETE FROM codebase_imports WHERE root_path = ?1",
+        params![root_path],
+    )?;
+    inject_codebase_index_a1_authoritative_failpoint(
+        failpoint,
+        crate::CodebaseIndexA1Failpoint::AfterDeleteImports,
+        "after_delete_imports",
+    )?;
+    transaction.execute(
+        "DELETE FROM codebase_calls WHERE root_path = ?1",
+        params![root_path],
+    )?;
+    inject_codebase_index_a1_authoritative_failpoint(
+        failpoint,
+        crate::CodebaseIndexA1Failpoint::AfterDeleteCalls,
+        "after_delete_calls",
+    )?;
+
+    let symbol_rows =
+        replay_codebase_index_a1_symbols(&staging, &transaction, root_path, indexed_at, failpoint)?;
+    let import_rows =
+        replay_codebase_index_a1_imports(&staging, &transaction, root_path, indexed_at, failpoint)?;
+    let call_rows =
+        replay_codebase_index_a1_calls(&staging, &transaction, root_path, indexed_at, failpoint)?;
+    if (symbol_rows, import_rows, call_rows) != expected_counts {
+        return Err(codebase_index_a1_contract_error(
+            "authoritative replay count did not match staging",
+        ));
+    }
+    inject_codebase_index_a1_authoritative_failpoint(
+        failpoint,
+        crate::CodebaseIndexA1Failpoint::BeforeCommit,
+        "before_commit",
+    )?;
+    transaction.commit()?;
+    let authoritative_transaction_ns = duration_ns(transaction_started.elapsed());
+    let autocommit_after = connection.is_autocommit();
+
+    Ok(CodebaseIndexTransactionReceipt {
+        autocommit_before,
+        autocommit_during,
+        autocommit_after,
+        authoritative_transaction_ns,
+    })
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn inject_codebase_index_a1_authoritative_failpoint(
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+    expected: crate::CodebaseIndexA1Failpoint,
+    label: &str,
+) -> RusqliteResult<()> {
+    if failpoint == Some(expected) {
+        return Err(codebase_index_a1_contract_error(&format!(
+            "A1 injected failpoint: {label}"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn replay_codebase_index_a1_symbols(
+    staging: &rusqlite::Connection,
+    transaction: &rusqlite::Savepoint<'_>,
+    root_path: &str,
+    indexed_at: i64,
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+) -> RusqliteResult<u32> {
+    let mut source = staging.prepare(
+        "SELECT file_path, line, col, kind, name, signature, language
+         FROM a1_symbols ORDER BY seq",
+    )?;
+    let mut destination = transaction.prepare(
+        "INSERT INTO codebase_symbols
+         (file_path, line, col, kind, name, signature, language, root_path,
+          indexed_at, embedding)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
+    )?;
+    let rows = source.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, u32>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+        ))
+    })?;
+    let mut count = 0_u32;
+    for row in rows {
+        let (file_path, line, col, kind, name, signature, language) = row?;
+        destination.execute(params![
+            file_path, line, col, kind, name, signature, language, root_path, indexed_at
+        ])?;
+        count = count.saturating_add(1);
+        if matches!(
+            failpoint,
+            Some(crate::CodebaseIndexA1Failpoint::AfterSymbolRows(target))
+                if target == u64::from(count)
+        ) {
+            return Err(codebase_index_a1_contract_error(
+                "A1 injected failpoint: after_symbol_rows",
+            ));
+        }
+    }
+    ensure_codebase_index_a1_row_failpoint_reached(
+        failpoint,
+        CodebaseIndexA1RowKind::Symbol,
+        count,
+    )?;
+    Ok(count)
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn replay_codebase_index_a1_imports(
+    staging: &rusqlite::Connection,
+    transaction: &rusqlite::Savepoint<'_>,
+    root_path: &str,
+    indexed_at: i64,
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+) -> RusqliteResult<u32> {
+    let mut source = staging.prepare(
+        "SELECT file_path, line, language, raw, target, alias
+         FROM a1_imports ORDER BY seq",
+    )?;
+    let mut destination = transaction.prepare(
+        "INSERT INTO codebase_imports
+         (file_path, line, language, raw, target, alias, root_path, indexed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )?;
+    let rows = source.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+        ))
+    })?;
+    let mut count = 0_u32;
+    for row in rows {
+        let (file_path, line, language, raw, target, alias) = row?;
+        destination.execute(params![
+            file_path, line, language, raw, target, alias, root_path, indexed_at
+        ])?;
+        count = count.saturating_add(1);
+        if matches!(
+            failpoint,
+            Some(crate::CodebaseIndexA1Failpoint::AfterImportRows(target))
+                if target == u64::from(count)
+        ) {
+            return Err(codebase_index_a1_contract_error(
+                "A1 injected failpoint: after_import_rows",
+            ));
+        }
+    }
+    ensure_codebase_index_a1_row_failpoint_reached(
+        failpoint,
+        CodebaseIndexA1RowKind::Import,
+        count,
+    )?;
+    Ok(count)
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn replay_codebase_index_a1_calls(
+    staging: &rusqlite::Connection,
+    transaction: &rusqlite::Savepoint<'_>,
+    root_path: &str,
+    indexed_at: i64,
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+) -> RusqliteResult<u32> {
+    let mut source = staging.prepare(
+        "SELECT file_path, line, language, caller, callee
+         FROM a1_calls ORDER BY seq",
+    )?;
+    let mut destination = transaction.prepare(
+        "INSERT INTO codebase_calls
+         (file_path, line, language, caller, callee, root_path, indexed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+    let rows = source.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut count = 0_u32;
+    for row in rows {
+        let (file_path, line, language, caller, callee) = row?;
+        destination.execute(params![
+            file_path, line, language, caller, callee, root_path, indexed_at
+        ])?;
+        count = count.saturating_add(1);
+        if matches!(
+            failpoint,
+            Some(crate::CodebaseIndexA1Failpoint::AfterCallRows(target))
+                if target == u64::from(count)
+        ) {
+            return Err(codebase_index_a1_contract_error(
+                "A1 injected failpoint: after_call_rows",
+            ));
+        }
+    }
+    ensure_codebase_index_a1_row_failpoint_reached(failpoint, CodebaseIndexA1RowKind::Call, count)?;
+    Ok(count)
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodebaseIndexA1RowKind {
+    Symbol,
+    Import,
+    Call,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn ensure_codebase_index_a1_row_failpoint_reached(
+    failpoint: Option<crate::CodebaseIndexA1Failpoint>,
+    row_kind: CodebaseIndexA1RowKind,
+    rows: u32,
+) -> RusqliteResult<()> {
+    let requested = match (row_kind, failpoint) {
+        (
+            CodebaseIndexA1RowKind::Symbol,
+            Some(crate::CodebaseIndexA1Failpoint::AfterSymbolRows(target)),
+        )
+        | (
+            CodebaseIndexA1RowKind::Import,
+            Some(crate::CodebaseIndexA1Failpoint::AfterImportRows(target)),
+        )
+        | (
+            CodebaseIndexA1RowKind::Call,
+            Some(crate::CodebaseIndexA1Failpoint::AfterCallRows(target)),
+        ) => Some(target),
+        _ => None,
+    };
+    if let Some(target) = requested {
+        return Err(codebase_index_a1_contract_error(&format!(
+            "A1 injected failpoint target {target} exceeded {rows} replayed rows"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a1_contract_error(message: &str) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(message.to_string())))
+}
+
+fn duration_ns(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
 #[async_trait]
@@ -3467,6 +4872,7 @@ impl StateStore for SqliteStore {
         model: Option<String>,
         model_reasoning_effort: Option<String>,
         codex_host: Option<String>,
+        mcp_session_id: Option<String>,
     ) -> Result<()> {
         let ts = now_secs();
         let tn = tool_name.to_string();
@@ -3478,8 +4884,9 @@ impl StateStore for SqliteStore {
                 c.execute(
                     "INSERT INTO mcp_tool_calls
                        (ts, tool_name, duration_ms, ok, args_size, result_size,
-                        client_name, profile, source, model, model_reasoning_effort, codex_host)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        client_name, profile, source, model, model_reasoning_effort, codex_host,
+                        mcp_session_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         ts,
                         tn,
@@ -3492,7 +4899,8 @@ impl StateStore for SqliteStore {
                         source,
                         model,
                         model_reasoning_effort,
-                        codex_host
+                        codex_host,
+                        mcp_session_id
                     ],
                 )?;
                 Ok(())
@@ -3715,7 +5123,8 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallRow>> {
                 let mut stmt = c.prepare(
-                    "SELECT ts, tool_name, duration_ms, ok, args_size, result_size
+                    "SELECT id, ts, tool_name, duration_ms, ok, args_size, result_size,
+                            mcp_session_id, source
                      FROM mcp_tool_calls
                      WHERE ts >= ?1
                      ORDER BY ts ASC, id ASC
@@ -3723,12 +5132,15 @@ impl StateStore for SqliteStore {
                 )?;
                 let iter = stmt.query_map(params![cutoff, lim], |row| {
                     Ok(McpToolCallRow {
-                        ts: row.get(0)?,
-                        tool_name: row.get(1)?,
-                        duration_ms: row.get::<_, i64>(2)? as u32,
-                        ok: row.get::<_, i64>(3)? != 0,
-                        args_size: row.get::<_, Option<i64>>(4)?.map(|v| v.max(0) as u32),
-                        result_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
+                        id: row.get(0)?,
+                        ts: row.get(1)?,
+                        tool_name: row.get(2)?,
+                        source: row.get(8)?,
+                        duration_ms: row.get::<_, i64>(3)? as u32,
+                        ok: row.get::<_, i64>(4)? != 0,
+                        args_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
+                        result_size: row.get::<_, Option<i64>>(6)?.map(|v| v.max(0) as u32),
+                        mcp_session_id: row.get(7)?,
                     })
                 })?;
                 let collected: std::result::Result<Vec<_>, _> = iter.collect();
@@ -5037,7 +6449,11 @@ impl StateStore for SqliteStore {
         // current tombstones (used in tests; in production callers should
         // pass at least the sync round-trip window, default 7+).
         let days = older_than_days.max(0);
-        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let cutoff = if days == 0 {
+            i64::MAX
+        } else {
+            now_secs() - days.saturating_mul(86_400)
+        };
         let removed = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<String>> {
@@ -6628,18 +8044,13 @@ impl StateStore for SqliteStore {
 
         let actions = plan_import_actions(&parsed, &incoming_vv, &existing_meta, policy);
 
-        // Embed only rows we're actually going to persist. When everything
-        // is Skip (the common sync-no-op case), we never touch the embedding
-        // backend → fastembed never cold-starts.
-        let to_embed_idx: Vec<usize> = actions
-            .iter()
-            .enumerate()
-            .filter(|(i, a)| {
-                !matches!(a, ImportAction::Skip)
-                    && memory_import_record_needs_embedding(&parsed[*i])
-            })
-            .map(|(i, _)| i)
-            .collect();
+        // Embed only rows we're actually going to persist. Headless sync can
+        // explicitly defer embeddings to avoid loading the ONNX model while
+        // importing a large divergent snapshot; records remain eligible for
+        // the normal explicit reindex path once the node is idle.
+        let embeddings_enabled = memory_import_embeddings_enabled();
+        let to_embed_idx =
+            memory_import_embedding_indices(&actions, &parsed, embeddings_enabled);
         let mut embeddings: Vec<Option<Vec<u8>>> = vec![None; parsed.len()];
         let mut embedding_backends: Vec<Option<String>> = vec![None; parsed.len()];
         if !to_embed_idx.is_empty() {
@@ -8984,11 +10395,20 @@ impl StateStore for SqliteStore {
         // same-backend wrong-dim rows when the two agree — see
         // `reindex_should_sweep_mismatched_dims` for why the gate is mandatory.
         let expected_dim = crate::vector::vector_dim();
-        let dominant_dim = self
+        let dominant_profile = self
             .dominant_embedding_profile()
             .await
-            .map_err(|e| Error::Backend(format!("memory_reindex dominant-dim probe: {e}")))?
-            .dim;
+            .map_err(|e| Error::Backend(format!("memory_reindex dominant-dim probe: {e}")))?;
+        let dominant_dim = dominant_profile.dim;
+        if stale_flag
+            && current_backend == "fnv1a-hash-384"
+            && dominant_profile.backend.as_deref() != Some(current_backend.as_str())
+        {
+            return Err(Error::Backend(format!(
+                "memory_reindex refused to replace dominant {:?}/{:?} embeddings with hash fallback; wait for the configured model or remote embed service",
+                dominant_profile.backend, dominant_profile.dim
+            )));
+        }
         let dim_aware =
             reindex_should_sweep_mismatched_dims(stale_flag, expected_dim, dominant_dim);
         let expected_bytes = (expected_dim * 4) as i64;
@@ -9173,157 +10593,31 @@ impl StateStore for SqliteStore {
         root_path: &str,
         languages: &[String],
     ) -> Result<CodebaseIndexStats> {
-        use crate::codebase::{detect_language, extract_calls, extract_imports, extract_symbols};
-        use walkdir::WalkDir;
-
-        let start = std::time::Instant::now();
-        let root = root_path.to_string();
-        let langs: Vec<String> = languages.to_vec();
-
-        // File walking, symbol extraction, and embedding computation run in a blocking thread.
-        let root_for_walk = root.clone();
-        let (all_symbols, all_imports, all_calls, indexed_files) =
-            tokio::task::spawn_blocking(move || {
-                // Walk source files; prune non-source trees at directory level.
-                let mut symbols: Vec<CodebaseSymbol> = Vec::new();
-                let mut imports: Vec<crate::CodebaseImport> = Vec::new();
-                let mut calls: Vec<crate::CodebaseCall> = Vec::new();
-                let mut count = 0u32;
-                for entry in WalkDir::new(&root_for_walk)
-                    .follow_links(false)
-                    .into_iter()
-                    .filter_entry(|e| {
-                        let name = e.file_name().to_str().unwrap_or("");
-                        !matches!(
-                            name,
-                            ".git"
-                                | "target"
-                                | "node_modules"
-                                | ".venv"
-                                | "__pycache__"
-                                | ".mypy_cache"
-                                | "dist"
-                                | "build"
-                        )
-                    })
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().is_file())
-                {
-                    let path = entry.path();
-                    let lang = match detect_language(path) {
-                        Some(l) => l,
-                        None => continue,
-                    };
-                    if !langs.is_empty() && !langs.iter().any(|l| l.as_str() == lang) {
-                        continue;
-                    }
-                    let file_path_str = path.to_string_lossy().to_string();
-                    if let Ok(content) = std::fs::read_to_string(path) {
-                        symbols.extend(extract_symbols(&content, &file_path_str, lang));
-                        imports.extend(extract_imports(&content, &file_path_str, lang));
-                        calls.extend(extract_calls(&content, &file_path_str, lang));
-                        count += 1;
-                    }
-                }
-                // Embeddings are filled by `codebase_reindex_embeddings` (call
-                // it after this returns); rows ship with embedding=NULL so the
-                // walk stays fast and embed cost is opt-in.
-                (symbols, imports, calls, count)
-            })
-            .await
-            .map_err(|e| Error::Backend(format!("codebase_index blocking: {e}")))?;
-
-        let symbol_count = all_symbols.len() as u32;
-        let import_count = all_imports.len() as u32;
-        let call_count = all_calls.len() as u32;
-        let root_for_return = root_path.to_string();
-        let now = now_secs();
-
-        self.conn
-            .call(move |c| -> RusqliteResult<()> {
-                // Wrap in explicit transaction: all INSERTs commit in one fsync.
-                let tx = c.savepoint()?;
-                tx.execute(
-                    "DELETE FROM codebase_symbols WHERE root_path = ?1",
-                    params![root],
-                )?;
-                tx.execute(
-                    "DELETE FROM codebase_imports WHERE root_path = ?1",
-                    params![root],
-                )?;
-                tx.execute(
-                    "DELETE FROM codebase_calls WHERE root_path = ?1",
-                    params![root],
-                )?;
-                let mut stmt = tx.prepare(
-                    "INSERT INTO codebase_symbols
-                     (file_path, line, col, kind, name, signature, language, root_path,
-                      indexed_at, embedding)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
-                )?;
-                for sym in &all_symbols {
-                    stmt.execute(params![
-                        sym.file_path,
-                        sym.line,
-                        sym.col,
-                        sym.kind,
-                        sym.name,
-                        sym.signature,
-                        sym.language,
-                        root,
-                        now
-                    ])?;
-                }
-                drop(stmt);
-                let mut imp_stmt = tx.prepare(
-                    "INSERT INTO codebase_imports
-                     (file_path, line, language, raw, target, alias, root_path, indexed_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                )?;
-                for imp in &all_imports {
-                    imp_stmt.execute(params![
-                        imp.file_path,
-                        imp.line,
-                        imp.language,
-                        imp.raw,
-                        imp.target,
-                        imp.alias,
-                        root,
-                        now
-                    ])?;
-                }
-                drop(imp_stmt);
-                let mut call_stmt = tx.prepare(
-                    "INSERT INTO codebase_calls
-                     (file_path, line, language, caller, callee, root_path, indexed_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                )?;
-                for call in &all_calls {
-                    call_stmt.execute(params![
-                        call.file_path,
-                        call.line,
-                        call.language,
-                        call.caller,
-                        call.callee,
-                        root,
-                        now
-                    ])?;
-                }
-                drop(call_stmt);
-                tx.commit()?;
-                Ok(())
-            })
-            .await
-            .map_err(|e| Error::Backend(format!("codebase_index write: {e}")))?;
-
-        Ok(CodebaseIndexStats {
-            indexed_files,
-            symbols: symbol_count,
-            imports: import_count,
-            calls: call_count,
-            duration_ms: start.elapsed().as_millis() as u64,
-            root_path: root_for_return,
-        })
+        #[cfg(feature = "codebase-index-bounded-native-a1")]
+        {
+            return self
+                .codebase_index_with_env_dispatch(root_path, languages)
+                .await
+                .map(|outcome| {
+                    let mut stats = outcome.stats;
+                    stats.dispatch = Some(outcome.dispatch);
+                    stats
+                });
+        }
+        #[cfg(not(feature = "codebase-index-bounded-native-a1"))]
+        {
+            let receipt = self
+                .codebase_index_full_vec_with_timing(root_path, languages)
+                .await?;
+            let _timing_evidence = (
+                receipt.extraction_and_accumulation_ns,
+                receipt.writer.authoritative_transaction_ns,
+                receipt.writer.autocommit_before,
+                receipt.writer.autocommit_during,
+                receipt.writer.autocommit_after,
+            );
+            return Ok(receipt.stats);
+        }
     }
 
     async fn codebase_index_status(&self, root_path: &str) -> Result<CodebaseIndexStatus> {
@@ -12682,8 +13976,55 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_import_skip_embeddings_flag_is_explicit_and_tolerant() {
+        for value in ["1", " true ", "YES", "on"] {
+            assert!(memory_import_skip_embeddings_from(Some(value)), "{value}");
+        }
+        for value in [None, Some("0"), Some("false"), Some("unexpected")] {
+            assert!(!memory_import_skip_embeddings_from(value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn memory_import_can_defer_all_embedding_work_without_changing_actions() {
+        let mut archived = mk_record("archived", 2);
+        archived.status = "archived".into();
+        let records = vec![mk_record("insert", 1), archived, mk_record("skip", 3)];
+        let actions = vec![
+            ImportAction::Insert,
+            ImportAction::Update,
+            ImportAction::Skip,
+        ];
+
+        assert_eq!(
+            memory_import_embedding_indices(&actions, &records, true),
+            vec![0],
+            "normal imports embed active persisted rows only"
+        );
+        assert!(
+            memory_import_embedding_indices(&actions, &records, false).is_empty(),
+            "headless sync defers vectors for every imported row"
+        );
+    }
+
     use super::*;
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    use crate::CodebaseIndexA1DispatchStrategy;
     use crate::{MemoryListSort, PlanStep, StateStore};
+
+    #[test]
+    fn cold_embedding_write_wait_defaults_to_two_seconds() {
+        assert_eq!(embedding_cold_write_wait_ms(None), 2_000);
+        assert_eq!(embedding_cold_write_wait_ms(Some("invalid")), 2_000);
+    }
+
+    #[test]
+    fn cold_embedding_write_wait_honors_override_with_safety_cap() {
+        assert_eq!(embedding_cold_write_wait_ms(Some("0")), 0);
+        assert_eq!(embedding_cold_write_wait_ms(Some("15000")), 15_000);
+        assert_eq!(embedding_cold_write_wait_ms(Some("999999")), 120_000);
+    }
 
     fn mk_record(key: &str, updated_at: i64) -> MemoryRecord {
         MemoryRecord {
@@ -12722,6 +14063,215 @@ mod tests {
             })
             .await
             .expect("drop timestamp guards");
+    }
+
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    #[test]
+    fn codebase_index_a1_strategy_from_env_parses_strategy_and_batch_tolerantly() {
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let key_strategy = "AB_CODEBASE_INDEX_A1_STRATEGY";
+        let key_batch = "AB_CODEBASE_INDEX_A1_BATCH_ROWS";
+        let key_staging_parent = "AB_CODEBASE_INDEX_A1_STAGING_PARENT";
+
+        let old_strategy = std::env::var_os(key_strategy);
+        let old_batch = std::env::var_os(key_batch);
+        let old_staging_parent = std::env::var_os(key_staging_parent);
+
+        // Known canonical alias maps to native strategy; unknown batch values
+        // fall back to the hard-coded default.
+        std::env::set_var(key_strategy, "native-chunk-staged-v0");
+        std::env::set_var(key_batch, "0");
+        let fallback0 =
+            codebase_index_a1_strategy_from_env().expect("environment strategy must be readable");
+        match fallback0 {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+                assert_eq!(options.failpoint, None);
+                assert_eq!(options.staging_parent, None);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Hard over-limit batch values also fall back to default.
+        std::env::set_var(key_batch, "999999");
+        let fallback_over = codebase_index_a1_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_over {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Valid values are passed through directly.
+        std::env::set_var(key_batch, "128");
+        let passthrough = codebase_index_a1_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match passthrough {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, 128);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Non-numeric values always fallback to default.
+        std::env::set_var(key_batch, "not-a-number");
+        let fallback_non_numeric = codebase_index_a1_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_non_numeric {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Unknown strategy should remain disabled.
+        std::env::set_var(key_strategy, "mystery");
+        assert!(codebase_index_a1_strategy_from_env().is_none());
+
+        if let Some(parent) = old_staging_parent {
+            std::env::set_var(key_staging_parent, parent);
+        } else {
+            std::env::remove_var(key_staging_parent);
+        }
+        if let Some(value) = old_strategy {
+            std::env::set_var(key_strategy, value);
+        } else {
+            std::env::remove_var(key_strategy);
+        }
+        if let Some(value) = old_batch {
+            std::env::set_var(key_batch, value);
+        } else {
+            std::env::remove_var(key_batch);
+        }
+    }
+
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    #[test]
+    fn codebase_index_a2_strategy_from_env_parses_strategy_and_batch_tolerantly() {
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let key_strategy = "AB_CODEBASE_INDEX_A2_STRATEGY";
+        let key_batch = "AB_CODEBASE_INDEX_A2_BATCH_ROWS";
+        let key_staging_parent = "AB_CODEBASE_INDEX_A2_STAGING_PARENT";
+
+        let old_strategy = std::env::var_os(key_strategy);
+        let old_batch = std::env::var_os(key_batch);
+        let old_staging_parent = std::env::var_os(key_staging_parent);
+
+        // Known canonical alias maps to native strategy; unknown batch values
+        // fall back to the hard-coded default.
+        std::env::set_var(key_strategy, "native-chunk-staged-v0");
+        std::env::set_var(key_batch, "0");
+        let fallback0 =
+            codebase_index_a2_strategy_from_env().expect("environment strategy must be readable");
+        match fallback0 {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+                assert_eq!(options.failpoint, None);
+                assert_eq!(options.staging_parent, None);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Hard over-limit batch values also fall back to default.
+        std::env::set_var(key_batch, "999999");
+        let fallback_over = codebase_index_a2_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_over {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Valid values are passed through directly.
+        std::env::set_var(key_batch, "128");
+        let passthrough = codebase_index_a2_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match passthrough {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, 128);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Non-numeric values always fallback to default.
+        std::env::set_var(key_batch, "not-a-number");
+        let fallback_non_numeric = codebase_index_a2_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_non_numeric {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Unknown strategy should remain disabled.
+        std::env::set_var(key_strategy, "mystery");
+        assert!(codebase_index_a2_strategy_from_env().is_none());
+
+        if let Some(parent) = old_staging_parent {
+            std::env::set_var(key_staging_parent, parent);
+        } else {
+            std::env::remove_var(key_staging_parent);
+        }
+        if let Some(value) = old_strategy {
+            std::env::set_var(key_strategy, value);
+        } else {
+            std::env::remove_var(key_strategy);
+        }
+        if let Some(value) = old_batch {
+            std::env::set_var(key_batch, value);
+        } else {
+            std::env::remove_var(key_batch);
+        }
+    }
+
+    async fn pin_memory_durable_timestamps(
+        store: &SqliteStore,
+        key: &str,
+        created_at: i64,
+        updated_at: i64,
+    ) {
+        let key = key.to_string();
+        let updated = store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories
+                        SET created_at = ?1,
+                            updated_at = ?2
+                      WHERE key = ?3",
+                    params![created_at, updated_at, key],
+                )
+            })
+            .await
+            .expect("pin durable memory timestamps");
+        assert_eq!(updated, 1, "fixture row must exist before timestamp pin");
     }
 
     #[tokio::test]
@@ -15139,7 +16689,15 @@ mod tests {
         };
         // Insert in scrambled order so rowid/insertion order != key order.
         for k in ["m_c", "m_a", "m_b"] {
-            store.memory_save(&mk(k)).await.expect("save");
+            let record = mk(k);
+            store.memory_save(&record).await.expect("save");
+            pin_memory_durable_timestamps(
+                &store,
+                &record.key,
+                record.created_at,
+                record.updated_at,
+            )
+            .await;
         }
 
         let out = temp_dir.join("mem.jsonl");
@@ -15182,12 +16740,14 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
-        let store_a = SqliteStore::open(&temp_dir.join("a.db"))
+        let mut store_a = SqliteStore::open(&temp_dir.join("a.db"))
             .await
             .expect("open a");
-        let store_b = SqliteStore::open(&temp_dir.join("b.db"))
+        let mut store_b = SqliteStore::open(&temp_dir.join("b.db"))
             .await
             .expect("open b");
+        store_a.set_node_id(0);
+        store_b.set_node_id(0);
 
         let rec = MemoryRecord {
             key: "stable_sync_meta".to_string(),
@@ -15207,6 +16767,9 @@ mod tests {
         };
         store_a.memory_save(&rec).await.expect("save a");
         store_b.memory_save(&rec).await.expect("save b");
+        for store in [&store_a, &store_b] {
+            pin_memory_durable_timestamps(store, &rec.key, rec.created_at, rec.updated_at).await;
+        }
 
         store_b
             .conn
@@ -15295,12 +16858,14 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
-        let store_a = SqliteStore::open(&temp_dir.join("a.db"))
+        let mut store_a = SqliteStore::open(&temp_dir.join("a.db"))
             .await
             .expect("open a");
-        let store_b = SqliteStore::open(&temp_dir.join("b.db"))
+        let mut store_b = SqliteStore::open(&temp_dir.join("b.db"))
             .await
             .expect("open b");
+        store_a.set_node_id(0);
+        store_b.set_node_id(0);
 
         let base_tags = vec![
             "present_outcome".to_string(),
@@ -15325,6 +16890,9 @@ mod tests {
         };
         store_a.memory_save(&rec).await.expect("save a");
         store_b.memory_save(&rec).await.expect("save b");
+        for store in [&store_a, &store_b] {
+            pin_memory_durable_timestamps(store, &rec.key, rec.created_at, rec.updated_at).await;
+        }
 
         // Node A runs its valence apply: importance derived + stamp minted.
         // Node B never applied. This is exactly the local divergence sync
@@ -15852,6 +17420,64 @@ mod tests {
             Some(backend_name.as_str()),
             "backend tag stays the current backend (dim clause, not backend clause)"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_reindex_only_stale_refuses_hash_downgrade_of_non_hash_store() {
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        use std::sync::Arc;
+
+        let _ = set_default_backend(Arc::new(HashBackend));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reindex-hash-downgrade-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        store
+            .memory_save(&MemoryRecord {
+                key: "dominant_non_hash".into(),
+                kind: "fact".into(),
+                content: "preserve the dominant embedding space".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save row");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET embedding_backend = 'gte-multilingual-base'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("label dominant space");
+
+        let error = store
+            .memory_reindex_embeddings(100, true)
+            .await
+            .expect_err("hash fallback must not replace a non-hash dominant space");
+        assert!(error.to_string().contains("refused to replace dominant"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -17159,6 +18785,100 @@ mod tests {
             .await
             .expect("purge all");
         assert_eq!(purged_all, vec!["fresh_tomb".to_string()]);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn purge_zero_ignores_future_logical_timestamps() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-purge-zero-future-tombstone-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let record = MemoryRecord {
+            key: "future_tomb".into(),
+            kind: "fact".into(),
+            content: "body-future_tomb".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&record).await.expect("save");
+        store.memory_delete("future_tomb").await.expect("delete");
+
+        let future_timestamp = now_secs() + 3_600;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at = ?1 WHERE key = 'future_tomb'",
+                    params![future_timestamp],
+                )
+            })
+            .await
+            .expect("move tombstone into logical future");
+
+        let positive_window = store
+            .memory_purge_tombstones(1, true)
+            .await
+            .expect("positive-window preview");
+        assert!(
+            positive_window.is_empty(),
+            "positive retention windows must preserve future tombstones"
+        );
+
+        let zero_preview = store
+            .memory_purge_tombstones(0, true)
+            .await
+            .expect("zero-day preview");
+        assert_eq!(zero_preview, vec!["future_tomb".to_string()]);
+        let still_present: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE key = 'future_tomb'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .expect("count after preview");
+        assert_eq!(still_present, 1, "dry-run must not delete the tombstone");
+
+        let purged = store
+            .memory_purge_tombstones(0, false)
+            .await
+            .expect("zero-day purge");
+        assert_eq!(purged, vec!["future_tomb".to_string()]);
+        let remaining: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE key = 'future_tomb'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .expect("count after purge");
+        assert_eq!(remaining, 0);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -19315,6 +21035,7 @@ mod tests {
                 Some("gpt-5.5".to_string()),
                 Some("xhigh".to_string()),
                 Some("desktop".to_string()),
+                Some("mcp-session-a".to_string()),
             )
             .await
             .expect("record codex ok");
@@ -19331,6 +21052,7 @@ mod tests {
                 Some("gpt-5.5".to_string()),
                 Some("xhigh".to_string()),
                 Some("desktop".to_string()),
+                Some("mcp-session-a".to_string()),
             )
             .await
             .expect("record codex error");
@@ -19347,9 +21069,21 @@ mod tests {
                 None,
                 None,
                 None,
+                Some("mcp-session-b".to_string()),
             )
             .await
             .expect("record hook");
+
+        let recent = store
+            .recent_mcp_tool_calls(86_400, 10)
+            .await
+            .expect("recent attributed calls");
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].mcp_session_id.as_deref(), Some("mcp-session-a"));
+        assert_eq!(recent[0].source.as_deref(), Some("codex"));
+        assert_eq!(recent[1].mcp_session_id.as_deref(), Some("mcp-session-a"));
+        assert_eq!(recent[2].mcp_session_id.as_deref(), Some("mcp-session-b"));
+        assert_eq!(recent[2].source.as_deref(), Some("hook"));
 
         let codex = store
             .mcp_tool_call_stats_filtered(
@@ -19549,17 +21283,25 @@ mod tests {
         ] {
             let mut record = make_memrec(
                 key,
-                &format!("Source admission for {source}. Verdict approved SPDX MIT Evidence reviewed"),
+                &format!(
+                    "Source admission for {source}. Verdict approved SPDX MIT Evidence reviewed"
+                ),
             );
             record.kind = "skill_source_admission".to_string();
-            store.memory_save(&record).await.expect("save source admission");
+            store
+                .memory_save(&record)
+                .await
+                .expect("save source admission");
         }
         for key in [
             "skill_source_admission:alpha/skills",
             "skill_source_admission:bravo/skills",
         ] {
             let record = store.memory_get(key).await.expect("get").expect("record");
-            assert_eq!(record.status, "active", "{key} must remain independently active");
+            assert_eq!(
+                record.status, "active",
+                "{key} must remain independently active"
+            );
             assert!(record.superseded_by.is_none());
         }
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -22624,7 +24366,11 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, latest_schema_version_for_test(), "schema after all migrations");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "schema after all migrations"
+        );
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -22675,7 +24421,11 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, latest_schema_version_for_test(), "re-open ran through all migrations");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "re-open ran through all migrations"
+        );
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -22715,7 +24465,11 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, latest_schema_version_for_test(), "schema after all migrations");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "schema after all migrations"
+        );
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
@@ -22753,7 +24507,11 @@ mod tests {
             })
             .await
             .expect("probe v40 schema");
-        assert_eq!(v, latest_schema_version_for_test(), "schema after v40+v41+v42+v43");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "schema after v40+v41+v42+v43"
+        );
         assert_eq!(col_n, 1, "consumed_at column exists exactly once");
         assert_eq!(idx_n, 1, "pending partial index exists");
 
@@ -26947,7 +28705,11 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, latest_schema_version_for_test(), "schema must be at the latest version");
+        assert_eq!(
+            probe.0,
+            latest_schema_version_for_test(),
+            "schema must be at the latest version"
+        );
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),

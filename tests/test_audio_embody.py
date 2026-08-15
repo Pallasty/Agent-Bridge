@@ -547,6 +547,317 @@ def test_synth_file_selects_zh_stt_for_cjk():
         _restore(saved)
 
 
+def test_qwen3_requires_an_explicit_isolated_runtime(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_PYTHON", raising=False)
+    wav, info = ae.synth_qwen3("你好", "Serena", 1.0)
+    assert wav is None
+    assert "AB_QWEN3_TTS_PYTHON" in info["detail"]
+
+
+def test_omnivoice_pilot_is_default_off(monkeypatch):
+    monkeypatch.delenv("AB_OMNIVOICE_TTS_ENABLED", raising=False)
+    wav, info = ae.synth_omnivoice("你好", "auto", 1.0)
+    assert wav is None
+    assert "AB_OMNIVOICE_TTS_ENABLED=1" in info["detail"]
+
+
+def test_omnivoice_pilot_rejects_unsupported_controls(monkeypatch):
+    monkeypatch.setenv("AB_OMNIVOICE_TTS_ENABLED", "1")
+    wav, info = ae.synth_omnivoice("你好", "Serena", 1.0)
+    assert wav is None
+    assert "named speakers" in info["detail"]
+    wav, info = ae.synth_omnivoice("你好", "auto", 1.0, instruct="温暖")
+    assert wav is None
+    assert "style instructions" in info["detail"]
+
+
+def test_omnivoice_pilot_invokes_explicit_adapter(monkeypatch, tmp_path):
+    python = tmp_path / "python"
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+    seen = {}
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        output = command[command.index("--output") + 1]
+        with open(output, "wb") as handle:
+            handle.write(b"RIFFfake")
+        receipt = {"ok": True, "backend": "omnivoice", "voice": "auto",
+                   "sample_rate": 24000, "runtime": "onnxruntime",
+                   "hashes_verified": True, "steps": 32}
+        return SimpleNamespace(returncode=0, stdout=ae.json.dumps(receipt), stderr="")
+    monkeypatch.setenv("AB_OMNIVOICE_TTS_ENABLED", "1")
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    wav, info = ae.synth_omnivoice("你好", "auto", 1.0,
+                                   omnivoice_python=str(python),
+                                   omnivoice_manifest="/models/manifest.json")
+    assert wav and os.path.exists(wav)
+    assert info["hashes_verified"] is True
+    assert info["steps"] == 32
+    assert seen["command"][seen["command"].index("--manifest") + 1] == "/models/manifest.json"
+
+
+def test_synth_file_omnivoice_records_provenance():
+    saved = _patch(
+        synth_omnivoice=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
+            "ok": True, "backend": "omnivoice", "voice": "auto", "wpm": 175,
+            "runtime": "onnxruntime", "manifest": "/models/manifest.json",
+            "manifest_status": "recommended", "hashes_verified": True,
+            "steps": 32, "language": "chinese", "rtf": 15.0,
+        }),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
+        transcribe_synth_file=lambda w, model=None, language="en": ("本地语音", None),
+        play_say_serialized=lambda p: {"play_ok": True, "playback_serialized": True},
+    )
+    try:
+        out = ae.run_speech_synth_file("本地语音", "auto", 1.0,
+                                       synth_backend="omnivoice")
+        assert out["status"] == "emitted", out
+        assert out["omnivoice_hashes_verified"] is True
+        assert out["omnivoice_steps"] == 32
+        assert out["omnivoice_manifest"] == "/models/manifest.json"
+    finally:
+        _restore(saved)
+
+
+def test_canary_checked_in_policy_routes_to_qwen(monkeypatch):
+    monkeypatch.setenv("AB_TTS_CANARY_ENABLED", "1")
+    seen = {}
+    saved = _patch(synth_qwen3=lambda text, voice, *args, **kwargs:
+                   (seen.setdefault("voice", voice) and "/tmp/qwen.wav",
+                    {"ok": True, "backend": "qwen3", "voice": voice}))
+    try:
+        wav, info = ae.synth_tts_canary(
+            "你好", "auto", 1.0, subject="owner-local-pilot", request_id="request-1")
+        assert wav == "/tmp/qwen.wav"
+        assert seen["voice"] == "Serena"
+        assert info["canary_selected_backend"] == "qwen3"
+        assert info["canary_assigned_backend"] == "qwen3"
+        assert info["canary_fallback_used"] is False
+        assert "policy_disabled" in info["canary_reasons"]
+    finally:
+        _restore(saved)
+
+
+def test_canary_enabled_policy_can_route_to_omnivoice(monkeypatch, tmp_path):
+    policy = ae.json.loads(open("config/omnivoice-canary.json").read())
+    policy["enabled"] = True
+    policy["canary_percent"] = 100
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(ae.json.dumps(policy))
+    monkeypatch.setenv("AB_TTS_CANARY_ENABLED", "1")
+    saved = _patch(synth_omnivoice=lambda *args, **kwargs:
+                   ("/tmp/omni.wav", {"ok": True, "backend": "omnivoice"}))
+    try:
+        wav, info = ae.synth_tts_canary(
+            "你好", "auto", 1.0, subject="owner-local-pilot", request_id="request-1",
+            policy_path=str(policy_path))
+        assert wav == "/tmp/omni.wav"
+        assert info["canary_selected_backend"] == "omnivoice"
+        assert info["canary_assigned_backend"] == "omnivoice"
+        assert info["canary_executed_backend"] == "omnivoice"
+        assert info["canary_candidate_selected"] is True
+        assert info["canary_fallback_used"] is False
+    finally:
+        _restore(saved)
+
+
+def test_canary_candidate_failure_falls_back_to_qwen(monkeypatch, tmp_path):
+    policy = ae.json.loads(open("config/omnivoice-canary.json").read())
+    policy["enabled"] = True
+    policy["canary_percent"] = 100
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(ae.json.dumps(policy))
+    monkeypatch.setenv("AB_TTS_CANARY_ENABLED", "1")
+    saved = _patch(
+        synth_omnivoice=lambda *args, **kwargs: (None, {"detail": "candidate boom"}),
+        synth_qwen3=lambda *args, **kwargs: ("/tmp/qwen.wav", {"ok": True, "backend": "qwen3"}),
+    )
+    try:
+        wav, info = ae.synth_tts_canary(
+            "你好", "auto", 1.0, subject="owner-local-pilot", request_id="request-1",
+            policy_path=str(policy_path))
+        assert wav == "/tmp/qwen.wav"
+        assert info["canary_assigned_backend"] == "omnivoice"
+        assert info["canary_executed_backend"] == "qwen3"
+        assert info["canary_fallback_used"] is True
+        assert info["canary_candidate_error"] == "candidate boom"
+    finally:
+        _restore(saved)
+
+
+def test_synth_file_canary_attributes_candidate_provenance_to_omnivoice():
+    saved = _patch(
+        synth_tts_canary=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
+            "ok": True, "backend": "omnivoice", "voice": "auto", "wpm": 175,
+            "runtime": "onnxruntime", "manifest": "/models/manifest.json",
+            "manifest_status": "recommended", "hashes_verified": True,
+            "steps": 32, "language": "chinese", "rtf": 15.0,
+            "canary_selected_backend": "omnivoice",
+            "canary_assigned_backend": "omnivoice",
+            "canary_executed_backend": "omnivoice",
+            "canary_candidate_selected": True, "canary_fallback_used": False,
+            "canary_candidate_error": None, "canary_bucket": 42,
+            "canary_reasons": [], "canary_review_decision_sha256": "abc",
+        }),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000,
+                                      "frames": 48000},
+        transcribe_synth_file=lambda w, model=None, language="en": ("本地语音", None),
+        play_say_serialized=lambda p: {"play_ok": True, "playback_serialized": True},
+    )
+    try:
+        out = ae.run_speech_synth_file(
+            "本地语音", "auto", 1.0, synth_backend="canary",
+            canary_subject="owner-local-pilot", canary_request_id="request-1")
+        assert out["canary_executed_backend"] == "omnivoice"
+        assert out["omnivoice_runtime"] == "onnxruntime"
+        assert out["omnivoice_hashes_verified"] is True
+        assert out["omnivoice_steps"] == 32
+        assert "qwen_runtime" not in out
+    finally:
+        _restore(saved)
+
+
+def test_qwen3_worker_is_explicit_and_never_requires_or_falls_back_to_python(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_PYTHON", raising=False)
+    seen = {}
+    def fake_worker(sock, request, timeout):
+        seen.update(sock=sock, request=request, timeout=timeout)
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "backend": "qwen3", "voice": "Serena", "sample_rate": 24000,
+                "device": "mps", "dtype": "float16", "worker": "unix_socket"}
+    saved = _patch(_qwen_worker_request=fake_worker)
+    try:
+        wav, info = ae.synth_qwen3("你好", "Serena", 1.0, qwen_worker="/tmp/qwen.sock")
+        assert wav and os.path.exists(wav)
+        assert info["worker"] == "unix_socket"
+        assert seen["sock"] == "/tmp/qwen.sock"
+        assert seen["request"]["op"] == "synthesize"
+    finally:
+        _restore(saved)
+
+
+def test_qwen3_worker_receipt_preserves_declared_runtime_identity(monkeypatch):
+    """The client keeps an adapter's actual engine/precision visible to receipts."""
+    def fake_worker(sock, request, timeout):
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "protocol": "ab.tts.worker.v1", "backend": "qwen3",
+                "engine": "onnxruntime", "model": "validated/export", "dtype": "int8",
+                "capabilities": ["custom_voice", "zh"], "worker": "unix_socket"}
+    saved = _patch(_qwen_worker_request=fake_worker)
+    try:
+        wav, info = ae.synth_qwen3("你好", "Serena", 1.0, qwen_worker="/tmp/future-onnx.sock")
+        assert wav and os.path.exists(wav)
+        assert info["protocol"] == "ab.tts.worker.v1"
+        assert info["engine"] == "onnxruntime"
+        assert info["dtype"] == "int8"
+    finally:
+        _restore(saved)
+
+
+def test_synth_file_qwen3_records_backend_and_expression_provenance():
+    saved = _patch(
+        synth_qwen3=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
+            "ok": True, "backend": "qwen3", "voice": "Serena", "sample_rate": 24000,
+            "wpm": 175, "model": "Qwen/test", "device": "mps", "dtype": "float16",
+            "instruct_applied": True,
+        }),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
+        transcribe_synth_file=lambda w, model=None, language="en": ("本地语音", None),
+    )
+    try:
+        out = ae.run_speech_synth_file("本地语音", "Serena", 1.0, synth_backend="qwen3",
+                                       qwen_instruct="温暖、平静")
+        assert out["synth_backend"] == "qwen3"
+        assert out["qwen_model"] == "Qwen/test"
+        assert out["qwen_device"] == "mps"
+        assert out["qwen_instruct_applied"] is True
+        assert out["status"] == "emitted", out
+    finally:
+        _restore(saved)
+
+
+def test_qwen3_rust_requires_explicit_enablement(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_RUST_ENABLED", raising=False)
+    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0)
+    assert wav is None
+    assert "AB_QWEN3_TTS_RUST_ENABLED=1" in info["detail"]
+
+
+def test_qwen3_rust_requires_explicit_binary_model_and_profile(monkeypatch):
+    monkeypatch.setenv("AB_QWEN3_TTS_RUST_ENABLED", "1")
+    for name in ("AB_QWEN3_TTS_RUST_BIN", "AB_QWEN3_TTS_RUST_MODEL_DIR", "AB_QWEN3_TTS_RUST_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0)
+    assert wav is None
+    assert "AB_QWEN3_TTS_RUST_BIN" in info["detail"]
+
+
+def test_qwen3_rust_invokes_integrity_gate_and_preserves_provenance(monkeypatch, tmp_path):
+    binary = tmp_path / "qwen-tts"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["timeout"] = kwargs["timeout"]
+        output = command[command.index("--output") + 1]
+        with ae.wave.open(output, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(24000)
+            audio.writeframes(b"\x00\x01" * 240)
+        receipt = {"verified": True, "model_profile": "1.7b-customvoice",
+                   "model_revision": "sha256:model", "binary_evidence": {"sha256": "a" * 64}}
+        return SimpleNamespace(returncode=0, stdout=ae.json.dumps(receipt), stderr="")
+
+    monkeypatch.setenv("AB_QWEN3_TTS_RUST_ENABLED", "1")
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0, "柔和、温暖",
+                                    str(binary), str(model_dir), "1.7b-customvoice")
+    assert os.path.exists(wav)
+    assert info["backend"] == "qwen3-rust"
+    assert info["runtime"] == "rust"
+    assert info["integrity_verified"] is True
+    assert info["binary_sha256"] == "a" * 64
+    assert seen["command"][seen["command"].index("--model-profile") + 1] == "1.7b-customvoice"
+    assert seen["command"][-2:] == ["--instruct", "柔和、温暖"]
+    assert seen["timeout"] == 900
+
+
+def test_synth_file_qwen3_rust_records_integrity_and_uses_explicit_stt_model():
+    seen = {}
+    saved = _patch(
+        synth_qwen3_rust=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
+            "ok": True, "backend": "qwen3-rust", "runtime": "rust", "voice": "serena",
+            "sample_rate": 24000, "wpm": 175, "model": "/models/qwen3",
+            "model_profile": "1.7b-customvoice", "model_revision": "sha256:model",
+            "device": "metal", "dtype": "f16", "instruct_applied": False,
+            "integrity_verified": True, "binary": "/bin/qwen-tts", "binary_sha256": "a" * 64,
+        }),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
+        transcribe_synth_file=lambda w, model=None, language="en":
+            (seen.setdefault("model", model) and "本地语音", None),
+        play_say_serialized=lambda p: {"play_ok": True, "playback_serialized": True},
+    )
+    try:
+        out = ae.run_speech_synth_file("本地语音", "serena", 1.0,
+                                       synth_backend="qwen3-rust", stt_model="base")
+        assert seen["model"] == "base"
+        assert out["synth_backend"] == "qwen3-rust"
+        assert out["qwen_runtime"] == "rust"
+        assert out["qwen_model_profile"] == "1.7b-customvoice"
+        assert out["qwen_integrity_verified"] is True
+        assert out["qwen_binary_sha256"] == "a" * 64
+        assert out["status"] == "emitted", out
+    finally:
+        _restore(saved)
+
+
 def test_whisper_timeout_is_bounded_and_degrades():
     original_exists = ae.os.path.exists
     original_run = ae.subprocess.run

@@ -1,0 +1,69 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_residual_embed_probe.v1",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "model": "cpu_int4/residual_embed.onnx",
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "provider": "CPUExecutionProvider"
+  },
+  "status": "residual_embed_probe_passed_no_forwarding",
+  "probe": {
+    "status": "residual_embed_probe_passed",
+    "input": {
+      "name": "codec_ids",
+      "shape": [
+        1,
+        16
+      ],
+      "dtype": "int64",
+      "fixture": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    },
+    "output": {
+      "name": "step_embed",
+      "shape": [
+        1,
+        2048
+      ],
+      "dtype": "float32",
+      "all_finite": true,
+      "nonzero": true,
+      "minimum": -0.2817627191543579,
+      "maximum": 0.20749510824680328,
+      "mean": 0.0007350541418418288
+    },
+    "sha256_run_1": "4b84ed89abc7c8dda088b35ebc285108d8eb6dc9e6f909220ba376442dda3ee6",
+    "sha256_run_2": "4b84ed89abc7c8dda088b35ebc285108d8eb6dc9e6f909220ba376442dda3ee6",
+    "deterministic": true
+  },
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_session": true,
+    "executed_graphs": true,
+    "execution_count": 2,
+    "forwarded_step_embedding": false,
+    "generated_codec_frame": false,
+    "decoded_waveform": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}

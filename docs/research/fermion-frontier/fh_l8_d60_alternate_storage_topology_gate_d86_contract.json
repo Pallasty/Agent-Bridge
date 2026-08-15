@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-ALTERNATE-STORAGE-TOPOLOGY-GATE-D86-V1",
+  "baseline_commit": "345ff3d36942af41ce6132e61b47e0963bd88f3d",
+  "source_pins": {
+    "FH_L8_D60_NVME_QUEUE_CONTROL_GATE_D85_ZH.md": "c855ae86221aeb23dd498ab28df3c115cf0db799c3fdab67f9e31256172d0dac",
+    "fh_l8_d60_nvme_queue_control_gate_d85_contract.json": "db5e9f6c3c6ab343a0fbc2049c178afdaf8b7617b9a0688a8d0afe114fc12603",
+    "fh_l8_d60_nvme_queue_control_gate_d85_result.json": "50972b7e0fa712b800858f828684080d5129d78486e88d0542b237e8d5076217"
+  },
+  "target": {
+    "cpu": 15,
+    "forbidden_controller": "nvme0",
+    "forbidden_device_prefix": "/dev/nvme0n1",
+    "candidate_disk": "mmcblk0",
+    "candidate_partition": "mmcblk0p1",
+    "candidate_pci_device": "0000:2d:00.0",
+    "minimum_image_capacity_bytes": 40000000000
+  },
+  "observed_snapshot": {
+    "candidate_disk_bytes": 63864569856,
+    "candidate_partition_bytes": 63847792640,
+    "candidate_fstype": "f2fs",
+    "candidate_uuid": "17a6b72c-efcc-4445-b447-385e96a109a2",
+    "candidate_label": "SD_F2FS",
+    "candidate_mountpoints": [],
+    "candidate_controller_pci": "0000:2d:00.0",
+    "candidate_driver": "sdhci-pci",
+    "forbidden_controller_pci": "0000:02:00.0",
+    "candidate_irqs": [175],
+    "candidate_irq_affinity": {
+      "175": {"configured": "0-14", "effective": "1"}
+    },
+    "nvme_mounts": {
+      "/": "/dev/nvme0n1p3",
+      "/boot/efi": "/dev/nvme0n1p1",
+      "/Programs": "/dev/nvme0n1p6",
+      "/home": "/dev/nvme0n1p5",
+      "/Data": "/dev/nvme0n1p7"
+    },
+    "used_bytes": {
+      "/": 26369445888,
+      "/Data": 238300471296,
+      "/home": 268478595072
+    },
+    "independent_efi_partition_present": false,
+    "minimal_measurement_bundle_present": false
+  },
+  "authority": {
+    "observation_only": true,
+    "mount_authorized": false,
+    "format_authorized": false,
+    "migration_authorized": false,
+    "bootloader_change_authorized": false,
+    "hardware_change_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

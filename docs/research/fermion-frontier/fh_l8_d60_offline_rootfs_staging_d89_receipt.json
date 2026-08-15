@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "receipt_id": "FH-L8-D60-OFFLINE-ROOTFS-STAGING-D89-20260809",
+  "artifact": {
+    "path": "/Data/CascadeProjects/.fh-l8-staging/d89/fh-l8-resolute-amd64-minroot.tar.xz",
+    "bytes": 43206112,
+    "sha256": "7756c1c849dcf1b7e442d526e18b29a6af9d6601fed0740be294145eadc33889",
+    "owner": "pallasting:pallasting",
+    "mode": "0644",
+    "xz_integrity_pass": true,
+    "archive_entry_count": 11397
+  },
+  "build": {
+    "builder": "mmdebstrap 1.5.7",
+    "mode": "root",
+    "suite": "resolute",
+    "architecture": "amd64",
+    "variant": "minbase",
+    "components": ["main", "universe"],
+    "mirror": "http://cn.archive.ubuntu.com/ubuntu",
+    "package_count": 116,
+    "package_manifest_sha256": "266bf26b8322115da554437416b56366b3fb94d8cd99285640f9dd55f3daffa5"
+  },
+  "required_packages": {
+    "ca-certificates": "20260223",
+    "dosfstools": "4.2-1.2build1",
+    "e2fsprogs": "1.47.2-3ubuntu4",
+    "iproute2": "6.19.0-1ubuntu1",
+    "kmod": "34.2-2ubuntu2",
+    "pciutils": "1:3.14.0-1build2",
+    "procps": "2:4.0.4-9ubuntu1",
+    "python3-minimal": "3.14.3-0ubuntu2",
+    "systemd-sysv": "259.5-0ubuntu3",
+    "util-linux": "2.41.3-3ubuntu2"
+  },
+  "required_paths_present": [
+    "./etc/os-release",
+    "./usr/bin/findmnt",
+    "./usr/bin/lsblk",
+    "./usr/bin/lspci",
+    "./usr/bin/python3",
+    "./usr/bin/systemctl",
+    "./usr/bin/taskset"
+  ],
+  "mmc_post_state": {
+    "disk_bytes": 63864569856,
+    "partition_bytes": 63847792640,
+    "fstype": "f2fs",
+    "uuid": "17a6b72c-efcc-4445-b447-385e96a109a2",
+    "mountpoints": []
+  },
+  "failed_attempts": [
+    "unshare_mode_stopped_at_essential_package_install",
+    "chrootless_mode_rejected_required_ownership_changes",
+    "fakeroot_mode_missing_fakechroot"
+  ]
+}

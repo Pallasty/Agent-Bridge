@@ -37,6 +37,58 @@ if ! command -v ab_platform_os >/dev/null 2>&1; then
 fi
 platform="$(ab_platform_os)"
 
+hydrate_linux_session_env() {
+    [ "$platform" = "Linux" ] || return 0
+
+    local runtime_dir="${XDG_RUNTIME_DIR:-}"
+    if [ -z "$runtime_dir" ]; then
+        local candidate="/run/user/$(id -u)"
+        if [ -d "$candidate" ] && [ -O "$candidate" ]; then
+            runtime_dir="$candidate"
+            export XDG_RUNTIME_DIR="$runtime_dir"
+        fi
+    fi
+
+    if [ -n "$runtime_dir" ] \
+        && [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] \
+        && [ -S "$runtime_dir/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
+    fi
+
+    command -v systemctl >/dev/null 2>&1 || return 0
+    local session_env=""
+    session_env="$(systemctl --user show-environment 2>/dev/null || true)"
+    [ -n "$session_env" ] || return 0
+
+    local value=""
+    if [ -z "${SWAYSOCK:-}" ]; then
+        value="$(printf '%s\n' "$session_env" | sed -n 's/^SWAYSOCK=//p' | head -1)"
+        if [ -n "$runtime_dir" ] \
+            && [ "${value#"$runtime_dir"/}" != "$value" ] \
+            && [ -S "$value" ]; then
+            export SWAYSOCK="$value"
+        fi
+    fi
+    if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+        value="$(printf '%s\n' "$session_env" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)"
+        if [ -n "$runtime_dir" ] \
+            && [ -n "$value" ] \
+            && [ "${value#*/}" = "$value" ] \
+            && [ -S "$runtime_dir/$value" ]; then
+            export WAYLAND_DISPLAY="$value"
+        fi
+    fi
+    if [ -z "${DISPLAY:-}" ]; then
+        value="$(printf '%s\n' "$session_env" | sed -n 's/^DISPLAY=//p' | head -1)"
+        [ -n "$value" ] && export DISPLAY="$value"
+    fi
+}
+
+# MCP clients can start before the graphical session and therefore lack the
+# session variables inherited by an interactive terminal. Recover only the
+# current user's validated runtime sockets; never guess among compositor sockets.
+hydrate_linux_session_env
+
 default_audit_dir="$(ab_default_system_control_audit_dir)"
 audit_dir="${AB_SYSTEM_CONTROL_AUDIT_DIR:-$default_audit_dir}"
 audit_log="$audit_dir/system-actions.jsonl"

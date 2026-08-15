@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_guarded_deployment.v1",
+  "type": "object",
+  "required": ["schema", "status", "source", "binary", "backups", "wrapper", "adapter", "profile_probe", "adoption", "decision", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_guarded_deployment.v1"},
+    "status": {"const": "story_binary_deployed_runtime_not_adopted"},
+    "source": {"type": "object", "required": ["commit", "origin_after_build", "origin_stable"], "properties": {"commit": {"pattern": "^[0-9a-f]{40}$"}, "origin_after_build": {"pattern": "^[0-9a-f]{40}$"}, "origin_stable": {"const": true}}, "additionalProperties": false},
+    "binary": {"type": "object", "required": ["path", "candidate_path", "sha256", "candidate_sha256", "size_bytes", "version", "story_marker", "current_feature_markers_preserved", "feature_marker_count"], "properties": {"path": {"type": "string"}, "candidate_path": {"type": "string"}, "sha256": {"pattern": "^[0-9a-f]{64}$"}, "candidate_sha256": {"pattern": "^[0-9a-f]{64}$"}, "size_bytes": {"type": "integer", "minimum": 1}, "version": {"type": "string"}, "story_marker": {"const": true}, "current_feature_markers_preserved": {"const": true}, "feature_marker_count": {"const": 9}}, "additionalProperties": false},
+    "backups": {"type": "object"},
+    "wrapper": {"type": "object"},
+    "adapter": {"type": "object"},
+    "profile_probe": {"const": {"standard": {"tool_count": 108, "story_visible": false}, "all": {"tool_count": 250, "story_visible": true}}},
+    "adoption": {"const": {"persistent_mcp_processes": 7, "processes_on_new_binary": 0, "processes_on_old_deleted_inode": 7, "runtime_adopted": false, "client_refreshed": false}},
+    "decision": {"const": {"deployment_authorized": true, "deployment_completed": true, "reconnect_authorized": false}},
+    "runtime_effects": {"const": {"built_release_candidate": true, "backed_up_installed_files": true, "deployed_binary": true, "deployed_adapter": true, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false}},
+    "next_gate": {"const": "story_mcp_reconnect_authorization"}
+  },
+  "additionalProperties": false
+}

@@ -14,6 +14,8 @@
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INV="$DIR/../desktop_invoke.py"
+SNAP="$DIR/../desktop_snapshot.py"
+VERIFY="$DIR/../desktop_verify.py"
 TOY="$DIR/toy_button.py"
 STATE="$HOME/.cache/agent-bridge/cage_invoke_hit.json"
 WORK="$(mktemp -d)"; LOG="$WORK/sway.log"; CONF="$WORK/sway.conf"
@@ -54,11 +56,28 @@ SEL=(--app toy_button --role button --name INVOKE_TARGET)  # AT-SPI role name is
 acts() { python3 -c "import json;print(json.load(open('$STATE')).get('activations',-1))" 2>/dev/null; }
 field() { python3 -c "import json,sys;print(json.load(sys.stdin).get('$1'))" 2>/dev/null; }
 
+echo "== 0. snapshot observes the target before acting =="
+S=$(python3 "$SNAP" --no-screenshot --activate-a11y --a11y-settle 1 --compact 2>&1)
+S_present=$(echo "$S" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+apps=(s.get("atspi") or {}).get("apps") or s.get("apps") or []
+print(any("toy_button" in (a.get("name") or "") and any("INVOKE_TARGET" in (e.get("name") or "") for e in (a.get("elements") or [])) for a in apps))' 2>/dev/null)
+echo "   -> target_present=$S_present"
+if [ "$S_present" != "True" ]; then
+  echo "   snapshot payload: $S"
+fi
+
 echo "== A. isolated invoke (--cage-pid $SWAY_PID) =="
 A=$(python3 "$INV" "${SEL[@]}" --cage-pid "$SWAY_PID" 2>&1); echo "   $A"
 A_allowed=$(echo "$A" | field allowed); A_rc=$(echo "$A" | field rc); A_iso=$(echo "$A" | python3 -c "import json,sys;print(json.load(sys.stdin).get('found',{}).get('isolated'))" 2>/dev/null)
 A_acts=$(acts)
 echo "   -> allowed=$A_allowed rc=$A_rc isolated=$A_iso activations=$A_acts"
+
+echo "== A2. verify re-observes the isolated target after acting =="
+V=$(python3 "$VERIFY" --expect element_appeared "${SEL[@]}" --cage-pid "$SWAY_PID" --timeout 2 --compact 2>&1); echo "   $V"
+V_verdict=$(echo "$V" | field verdict); V_recover=$(echo "$V" | field recover)
+echo "   -> verdict=$V_verdict recover=$V_recover"
 
 echo "== B. dry-run (no cage-pid) =="
 B=$(python3 "$INV" "${SEL[@]}" --dry-run 2>&1); echo "   $B"
@@ -71,15 +90,18 @@ C_allowed=$(echo "$C" | field allowed); C_acts=$(acts)
 echo "   -> allowed=$C_allowed activations=$C_acts (must be unchanged = $A_acts)"
 
 echo "== VERDICT =="
-python3 - "$A_allowed" "$A_rc" "$A_iso" "$A_acts" "$B_allowed" "$B_acts" "$C_allowed" "$C_acts" <<'PY'
+python3 - "$S_present" "$A_allowed" "$A_rc" "$A_iso" "$A_acts" "$V_verdict" "$V_recover" "$B_allowed" "$B_acts" "$C_allowed" "$C_acts" <<'PY'
 import sys
-A_allowed,A_rc,A_iso,A_acts,B_allowed,B_acts,C_allowed,C_acts = sys.argv[1:9]
+S_present,A_allowed,A_rc,A_iso,A_acts,V_verdict,V_recover,B_allowed,B_acts,C_allowed,C_acts = sys.argv[1:12]
 ok = True
 checks = [
+  ("0 snapshot sees target", S_present=="True"),
   ("A isolated invoke allowed", A_allowed=="True"),
   ("A rc==0", A_rc=="0"),
   ("A isolated==True", A_iso=="True"),
   ("A activated button (activations==1)", A_acts=="1"),
+  ("A2 verify postcondition", V_verdict=="verified"),
+  ("A2 recover says proceed", V_recover=="proceed"),
   ("B dry-run allowed", B_allowed=="True"),
   ("B no extra activation", B_acts=="1"),
   ("C host invoke DENIED", C_allowed=="False"),

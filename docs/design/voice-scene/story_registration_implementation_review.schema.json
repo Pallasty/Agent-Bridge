@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_registration_implementation_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "evidence", "blockers", "proposed_surface", "configuration_contract", "adapter_contract", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_registration_implementation_review.v1"},
+    "status": {"const": "story_registration_implementation_review_complete"},
+    "decision": {"const": {"selected": "isolated_adapter_before_registry_wiring", "isolated_adapter_implementation_admitted": true, "registry_wiring_admitted": false}},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["s5zo_hardening_verified", "current_registry_collision", "story_module_exported", "mcp_cancellation_aborts_tool_future", "future_drop_cancel_guard_present", "registry_worktree_overlap", "lib_worktree_overlap", "registry_path", "registry_sha256", "lib_path", "lib_sha256", "story_module_path", "story_module_sha256", "mcp_server_path", "mcp_server_sha256", "hardening_receipt_path", "hardening_receipt_sha256"],
+      "properties": {
+        "s5zo_hardening_verified": {"const": true},
+        "current_registry_collision": {"const": false},
+        "story_module_exported": {"const": false},
+        "mcp_cancellation_aborts_tool_future": {"const": true},
+        "future_drop_cancel_guard_present": {"const": false},
+        "registry_worktree_overlap": {"const": true},
+        "lib_worktree_overlap": {"const": true},
+        "registry_path": {"type": "string", "minLength": 1},
+        "registry_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "lib_path": {"type": "string", "minLength": 1},
+        "lib_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "story_module_path": {"type": "string", "minLength": 1},
+        "story_module_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "mcp_server_path": {"type": "string", "minLength": 1},
+        "mcp_server_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "hardening_receipt_path": {"type": "string", "minLength": 1},
+        "hardening_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "blockers": {"const": ["mcp_future_drop_cancellation_guard_missing", "registry_worktree_overlap_active", "lib_module_tree_overlap_active"]},
+    "proposed_surface": {"const": {"tool_name": "story_command_preflight", "tier": "Niche", "toolset_extras": [], "activation_env": "AB_STORY_COMMAND_PREFLIGHT_ENABLE", "activation_env_required_value": "1", "default_exposed": false, "codex_essential_exposed": false, "codex_voice_exposed": false}},
+    "configuration_contract": {"type": "object", "minProperties": 11, "additionalProperties": {"type": "string", "minLength": 1}},
+    "adapter_contract": {"const": {"isolated_path": "crates/bridge/src/mcp_tools/story.rs", "future_drop_cancel_guard_required": true, "complete_config_required_before_exposure": true, "invalid_arguments_return_tool_error": true, "runtime_flags_rejected": true, "structured_success_result": true}},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"const": {"modified_module_tree": false, "modified_rust_registry": false, "registered_story_command": false, "deployed_binary": false, "refreshed_client": false, "loaded_model": false, "rendered_audio": false, "played_audio": false, "wrote_cache": false, "wrote_memory": false}},
+    "next_gate": {"const": "isolated_rust_story_mcp_adapter"}
+  }
+}

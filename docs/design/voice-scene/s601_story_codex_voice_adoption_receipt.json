@@ -1,0 +1,13 @@
+{
+  "schema": "agent_bridge.story_codex_voice_adoption.v1",
+  "status": "story_codex_voice_deployed_restart_pending",
+  "source": {"commit": "82fc5f1694388b99493446d6346b200977543f48", "origin_after_build": "82fc5f1694388b99493446d6346b200977543f48", "origin_stable": true},
+  "policy": {"toolset": "codex-voice", "profile": "essential", "added_extras": ["story_command_preflight"], "codex_essential_unchanged": true, "default_profile_unchanged": true, "unrelated_niche_tools_added": 0},
+  "binary": {"path": "/home/pallasting/.local/bin/agent-bridge.real", "candidate_path": "/home/pallasting/.cache/agent-bridge-story-deploy-dry-run-target/release/agent-bridge", "sha256": "5bd92a9d27629a16ef338ecbf4eb5e157ce1f86d8035f6a9c20d24cb52d921b5", "candidate_sha256": "5bd92a9d27629a16ef338ecbf4eb5e157ce1f86d8035f6a9c20d24cb52d921b5", "size_bytes": 76406136, "version_source": "82fc5f169438", "feature_marker_count": 9},
+  "backups": {"binary_path": "/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-82fc5f1-20260801T075628", "binary_sha256": "bde3918eb342cd42c61fb2932a01456e2f91cc0b9af99ea30b15f33b2931d133", "adapter_path": "/home/pallasting/.local/share/ab-tts/audio_embody.py.bak-deploy-20260801T075629", "adapter_sha256": "7372ae3317c790cd099e67874205c631c3053ede35a278511f565ed9becae241"},
+  "manifest_probe": {"tool_count_before": 102, "tool_count_after": 103, "story_visible_before": false, "story_visible_after": true, "voice_tools_after": ["present_voice", "present_voice_confirm_audibility", "voice_delivery_health", "voice_runtime_preflight"]},
+  "adoption": {"persistent_mcp_processes": 9, "processes_on_new_binary": 0, "processes_on_old_deleted_inode": 9, "current_client_runtime_adopted": false, "current_client_restart_required": true},
+  "verification": {"tdd_red_observed": true, "source_contract_green": true, "precommit_all_targets_check_passed": true, "candidate_matches_installed": true, "feature_gate_passed": true},
+  "runtime_effects": {"modified_allowlist": true, "deployed_binary": true, "deployed_adapter": true, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false},
+  "next_gate": "current_codex_restart_and_direct_manifest_verification"
+}

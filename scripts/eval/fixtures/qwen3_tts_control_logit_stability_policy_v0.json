@@ -1,0 +1,40 @@
+{
+  "schema": "agent_bridge.qwen3_tts.control_logit_stability_policy.v0",
+  "status": "CONTROL_ONLY_DEFAULT_OFF",
+  "case_id": "zh-short-neutral-serena",
+  "trial_labels": ["C0_cold", "C1_warm", "C2_warm", "C3_warm", "C4_warm", "C5_warm"],
+  "execution": {
+    "processes": 1,
+    "model_loads": 1,
+    "device": "mps",
+    "dtype": "float16",
+    "do_sample": false,
+    "subtalker_dosample": false,
+    "max_new_tokens": 256,
+    "synchronize_mps_at_trial_boundaries": true,
+    "offline_local_snapshot_only": true,
+    "worker_socket_use": false,
+    "audio_decode_write_or_playback": false,
+    "weight_mutation_or_proxy": false,
+    "quantized_weight_writing": false
+  },
+  "paths": [
+    "talker_generated_rows",
+    "talker_terminal_decision",
+    "predictor_head_0",
+    "predictor_heads_1_through_14"
+  ],
+  "classification": {
+    "BIT_EXACT": "all pairwise path arrays have identical shape, dtype, and bytes",
+    "NUMERICALLY_STABLE_WITHIN_CONTROL_ENVELOPE": "speech codes, length, terminal decision, top-1 and top-8 sets remain exact while finite raw logits vary",
+    "UNSTABLE": "any speech-code, length, terminal decision, top-1/top-8, shape, dtype, cleanup, or finite-value invariant fails"
+  },
+  "authority": {
+    "allows_fake_q8": false,
+    "allows_writer": false,
+    "allows_runtime_candidate": false,
+    "allows_worker_replacement": false,
+    "allows_deployment": false
+  },
+  "next_gate": "freeze_control_envelope_then_separately_authorize_one_fake_q8_trial"
+}

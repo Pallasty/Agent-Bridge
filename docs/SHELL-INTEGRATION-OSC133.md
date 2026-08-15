@@ -153,5 +153,6 @@ $ agent-bridge shell-init fish >  ~/.config/fish/conf.d/agent-bridge-osc133.fish
 ```
 
 The snippets in this document and the ones the CLI emits come from the
-same Rust source-of-truth (`crates/bridge/src/main.rs::shell_init_snippet`),
-so they stay in sync.
+same Rust source-of-truth
+(`crates/bridge/src/cli/shell_init.rs::shell_init_snippet`), so they stay in
+sync.

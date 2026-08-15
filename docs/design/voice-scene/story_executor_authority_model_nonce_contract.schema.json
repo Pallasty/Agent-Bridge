@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_authority_model_nonce_contract.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "authority_proof", "model_bundle", "nonce_store", "receipt_schema", "blockers", "execution_authorized", "runtime_effects", "contract_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_authority_model_nonce_contract.v1"},
+    "status": {"const": "story_executor_authority_model_nonce_contract_reviewable"},
+    "decision": {"const": "static_contract_complete_runtime_configuration_uninstalled"},
+    "evidence": {"type": "object"}, "authority_proof": {"type": "object"},
+    "model_bundle": {"type": "object"}, "nonce_store": {"type": "object"},
+    "receipt_schema": {"type": "object"},
+    "blockers": {"const": ["authority_and_model_verifiers_not_implemented", "secure_key_and_nonce_paths_not_installed", "executor_not_wired_to_fixed_contracts"]},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"const": {"created_key": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false}},
+    "contract_sha256": {"$ref": "#/$defs/sha256"},
+    "claims": {"const": {"authority_proof_format_defined": true, "cpu_int4_bundle_bound": true, "nonce_custody_defined": true, "render_receipt_schema_defined": true, "verifiers_implemented": false, "real_model_executed": false}},
+    "next_gate": {"const": "story_executor_authority_model_nonce_verifier_implementation_review"}
+  },
+  "additionalProperties": false,
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

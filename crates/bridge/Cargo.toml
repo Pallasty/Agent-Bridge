@@ -14,6 +14,7 @@ onnx-embed = ["ab-store/onnx-embed"]
 linux-native-avatar = ["dep:smithay-client-toolkit", "dep:wayland-client"]
 biocortex-retrieval-shadow = []
 biocortex-retrieval-opt-in = ["biocortex-retrieval-shadow"]
+embodiment-runtime-p4 = []
 episode-observation-slice-c1 = []
 episode-observation-slice-c2-synthetic = [
     "episode-observation-slice-c1",
@@ -93,10 +94,13 @@ png = "0.17"
 tempfile = { version = "3", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.4", features = ["fs", "process"] }
 smithay-client-toolkit = { version = "0.20", optional = true }
 wayland-client = { version = "0.31", optional = true }
 
 [dev-dependencies]
+flate2 = "1"
+ring = "0.17"
 tempfile = "3"
 
 [[bin]]
@@ -107,3 +111,7 @@ path = "src/main.rs"
 name = "episode-observation-c2c-live-lab"
 path = "src/bin/episode_observation_c2c_live_lab.rs"
 required-features = ["episode-observation-c2c-keychain-macos-live-lab"]
+
+[[bin]]
+name = "mobile-projection-host"
+path = "src/bin/mobile_projection_host.rs"

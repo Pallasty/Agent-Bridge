@@ -1,0 +1,144 @@
+{
+  "schema": "agent_bridge.qwen3_tts.quantization_corpus.v0",
+  "status": "PREREGISTERED_NOT_EXECUTED",
+  "model_family": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "language": "Chinese",
+  "source_policy": "public_or_synthetic_no_private_task_contact_credential_or_payment_data",
+  "seed_policy": {
+    "supported_by_current_worker": false,
+    "rule": "record unsupported explicitly; do not claim deterministic generation"
+  },
+  "comparison_invariants": [
+    "same source model hash",
+    "same runtime and runtime hash",
+    "same text, speaker, instruct, and generation configuration",
+    "same capture and validation pipeline",
+    "candidate thresholds frozen after FP16 baseline and before candidate evaluation"
+  ],
+  "cases": [
+    {
+      "id": "zh-short-neutral-serena",
+      "strata": ["short", "neutral", "single_sentence"],
+      "speaker": "Serena",
+      "instruct": "用自然、清晰、平静的普通话播报。",
+      "text": "语音系统已经准备完成。"
+    },
+    {
+      "id": "zh-short-neutral-vivian",
+      "strata": ["short", "neutral", "speaker_variation"],
+      "speaker": "Vivian",
+      "instruct": "用自然、清晰、平静的普通话播报。",
+      "text": "今天的任务已经按计划完成。"
+    },
+    {
+      "id": "zh-long-narrative-serena",
+      "strata": ["long", "narrative", "multi_clause"],
+      "speaker": "Serena",
+      "instruct": "用自然、连贯、富有层次的普通话叙述，保持舒适语速。",
+      "text": "清晨的风穿过林间，树叶发出细微的声响。我们沿着安静的小路继续前行，在太阳升起之前抵达了山顶。"
+    },
+    {
+      "id": "zh-long-technical-vivian",
+      "strata": ["long", "technical", "punctuation"],
+      "speaker": "Vivian",
+      "instruct": "用专业、清楚、节奏稳定的普通话播报。",
+      "text": "系统会先检查模型完整性，再记录运行时、精度和功能能力；只有自动测试与人工听感都通过，候选模型才会进入下一阶段。"
+    },
+    {
+      "id": "zh-numbers-date-units",
+      "strata": ["numbers", "date", "units"],
+      "speaker": "Serena",
+      "instruct": "准确、清晰地读出日期、时间、百分比和单位。",
+      "text": "测试时间是二零二六年七月二十七日下午三点三十分，完成率为百分之九十八点五，延迟是一百二十毫秒。"
+    },
+    {
+      "id": "zh-punctuation-pauses",
+      "strata": ["punctuation", "pause", "sentence_boundary"],
+      "speaker": "Vivian",
+      "instruct": "注意停顿层次，句间不要连读。",
+      "text": "请稍等——检查正在进行。第一步，确认资产；第二步，验证模型；最后，生成报告。"
+    },
+    {
+      "id": "zh-mixed-english-supported",
+      "strata": ["mixed_zh_en", "abbreviation", "model_name"],
+      "speaker": "Serena",
+      "instruct": "中文自然，英文名称清晰，不要吞词。",
+      "text": "Agent Bridge 正在使用 Qwen 三 TTS，并通过 MPS 完成本地语音生成。"
+    },
+    {
+      "id": "zh-warm-serena",
+      "strata": ["emotion", "warm", "supportive"],
+      "speaker": "Serena",
+      "instruct": "用温暖、亲切、令人安心的语气播报。",
+      "text": "别着急，我们已经保存了当前进度，可以从这里继续。"
+    },
+    {
+      "id": "zh-cheerful-vivian",
+      "strata": ["emotion", "cheerful", "energetic"],
+      "speaker": "Vivian",
+      "instruct": "用轻快、开心、有活力的语气播报，但不要过度夸张。",
+      "text": "好消息，所有检查都顺利通过了！"
+    },
+    {
+      "id": "zh-serious-uncle-fu",
+      "strata": ["emotion", "serious", "low_arousal"],
+      "speaker": "Uncle_Fu",
+      "instruct": "用严肃、沉稳、清晰的语气播报。",
+      "text": "当前证据不足，系统不会自动执行高风险操作。"
+    },
+    {
+      "id": "zh-sad-dylan",
+      "strata": ["emotion", "sad", "restrained"],
+      "speaker": "Dylan",
+      "instruct": "用克制、低落但仍然清晰的语气播报。",
+      "text": "很遗憾，这次尝试没有达到预期结果。"
+    },
+    {
+      "id": "zh-urgent-eric",
+      "strata": ["emotion", "urgent", "high_arousal"],
+      "speaker": "Eric",
+      "instruct": "用紧迫、明确、快速但可听清的语气播报。",
+      "text": "请立即停止当前操作，并检查设备状态！"
+    },
+    {
+      "id": "zh-restrained-serena",
+      "strata": ["emotion", "restrained", "formal"],
+      "speaker": "Serena",
+      "instruct": "用克制、正式、不带夸张情绪的语气播报。",
+      "text": "本次结果仅用于离线评估，不代表已经投入生产。"
+    },
+    {
+      "id": "zh-question-exclamation",
+      "strata": ["prosody", "question", "exclamation"],
+      "speaker": "Vivian",
+      "instruct": "准确表现疑问和感叹语气，同时保持自然。",
+      "text": "真的完成了吗？太好了，我们终于通过这一关了！"
+    },
+    {
+      "id": "zh-homophone-difficult",
+      "strata": ["pronunciation", "homophone", "dense_syllables"],
+      "speaker": "Serena",
+      "instruct": "逐字清晰但保持自然连贯。",
+      "text": "实验室正在审视事实、实时状态与实施时序是否一致。"
+    },
+    {
+      "id": "zh-repetition-stability",
+      "strata": ["repetition", "stability", "delivery"],
+      "speaker": "Vivian",
+      "instruct": "语速稳定，每个短句都要完整清晰。",
+      "text": "第一次检查完成。第二次检查完成。第三次检查完成。"
+    }
+  ],
+  "metrics_to_preregister_after_fp16_baseline": [
+    "speech_token_agreement_or_explicitly_unsupported",
+    "speech_token_kl_or_explicitly_unsupported",
+    "generated_duration_and_length_drift",
+    "synth_file_stt_overlap",
+    "speaker_consistency",
+    "instruction_and_emotion_adherence",
+    "first_audio_latency",
+    "real_time_factor",
+    "host_rss_and_backend_memory_evidence",
+    "exact_artifact_human_intelligibility_and_naturalness"
+  ]
+}

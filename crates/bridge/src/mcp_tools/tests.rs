@@ -624,6 +624,97 @@ async fn session_bootstrap_surfaces_continuity_kernel_from_selected_rows() {
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
+#[test]
+fn targeted_bootstrap_omits_global_auxiliary_sections_for_every_frontend() {
+    assert!(!include_bootstrap_auxiliary_sections(true));
+    assert!(include_bootstrap_auxiliary_sections(false));
+}
+
+#[test]
+fn session_bootstrap_schema_describes_targeted_policy_for_every_frontend() {
+    let schema = SessionBootstrapTool::new(Hub::builder().build()).schema();
+    assert!(schema.description.contains("For every frontend"));
+    assert!(schema.description.contains("global past-self letters"));
+    assert!(schema.description.contains("without a query retains"));
+    assert!(schema
+        .description
+        .contains("User and Agent Profile sections are unaffected"));
+    assert!(!schema
+        .description
+        .contains("Compact output with an explicit query"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let cwd = temp_dir.display().to_string();
+    let store = hub.store.clone().expect("store");
+    store
+        .memory_save(&MemoryRecord {
+            key: "targeted_compact_task_state".into(),
+            kind: "decision".into(),
+            content: "Continue the practical compact recovery task.".into(),
+            tags: vec![
+                "continuity_role:state".into(),
+                "continuity_confidence:verified".into(),
+                "continuity_actionability:plan_influence".into(),
+                "continuity_blast_radius:project".into(),
+            ],
+            related_keys: vec![],
+            scope: Some(format!("project:{cwd}")),
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 0,
+            importance: 0.9,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        })
+        .await
+        .expect("save task state");
+    store
+        .memory_save(&MemoryRecord {
+            key: "targeted_compact_semantic_feedback".into(),
+            kind: "feedback".into(),
+            content: "Practical compact recovery should preserve query-relevant corrections."
+                .into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(format!("project:{cwd}")),
+            created_at: 1_700_000_001,
+            updated_at: 1_700_000_001,
+            last_accessed_at: 1_700_000_001,
+            access_count: 0,
+            importance: 0.95,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        })
+        .await
+        .expect("save feedback");
+
+    let out = SessionBootstrapTool::new(hub)
+        .execute(
+            json!({
+                "cwd": cwd,
+                "query": "practical compact recovery task",
+                "limit": 10,
+                "frontend": "warp",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("targeted compact bootstrap");
+    let text = result_text(&out);
+    assert!(text.contains("targeted_compact_task_state"), "{text}");
+    assert!(text.contains("targeted_compact_semantic_feedback"), "{text}");
+    assert!(text.contains("Continuity Kernel"), "{text}");
+    assert!(!text.contains("Feedback preamble"), "{text}");
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
 #[tokio::test]
 async fn session_bootstrap_surfaces_distillation_candidates_propose_only() {
     // S1 surfacing: a verified lesson that is NOT yet distilled shows up
@@ -1026,6 +1117,102 @@ async fn agent_task_contract_preview_is_pure_and_exposed_to_codex() {
     assert!(invalid.is_error);
 }
 
+#[cfg(feature = "embodiment-runtime-p4")]
+#[test]
+fn embodiment_projection_preview_config_is_explicit_and_fail_closed() {
+    assert_eq!(parse_projection_preview_config(None, None).unwrap(), None);
+    assert_eq!(
+        parse_projection_preview_config(Some("0"), Some("terminal_write")).unwrap(),
+        None
+    );
+    assert!(parse_projection_preview_config(Some("1"), None).is_err());
+    assert!(parse_projection_preview_config(Some("1"), Some("terminal write")).is_err());
+    assert_eq!(
+        parse_projection_preview_config(Some("1"), Some("terminal_write,body_status")).unwrap(),
+        Some(vec!["terminal_write".into(), "body_status".into()])
+    );
+}
+
+#[cfg(feature = "embodiment-runtime-p4")]
+fn embodiment_projection_preview_args(owner_confirmation: bool) -> Value {
+    json!({
+        "attention": {
+            "schema": "agent_bridge.attention_decision.v0",
+            "mode": "shadow",
+            "decision_id": "attention-mcp-1",
+            "body_id": "body-mac",
+            "input_schema": "agent_bridge.observed_world.v0",
+            "input_world_revision": 12,
+            "selected_observations": [{
+                "body_id": "body-mac",
+                "source": "body_status",
+                "observed_at_unix_ms": 100,
+                "world_revision": 12
+            }],
+            "omitted_observations": 0,
+            "authority": "non_authoritative"
+        },
+        "authority": {
+            "schema": "agent_bridge.authority_decision.v0",
+            "decision_id": "authority-mcp-1",
+            "cognitive_decision_id": "cognitive-mcp-1",
+            "body_id": "body-mac",
+            "status": "approved",
+            "boundary": "project_write",
+            "owner_confirmation": owner_confirmation,
+            "lease_id": null
+        },
+        "request": {
+            "intent_id": "intent-mcp-1",
+            "operation": "terminal_write",
+            "arguments": {"keys": "temporary"},
+            "precondition": {
+                "schema": "agent_bridge.observation.v0",
+                "body_id": "body-mac",
+                "source": "body_status",
+                "observed_at_unix_ms": 100,
+                "freshness_ms": 20,
+                "confidence": 1.0,
+                "world_revision": 12,
+                "payload": {"ready": true}
+            },
+            "reversible": true
+        }
+    })
+}
+
+#[cfg(feature = "embodiment-runtime-p4")]
+#[tokio::test]
+async fn embodiment_projection_preview_is_plan_only_and_owner_confirmed() {
+    let tool = EmbodimentProjectionPreviewTool::new(vec!["terminal_write".into()]);
+    assert_eq!(tool.name(), "embodiment_projection_preview");
+    assert!(tool.annotations().unwrap().read_only_hint);
+
+    let result = tool
+        .execute(
+            embodiment_projection_preview_args(true),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    let body = result_json(&result);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(body["executed"], false);
+    assert_eq!(body["lease_acquired"], false);
+    assert_eq!(body["effect_receipt_created"], false);
+    assert_eq!(body["plan"]["operation"], "terminal_write");
+    assert_eq!(body["plan"]["re_observation_required"], true);
+
+    let rejected = tool
+        .execute(
+            embodiment_projection_preview_args(false),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    assert!(rejected.is_error);
+}
+
 fn frontend_env_test_setup() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().expect("frontend env test lock")
@@ -1112,6 +1299,12 @@ fn codex_essential_exposes_xiao_shu_action_request() {
         "xiao_shu_action_request"
     ));
     assert!(codex_lean_tool("xiao_shu_action_request"));
+}
+
+#[test]
+fn codex_lean_exposes_consent_gated_kitesurf_snapshot() {
+    assert!(codex_lean_tool("cloudflare_kitesurf_snapshot"));
+    assert!(!gemini_lean_tool("cloudflare_kitesurf_snapshot"));
 }
 
 #[test]
@@ -1372,22 +1565,179 @@ fn apple_mobile_status_parses_ioreg_usb_devices() {
 }
 
 #[test]
-fn codex_essential_exposes_mobile_bridge_tools() {
+fn codex_essential_exposes_mobile_readonly_bridge_tools() {
     for t in [
         "mobile_list_devices",
         "mobile_current_focus",
         "mobile_screenshot",
         "mobile_health",
+        "mobile_debug_bundle",
+        "mobile_projection_status",
+        "mobile_projection_wait",
         "mobile_ui_snapshot",
+        "mobile_wait_for_ui",
         "mobile_logcat_tail",
-        "mobile_install_apk",
-        "mobile_launch_app",
-        "mobile_click",
-        "mobile_input_text",
         "mobile_apple_status",
     ] {
         assert!(codex_essential_tool(Tier::Standard, t), "{t}");
     }
+
+    for t in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+        "mobile_install_apk",
+        "mobile_launch_app",
+        "mobile_click",
+        "mobile_input_text",
+    ] {
+        assert!(!codex_essential_tool(Tier::Standard, t), "{t}");
+    }
+}
+
+#[test]
+fn mobile_projection_wait_reports_only_observed_or_terminal_facts() {
+    assert_eq!(
+        mobile_projection_wait_outcome(0, 0, false, false, 200, None, 150),
+        None
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(1, 1, false, false, 200, None, 150),
+        Some("consent_observed")
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(1, 1, false, false, 200, Some(2), 150),
+        None
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(2, 2, false, false, 200, Some(2), 150),
+        Some("revision_observed_by_device")
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(2, 2, true, false, 200, Some(2), 150),
+        Some("stopped_before_observation")
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(2, 2, false, false, 200, Some(3), 200),
+        Some("expired_before_observation")
+    );
+}
+
+#[test]
+fn mobile_projection_patch_preserves_omitted_fields() {
+    let original = crate::mobile_projection::ProjectionFrame::new(
+        "session-1",
+        4,
+        500,
+        "Original title",
+        "Original body",
+    )
+    .unwrap()
+    .with_presentation(Some("Waiting"), &["First".into(), "Second".into()])
+    .unwrap();
+    let (patched, changed) =
+        mobile_projection_patch_frame(&original, &json!({"status": "Done"})).unwrap();
+    assert_eq!(patched.revision, 5);
+    assert_eq!(patched.title, "Original title");
+    assert_eq!(patched.body, "Original body");
+    assert_eq!(patched.status.as_deref(), Some("Done"));
+    assert_eq!(patched.actions, vec!["First", "Second"]);
+    assert_eq!(changed, vec!["status"]);
+}
+
+#[test]
+fn mobile_projection_patch_clears_only_explicit_nullable_fields() {
+    let original =
+        crate::mobile_projection::ProjectionFrame::new("session-1", 1, 500, "Title", "Body")
+            .unwrap()
+            .with_presentation(Some("Waiting"), &["First".into()])
+            .unwrap();
+    let (patched, changed) =
+        mobile_projection_patch_frame(&original, &json!({"status": null, "actions": []})).unwrap();
+    assert_eq!(patched.title, "Title");
+    assert_eq!(patched.body, "Body");
+    assert_eq!(patched.status, None);
+    assert!(patched.actions.is_empty());
+    assert_eq!(changed, vec!["status", "actions"]);
+}
+
+#[test]
+fn mobile_projection_patch_rejects_empty_or_malformed_updates() {
+    let original =
+        crate::mobile_projection::ProjectionFrame::new("session-1", 1, 500, "Title", "Body")
+            .unwrap();
+    assert_eq!(
+        mobile_projection_patch_frame(&original, &json!({})).unwrap_err(),
+        "provide at least one of title, body, status, or actions"
+    );
+    assert_eq!(
+        mobile_projection_patch_frame(&original, &json!({"title": null})).unwrap_err(),
+        "title must be a string when provided"
+    );
+    assert_eq!(
+        mobile_projection_patch_frame(&original, &json!({"actions": [1]})).unwrap_err(),
+        "actions must contain only strings"
+    );
+}
+
+#[test]
+fn mobile_debug_bundle_path_is_unique_per_device_and_timestamp() {
+    let path = mobile_debug_bundle_path(Path::new("/tmp"), "emulator:5555/unsafe", 42);
+    assert_eq!(
+        path,
+        Path::new("/tmp/agent-bridge-mobile-debug-emulator-5555-unsafe-42")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn mobile_debug_bundle_permissions_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "ab-mobile-bundle-permissions-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).expect("create test bundle");
+    harden_mobile_bundle_path(&root, true).expect("harden directory");
+    let file = root.join("manifest.json");
+    write_mobile_bundle_text(&file, "{}").expect("write private file");
+    assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    std::fs::remove_dir_all(root).expect("remove test bundle");
+}
+
+#[test]
+fn mobile_projection_phase_is_honest_about_idle_and_terminal_states() {
+    assert_eq!(
+        mobile_projection_phase(0, 0, false, false, 200, 100),
+        "awaiting_consent"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 98, false, false, 200, 100),
+        "connected_recently"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 90, false, false, 200, 100),
+        "connected_then_idle"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 98, true, false, 200, 100),
+        "stopped"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 98, false, true, 200, 100),
+        "expired"
+    );
+}
+
+#[test]
+fn mobile_wait_condition_supports_present_and_absent() {
+    assert!(mobile_wait_condition_met(1, "present"));
+    assert!(!mobile_wait_condition_met(0, "present"));
+    assert!(mobile_wait_condition_met(0, "absent"));
+    assert!(!mobile_wait_condition_met(2, "absent"));
 }
 
 #[test]
@@ -2239,6 +2589,181 @@ async fn session_bootstrap_surfaces_work_memory_block() {
 }
 
 #[tokio::test]
+async fn session_bootstrap_recovers_actionable_work_memory_after_store_restart() {
+    use std::sync::Arc;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-work-memory-restart-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let db_path = temp_dir.join("state.db");
+    let cwd = "/tmp/agent-bridge-restart-resume";
+
+    let first_store = ab_store::SqliteStore::open(&db_path)
+        .await
+        .expect("open first store");
+    let first_hub = crate::Hub::builder()
+        .store(Arc::new(first_store))
+        .build();
+    WorkMemoryTool::new(first_hub.clone())
+        .execute(
+            json!({
+                "op": "save",
+                "cwd": cwd,
+                "session_id": "before-restart",
+                "summary": "Network interruption happened after the implementation landed.",
+                "next_step": "Verify the reopened store and continue without repeating work.",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("save before restart");
+    drop(first_hub);
+
+    let reopened_store = ab_store::SqliteStore::open(&db_path)
+        .await
+        .expect("reopen store after simulated process restart");
+    let reopened_hub = crate::Hub::builder()
+        .store(Arc::new(reopened_store))
+        .build();
+    let boot = SessionBootstrapTool::new(reopened_hub)
+        .execute(
+            json!({"cwd": cwd, "frontend": "claude-code", "limit": 5}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bootstrap after restart");
+    let text = result_text(&boot);
+    assert!(text.contains("Network interruption happened"));
+    assert!(text.contains("Verify the reopened store"));
+    assert!(!text.contains("cwd: /tmp/agent-bridge-restart-resume"));
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[test]
+fn work_memory_resume_row_prefers_structured_next_step() {
+    let row = mk_mem_scoped(
+        "resume_structured",
+        WORK_MEMORY_KIND,
+        "# Active Work Memory\ncwd: /tmp/project\nslot: active\nstatus: active\n\n## Summary\nold summary\n\n## Next Step\nRun the focused recovery test.\n\n## Evidence\nold evidence",
+        &["work_memory", "slot:active"],
+        Some("project:/tmp/project"),
+    );
+    let rendered = format_work_memory_resume_row(&row, 120);
+    assert!(rendered.contains("Run the focused recovery test."));
+    assert!(rendered.contains("old summary"));
+    assert!(!rendered.contains("cwd:"));
+}
+
+#[test]
+fn work_memory_resume_row_uses_precompact_tail() {
+    let row = mk_mem_scoped(
+        "resume_precompact",
+        WORK_MEMORY_KIND,
+        "# PreCompact Work Memory\ncwd: /tmp/project\n\n## Recent Context Excerpt\nold context that should not consume the resume cue\nlatest decision: keep the practical lane\nnext action: repair restart continuation",
+        &["work_memory", "source:precompact"],
+        Some("project:/tmp/project"),
+    );
+    let rendered = format_work_memory_resume_row(&row, 90);
+    assert!(rendered.contains("next action: repair restart continuation"));
+    assert!(!rendered.contains("# PreCompact Work Memory"));
+}
+
+#[test]
+fn bootstrap_work_memory_keeps_only_exact_project_scope() {
+    let cwd = "/Data/CascadeProjects/agent-bridge/";
+    let rows = vec![
+        mk_mem_scoped(
+            "exact",
+            WORK_MEMORY_KIND,
+            "current project",
+            &[],
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        ),
+        mk_mem_scoped(
+            "parent",
+            WORK_MEMORY_KIND,
+            "parent task",
+            &[],
+            Some("project:/Data/CascadeProjects"),
+        ),
+        mk_mem_scoped(
+            "global",
+            WORK_MEMORY_KIND,
+            "global task",
+            &[],
+            Some("global"),
+        ),
+        mk_mem_scoped(
+            "peer",
+            WORK_MEMORY_KIND,
+            "cross-node peer task",
+            &[],
+            Some("project:/Users/pallasting/Projects/agent-bridge"),
+        ),
+    ];
+
+    let filtered = exact_scope_work_memory_rows(rows, cwd);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].key, "exact");
+}
+
+#[test]
+fn bootstrap_work_memory_keeps_latest_live_precompact_and_structured_lanes() {
+    let cwd = "/Data/CascadeProjects/agent-bridge";
+    let now = unix_now_secs();
+    let mut structured = mk_mem_scoped(
+        "structured",
+        WORK_MEMORY_KIND,
+        "## Next Step\nKeep this explicit lane",
+        &["work_memory", "slot:active"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    structured.updated_at = now - 30;
+    let mut older = mk_mem_scoped(
+        "precompact_old",
+        WORK_MEMORY_KIND,
+        "old interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    older.updated_at = now - 20;
+    older.created_at = now - 20;
+    let mut newest = mk_mem_scoped(
+        "precompact_new",
+        WORK_MEMORY_KIND,
+        "new interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    newest.updated_at = now - 10;
+    newest.created_at = now - 10;
+    let mut expired = mk_mem_scoped(
+        "precompact_expired",
+        WORK_MEMORY_KIND,
+        "expired interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    expired.updated_at = now - 15 * WORK_MEMORY_SECONDS_PER_DAY;
+    expired.created_at = expired.updated_at;
+
+    let selected = bootstrap_work_memory_rows(
+        vec![older, expired, structured, newest],
+        cwd,
+        now,
+    );
+    let keys: Vec<&str> = selected.iter().map(|row| row.key.as_str()).collect();
+    assert_eq!(keys, vec!["structured", "precompact_new"]);
+}
+
+#[tokio::test]
 async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_foreign_scope() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;
     let store = hub.store.clone().expect("store");
@@ -2297,6 +2822,85 @@ async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_fo
     assert!(
         !text.contains("bootstrap_semantic_foreign_hidden"),
         "foreign-project semantic hit must not enter bootstrap: {text}"
+    );
+}
+
+#[tokio::test]
+async fn session_bootstrap_state_digest_keeps_only_priority_eligible_handoff() {
+    let (hub, _temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let cwd = "/tmp/bootstrap-state-digest-handoff";
+    let local_scope = format!("project:{cwd}");
+    let actionable_tags = [
+        "continuity_role:state",
+        "continuity_actionability:plan_influence",
+        "continuity_confidence:verified",
+    ];
+
+    for row in [
+        mk_mem_scoped(
+            "bootstrap_digest_exact_actionable",
+            "session_handoff",
+            "continue the exact project task",
+            &actionable_tags,
+            Some(&local_scope),
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_global_not_priority",
+            "session_handoff",
+            "unrelated global historical handoff",
+            &actionable_tags,
+            None,
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_stale_not_priority",
+            "session_handoff",
+            "stale project handoff",
+            &[
+                "continuity_role:state",
+                "continuity_actionability:plan_influence",
+                "continuity_confidence:stale",
+            ],
+            Some(&local_scope),
+        ),
+    ] {
+        store.memory_save(&row).await.expect("save handoff row");
+    }
+
+    let out = SessionBootstrapTool::new(hub)
+        .execute(
+            json!({
+                "cwd": cwd,
+                "limit": 10,
+                "frontend": "claude-code",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bootstrap state digest");
+    let text = result_text(&out);
+    let digest_start = text
+        .find("=== Project State Digest")
+        .expect("state digest should be present");
+    let digest_tail = &text[digest_start..];
+    let digest_end = digest_tail
+        .get(1..)
+        .and_then(|tail| tail.find("\n=== "))
+        .map(|offset| offset + 1)
+        .unwrap_or(digest_tail.len());
+    let digest = &digest_tail[..digest_end];
+
+    assert!(
+        digest.contains("bootstrap_digest_exact_actionable"),
+        "exact actionable handoff should orient the project digest: {digest}"
+    );
+    assert!(
+        !digest.contains("bootstrap_digest_global_not_priority"),
+        "global handoff must not receive project-digest priority: {digest}"
+    );
+    assert!(
+        !digest.contains("bootstrap_digest_stale_not_priority"),
+        "stale handoff must not receive project-digest priority: {digest}"
     );
 }
 
@@ -3281,13 +3885,15 @@ async fn avatar_cortex_renderer_snapshot_returns_compact_sidecar_view() {
 }
 
 #[test]
-fn xiao_shu_action_request_schema_is_dry_run_only() {
+fn xiao_shu_action_request_schema_discloses_fail_closed_enqueue() {
     let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
     let schema = tool.schema();
 
     assert_eq!(schema.name, "xiao_shu_action_request");
     assert!(schema.description.contains("LLM-safe"));
     assert!(schema.description.contains("never directly"));
+    assert!(schema.description.contains("enqueue=true is disabled"));
+    assert!(schema.description.contains("per-call write capability"));
     assert!(schema.description.contains("Real audio still requires"));
     assert_eq!(
         schema.input_schema["properties"]["confirm"]["description"],
@@ -3300,7 +3906,7 @@ fn xiao_shu_action_request_schema_is_dry_run_only() {
     assert!(schema.input_schema["properties"]["enqueue"]["description"]
         .as_str()
         .unwrap()
-        .contains("does not emit audio"));
+        .contains("fails closed"));
     assert_eq!(
         schema.input_schema["properties"]["list_queue"]["default"],
         false
@@ -3316,6 +3922,90 @@ fn xiao_shu_action_request_schema_is_dry_run_only() {
         schema.input_schema["properties"]["intent"]["enum"][0],
         "voice_alert"
     );
+}
+
+#[tokio::test]
+async fn xiao_shu_action_request_enqueue_fails_closed_without_write_authority() {
+    struct RemoveTestDirOnDrop(std::path::PathBuf);
+
+    impl Drop for RemoveTestDirOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos();
+    let project = format!(
+        "mcp-enqueue-authority-gate-test-{}-{unique}",
+        std::process::id()
+    );
+    let project_dir = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+        .join("Library")
+        .join("Application Support")
+        .join("agent-bridge")
+        .join("avatar_cortex_action_requests")
+        .join(&project);
+    let queue_path = project_dir.join("requests.jsonl");
+    let _cleanup = RemoveTestDirOnDrop(project_dir);
+    assert!(!queue_path.exists(), "test queue path must start absent");
+
+    for args in [
+        json!({"project": &project, "enqueue": true}),
+        json!({"project": &project, "enqueue": true, "list_queue": true}),
+    ] {
+        let out = tool
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("enqueue gate must return an MCP result");
+
+        assert!(out.is_error, "enqueue must fail closed: {out:?}");
+        assert_eq!(
+            result_text(&out),
+            "xiao_shu_action_request enqueue is disabled until a per-call write capability is defined"
+        );
+    }
+    assert!(
+        !queue_path.exists(),
+        "fail-closed MCP enqueue must not create a queue record"
+    );
+}
+
+#[tokio::test]
+async fn xiao_shu_action_request_preview_and_list_remain_read_only() {
+    let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
+    let project = format!("mcp-read-only-characterization-{}", std::process::id());
+
+    let preview = tool
+        .execute(
+            json!({"project": project, "intent": "voice_alert"}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("preview result");
+    assert!(
+        !preview.is_error,
+        "preview must remain available: {preview:?}"
+    );
+    let preview_payload = result_text_as_json(&preview);
+    assert_eq!(preview_payload["surface"], "xiao_shu_action_request");
+    assert_eq!(preview_payload["read_only"], true);
+    assert_eq!(preview_payload["writes_request_record"], false);
+
+    let list = tool
+        .execute(
+            json!({"project": project, "list_queue": true}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("list result");
+    assert!(!list.is_error, "queue list must remain available: {list:?}");
+    let list_payload = result_text_as_json(&list);
+    assert_eq!(list_payload["surface"], "xiao_shu_action_request_queue");
+    assert_eq!(list_payload["read_only"], true);
 }
 
 #[test]
@@ -6775,10 +7465,10 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 61 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
-    //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-    //      + DIRECT(51: 6 avatar observation/sync/renderer tools
-    //      + xiao_shu_action_request + 14 mobile bridge tools
+    // 67 total extras = 10 collab-group entries + 57 direct extras:
+    //      practical_workflow_scorecard
+    //      + 6 avatar observation/sync/renderer tools
+    //      + xiao_shu_action_request + 14 read-only mobile bridge tools
     //      + memory_graph_topology + memory_retrieval_feedback
     //      + memory_consolidation_queue
     //      + memory_biocortex_shadow_trial
@@ -6804,9 +7494,10 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // profiles, not codex-essential direct extras.
     // T6 candidate-expansion gate ceremony tools are all/Niche only and
     // must not re-enter Codex's eager direct extras.
-    // 61 curated extras + 5 prune-continuity entries (2026-07: demoted
-    // Essential->Standard, kept in codex-essential by name).
-    assert_eq!(extras.len(), 66);
+    // The five prune-continuity entries remain part of the direct list by
+    // name, preserving the established Codex surface contract.
+    assert_eq!(extras.len(), 67);
+    assert!(extras.contains(&"practical_workflow_scorecard"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
     assert!(extras.contains(&"forum_post"));
@@ -6827,12 +7518,27 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     assert!(extras.contains(&"mobile_list_devices"));
     assert!(extras.contains(&"mobile_screenshot"));
     assert!(extras.contains(&"mobile_health"));
+    assert!(extras.contains(&"mobile_projection_status"));
+    assert!(extras.contains(&"mobile_projection_wait"));
     assert!(extras.contains(&"mobile_ui_snapshot"));
-    assert!(extras.contains(&"mobile_click"));
     assert!(extras.contains(&"mobile_apple_status"));
     assert!(extras.contains(&"mobile_ios_list_devices"));
     assert!(extras.contains(&"mobile_ios_apps"));
     assert!(extras.contains(&"mobile_ios_syslog_tail"));
+    for tool_name in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+        "mobile_install_apk",
+        "mobile_launch_app",
+        "mobile_click",
+        "mobile_input_text",
+    ] {
+        assert!(
+            !extras.contains(&tool_name),
+            "{tool_name} must stay out of codex-essential"
+        );
+    }
     assert!(extras.contains(&"memory_graph_topology"));
     assert!(extras.contains(&"memory_retrieval_feedback"));
     assert!(extras.contains(&"memory_consolidation_queue"));
@@ -6873,6 +7579,55 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     assert!(extras.contains(&"agent_steer_kill"));
     assert!(extras.contains(&"agent_orchestrate_scan"));
     assert!(extras.contains(&"research_cycle_plan"));
+}
+
+#[test]
+fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
+    let essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let voice = ToolPolicy::from_values(Some("codex-voice"), None, None, None);
+    let voice_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), voice)
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+
+    assert_eq!(voice.label(), "codex-voice");
+    assert_eq!(voice.profile().label(), "compact");
+
+    let voice_tools = [
+        "present_voice",
+        "present_voice_confirm_audibility",
+        "voice_runtime_preflight",
+        "voice_delivery_health",
+        "embodiment_operating_readiness",
+    ];
+    for tool_name in voice_tools {
+        assert!(
+            !essential.includes(Tier::Niche, tool_name),
+            "{tool_name} must stay out of codex-essential"
+        );
+        assert!(
+            voice.includes(Tier::Niche, tool_name),
+            "{tool_name} must be available in the explicit codex-voice toolset"
+        );
+        assert!(
+            voice.extras().contains(&tool_name),
+            "{tool_name} must be surfaced in capabilities.tool_profile_extras"
+        );
+        assert!(
+            voice_names.iter().any(|name| name == tool_name),
+            "{tool_name} must register in the codex-voice manifest"
+        );
+    }
+
+    assert!(
+        !voice.includes(Tier::Niche, "present_dashboard"),
+        "codex-voice must not widen to unrelated Niche presentation tools"
+    );
+    assert!(
+        !voice.includes(Tier::Niche, "browser_navigate"),
+        "codex-voice must not widen to unrelated browser mutation"
+    );
 }
 
 #[test]
@@ -6960,6 +7715,33 @@ fn codex_lean_preserves_curated_surface() {
     assert!(!p.includes(Tier::Niche, "forum_subscribe"));
     assert!(!p.includes(Tier::Niche, "forum_set_thread_status"));
     assert!(!p.includes(Tier::Niche, "agent_presence_announce"));
+}
+
+#[test]
+fn codex_lean_exposes_only_mobile_readonly_status_tools() {
+    let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+    for tool in [
+        "mobile_list_devices",
+        "mobile_health",
+        "mobile_projection_status",
+        "mobile_projection_wait",
+    ] {
+        assert!(p.includes(Tier::Standard, tool), "missing lean status tool: {tool}");
+    }
+    for tool in [
+        "mobile_screenshot",
+        "mobile_debug_bundle",
+        "mobile_ui_snapshot",
+        "mobile_logcat_tail",
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+        "mobile_install_apk",
+        "mobile_click",
+        "mobile_input_text",
+    ] {
+        assert!(!p.includes(Tier::Standard, tool), "control/heavy tool leaked into lean: {tool}");
+    }
 }
 
 #[test]
@@ -7117,14 +7899,21 @@ fn host_surface_gates_device_and_credential_families() {
             &[
                 "mobile_click",
                 "mobile_current_focus",
+                "mobile_debug_bundle",
                 "mobile_health",
                 "mobile_input_text",
                 "mobile_install_apk",
                 "mobile_launch_app",
                 "mobile_list_devices",
                 "mobile_logcat_tail",
+                "mobile_projection_start",
+                "mobile_projection_status",
+                "mobile_projection_stop",
+                "mobile_projection_update",
+                "mobile_projection_wait",
                 "mobile_screenshot",
                 "mobile_ui_snapshot",
+                "mobile_wait_for_ui",
             ],
         ),
         (
@@ -7152,6 +7941,10 @@ fn host_surface_gates_device_and_credential_families() {
             ],
         ),
         (
+            "cloudflare_kitesurf",
+            &["cloudflare_kitesurf_snapshot"],
+        ),
+        (
             "github_api",
             &["github_issue_create", "github_issue_list", "github_pr_list"],
         ),
@@ -7170,6 +7963,7 @@ fn host_surface_gates_device_and_credential_families() {
             "brave" => surface.brave = false,
             "notion" => surface.notion = false,
             "cloudflare" => surface.cloudflare = false,
+            "cloudflare_kitesurf" => surface.cloudflare_kitesurf = false,
             "github_api" => surface.github_api = false,
             "gitlab_api" => surface.gitlab_api = false,
             "tailscale_api" => surface.tailscale_api = false,
@@ -9242,6 +10036,37 @@ async fn browser_lite_probe_missing_binary_is_structured_not_tool_error() {
     assert_eq!(payload["safety"]["mutates_agent_bridge_state"], false);
 }
 
+#[test]
+fn installed_runtime_script_path_uses_stable_asset_directory() {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().expect("runtime asset env lock");
+    let previous = std::env::var_os("AGENT_BRIDGE_RUNTIME_ASSET_DIR");
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-runtime-assets-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("mkdir runtime assets");
+    let script = temp_dir.join("desktop_snapshot.py");
+    std::fs::write(&script, "# stable runtime fixture\n").expect("write runtime asset");
+    std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
+
+    assert_eq!(
+        installed_runtime_script_path("desktop_snapshot.py"),
+        Some(script)
+    );
+    assert_eq!(installed_runtime_script_path("missing.py"), None);
+
+    match previous {
+        Some(value) => std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", value),
+        None => std::env::remove_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR"),
+    }
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
 #[tokio::test]
 async fn desktop_snapshot_wrapper_defaults_to_non_mutating_script_flags() {
     let temp_dir = std::env::temp_dir().join(format!(
@@ -9393,6 +10218,35 @@ print(json.dumps(payload))
     assert_eq!(payload["raw_available"], true);
     assert_eq!(payload["raw_included"], false);
     assert!(payload.get("raw_snapshot").is_none());
+    assert_eq!(
+        payload["observation"]["schema"],
+        "agent_bridge.observation.v0"
+    );
+    assert_eq!(payload["observation"]["revision"], 1780833000_u64);
+    assert_eq!(
+        payload["observation"]["content_hash"]["algorithm"],
+        "sha256"
+    );
+    let content_hash = payload["observation"]["content_hash"]["value"]
+        .as_str()
+        .expect("content hash");
+    assert_eq!(content_hash.len(), 64);
+    assert!(payload["observation"]["observation_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("obs-desktop-linux-")));
+    assert_eq!(
+        payload["observation"]["freshness"]["max_age_ms"],
+        5000_u64
+    );
+    assert!(payload["observation"]["freshness"]["age_ms_at_return"].is_u64());
+    assert_eq!(
+        payload["observation"]["coordinate_provenance"]["windows_rect"]["coordinate_space"],
+        "sway.logical.desktop"
+    );
+    assert_eq!(
+        payload["observation"]["coordinate_provenance"]["atspi_bounds"]["mapping_to_sway"],
+        "unverified"
+    );
     assert_eq!(payload["verification"]["verdict"], "verified");
     assert_eq!(payload["verification"]["verified_to"], "semantic_objects");
     assert_eq!(payload["verification"]["recover"], "proceed");
@@ -9446,8 +10300,30 @@ print(json.dumps(payload))
         DESKTOP_SNAPSHOT_SOURCE_SCHEMA
     );
     assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
+    assert_eq!(
+        raw_payload["observation"]["content_hash"]["value"],
+        payload["observation"]["content_hash"]["value"]
+    );
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[test]
+fn desktop_snapshot_observation_hash_excludes_runtime_wrapper_metadata() {
+    let source = json!({
+        "schema": DESKTOP_SNAPSHOT_SOURCE_SCHEMA,
+        "captured_at": 1780833000_u64,
+        "windows": []
+    });
+    let mut wrapped = source.clone();
+    wrapped.as_object_mut().expect("object").insert(
+        "mcp_wrapper".to_string(),
+        json!({"duration_ms": 999, "stderr": "runtime-only"}),
+    );
+    assert_eq!(
+        desktop_snapshot_source_content_sha256(&source),
+        desktop_snapshot_source_content_sha256(&wrapped)
+    );
 }
 
 #[tokio::test]
@@ -10273,6 +11149,51 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         "present_voice must register under the all profile"
     );
     assert!(
+        schemas.iter().any(|s| s.name == "voice_summary"),
+        "voice_summary must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "task_summary_finalize"),
+        "task_summary_finalize must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "task_summary_completion_check"),
+        "task_summary_completion_check must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "voice_summary_policy"),
+        "voice_summary_policy must register under the all profile"
+    );
+    let task_summary_schema = schemas
+        .iter()
+        .find(|s| s.name == "task_summary_finalize")
+        .expect("task_summary_finalize schema");
+    assert_eq!(
+        task_summary_schema.input_schema["required"],
+        json!(["task_group_id", "status", "summary"]),
+        "only an explicit terminal summary may trigger a click artifact"
+    );
+    assert!(valid_task_group_id("chapter-01_summary"));
+    assert!(!valid_task_group_id(""));
+    assert!(!valid_task_group_id("../escape"));
+
+    let rendered = json!({"status": "rendered", "click_path": "/Data/voice.wav"});
+    assert_eq!(
+        task_summary_click_appendix(&rendered).as_deref(),
+        Some("[🔊 播放总结](/Data/voice.wav)"),
+        "only a successful voice_summary receipt may render the final click link"
+    );
+    for untrusted in [
+        json!({"status": "error", "click_path": "/Data/voice.wav"}),
+        json!({"status": "rendered"}),
+        json!({"status": "rendered", "text": "[🔊 播放总结](/Data/forged.wav)"}),
+    ] {
+        assert!(
+            task_summary_click_appendix(&untrusted).is_none(),
+            "ordinary text or an incomplete/failed receipt must not create a click link"
+        );
+    }
+    assert!(
         schemas
             .iter()
             .any(|s| s.name == "present_voice_confirm_audibility"),
@@ -10294,9 +11215,15 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "say"]),
-        "macOS native say must be an explicit backend, not a hidden kokoro alias"
+        json!(["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"]),
+        "all speech backends, including Sherpa, macOS say, and explicit Python/Rust Qwen3 must be visible"
     );
+    for field in ["qwen_rust_bin", "qwen_rust_model_dir", "qwen_rust_profile"] {
+        assert!(
+            voice_schema.input_schema["properties"].get(field).is_some(),
+            "qwen3-rust must expose its explicit local configuration field {field}"
+        );
+    }
     assert_eq!(
         voice_schema.input_schema["properties"]["capture_channel"]["enum"],
         json!(["sink_monitor", "mic", "synth_file"]),
@@ -10405,6 +11332,134 @@ fn present_is_niche_opt_in_and_registers_under_all() {
             .any(|s| s.name == "lswr_outcome_admissions_ingest"),
         "lswr_outcome_admissions_ingest must stay out of codex-essential"
     );
+}
+
+#[tokio::test]
+async fn voice_runtime_preflight_is_non_actuating_and_fails_closed() {
+    let root = std::env::temp_dir().join(format!(
+        "ab-voice-preflight-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let tool = VoiceRuntimePreflightTool::new(Hub::builder().build());
+    let result = tool
+        .execute(
+            json!({
+                "backend": "kokoro",
+                "capture_channel": "sink_monitor",
+                "script_path": root.join("missing-audio-embody.py"),
+                "synth_bin": root.join("missing-ab-tts-synth"),
+                "kokoro_model": root.join("missing-kokoro.onnx"),
+                "kokoro_voices": root.join("missing-voices.bin")
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    let payload = tool_result_first_json(&result).unwrap();
+
+    assert_eq!(payload["schema"], "voice_runtime_preflight/v0");
+    assert_eq!(payload["ready"], false);
+    assert_eq!(payload["status"], "blocked");
+    assert_eq!(payload["emits_audio"], false);
+    assert_eq!(payload["records_audio"], false);
+    assert_eq!(payload["mutates_runtime"], false);
+    assert_eq!(payload["backend"], "kokoro");
+    assert_eq!(payload["capture_channel"], "sink_monitor");
+    assert!(
+        payload["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("audio adapter"))
+    );
+    assert!(
+        payload["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("Kokoro model"))
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn present_voice_qwen3_rust_forwards_explicit_paths_and_persists_provenance() {
+    let _env = PRESENTATIONS_DIR_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-present-voice-qwen3-rust-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &temp_dir);
+    let script = temp_dir.join("audio_embody.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({
+    "status": "emitted", "verify_status": "rendered_ok",
+    "verify_method": "synth_file_stt", "verified_to": "synthesized audio file",
+    "not_verified": "physical transducer", "synth_backend": "qwen3-rust",
+    "capture_channel": "synth_file", "voice": "serena", "qwen_runtime": "rust",
+    "qwen_model": "/models/qwen3", "qwen_model_profile": "1.7b-customvoice",
+    "qwen_model_revision": "sha256:model", "qwen_integrity_verified": True,
+    "qwen_binary": "/opt/qwen-tts", "qwen_binary_sha256": "abc123",
+    "qwen_instruct_applied": True, "argv": sys.argv[1:]
+}))
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let tool = PresentVoiceTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "backend": "qwen3-rust", "text": "你好", "voice": "serena",
+                "capture_channel": "synth_file", "qwen_instruct": "柔和、温暖",
+                "qwen_rust_bin": "/opt/qwen-tts", "qwen_rust_model_dir": "/models/qwen3",
+                "qwen_rust_profile": "1.7b-customvoice", "stt_model": "base",
+                "script_path": script.to_string_lossy()
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    let payload = result_text_as_json(&out);
+    let argv = payload["argv"].as_array().expect("argv");
+    let argv: Vec<&str> = argv.iter().filter_map(Value::as_str).collect();
+    for expected in [
+        "--qwen-rust-bin", "/opt/qwen-tts", "--qwen-rust-model-dir", "/models/qwen3",
+        "--qwen-rust-profile", "1.7b-customvoice", "--stt-model", "base",
+    ] {
+        assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
+    }
+
+    let sidecar = temp_dir.join(payload["outcome_sidecar"].as_str().expect("outcome sidecar"));
+    let outcome: Value = serde_json::from_str(
+        &tokio::fs::read_to_string(&sidecar).await.expect("read sidecar"),
+    )
+    .expect("sidecar json");
+    assert_eq!(outcome["backend"], "qwen3-rust");
+    assert_eq!(outcome["qwen_runtime"], "rust");
+    assert_eq!(outcome["qwen_model_profile"], "1.7b-customvoice");
+    assert_eq!(outcome["qwen_integrity_verified"], true);
+    assert_eq!(outcome["qwen_binary_sha256"], "abc123");
+
+    std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[test]
@@ -13887,12 +14942,29 @@ fn desktop_steer_script_path_resolution() {
 }
 
 #[test]
-fn desktop_invoke_not_exposed_to_codex_essential() {
-    // Mutating semantic-invoke surface must stay out of the Codex essential allowlist.
-    assert!(!codex_essential_tool(Tier::Standard, "desktop_invoke"));
-    assert!(!codex_essential_tool(Tier::Niche, "desktop_invoke"));
-    // ...while the read-only snapshot IS exposed (sanity contrast).
+fn desktop_invoke_is_the_only_codex_essential_desktop_act_surface() {
+    // Semantic invoke is deliberately exposed as the smallest useful act
+    // surface. The implementation still default-denies host invocation.
+    assert!(codex_essential_tool(Tier::Niche, "desktop_invoke"));
+    // Coordinate injection and phase-2 host execution remain hidden.
+    assert!(!codex_essential_tool(Tier::Niche, "desktop_action"));
+    assert!(!codex_essential_tool(Tier::Niche, "desktop_confirm"));
+    // The read-only observation/verification legs remain exposed too.
     assert!(codex_essential_tool(Tier::Standard, "desktop_snapshot"));
+    assert!(codex_essential_tool(Tier::Standard, "desktop_verify"));
+
+    let policy = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let names: std::collections::HashSet<_> = build_registry_with_policy(
+        Hub::builder().build(),
+        policy,
+    )
+    .list()
+    .into_iter()
+    .map(|schema| schema.name)
+    .collect();
+    assert!(names.contains("desktop_invoke"));
+    assert!(!names.contains("desktop_action"));
+    assert!(!names.contains("desktop_confirm"));
 }
 
 #[test]
@@ -15251,10 +16323,9 @@ async fn agent_spawn_interactive_rejects_non_pty_backends_before_spawn() {
         );
         let msg = result_text(&out);
         assert!(
-            msg.contains(&format!(
-                "{runtime_id}: interactive sessions are not supported"
-            )),
-            "{backend} should reject via runtime interactive gate, got: {msg}"
+            msg.contains(&format!("{runtime_id}: interactive request rejected"))
+                && msg.contains("Unsupported"),
+            "{backend} should reject via workspace runtime contract, got: {msg}"
         );
         assert!(
             !msg.contains("No such file") && !msg.contains("spawn "),
@@ -15273,6 +16344,9 @@ struct MockRuntime {
 impl ab_agent::AgentRuntime for MockRuntime {
     fn id(&self) -> &str {
         &self.id
+    }
+    fn workspace_contract(&self) -> ab_agent::WorkspaceRuntimeContract {
+        ab_agent::WorkspaceRuntimeContract::local_agent(false)
     }
     async fn spawn(&self, cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
         if self.fail {
@@ -15295,6 +16369,105 @@ impl ab_agent::AgentRuntime for MockRuntime {
     async fn capabilities(&self) -> ab_agent::AgentCapabilities {
         ab_agent::AgentCapabilities::default()
     }
+}
+
+#[tokio::test]
+async fn agent_backend_descriptors_are_sorted_and_mark_the_default() {
+    let hub = crate::Hub::builder()
+        .agent(mock("z-default", false))
+        .register_agent(mock("a-backup", false))
+        .build();
+
+    let descriptors = agent_backend_descriptors(&hub).await;
+    assert_eq!(descriptors.len(), 2);
+    assert_eq!(descriptors[0]["id"], "a-backup");
+    assert_eq!(descriptors[0]["default"], false);
+    assert_eq!(descriptors[1]["id"], "z-default");
+    assert_eq!(descriptors[1]["default"], true);
+    assert_eq!(
+        descriptors[1]["workspace_runtime"]["schema_version"],
+        "ab.workspace_runtime.v0"
+    );
+    assert_eq!(
+        descriptors[1]["workspace_runtime"]["network_isolation"],
+        "unknown"
+    );
+}
+
+#[test]
+fn workspace_runtime_request_rejects_unknown_capabilities() {
+    struct UndescribedRuntime;
+    #[async_trait]
+    impl ab_agent::AgentRuntime for UndescribedRuntime {
+        fn id(&self) -> &str {
+            "undescribed"
+        }
+        async fn spawn(&self, _cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+            unreachable!("validation must happen before spawn")
+        }
+        async fn send_input(
+            &self,
+            _session: &ab_core::SessionId,
+            _text: &str,
+        ) -> ab_core::Result<()> {
+            Ok(())
+        }
+        async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+            ab_agent::AgentCapabilities::default()
+        }
+    }
+
+    let cfg = SpawnConfig {
+        interactive: true,
+        ..SpawnConfig::default()
+    };
+    let error = validate_workspace_runtime_request(&UndescribedRuntime, &cfg)
+        .expect_err("unknown interactive capability must fail closed");
+    assert!(error.contains("Unknown"), "got: {error}");
+
+    let error = validate_workspace_runtime_request(&UndescribedRuntime, &SpawnConfig::default())
+        .expect_err("unknown one-shot capability must fail closed");
+    assert!(
+        error.contains("one-shot") && error.contains("Unknown"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn workspace_runtime_request_rejects_incompatible_source_kind() {
+    struct ShellRuntime;
+    #[async_trait]
+    impl ab_agent::AgentRuntime for ShellRuntime {
+        fn id(&self) -> &str {
+            "shell-runtime"
+        }
+        fn workspace_contract(&self) -> ab_agent::WorkspaceRuntimeContract {
+            ab_agent::WorkspaceRuntimeContract {
+                source_kind: "shell_command",
+                ..ab_agent::WorkspaceRuntimeContract::local_agent(false)
+            }
+        }
+        async fn spawn(&self, _cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+            unreachable!("validation must happen before spawn")
+        }
+        async fn send_input(
+            &self,
+            _session: &ab_core::SessionId,
+            _text: &str,
+        ) -> ab_core::Result<()> {
+            Ok(())
+        }
+        async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+            ab_agent::AgentCapabilities::default()
+        }
+    }
+
+    let error = validate_workspace_runtime_request(&ShellRuntime, &SpawnConfig::default())
+        .expect_err("agent_spawn must reject a non-prompt source kind");
+    assert!(
+        error.contains("shell_command") && error.contains("agent_prompt"),
+        "got: {error}"
+    );
 }
 
 fn mock(id: &str, fail: bool) -> Arc<dyn ab_agent::AgentRuntime> {
@@ -23329,6 +24502,167 @@ fn coactivation_rerank_disable_defaults_to_enabled() {
     assert!(coactivation_rerank_disabled_from(Some("1")));
     assert!(coactivation_rerank_disabled_from(Some("true")));
     assert!(coactivation_rerank_disabled_from(Some("TRUE")));
+}
+
+#[test]
+fn remote_session_specificity_defaults_off_and_parses_only_explicit_truthy_values() {
+    assert!(!remote_session_specificity_enabled_from(None));
+    assert!(!remote_session_specificity_enabled_from(Some("")));
+    assert!(!remote_session_specificity_enabled_from(Some("0")));
+    assert!(!remote_session_specificity_enabled_from(Some("yes")));
+    assert!(remote_session_specificity_enabled_from(Some("1")));
+    assert!(remote_session_specificity_enabled_from(Some("true")));
+    assert!(remote_session_specificity_enabled_from(Some("TRUE")));
+}
+
+#[test]
+fn remote_session_specificity_requires_semantic_mode_and_approved_ab_scope() {
+    const LEGACY_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
+    const ALIASES: &str = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+        project:/Users/pallasting/Projects/agent-bridge";
+    const QUERY: &str = "怎么远程给一个正在运行的长驻 agent 会话注入指令";
+
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            false,
+            "semantic",
+            Some(LEGACY_SCOPE),
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "fts",
+            Some(LEGACY_SCOPE),
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            None,
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            Some(LEGACY_SCOPE),
+            QUERY,
+            None
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            Some("project:/Users/pallasting/Projects/other"),
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            Some(REMOTE_SESSION_SPECIFICITY_PROJECT_ID),
+            QUERY,
+            None
+        ),
+        RemoteSessionSpecificityPolicy::StrictSteering
+    );
+}
+
+#[test]
+fn remote_session_specificity_classifies_frozen_positive_and_negative_controls() {
+    const LEGACY_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
+    const ALIASES: &str = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+        project:/Users/pallasting/Projects/agent-bridge";
+    const POSITIVES: &[&str] = &[
+        "怎么远程给一个正在运行的长驻 agent 会话注入指令",
+        "怎么向远端正在运行的长驻 agent 会话发送新的指令",
+        "远程 tmux 里的 agent 会话卡住了,要用 agent_steer_drive 注入下一步",
+        "remote steer a running agent session by sending instructions to the tmux pane",
+        "agent_steer_drive should send input to a detached remote agent session and handle gates",
+        "ab remote session steering uses a long-lived agent handle and tmux send-keys",
+        "Agent-Bridge 当初远程控制长驻 agent 会话的缺口是什么,怎么补",
+    ];
+    const NEGATIVES: &[&str] = &[
+        "怎么通过 ssh 远程登录服务器",
+        "git remote branch 推送失败怎么处理",
+        "agent 会话上下文太长要怎么总结",
+        "怎么给正在运行的后台进程发送 kill 信号",
+        "远程数据库迁移脚本运行中怎么查看日志",
+        "memory_search 检索结果不准应该调 bm25 还是语义模型",
+    ];
+
+    for query in POSITIVES {
+        assert_eq!(
+            remote_session_specificity_policy_with_aliases(
+                true,
+                "semantic",
+                Some(LEGACY_SCOPE),
+                query,
+                Some(ALIASES)
+            ),
+            RemoteSessionSpecificityPolicy::StrictSteering,
+            "positive query was not admitted: {query}"
+        );
+    }
+    for query in NEGATIVES {
+        assert_eq!(
+            remote_session_specificity_policy_with_aliases(
+                true,
+                "semantic",
+                Some(LEGACY_SCOPE),
+                query,
+                Some(ALIASES)
+            ),
+            RemoteSessionSpecificityPolicy::SuppressFamily,
+            "negative query was not isolated: {query}"
+        );
+    }
+}
+
+#[test]
+fn remote_session_specificity_family_key_match_is_narrow() {
+    for key in [
+        "agentbridge_remote_session_steer_gap_20260529",
+        "session_handoff_agent_spawn_remote_steer_retry_to_aio2_20260531",
+        "agent_spawn_remote_ssh_and_steer",
+        "remote_session_steering_decision",
+        "agent_steer_drive_delivery",
+        "tmux_remote_steering",
+    ] {
+        assert!(
+            is_remote_session_steering_family_key(key),
+            "expected family key to match: {key}"
+        );
+    }
+    for key in [
+        "generic_ssh_login",
+        "git_remote_branch",
+        "agent_session_context_summary",
+        "remote_database_migration",
+        "memory_search_semantic_quality",
+        "tmux_session_recovery_without_control",
+    ] {
+        assert!(
+            !is_remote_session_steering_family_key(key),
+            "unrelated key matched family filter: {key}"
+        );
+    }
 }
 
 #[test]
@@ -33101,8 +34435,11 @@ async fn context_pressure_estimate_flags_1m_beta_when_no_window() {
 
 fn mk_call(ts: i64, name: &str, ok: bool, result_size: u32) -> ab_store::McpToolCallRow {
     ab_store::McpToolCallRow {
+        id: ts,
         ts,
         tool_name: name.into(),
+        source: Some("codex".into()),
+        mcp_session_id: Some("test-session".into()),
         duration_ms: 10,
         ok,
         args_size: Some(100),
@@ -33197,8 +34534,11 @@ fn attention_report_handles_missing_result_size() {
     // result_size=None → not high-yield (heuristic: unknown size
     // is conservative no-signal).
     let calls = vec![ab_store::McpToolCallRow {
+        id: 0,
         ts: 0,
         tool_name: "weird_tool".into(),
+        source: Some("codex".into()),
+        mcp_session_id: Some("test-session".into()),
         duration_ms: 10,
         ok: true,
         args_size: Some(100),
@@ -33206,6 +34546,182 @@ fn attention_report_handles_missing_result_size() {
     }];
     let r = compute_attention_report(&calls, 7200, 2500, 600);
     assert_eq!(r.high_yield_calls, 0);
+}
+
+#[test]
+fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
+    let calls = vec![
+        mk_call(100, "session_bootstrap", true, 2_000),
+        mk_call(112, "memory_get", true, 500),
+        mk_call(200, "memory_save", false, 100),
+        mk_call(205, "memory_save", false, 100),
+        mk_call(215, "memory_save", true, 500),
+        mk_call(300, "plan_update", true, 500),
+        mk_call(400, "session_finalize", true, 500),
+    ];
+    let report = compute_practical_workflow_scorecard(&calls, 86_400, 600, 1_000);
+
+    assert_eq!(report.total_calls, 7);
+    assert_eq!(report.successful_calls, 5);
+    assert_eq!(report.failed_calls, 2);
+    assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.excluded_hook_bootstraps, 0);
+    assert_eq!(report.continuation.continuation_candidate_bootstraps, 1);
+    assert_eq!(report.continuation.attributed_bootstrap_calls, 1);
+    assert_eq!(report.continuation.legacy_unattributed_bootstraps, 0);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.right_censored_bootstraps, 0);
+    assert_eq!(report.continuation.bootstraps_with_followup, 1);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 0);
+    assert_eq!(report.continuation.followup_rate, Some(1.0));
+    assert_eq!(report.continuation.median_followup_secs, Some(12));
+    assert_eq!(report.completion.finalize_signals, 1);
+    assert_eq!(report.completion.plan_update_signals, 1);
+    assert_eq!(report.recovery.failures_followed_by_success, 2);
+    assert_eq!(report.recovery.repeated_failure_loops, 1);
+    assert_eq!(report.coordination.calls, 3);
+    assert_eq!(report.coordination.memory_saves, 3);
+    assert_eq!(report.coordination.ratio, Some(3.0 / 7.0));
+    assert!(!report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("two in five")));
+    assert_eq!(report.operator_burden.instrumentation_status, "unavailable");
+    assert_eq!(report.operator_burden.repeated_authorization_prompts, None);
+    assert_eq!(report.operator_burden.manual_interventions, None);
+}
+
+#[test]
+fn practical_scorecard_flags_coordination_majority() {
+    let mut calls = Vec::new();
+    for ts in 0..6 {
+        calls.push(mk_call(ts, "forum_read", true, 500));
+    }
+    for ts in 6..11 {
+        calls.push(mk_call(ts, "forum_post", true, 200));
+    }
+    for ts in 11..15 {
+        calls.push(mk_call(ts, "memory_save", true, 300));
+    }
+    for ts in 15..18 {
+        calls.push(mk_call(ts, "capabilities", true, 500));
+    }
+    for ts in 18..20 {
+        calls.push(mk_call(ts, "memory_get", true, 500));
+    }
+
+    let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
+
+    assert_eq!(report.schema_version, 4);
+    assert_eq!(report.coordination.calls, 18);
+    assert_eq!(report.coordination.ratio, Some(0.9));
+    assert_eq!(report.coordination.forum_reads, 6);
+    assert_eq!(report.coordination.forum_posts, 5);
+    assert_eq!(report.coordination.memory_saves, 4);
+    assert_eq!(report.coordination.capability_checks, 3);
+    assert!(report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("two in five")));
+}
+
+#[test]
+fn practical_scorecard_keeps_missing_signals_explicit() {
+    let report = compute_practical_workflow_scorecard(&[], 3_600, 600, 1_000);
+    assert_eq!(report.continuation.followup_rate, None);
+    assert_eq!(report.continuation.median_followup_secs, None);
+    assert_eq!(report.completion.finalize_signals, 0);
+    assert_eq!(report.recovery.repeated_failure_loops, 0);
+    assert_eq!(report.coordination.calls, 0);
+    assert_eq!(report.coordination.ratio, None);
+    assert!(report.recommendations[0].contains("No bootstrap signal"));
+}
+
+#[test]
+fn practical_scorecard_excludes_right_censored_bootstraps_from_rate() {
+    let calls = vec![
+        mk_call(100, "session_bootstrap", true, 2_000),
+        mk_call(900, "session_bootstrap", true, 2_000),
+    ];
+    let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
+
+    assert_eq!(report.continuation.bootstrap_calls, 2);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.right_censored_bootstraps, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 0);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 1);
+    assert_eq!(report.continuation.followup_rate, Some(0.0));
+    assert!(report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("right-censored")));
+}
+
+#[test]
+fn practical_scorecard_requires_same_session_followup() {
+    let mut bootstrap = mk_call(100, "session_bootstrap", true, 2_000);
+    bootstrap.mcp_session_id = Some("session-a".into());
+    let mut other_session_call = mk_call(112, "memory_get", true, 500);
+    other_session_call.mcp_session_id = Some("session-b".into());
+    let report =
+        compute_practical_workflow_scorecard(&[bootstrap, other_session_call], 3_600, 600, 1_000);
+
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 0);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 1);
+    assert_eq!(report.continuation.followup_rate, Some(0.0));
+}
+
+#[test]
+fn practical_scorecard_orders_same_second_calls_by_row_id() {
+    let mut bootstrap = mk_call(100, "session_bootstrap", true, 2_000);
+    bootstrap.id = 10;
+    let mut followup = mk_call(100, "memory_get", true, 500);
+    followup.id = 11;
+    let report = compute_practical_workflow_scorecard(&[bootstrap, followup], 3_600, 30, 1_000);
+
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 1);
+    assert_eq!(report.continuation.followup_rate, Some(1.0));
+    assert_eq!(report.continuation.median_followup_secs, Some(0));
+}
+
+#[test]
+fn practical_scorecard_excludes_legacy_unattributed_bootstrap() {
+    let mut bootstrap = mk_call(100, "session_bootstrap", true, 2_000);
+    bootstrap.mcp_session_id = None;
+    let report = compute_practical_workflow_scorecard(&[bootstrap], 3_600, 600, 1_000);
+
+    assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.attributed_bootstrap_calls, 0);
+    assert_eq!(report.continuation.legacy_unattributed_bootstraps, 1);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 0);
+    assert_eq!(report.continuation.followup_rate, None);
+}
+
+#[test]
+fn practical_scorecard_excludes_noninteractive_hook_bootstrap_from_continuation() {
+    let mut hook = mk_call(100, "session_bootstrap", true, 2_000);
+    hook.source = Some("hook".into());
+    hook.mcp_session_id = Some("hook-process".into());
+    let codex = mk_call(200, "session_bootstrap", true, 2_000);
+    let followup = mk_call(212, "memory_get", true, 500);
+
+    let report = compute_practical_workflow_scorecard(
+        &[hook, codex, followup],
+        3_600,
+        600,
+        1_000,
+    );
+
+    assert_eq!(report.continuation.bootstrap_calls, 2);
+    assert_eq!(report.continuation.excluded_hook_bootstraps, 1);
+    assert_eq!(report.continuation.continuation_candidate_bootstraps, 1);
+    assert_eq!(report.continuation.attributed_bootstrap_calls, 1);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 1);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 0);
+    assert_eq!(report.continuation.followup_rate, Some(1.0));
 }
 
 #[tokio::test]

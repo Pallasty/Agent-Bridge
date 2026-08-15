@@ -1,0 +1,21 @@
+[
+  {
+    "speaker_id": "speaker_3c9aef950848fbb970ea",
+    "text": "雨声渐近，旧钟楼里只剩一线昏黄的灯光。",
+    "transition_after": "paragraph_break"
+  },
+  {
+    "speaker_id": "speaker_e6003d6d0222150b5ab3",
+    "text": "我们得马上离开。",
+    "transition_after": "speaker_turn"
+  },
+  {
+    "speaker_id": "speaker_54151648be8fd67718fc",
+    "text": "我听见钟声了。",
+    "transition_after": "paragraph_break"
+  },
+  {
+    "speaker_id": "speaker_3c9aef950848fbb970ea",
+    "text": "两人同时回头，尘封的钟摆动了起来。"
+  }
+]

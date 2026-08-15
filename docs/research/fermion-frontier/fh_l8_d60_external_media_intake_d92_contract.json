@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-EXTERNAL-MEDIA-INTAKE-D92-V1",
+  "baseline_commit": "3b695d2e1b127169f8f2bbb94a08949c258cc452",
+  "source_pins": {
+    "FH_L8_D60_D91R_DIRECT_KERNEL_ACCEPTANCE_ZH.md": "69e7d8e63d41321dad0d1cedb69a4a731b6f0faf92c9f9fd11fc2feb548b024c",
+    "fh_l8_d60_d91r_direct_kernel_acceptance_contract.json": "b5506aeeef53551e08c9b470ca97aca1b283e61ff920e8ae021b05d5e2efaf64",
+    "fh_l8_d60_d91r_direct_kernel_acceptance_result.json": "a3fa98be06e67379e3dd6ec6d26277b543ddbfbd1a52e5f2ae7a2862b3d99271",
+    "fh_l8_d60_d91r_direct_kernel_acceptance_receipt.json": "752a86d5fd93f4a7bb15acd907f1a25f0fb550df46415c2ee66d62919943d347"
+  },
+  "requirements": {
+    "minimum_disposable_media_bytes": 64000000000,
+    "minimum_backup_target_free_after_image_bytes": 20000000000,
+    "required_evidence": [
+      "stable_device_identity",
+      "disposable_or_data_disposition_receipt",
+      "backup_capacity_and_sha256",
+      "firmware_sd_boot_proof",
+      "rollback_boot_entry_proof"
+    ]
+  },
+  "observed_snapshot": {
+    "candidate_mmc": {"path": "/dev/mmcblk0", "bytes": 63864569856, "uuid": "17a6b72c-efcc-4445-b447-385e96a109a2", "mounted_at": "/run/media/pallasting/SD_F2FS"},
+    "other_removable_block_devices": [],
+    "eligible_disposable_media": [],
+    "eligible_backup_targets": [],
+    "stable_device_identity_evidence": true,
+    "disposable_or_data_disposition_receipt": false,
+    "backup_capacity_and_sha256": false,
+    "firmware_sd_boot_proof": false,
+    "rollback_boot_entry_proof": true
+  },
+  "authority": {
+    "observation_only": true,
+    "unmount_authorized": false,
+    "backup_write_authorized": false,
+    "partition_authorized": false,
+    "format_authorized": false,
+    "firmware_change_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

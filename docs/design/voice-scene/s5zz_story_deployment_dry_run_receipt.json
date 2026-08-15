@@ -1,0 +1,13 @@
+{
+  "schema": "agent_bridge.story_deployment_dry_run.v1",
+  "status": "story_deployment_dry_run_verified",
+  "source": {"commit": "f8112a72cd82f042b48517826a7f6a48d6930ac7", "origin_before_build": "f8112a72cd82f042b48517826a7f6a48d6930ac7", "origin_after_build": "f8112a72cd82f042b48517826a7f6a48d6930ac7", "origin_stable": true},
+  "candidate": {"path": "/home/pallasting/.cache/agent-bridge-story-deploy-dry-run-target/release/agent-bridge", "sha256": "b774565124fb4ba2194921172d89bcd1923e3d115aaffaa06d137518eb2a065b", "size_bytes": 76406104, "version": "agent-bridge 0.14.0 (v0.14.0-1278-gf8112a72; f8112a72cd82)", "native_executable": true, "story_marker": true, "current_feature_markers_preserved": true, "feature_marker_count": 9},
+  "profile_probe": {"standard": {"tool_count": 108, "story_visible": false}, "all": {"tool_count": 250, "story_visible": true}},
+  "installation": {"binary_path": "/home/pallasting/.local/bin/agent-bridge.real", "sha256_before": "762c27bee788045dc23681881e1011be8722d9696b2205068a75b2a7c0c045ed", "sha256_after": "762c27bee788045dc23681881e1011be8722d9696b2205068a75b2a7c0c045ed", "size_bytes_before": 76623480, "size_bytes_after": 76623480, "mtime_epoch_before": 1785573933, "mtime_epoch_after": 1785573933, "inode_before": 461377, "inode_after": 461377, "source": "5a02c8fdeccc", "story_marker": false},
+  "adapter": {"repository_sha256": "7372ae3317c790cd099e67874205c631c3053ede35a278511f565ed9becae241", "installed_sha256": "7372ae3317c790cd099e67874205c631c3053ede35a278511f565ed9becae241", "already_matched": true},
+  "rollback_plan": {"binary_backup_pattern": "/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-f8112a7-<timestamp>", "adapter_backup_pattern": "/home/pallasting/.local/share/ab-tts/audio_embody.py.bak-deploy-<timestamp>", "wrapper_path": "/home/pallasting/.local/bin/agent-bridge", "wrapper_left_untouched": true},
+  "decision": {"dry_run_passed": true, "candidate_deployment_eligible": true, "deployment_authorized": false},
+  "runtime_effects": {"built_release_candidate": true, "backed_up_installed_files": false, "deployed_binary": false, "deployed_adapter": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false, "persistent_mcp_processes_before": 7, "persistent_mcp_processes_after": 7},
+  "next_gate": "story_guarded_deployment_authorization"
+}

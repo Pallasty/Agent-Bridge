@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story_rust_source_ingest.v1.json",
+  "title": "Agent-Bridge Rust story source ingest parity receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "evidence", "parity", "negative_controls", "scope", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_rust_source_ingest.v1"},
+    "status": {"const": "rust_story_source_ingest_parity_verified"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust_module_path", "rust_module_sha256", "rust_test_path", "rust_test_sha256", "python_oracle_path", "python_oracle_sha256", "fixture_path", "fixture_sha256", "fixture_byte_length", "fixture_char_length"],
+      "properties": {
+        "rust_module_path": {"type": "string", "minLength": 1},
+        "rust_module_sha256": {"$ref": "#/$defs/sha256"},
+        "rust_test_path": {"type": "string", "minLength": 1},
+        "rust_test_sha256": {"$ref": "#/$defs/sha256"},
+        "python_oracle_path": {"type": "string", "minLength": 1},
+        "python_oracle_sha256": {"$ref": "#/$defs/sha256"},
+        "fixture_path": {"type": "string", "minLength": 1},
+        "fixture_sha256": {"$ref": "#/$defs/sha256"},
+        "fixture_byte_length": {"const": 232},
+        "fixture_char_length": {"const": 88}
+      }
+    },
+    "parity": {"type": "object", "minProperties": 6, "additionalProperties": {"const": true}},
+    "negative_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["missing_chapter_rejected", "non_utf8_rejected"],
+      "properties": {
+        "missing_chapter_rejected": {"const": true},
+        "non_utf8_rejected": {"const": true}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module_exported", "mcp_registered", "voice_plan_implemented", "full_preflight_implemented"],
+      "properties": {
+        "module_exported": {"const": false},
+        "mcp_registered": {"const": false},
+        "voice_plan_implemented": {"const": false},
+        "full_preflight_implemented": {"const": false}
+      }
+    },
+    "runtime_effects": {"type": "object", "minProperties": 1, "additionalProperties": {"const": false}},
+    "next_gate": {"const": "rust_story_voice_plan_parity"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

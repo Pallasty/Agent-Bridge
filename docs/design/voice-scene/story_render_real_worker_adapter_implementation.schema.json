@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_real_worker_adapter_implementation.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "decision",
+    "implemented_at",
+    "baseline",
+    "source_evidence",
+    "implementation",
+    "response_policy",
+    "current_real_path",
+    "verification",
+    "blockers",
+    "authority",
+    "runtime_effects",
+    "claims",
+    "nonclaims",
+    "receipt_sha256",
+    "next_gate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.story_render_real_worker_adapter_implementation.v1"
+    },
+    "status": {
+      "const": "story_render_real_worker_adapter_implemented"
+    },
+    "decision": {
+      "const": "one_shot_worker_adapter_implemented_real_render_fail_closed_pending_identity_package_and_contract_convergence"
+    },
+    "implemented_at": {"const": "2026-08-02"},
+    "baseline": {
+      "type": "object",
+      "required": ["commit", "s636_review"],
+      "properties": {
+        "commit": {
+          "const": "b019670bd28903533923683c1888389850ad4a74"
+        },
+        "s636_review": {
+          "type": "object",
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {
+              "const": "docs/design/voice-scene/s636_story_render_guardian_runtime_adoption_review.json"
+            },
+            "sha256": {
+              "const": "ab41ad9f687e847d9cc70a5e8619cb65fa547b6ed67895b8bf84216ffad2acdb"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "source_evidence": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/source_file"}
+    },
+    "implementation": {
+      "const": {
+        "entrypoint": "scripts/story_render_one_shot_worker.py",
+        "protocol": "agent_bridge.story-render-worker.v1",
+        "stdin_read": "single_read_at_maximum_plus_one",
+        "stdin_max_bytes": 65536,
+        "stdout_write": "exactly_one_bounded_json_document",
+        "stdout_max_bytes": 65536,
+        "stderr_policy": "silent_no_private_diagnostics",
+        "shell": false,
+        "subprocess_spawned_by_worker": false,
+        "dependency_injection": "process_request_execute_callable",
+        "import_time_key_or_model_access": false,
+        "caller_supplied_text_allowed": false,
+        "caller_supplied_path_allowed": false,
+        "fixed_fixture_request_builder": true,
+        "fixed_artifact_sha256_pinning": true,
+        "installed_key_composition_scope": "execute_real_only_after_contract_compatibility",
+        "bounded_executor_scope": "execute_real_only_after_installed_preparation",
+        "nonce_before_output_in_existing_executor": true
+      }
+    },
+    "response_policy": {
+      "const": {
+        "success_exact_fields": [
+          "protocol",
+          "request_id",
+          "status",
+          "render_id",
+          "segment_count",
+          "assembly",
+          "playback_authorized",
+          "memory_authorized"
+        ],
+        "assembly_exact_fields": [
+          "sha256",
+          "sample_rate_hz",
+          "channels",
+          "frames",
+          "duration_seconds"
+        ],
+        "private_receipt_required": true,
+        "forbidden_effects_rejected": [
+          "played_audio",
+          "recorded_audio",
+          "wrote_cache",
+          "wrote_memory"
+        ],
+        "authorization_id_projected": false,
+        "absolute_path_projected": false,
+        "traceback_projected": false,
+        "unknown_request_uses_zero_sentinel": true,
+        "unknown_internal_error_code_degrades_to": "internal_failure"
+      }
+    },
+    "current_real_path": {
+      "const": {
+        "protocol_authorization_contract_sha256": "be4bfc12d9adeda14b8d20048b91baaaf903f155a3fca5bd3413b2b649f7334d",
+        "execution_contract_sha256": "24edc82e885c7f8e5a934019e78530f0d70a482e15ec04c52824395fef1e0fe8",
+        "protocol_output_root": "/home/pallasting/.agent-bridge-secure/story-render/outputs",
+        "execution_output_root": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime",
+        "contracts_compatible": false,
+        "failure_code": "custody_rejected",
+        "failure_before_installed_key_composition": true,
+        "failure_before_model_or_output_access": true,
+        "runtime_adoption_ready": false
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": [
+        "behavior_command",
+        "behavior_tests",
+        "behavior_passed",
+        "behavior_failed",
+        "red_green_observed",
+        "real_subprocess"
+      ],
+      "properties": {
+        "behavior_command": {"type": "string", "minLength": 1},
+        "behavior_tests": {"const": 10},
+        "behavior_passed": {"const": 10},
+        "behavior_failed": {"const": 0},
+        "red_green_observed": {"const": true},
+        "real_subprocess": {
+          "const": {
+            "environment": "env_clear_equivalent_fixed_locale_no_user_site_no_bytecode",
+            "exit_code": 0,
+            "stdout_documents": 1,
+            "response_code": "custody_rejected",
+            "stderr_bytes": 0
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "blockers": {
+      "const": {
+        "B1_REAL_WORKER_ENTRYPOINT": "closed",
+        "B2_GUARDIAN_PRODUCT_ENTRYPOINT": "open",
+        "B3_EXECUTABLE_IDENTITY_TOCTOU": "open",
+        "B4_IMMUTABLE_PACKAGE_AND_PYTHON": "open",
+        "B5_SECURE_OUTPUT_ROOT": "open",
+        "B6_OWNER_AUTHORIZATION_BROKER": "open",
+        "B7_RENDER_MCP_SURFACE": "open",
+        "B8_DEPLOYED_BINARY_AND_INSTALL_TRUST": "open"
+      }
+    },
+    "authority": {
+      "type": "object",
+      "minProperties": 9,
+      "additionalProperties": {"const": false}
+    },
+    "runtime_effects": {
+      "const": {
+        "worker_subprocess_protocol_tested": true,
+        "installed_key_read": false,
+        "nonce_consumed": false,
+        "model_session_created": false,
+        "model_graph_executed": false,
+        "output_directory_created": false,
+        "audio_written": false,
+        "audio_played": false,
+        "memory_written": false,
+        "mcp_registered": false,
+        "runtime_configuration_modified": false,
+        "binary_deployed": false,
+        "network_accessed_by_story_runtime": false
+      }
+    },
+    "claims": {
+      "const": {
+        "one_shot_worker_entrypoint_implemented": true,
+        "strict_process_protocol_verified": true,
+        "synthetic_success_projection_verified": true,
+        "private_failure_redaction_verified": true,
+        "current_real_path_fails_before_key_read": true,
+        "B1_real_worker_entrypoint_closed": true,
+        "real_render_executable": false,
+        "runtime_adoption_ready": false,
+        "mcp_registered": false,
+        "deployed": false
+      }
+    },
+    "nonclaims": {"$ref": "#/$defs/nonempty_strings"},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "next_gate": {
+      "const": {
+        "id": "S638",
+        "name": "story_render_artifact_identity_and_python_package",
+        "authority": "source_and_isolated_package_tests",
+        "runtime_enablement": "not_authorized"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_file": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "nonempty_strings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

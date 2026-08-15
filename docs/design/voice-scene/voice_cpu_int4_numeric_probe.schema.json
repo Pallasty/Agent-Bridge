@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_cpu_int4_numeric_probe.schema.json",
+  "title": "Agent-Bridge CPU INT4 numeric probe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "snapshot",
+    "model",
+    "runtime",
+    "probe",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.voice_cpu_int4_numeric_probe.v1"},
+    "status": {"enum": ["blocked", "numeric_probe_passed_no_audio"]},
+    "snapshot": {"type": "string", "minLength": 1},
+    "model": {"const": "cpu_int4/codec_embed.onnx"},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "executable", "provider"],
+      "properties": {
+        "name": {"const": "onnxruntime"},
+        "version": {"type": "string", "minLength": 1},
+        "executable": {"type": "string", "minLength": 1},
+        "provider": {"const": "CPUExecutionProvider"}
+      }
+    },
+    "probe": {
+      "type": ["object", "null"]
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "created_inference_session",
+        "executed_graphs",
+        "execution_count",
+        "generated_tokens",
+        "rendered_audio",
+        "played_audio",
+        "used_gpu",
+        "imported_community_python"
+      ],
+      "properties": {
+        "created_inference_session": {"type": "boolean"},
+        "executed_graphs": {"type": "boolean"},
+        "execution_count": {"type": "integer", "minimum": 0, "maximum": 2},
+        "generated_tokens": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "used_gpu": {"const": false},
+        "imported_community_python": {"const": false}
+      }
+    }
+  }
+}

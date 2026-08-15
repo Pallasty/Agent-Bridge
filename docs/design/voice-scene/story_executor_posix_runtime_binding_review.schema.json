@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_posix_runtime_binding_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "boundaries", "blockers", "implementation_present", "installation_authorized", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_posix_runtime_binding_review.v1"},
+    "status": {"const": "story_executor_posix_runtime_binding_reviewable"},
+    "decision": {"const": "posix_binding_and_fd_key_loader_accepted_installation_blocked"},
+    "evidence": {"type": "object"}, "boundaries": {"type": "object", "minProperties": 14, "additionalProperties": {"const": true}},
+    "blockers": {"const": ["secure_configuration_not_installed", "installed_key_not_composed_into_preparation", "executor_invocation_not_authorized"]},
+    "implementation_present": {"const": true}, "installation_authorized": {"const": false}, "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 12, "additionalProperties": {"const": false}},
+    "review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"posix_nonce_binding_implemented": true, "fd_authority_key_loader_implemented": true, "legacy_fuse_active_binding_removed": true, "secure_configuration_installed": false, "installed_key_loaded": false, "executor_invoked": false}},
+    "next_gate": {"const": "story_executor_installed_key_composition_implementation_review"}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "agent_bridge.omnivoice_human_review_policy.v0",
+  "metrics": ["intelligibility", "naturalness", "pronunciation", "artifacts", "overall"],
+  "candidate_minimums": {
+    "intelligibility": 4,
+    "naturalness": 3,
+    "pronunciation": 4,
+    "artifacts": 3,
+    "overall": 3
+  },
+  "maximum_candidate_drop_vs_qwen": 1,
+  "packets": [
+    {
+      "id": "basic",
+      "answer_key": "docs/reports/tts-comparison/replacement-gate-2026-08-15/perceptual-review/private/answer-key.json",
+      "samples": ["english_A", "english_B", "chinese_A", "chinese_B"]
+    },
+    {
+      "id": "expanded",
+      "answer_key": "docs/reports/tts-comparison/expanded-corpus-2026-08-15/perceptual-review/private/answer-key.json",
+      "samples": ["numbers_A", "numbers_B", "mixed_A", "mixed_B", "operational_A", "operational_B"]
+    }
+  ],
+  "clone_identity_minimum": 4,
+  "clone_naturalness_minimum": 3,
+  "long_chinese_key_phrase_required": true
+}

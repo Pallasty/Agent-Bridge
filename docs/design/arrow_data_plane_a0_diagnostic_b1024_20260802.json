@@ -1,0 +1,609 @@
+{
+  "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.suite.v0",
+  "config": {
+    "documents": 100000,
+    "batch_rows": 1024
+  },
+  "trials_per_mode": 3,
+  "evidence_class": "diagnostic",
+  "build": {
+    "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+    "tree_clean": true,
+    "profile": "release",
+    "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+    "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+    "target": "x86_64-unknown-linux-gnu",
+    "opt_level": "3",
+    "debug_assertions": false,
+    "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "profile_overrides_present": false,
+    "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+  },
+  "runtime_source": {
+    "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+    "tree_clean": true,
+    "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+    "tracked_source_sha256": "NOT_CHECKED_DIAGNOSTIC",
+    "build_matches_runtime": false
+  },
+  "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+  "post_run_identity_stable": false,
+  "fresh_process_per_trial": true,
+  "interleaved_mode_order": true,
+  "environment": {
+    "target_os": "linux",
+    "target_arch": "x86_64",
+    "kernel_release": "7.0.0-27-generic",
+    "cpu_model": "Intel(R) Xeon(R) Gold 6138 CPU @ 2.00GHz",
+    "logical_cpus": 80,
+    "total_memory_kib": 588894720
+  },
+  "receipts": [
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "full_vec",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1,
+      "max_accumulator_rows": 1400000,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 1400000,
+      "declared_live_row_bound": 1400000,
+      "elapsed_ns": 7239101926,
+      "peak_rss_kib": 387948,
+      "arrow_record_batches": null,
+      "max_arrow_batch_rows": null,
+      "arrow_schema_fingerprints": null,
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 0,
+      "order_position": 0,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "native_chunk",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1368,
+      "max_accumulator_rows": 1024,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 1034,
+      "declared_live_row_bound": 1041,
+      "elapsed_ns": 4042679050,
+      "peak_rss_kib": 3716,
+      "arrow_record_batches": null,
+      "max_arrow_batch_rows": null,
+      "arrow_schema_fingerprints": null,
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 0,
+      "order_position": 1,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "arrow_record_batch",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1368,
+      "max_accumulator_rows": 1024,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 2058,
+      "declared_live_row_bound": 2065,
+      "elapsed_ns": 4176747342,
+      "peak_rss_kib": 3848,
+      "arrow_record_batches": {
+        "symbols": 1368,
+        "imports": 1368,
+        "calls": 1368
+      },
+      "max_arrow_batch_rows": 496,
+      "arrow_schema_fingerprints": {
+        "symbols_sha256": "d2e58dd3b51cbc07961f8030047f714da4d7c188bbcdfd1aa87ee37a1b70daca",
+        "imports_sha256": "14edf86e7ab3fa80069a8e80a37a53ef4936311fe1a66c826e386029220f093c",
+        "calls_sha256": "2177a1bcf398af49659becb03d682d2b2fa869ff8524cdd1faf19e570eda70e4",
+        "combined_sha256": "76db54f5f3a2938c88aa6a82b378503d5919293a08d24c4ff5e7297e78f84cda"
+      },
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 0,
+      "order_position": 2,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "native_chunk",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1368,
+      "max_accumulator_rows": 1024,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 1034,
+      "declared_live_row_bound": 1041,
+      "elapsed_ns": 4099677293,
+      "peak_rss_kib": 3604,
+      "arrow_record_batches": null,
+      "max_arrow_batch_rows": null,
+      "arrow_schema_fingerprints": null,
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 1,
+      "order_position": 0,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "arrow_record_batch",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1368,
+      "max_accumulator_rows": 1024,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 2058,
+      "declared_live_row_bound": 2065,
+      "elapsed_ns": 4050154428,
+      "peak_rss_kib": 3856,
+      "arrow_record_batches": {
+        "symbols": 1368,
+        "imports": 1368,
+        "calls": 1368
+      },
+      "max_arrow_batch_rows": 496,
+      "arrow_schema_fingerprints": {
+        "symbols_sha256": "d2e58dd3b51cbc07961f8030047f714da4d7c188bbcdfd1aa87ee37a1b70daca",
+        "imports_sha256": "14edf86e7ab3fa80069a8e80a37a53ef4936311fe1a66c826e386029220f093c",
+        "calls_sha256": "2177a1bcf398af49659becb03d682d2b2fa869ff8524cdd1faf19e570eda70e4",
+        "combined_sha256": "76db54f5f3a2938c88aa6a82b378503d5919293a08d24c4ff5e7297e78f84cda"
+      },
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 1,
+      "order_position": 1,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "full_vec",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1,
+      "max_accumulator_rows": 1400000,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 1400000,
+      "declared_live_row_bound": 1400000,
+      "elapsed_ns": 6997139955,
+      "peak_rss_kib": 387876,
+      "arrow_record_batches": null,
+      "max_arrow_batch_rows": null,
+      "arrow_schema_fingerprints": null,
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 1,
+      "order_position": 2,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "arrow_record_batch",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1368,
+      "max_accumulator_rows": 1024,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 2058,
+      "declared_live_row_bound": 2065,
+      "elapsed_ns": 4050969304,
+      "peak_rss_kib": 3860,
+      "arrow_record_batches": {
+        "symbols": 1368,
+        "imports": 1368,
+        "calls": 1368
+      },
+      "max_arrow_batch_rows": 496,
+      "arrow_schema_fingerprints": {
+        "symbols_sha256": "d2e58dd3b51cbc07961f8030047f714da4d7c188bbcdfd1aa87ee37a1b70daca",
+        "imports_sha256": "14edf86e7ab3fa80069a8e80a37a53ef4936311fe1a66c826e386029220f093c",
+        "calls_sha256": "2177a1bcf398af49659becb03d682d2b2fa869ff8524cdd1faf19e570eda70e4",
+        "combined_sha256": "76db54f5f3a2938c88aa6a82b378503d5919293a08d24c4ff5e7297e78f84cda"
+      },
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 2,
+      "order_position": 0,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "full_vec",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1,
+      "max_accumulator_rows": 1400000,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 1400000,
+      "declared_live_row_bound": 1400000,
+      "elapsed_ns": 7199029960,
+      "peak_rss_kib": 387248,
+      "arrow_record_batches": null,
+      "max_arrow_batch_rows": null,
+      "arrow_schema_fingerprints": null,
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 2,
+      "order_position": 1,
+      "sqlite_accessed": false,
+      "production_write": false
+    },
+    {
+      "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.evaluation.v0",
+      "mode": "native_chunk",
+      "workload": {
+        "schema": "agent_bridge.codebase_index.frozen_workload.v0",
+        "generator_revision": "frozen-source-templates-v0",
+        "documents": 100000,
+        "template_count": 4,
+        "manifest_sha256": "91c2ea6f081ede4d31c08a03f7365e4b93b5f8f70f1e1a001f1f7d5099405fa8"
+      },
+      "semantic": {
+        "schema": "agent_bridge.codebase_index.semantic_digest.v0",
+        "counts": {
+          "symbols": 500000,
+          "imports": 225000,
+          "calls": 675000
+        },
+        "symbols_sha256": "7084c185e49cae300f17e937cbf4947af65564fef6059ab45641f363c45aedcb",
+        "imports_sha256": "543f4aa62adf2e623703154ee8aec3743c7f6fa3740f753e8c02f3ca1851f127",
+        "calls_sha256": "82a2cd66302c6e090bd848cf5ea8e9b673e7029729f77b4e3e5998b7f808763f",
+        "combined_sha256": "c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099"
+      },
+      "batch_rows": 1024,
+      "emitted_flushes": 1368,
+      "max_accumulator_rows": 1024,
+      "max_extractor_output_rows": 18,
+      "max_estimated_live_rows": 1034,
+      "declared_live_row_bound": 1041,
+      "elapsed_ns": 3875966951,
+      "peak_rss_kib": 3668,
+      "arrow_record_batches": null,
+      "max_arrow_batch_rows": null,
+      "arrow_schema_fingerprints": null,
+      "build": {
+        "revision": "229a88436f9928919343f4bbfffe382f6d8b3127",
+        "tree_clean": true,
+        "profile": "release",
+        "cargo_lock_sha256": "c7cdda913655b2aa29320184ab82554da2dbdd496cf858ac1ed37dc706154811",
+        "tracked_source_sha256": "b341acf4ccd807a759bdbe24313e80d984ef7aaaadfa3aef12e4b8bc83fe2cfe",
+        "target": "x86_64-unknown-linux-gnu",
+        "opt_level": "3",
+        "debug_assertions": false,
+        "encoded_rustflags_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "profile_overrides_present": false,
+        "rustc_version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "executable_sha256": "6dc55248554aeee3a35b3bc2e50926b99097d1d97e7091582a12f7ab674632c2",
+      "trial_index": 2,
+      "order_position": 2,
+      "sqlite_accessed": false,
+      "production_write": false
+    }
+  ],
+  "assessment": {
+    "schema": "agent_bridge.codebase_index.arrow_data_plane_a0.assessment.v0",
+    "evidence_class": "diagnostic",
+    "thresholds": {
+      "min_rss_reduction_basis_points": 3000,
+      "max_elapsed_regression_basis_points": 1000
+    },
+    "semantic_equivalent": true,
+    "workload_equivalent": true,
+    "batch_config_equivalent": true,
+    "measurement_complete": true,
+    "receipt_contracts_valid": true,
+    "build_consistent": true,
+    "artifact_consistent": true,
+    "source_revision_bound": false,
+    "executable_sha256_bound": true,
+    "runtime_identity_stable": false,
+    "canonical_config": false,
+    "canonical_trial_plan": false,
+    "canonical_thresholds": true,
+    "no_authority_side_effects": true,
+    "evidence_complete": false,
+    "full_vec": {
+      "mode": "full_vec",
+      "trials": 3,
+      "median_elapsed_ns": 7199029960,
+      "median_peak_rss_kib": 387876,
+      "rss_reduction_basis_points_vs_full_vec": 0,
+      "elapsed_regression_basis_points_vs_full_vec": 0,
+      "bound_respected": true,
+      "paired_gate_passes": 0,
+      "required_paired_gate_passes": 0,
+      "stable": true,
+      "resource_gates_passed": false,
+      "eligible": false
+    },
+    "native_chunk": {
+      "mode": "native_chunk",
+      "trials": 3,
+      "median_elapsed_ns": 4042679050,
+      "median_peak_rss_kib": 3668,
+      "rss_reduction_basis_points_vs_full_vec": 9905,
+      "elapsed_regression_basis_points_vs_full_vec": -4384,
+      "bound_respected": true,
+      "paired_gate_passes": 3,
+      "required_paired_gate_passes": 1,
+      "stable": true,
+      "resource_gates_passed": true,
+      "eligible": false
+    },
+    "arrow_record_batch": {
+      "mode": "arrow_record_batch",
+      "trials": 3,
+      "median_elapsed_ns": 4050969304,
+      "median_peak_rss_kib": 3856,
+      "rss_reduction_basis_points_vs_full_vec": 9900,
+      "elapsed_regression_basis_points_vs_full_vec": -4372,
+      "bound_respected": true,
+      "paired_gate_passes": 3,
+      "required_paired_gate_passes": 1,
+      "stable": true,
+      "resource_gates_passed": true,
+      "eligible": false
+    },
+    "arrow_incremental_value": false,
+    "arrow_vs_native_paired_value_passes": 0,
+    "required_arrow_vs_native_value_passes": 1,
+    "tradeoff_indeterminate": false,
+    "recommendation": "no_candidate",
+    "status": "diagnostic_only"
+  }
+}

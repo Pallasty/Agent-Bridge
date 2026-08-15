@@ -1,0 +1,12 @@
+{
+  "schema": "agent_bridge.story_fixture_mcp_preflight.v1",
+  "status": "story_fixture_mcp_preflight_verified",
+  "runtime": {"binary_sha256": "5bd92a9d27629a16ef338ecbf4eb5e157ce1f86d8035f6a9c20d24cb52d921b5", "binary_source": "82fc5f169438", "toolset": "codex-voice", "profile": "essential", "tool_name": "story_command_preflight", "mcp_error": false},
+  "request": {"source_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures/story_s1.md", "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566", "start": {"kind": "chapter", "chapter": 2}, "dry_run": true},
+  "result": {"schema": "agent_bridge.story_command_integration_preflight.v1", "status": "story_command_integration_preflight_reviewable", "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb", "execution_authorized": false, "continuity_receipt_status": "owner_accepted"},
+  "selection": {"selected_segments": 3, "excluded_earlier_segments": 4, "excluded_later_segments": 0, "assembly_gap_seconds": [1.0, 1.0], "preceding_scene_gap_seconds": 2.2},
+  "render_plan": {"speakers": ["Vivian", "Serena", "Vivian"], "texts": ["苏岚回答。", "我听见钟声了。", "苏岚打开了旧木门。"], "cache_keys": ["cf77113811bd2477b2f848a7c78cf5d641e1e8c1834b6132b9f565f112700a2a", "cfdca9f57fb8a22979d40ca50e8391cadd69cca0074844ad22c522942e2d7ca0", "8bc3f607cd52a34760241771a5e8142a2799f1a59cdc6074f7cd3b30629be1d9"], "distinct_cache_keys": true},
+  "evidence": {"voice_plan_file_sha256": "b2cd6263bb8dba14b6e681be346f65424dad557b504ffde127e59a20dbb7984e", "mapping_file_sha256": "0db9640b8509faeff9e13048b29c3769d9d450aa2eeb035270581040e247a86f", "role_acceptance_file_sha256": "09c7eb584e7d925782d8b62c7f686f5b9ff01f907023e059e89f9a623393f72d", "continuity_file_sha256": "d3d4f41e1a851281a1420329e518399b43907bf6abc3b2493f36df597074b969", "unchanged_after_call": true},
+  "runtime_effects": {"loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false, "wrote_cache": false, "persistent_mcp_processes_after": 9},
+  "next_gate": "story_fixture_bounded_render_authorization"
+}

@@ -1,0 +1,82 @@
+{
+  "schema": "agent_bridge.qwen3_tts.quantization_q0_asset_manifest.v0",
+  "status": "Q0_COMPLETE_Q1_STATIC_VALIDATED_DEFAULT_OFF",
+  "model": {
+    "family": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "model_type": "qwen3_tts",
+    "tts_model_type": "custom_voice",
+    "snapshot_name": "master",
+    "assets": [
+      {
+        "relative_path": "model.safetensors",
+        "partition": "talker",
+        "bytes": 3833402552,
+        "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+        "tensor_count": 404,
+        "dtype_counts": {
+          "BF16": 404
+        }
+      },
+      {
+        "relative_path": "speech_tokenizer/model.safetensors",
+        "partition": "speech_tokenizer_codec",
+        "bytes": 682293092,
+        "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+        "tensor_count": 496,
+        "dtype_counts": {
+          "F32": 496
+        }
+      }
+    ]
+  },
+  "baseline_worker": {
+    "probe_status": "healthy_identity_only",
+    "protocol": "ab.tts.worker.v1",
+    "backend": "qwen3",
+    "engine": "qwen3-pytorch",
+    "state": "ready",
+    "device": "mps",
+    "dtype": "float16",
+    "capabilities": [
+      "custom_voice",
+      "instruct",
+      "zh"
+    ],
+    "fresh_synthesis_or_playback_repeated_by_q0_q1": false
+  },
+  "corpus": {
+    "relative_path": "scripts/eval/fixtures/qwen3_tts_quantization_corpus_v0.json",
+    "sha256": "9193f6e5359fcf3ecd9c0a5a2726886908ffa3a266ab7597f283629e710a7afd",
+    "case_count": 16,
+    "status": "PREREGISTERED_NOT_EXECUTED",
+    "threshold_status": "PENDING_FP16_BASELINE_BEFORE_ANY_CANDIDATE"
+  },
+  "static_diagnostic": {
+    "schema": "agent_bridge.qwen3_tts.quant_static_report.v0",
+    "sample_strategy": "deterministic_even_spacing_plus_real_contiguous_groups",
+    "sample_size": 8192,
+    "min_elements": 4096,
+    "entropy_bins": [
+      64,
+      256,
+      1024
+    ],
+    "group_sizes": [
+      32,
+      64,
+      128,
+      256
+    ],
+    "talker_static_tensor_count": 267,
+    "codec_static_tensor_count": 213,
+    "repeat_reports_byte_identical": true,
+    "repeat_report_sha256": "6999f67da3b3ac6319cdc68049cba9e5ac78e5f98dd252615877db7354178e93"
+  },
+  "authority": {
+    "model_writer_present": false,
+    "runtime_wiring_present": false,
+    "candidate_model_created": false,
+    "current_worker_changed": false,
+    "q2_or_later_authorized": false
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "schema": "agent_bridge.story_coordinated_wiring_review.v1",
+  "status": "story_coordinated_wiring_review_complete",
+  "decision": {
+    "selected": "defer_wiring_until_shared_surfaces_clean",
+    "minimal_patch_contract_admitted": true,
+    "wiring_implementation_admitted": false
+  },
+  "evidence": {
+    "s5zq_adapter_verified": true,
+    "registry_name_collision": false,
+    "story_module_currently_exported": false,
+    "adapter_module_currently_declared": false,
+    "lib_sha256": "7fb33d55d9c91b74aec1dc288319f3ec2a3af95912764801df11ac22db6b0b81",
+    "registry_sha256": "8dd22fac1e38ce4011a005f262145df02060694f5eb18fbf9b06788413efecd6",
+    "cargo_sha256": "78737bfe059a95d836af460298afe8cd92cdba49ae2885488d5e6a22417bbdef",
+    "adapter_sha256": "7fdd0e1534b1ebddf07289188d7769b01aa5d2363ec4b7f88e006abc241ceedd",
+    "story_contract_sha256": "ccfa045db403441cf06a2f88699dc773fe89b6a6ffddd42d89fc142d61e88598",
+    "adapter_receipt_sha256": "c2d3f92d031271d7db31e98cfbef3da791a008a8003c19088fc3f11c697bd13b",
+    "active_cargo_processes_observed": 2
+  },
+  "overlap": {
+    "lib_worktree_overlap": true,
+    "registry_worktree_overlap": true,
+    "cargo_worktree_overlap": true
+  },
+  "blockers": [
+    "lib_module_tree_overlap_active",
+    "registry_worktree_overlap_active",
+    "cargo_manifest_overlap_active",
+    "shared_cargo_activity_active"
+  ],
+  "minimal_patch_contract": {
+    "module_tree_declaration": "pub(crate) mod story_contract;",
+    "registry_module_declaration": "mod story;",
+    "registry_imports": ["StoryCommandPreflightTool", "StoryMcpConfig"],
+    "tool_name": "story_command_preflight",
+    "tier": "Niche",
+    "activation_env": "AB_STORY_COMMAND_PREFLIGHT_ENABLE=1",
+    "invalid_enabled_config": "warn_and_leave_tool_unregistered",
+    "disabled_config": "leave_tool_unregistered_without_warning",
+    "eager_profile_exposure": false,
+    "cargo_manifest_change_required": false,
+    "required_tests": [
+      "disabled_tool_absent",
+      "invalid_enabled_config_tool_absent",
+      "complete_enabled_config_niche_visible",
+      "eager_profiles_tool_absent"
+    ]
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "modified_module_tree": false,
+    "modified_rust_registry": false,
+    "modified_cargo_manifest": false,
+    "registered_story_command": false,
+    "exposed_story_command": false,
+    "deployed": false,
+    "client_refreshed": false,
+    "loaded_model": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_memory": false
+  },
+  "next_gate": "clean_surface_story_wiring_readiness_recheck"
+}

@@ -295,6 +295,157 @@ fn git_output(cwd: &Path, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Read-only session-start Git orientation.  Returns `None` outside a Git
+/// worktree or when the checkout is the clean, up-to-date integration branch.
+/// It deliberately never fetches, switches branches, or mutates the worktree.
+pub fn session_git_currentness(cwd: &Path) -> Option<Value> {
+    let snap = collect_git_snapshot(cwd);
+    if !snap.is_repo {
+        return None;
+    }
+
+    let head = git_output(cwd, &["rev-parse", "HEAD"])?;
+    let head = head.trim().to_string();
+    let target_ref = git_output(
+        cwd,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .or_else(|| {
+        ["origin/master", "master", "origin/main", "main"]
+            .into_iter()
+            .find(|candidate| git_output(cwd, &["rev-parse", "--verify", candidate]).is_some())
+            .map(str::to_string)
+    })?;
+    let target_branch = target_ref
+        .strip_prefix("origin/")
+        .unwrap_or(&target_ref)
+        .to_string();
+    let counts = git_output(
+        cwd,
+        &[
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("HEAD...{target_ref}"),
+        ],
+    )?;
+    let mut fields = counts.split_whitespace();
+    let ahead = fields.next()?.parse::<u64>().ok()?;
+    let behind = fields.next()?.parse::<u64>().ok()?;
+    let branch = snap.active_branch.unwrap_or_else(|| "HEAD".to_string());
+    let detached = branch == "HEAD";
+    let clean = snap.clean.unwrap_or(false);
+    let on_integration_branch = branch == target_branch;
+
+    if clean && on_integration_branch && behind == 0 {
+        return None;
+    }
+
+    let mut warnings = Vec::new();
+    if detached {
+        warnings.push("detached_head");
+    } else if !on_integration_branch {
+        warnings.push("non_integration_branch");
+    }
+    if behind > 0 {
+        warnings.push("behind_integration_ref");
+    }
+    if !clean {
+        warnings.push("dirty_worktree");
+    }
+
+    let recovery_worktree = local_integration_recovery_worktree(cwd, &target_ref, &target_branch);
+
+    Some(json!({
+        "branch": branch,
+        "head": head,
+        "target_ref": target_ref,
+        "ahead": ahead,
+        "behind": behind,
+        "clean": clean,
+        "warnings": warnings,
+        "recovery_worktree": recovery_worktree,
+        "read_only": true,
+    }))
+}
+
+/// Find a conservative local place to resume integration work.  A candidate
+/// must be a different worktree on the integration branch, clean, and contain
+/// the locally known integration ref.  This intentionally uses local Git state
+/// only and never fetches or mutates either checkout.
+fn local_integration_recovery_worktree(
+    cwd: &Path,
+    target_ref: &str,
+    target_branch: &str,
+) -> Option<Value> {
+    let current_root = git_output(cwd, &["rev-parse", "--show-toplevel"])?;
+    let current_root = PathBuf::from(current_root.trim());
+    let listing = git_output(cwd, &["worktree", "list", "--porcelain"])?;
+    let wanted_branch = format!("refs/heads/{target_branch}");
+    let mut candidates = Vec::new();
+
+    for block in listing.split("\n\n") {
+        let mut path = None;
+        let mut head = None;
+        let mut branch = None;
+        for line in block.lines() {
+            if let Some(value) = line.strip_prefix("worktree ") {
+                path = Some(PathBuf::from(value));
+            } else if let Some(value) = line.strip_prefix("HEAD ") {
+                head = Some(value.to_string());
+            } else if let Some(value) = line.strip_prefix("branch ") {
+                branch = Some(value.to_string());
+            }
+        }
+        let (Some(path), Some(head), Some(branch)) = (path, head, branch) else {
+            continue;
+        };
+        if path == current_root || branch != wanted_branch {
+            continue;
+        }
+        let clean = git_output(&path, &["status", "--porcelain"])
+            .map(|out| out.trim().is_empty())
+            .unwrap_or(false);
+        if !clean {
+            continue;
+        }
+        let counts = git_output(
+            &path,
+            &[
+                "rev-list",
+                "--left-right",
+                "--count",
+                &format!("HEAD...{target_ref}"),
+            ],
+        )?;
+        let mut fields = counts.split_whitespace();
+        let ahead = fields.next()?.parse::<u64>().ok()?;
+        let behind = fields.next()?.parse::<u64>().ok()?;
+        if behind == 0 {
+            candidates.push((ahead, path, head));
+        }
+    }
+
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let (ahead, path, head) = candidates.into_iter().next()?;
+    Some(json!({
+        "path": path.display().to_string(),
+        "branch": target_branch,
+        "head": head,
+        "ahead": ahead,
+        "behind": 0,
+        "clean": true,
+        "read_only": true,
+    }))
+}
+
 // --- changes_digest ---
 
 /// `scope`: `working_tree` | `working` | `staged` | `last_commit` | `branch_vs_main`
@@ -985,8 +1136,97 @@ mod tests {
         assert_eq!(v["deletions"], 0);
     }
 
+    #[test]
+    fn session_git_currentness_is_quiet_on_clean_integration_branch() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+
+        assert!(session_git_currentness(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn session_git_currentness_warns_on_feature_branch_and_reports_divergence() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+        git_ok(tmp.path(), &["checkout", "-b", "feature"]);
+        write_file(tmp.path().join("feature.txt"), "feature\n");
+        git_ok(tmp.path(), &["add", "feature.txt"]);
+        git_ok(tmp.path(), &["commit", "-m", "feature"]);
+
+        let state = session_git_currentness(tmp.path()).expect("feature warning");
+        assert_eq!(state["branch"], "feature");
+        assert_eq!(state["target_ref"], "master");
+        assert_eq!(state["ahead"], 1);
+        assert_eq!(state["behind"], 0);
+        assert_eq!(state["read_only"], true);
+        assert!(state["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|w| w == "non_integration_branch"));
+    }
+
+    #[test]
+    fn session_git_currentness_suggests_clean_local_integration_worktree() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+        git_ok(tmp.path(), &["checkout", "-b", "feature"]);
+        let integration = tmp.path().join("integration");
+        git_ok(
+            tmp.path(),
+            &[
+                "worktree",
+                "add",
+                integration.to_str().expect("utf8 path"),
+                "master",
+            ],
+        );
+
+        let state = session_git_currentness(tmp.path()).expect("feature warning");
+        let recovery = &state["recovery_worktree"];
+        assert_eq!(recovery["path"], integration.display().to_string());
+        assert_eq!(recovery["branch"], "master");
+        assert_eq!(recovery["behind"], 0);
+        assert_eq!(recovery["clean"], true);
+        assert_eq!(recovery["read_only"], true);
+    }
+
+    #[test]
+    fn session_git_currentness_omits_dirty_integration_worktree() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+        git_ok(tmp.path(), &["checkout", "-b", "feature"]);
+        let integration = tmp.path().join("integration");
+        git_ok(
+            tmp.path(),
+            &[
+                "worktree",
+                "add",
+                integration.to_str().expect("utf8 path"),
+                "master",
+            ],
+        );
+        write_file(integration.join("untracked.txt"), "dirty\n");
+
+        let state = session_git_currentness(tmp.path()).expect("feature warning");
+        assert!(state["recovery_worktree"].is_null());
+    }
+
     fn init_git_repo(path: &Path) {
         git_ok(path, &["init", "-q"]);
+        git_ok(path, &["symbolic-ref", "HEAD", "refs/heads/master"]);
         git_ok(
             path,
             &["config", "user.email", "agent-bridge@example.invalid"],

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_existing_onnx_adoption_decision.schema.json",
+  "title": "Agent-Bridge existing ONNX adoption decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "active_lane", "reexport_lane", "snapshot",
+    "existing_onnx_evidence", "original_model", "runtime_gap", "paused_work",
+    "claims", "supply_chain_blockers_retained", "next_gate",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_existing_onnx_adoption_decision.v1"
+    },
+    "status": {"const": "existing_onnx_trial_selected"},
+    "active_lane": {"const": "community_cpu_int4"},
+    "reexport_lane": {"const": "paused_fallback_only"},
+    "snapshot": {"type": "string", "minLength": 1},
+    "existing_onnx_evidence": {"type": "object"},
+    "original_model": {"type": "object"},
+    "runtime_gap": {"type": "object"},
+    "paused_work": {"type": "object"},
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publisher_lineage_verified", "production_admitted",
+        "end_to_end_text_to_wav_verified", "mi50_verified",
+        "human_audibility_verified"
+      ],
+      "properties": {
+        "publisher_lineage_verified": {"const": false},
+        "production_admitted": {"const": false},
+        "end_to_end_text_to_wav_verified": {"const": false},
+        "mi50_verified": {"const": false},
+        "human_audibility_verified": {"const": false}
+      }
+    },
+    "supply_chain_blockers_retained": {
+      "type": "array", "items": {"type": "string"}, "uniqueItems": true
+    },
+    "next_gate": {
+      "const": "existing_onnx_minimal_runtime_and_bounded_text_to_wav_trial"
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "downloaded_files", "installed_packages", "loaded_original_model",
+        "executed_converter", "created_onnx", "executed_onnx_graphs",
+        "rendered_audio", "played_audio", "used_gpu"
+      ],
+      "properties": {
+        "downloaded_files": {"const": false},
+        "installed_packages": {"const": false},
+        "loaded_original_model": {"const": false},
+        "executed_converter": {"const": false},
+        "created_onnx": {"const": false},
+        "executed_onnx_graphs": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "used_gpu": {"const": false}
+      }
+    }
+  }
+}

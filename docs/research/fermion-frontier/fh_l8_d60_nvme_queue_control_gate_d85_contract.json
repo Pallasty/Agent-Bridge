@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-NVME-QUEUE-CONTROL-GATE-D85-V1",
+  "baseline_commit": "c39fcd841aadeaa16dfee5bb1a89a3b6939d289f",
+  "source_pins": {
+    "FH_L8_D60_MANAGED_IRQ_BOOT_PLAN_ZH.md": "9761909a1b932584614aac79e5b8e03be8d57a8e7332b0aa100ac8aef4f0b7bb",
+    "fh_l8_d60_managed_irq_reboot_outcome_d84_contract.json": "a5f664006130bdad4f6ce20813b3bca76a5969b726d367d40296ef614ceeca81",
+    "fh_l8_d60_managed_irq_reboot_outcome_d84_result.json": "35de1aac92b903c163697a29d5da87e25ecd2b9451bb769f569b711e0e5639fa"
+  },
+  "target": {
+    "cpu": 15,
+    "irq_action": "nvme0q15",
+    "controller": "nvme0",
+    "root_block_device_prefix": "/dev/nvme0n1",
+    "required_max_io_queue_count": 15
+  },
+  "supported_total_queue_parameter_names": [
+    "max_io_queues",
+    "nr_io_queues",
+    "io_queues"
+  ],
+  "observed_snapshot": {
+    "kernel_release": "7.0.0-29-generic",
+    "cmdline_tokens": ["irqaffinity=0-14", "isolcpus=managed_irq,15"],
+    "nvme_queue_count": 16,
+    "nvme_module_parameters": [
+      "io_queue_depth",
+      "max_host_mem_size_mb",
+      "noacpi",
+      "poll_queues",
+      "quirks",
+      "sgl_threshold",
+      "use_cmb_sqes",
+      "use_threaded_interrupts",
+      "write_queues"
+    ],
+    "queue_count_mode": 292,
+    "root_source": "/dev/nvme0n1p3",
+    "target_irq": 174,
+    "target_irq_action": "nvme0q15",
+    "configured_affinity_list": "15",
+    "effective_affinity_list": "15",
+    "transaction_state_absent": true,
+    "target_cgroup_absent": true
+  },
+  "authority": {
+    "observation_only": true,
+    "driver_unload_authorized": false,
+    "custom_kernel_authorized": false,
+    "hardware_change_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

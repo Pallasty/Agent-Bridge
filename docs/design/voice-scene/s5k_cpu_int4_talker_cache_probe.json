@@ -1,0 +1,73 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_talker_cache_probe.v1",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "model": "cpu_int4/talker_cache.onnx",
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "provider": "CPUExecutionProvider"
+  },
+  "status": "talker_single_step_passed_no_sampling",
+  "probe": {
+    "status": "talker_cache_probe_passed",
+    "input_contract": {
+      "input_count": 59,
+      "current_length": 1,
+      "past_length": 0,
+      "kv_input_count": 56,
+      "embedding_fixture": "bounded_linear_-0.01_0.01"
+    },
+    "logits": {
+      "shape": [
+        1,
+        1,
+        3072
+      ],
+      "dtype": "float32",
+      "all_finite": true,
+      "nonzero": true,
+      "minimum": -16.334016799926758,
+      "maximum": 10.391515731811523,
+      "mean": -1.8467050790786743
+    },
+    "hidden": {
+      "shape": [
+        1,
+        1,
+        2048
+      ],
+      "dtype": "float32",
+      "all_finite": true
+    },
+    "present_cache": {
+      "count": 56,
+      "all_shapes": [
+        [
+          1,
+          8,
+          1,
+          128
+        ]
+      ],
+      "all_finite": true
+    },
+    "sha256_run_1": "87b234ae0265c7e670b7e7c0b28165382304f3ae0af0f13cbb206605e31b2454",
+    "sha256_run_2": "87b234ae0265c7e670b7e7c0b28165382304f3ae0af0f13cbb206605e31b2454",
+    "deterministic": true
+  },
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_session": true,
+    "executed_graphs": true,
+    "execution_count": 2,
+    "produced_kv_cache": true,
+    "fed_back_kv_cache": false,
+    "sampled_codec_ids": false,
+    "generated_tokens": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}

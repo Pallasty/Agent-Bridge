@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-RUNTIME-RULE-PRECOMMIT-D83-V1",
+  "baseline_commit": "49bfd0bb2b7ee1cf216a4f915dcb5cfca65294f3",
+  "source_pins": {
+    "fh_l8_runtime_rule_d60_contract.json": "aedb085f4cf3f05030142f76997bf765e2ff8d817e125235055873400a97b515",
+    "fh_l8_runtime_scope_lock_d79_result.json": "1c4522d9ab92ae4fd59e9f9ba8514e7f2725f83b35f7f1c1988930b65d315c1b",
+    "fh_l8_d60_environment_margin_precommit_d81_contract.json": "1e43735bb42651647a510d2715d98f2040445b3d399b3d0f0fcc941d6accc5f4",
+    "fh_l8_d60_environment_margin_precommit_d81_result.json": "ebd52e30bf795723dff295ad9abd4cbd8b963966dfc2902c92b3152bff1ca218",
+    "fh_l8_d60_owner_policy_isolation_d82_contract.json": "6b0ffd9f76bee736efac9d55f637e0490bd98b864bdbb235b0199996abb34306",
+    "fh_l8_d60_owner_policy_isolation_d82_result.json": "c6ddc23fbbabe2046ea1183f0218ca794955bd43998f3f1facd78e75bec324cc",
+    "fh_l8_d60_isolation_transaction_d82r_contract.json": "1ebafbbb43795d6b4416dbe6d8add5366f73bd68cfe780f85b45d04e5e1a880c",
+    "fh_l8_d60_isolation_transaction_d82r_result.json": "290b1ec2434785432f9edaf07384e83b80c59ddcc8b8f23a1355134ddb21c123",
+    "FH_L8_D60_MANAGED_IRQ_BOOT_PLAN_ZH.md": "9761909a1b932584614aac79e5b8e03be8d57a8e7332b0aa100ac8aef4f0b7bb"
+  },
+  "frozen_runtime_rule": {
+    "claim_class": "EMPIRICAL_ADMISSION_RUNTIME_ENVELOPE_NOT_DETERMINISTIC_WORST_CASE",
+    "operation_populations": [213099, 47947275, 95894550, 95894550, 958945500],
+    "confirmatory_samples_per_operation_class": 459,
+    "operation_class_count": 5,
+    "total_confirmatory_samples": 2295,
+    "coverage_per_class": "99/100",
+    "confidence_per_class": "99/100",
+    "familywise_confidence_lower_bound": "95/100",
+    "confirmatory_sample_timeout_seconds": 240,
+    "timeout_disposition": "INDETERMINATE_MEASUREMENT_FAILURE",
+    "automatic_retry_allowed": false,
+    "deadline_extension_allowed": false,
+    "full_run_deadline_rule": "CEILING_OF_SEALED_EMPIRICAL_ADMISSION_RUNTIME_ENVELOPE_SECONDS"
+  },
+  "fresh_admission": {
+    "receipt_contract_id": "FH-L8-D60-ISOLATION-RECEIPT-D82R-V1",
+    "target_cpu": 15,
+    "target_service_cgroup_path": "/fh-l8-d60-isolated.slice/fh-l8-d82-measurement.service",
+    "required_green_predicates": [
+      "root_cpuset_controller_available", "root_cpuset_subtree_enabled",
+      "partition_state_isolated", "effective_cpu_set_exact",
+      "exclusive_effective_cpu_set_exact", "target_cpu_root_isolated",
+      "process_affinity_exact", "target_cpu_online",
+      "target_cpu_has_no_smt_sibling", "irq_affinity_excludes_target"
+    ],
+    "environment_recapture_required": true,
+    "environment_identity_except_cgroup_must_match_d81": true,
+    "service_only_d79_observation_is_scope_proof": false
+  },
+  "authority": {
+    "rule_structure_frozen": true,
+    "runtime_lock_precommitted": false,
+    "measurement_authorized": false,
+    "timing_measurements_executed": 0,
+    "scientific_kernel_calls_executed": 0,
+    "numeric_runtime_seconds_proven": false,
+    "full53_execution_authorized": false
+  }
+}

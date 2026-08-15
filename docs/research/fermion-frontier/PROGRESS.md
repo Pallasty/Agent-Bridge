@@ -1,59 +1,104 @@
 # Research progress ledger
 
-Status date: 2026-07-27
+Status date: 2026-08-09
+
+## 2026-08-10 — FH-L8 D91R GRUB UEFI rehearsal fix
+
+- Embedded kernel/initramfs into standalone GRUB EFI and disabled host-only initramfs fstab inputs.
+- QEMU/OVMF loaded the kernel, found `/dev/vda`, switched root and reached systemd basic with no
+  GRUB prompt or kernel panic. Multi-user is not a D91 requirement.
+- MMC, host bootloader, D82R, measurement and full53 authority remain untouched/closed. Next gate
+  is a separately admitted D92 physical-media materialization and firmware-boot packet.
+
+## 2026-08-10 — FH-L8 D85 maxcpus queue topology
+
+- Paired IRQ housekeeping parameters are live, but the installed GRUB snippet lacks `maxcpus=15`.
+- CPU15 is online, NVMe exposes 16 queues, and `nvme0q15` (IRQ174) remains affined to CPU15;
+  D82R has one conflict and refuses mutation. Next gate is host-admin installation of the maxcpus
+  boot config followed by a fresh reboot.
+
+## 2026-08-10 — FH-L8 D84 managed-IRQ reboot outcome
+
+- Verified the rebooted kernel command line contains `isolcpus=managed_irq,15`.
+- IRQ175 remains `nvme0q15` with configured and effective affinity exactly CPU15, so the frozen
+  D82 zero-conflict acceptance predicate still fails. No fresh D82R receipt is authorized.
+- Transaction state and target cgroup are absent. No measurement or full53 authority is opened;
+  next gate is the pinned paired `irqaffinity=0-14 isolcpus=managed_irq,15` boot candidate; it has
+  not been executed by D84.
+
+## 2026-08-09 — FH-L8 D83 runtime-rule precommit
+
+- Froze the D81/D82 empirical runtime-rule packet: 459 fresh samples for each of five operation
+  classes, 2,295 total, and a 240-second per-sample operational timeout.
+- Requires a fresh post-boot all-green D82R isolation receipt plus environment recapture from the
+  exact CPU15 isolated service. D79 service-only observation is explicitly not scope proof.
+- No receipt or recapture is admitted in the committed state. Runtime lock, measurement, numeric
+  proof and full53 authority remain closed; next gate is
+  `D82R_BOOT_RESTART_FRESH_RECEIPT_THEN_D83_REVERIFY`.
+
+## 2026-08-09 — FH-L8 D82R reversible CPU15 isolation transaction
+
+- Implemented plan/apply/verify/run/rollback with pre-mutation state persistence, exact IRQ
+  before/after records, automatic apply-failure rollback and refusal to overwrite populated-cgroup
+  or third-party IRQ drift.
+- Six transaction simulations and three receipt simulations pass. The receipt writer admits only an
+  all-green D82 result and uses exclusive creation outside the repository.
+- A live apply invocation stopped at the root-credential preflight. EUID remains 1000, the state
+  file and target cgroup remain absent, root subtree control remains unchanged, and host/IRQ mutation
+  counts are zero.
+- Next gate is `HOST_ADMIN_RUN_D82R_APPLY_RUN_RECEIPT_VERIFY_ROLLBACK`; D83 remains forbidden.
+
+## 2026-08-09 — FH-L8 D82 owner policy and load-isolation gate
+
+- Froze the owner-selected runtime claim as an empirical admission envelope, not a deterministic
+  worst-case proof. Each of the five operation classes requires 459 fresh confirmatory samples;
+  the total is 2,295, with 99% per-class coverage/confidence and a 95% Bonferroni family-wise
+  confidence lower bound.
+- Froze a no-scalar timeout policy: each confirmatory sample has a 240-second operational cap;
+  the future full-run deadline is the ceiling of the sealed empirical envelope. Timeout is an
+  indeterminate failure, with no retry or extension and TERM/30-second-grace/KILL termination.
+- Live cgroup v2 preflight found cpuset available at root but absent from root subtree control. The
+  current session is not the exact CPU15 isolated service, effective/exclusive CPU and affinity
+  predicates fail, CPU15 is not in the root isolated set, and IRQ conflicts remain.
+- D82 performs no host cgroup mutation, timing measurement, production I/O, external request or
+  scientific kernel call. It closes the two owner policy inputs but remains fail-closed on the one
+  load-isolation input. Next gate:
+  `HOST_ADMIN_CPUSET_ISOLATED_PARTITION_PROVISIONING_AND_FRESH_D82_RECEIPT`.
+
+## 2026-08-09 — FH-L8 D81 environment/margin precommit
+
+- Froze the CPython/CPU/governor/filesystem/cgroup-v2 capture identity, the precommitted
+  measurement-rule form and all five D60 operation populations.
+- D81 intentionally left owner margin, timeout and a verifiable concurrent-load exclusion
+  mechanism unset. It executed no timing work and granted no numeric runtime or full53 authority.
+- D82 supersedes only the owner-input part of this blocker; D81's ordinary session cgroup path must
+  be freshly recaptured after the isolated service exists.
 
 ## 2026-07-27 — FH-L8 D79 runtime scope-lock precheck
 
-- Synced local worktree to the latest committed frontier state (same ancestry as
-  `origin/master`), then validated the D67–D79 chain end-to-end.
-- Completed/re-verified fail-closed gates for:
-  - D67 external-capacity receipt request,
-  - D68 page-cache environment request,
-  - D69 runtime environment request,
-  - D70 allocator-proof request,
-  - D71 evidence handoff bundle,
-  - D72 recipient registry template,
-  - D73 owner-local attestation workflow,
-  - D74 owner-local preflight,
-  - D75/ D76 owner-local capacity admission,
-  - D77 integrated envelope refresh,
-  - D78 owner host/allocator proof intake,
-  - D79 runtime scope-lock precheck.
-- The D79 precheck confirms:
-  - scope mode lacks cgroup memory controller capabilities,
-  - service mode applies only service-visible memory limits,
-  - no external request, no request-scope runtime lock commitment,
-  - no full-53 execution authority.
-- Ran 34 D-line verifier tests (including D56–D63 dependencies and D67–D79 checks);
-  all passed.
-- Remaining closed-state blockers remain unchanged:
-  - D58 numeric allocator proof inputs are still missing for all 8 required variables,
-  - D59 page-cache bound still requires production-environment evidence contract before closure,
-  - D60 runtime rule is still `NO_GO_D60_RUNTIME_RULE_ENVIRONMENT_AND_MARGIN_NOT_PRECOMMITTED`,
-  - D61 reconciles with four unresolved closures,
-  - D23 external-resource shortfall remains unresolved.
-- Next gate target remains `D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE`.
+- Synced the local worktree to the latest committed frontier state and validated
+  the D67–D79 chain end-to-end.
+- Re-verified fail-closed gates for D67 through D79, including external-capacity,
+  page-cache, runtime-environment, allocator-proof, evidence handoff, recipient
+  registry, owner-local attestation, capacity admission, envelope refresh,
+  owner host/allocator intake and runtime scope-lock precheck.
+- The precheck confirms that scope mode lacks cgroup memory-controller
+  capabilities and service mode applies only service-visible memory limits.
+  No external request, request-scope runtime lock commitment or full-53
+  execution authority was introduced.
+- All 34 D-line verifier tests passed. D58 numeric allocator inputs, D59
+  page-cache evidence, D60 runtime-rule inputs, D61 reconciliation and the D23
+  external-resource shortfall remain closed-state blockers.
+- Next gate remains `D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE`.
 
 ## 2026-07-27 — FH-L8 D60 local readiness checkpoint before evidence exchange
 
-- Performed a second local verifier sweep across the current D56–D79 frontier:
-  `fh_l8_allocator_numeric_proof_d58_result.json`, `fh_l8_runtime_rule_d60_result.json`,
-  `fh_l8_runtime_numeric_proof_d60_result.json`, `fh_l8_production_io_page_cache_d59_result.json`,
-  `fh_l8_integrated_resource_envelope_d61_result.json`, `fh_l8_external_authorization_d62_result.json`,
-  and `fh_l8_runtime_scope_lock_d79_result.json` all remain in their expected fail-closed states.
-- Confirmed unsent/request-pending pre-closure artifacts are still structurally intact:
-  `fh_l8_d67_external_capacity_receipt_request_d67.json`,
-  `fh_l8_d58_allocator_proof_request_d70.json`,
-  `fh_l8_d59_page_cache_environment_request_d68.json`,
-  `fh_l8_d60_runtime_environment_request_d69.json`,
-  `fh_l8_evidence_request_handoff_d71.json`,
-  `fh_l8_evidence_recipient_registry_d72.json`.
-- D60 remains blocked by missing premeasurement runtime rule/environment inputs; no new execution
-  authority was introduced.
-- Next immediate objective: keep D69/D71/D72 in local-united ready state, then advance to
-  evidence intake only when first valid `runtime_experiment` premeasurement packets are available.
-
-Status date: 2026-07-26
+- A second local verifier sweep confirmed the D56–D79 artifacts remain in their
+  expected fail-closed states; no new execution authority was introduced.
+- Unsent/request-pending pre-closure artifacts remain structurally intact.
+- D60 remains blocked by missing premeasurement runtime-rule/environment inputs;
+  the next objective is to keep the evidence request lanes ready until valid
+  `runtime_experiment` packets arrive.
 
 ## 2026-07-26 — FH-L8 D64 owner-local capacity observation
 

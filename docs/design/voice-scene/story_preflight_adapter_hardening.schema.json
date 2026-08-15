@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_preflight_adapter_hardening.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "evidence", "hardening", "negative_controls", "scope", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_preflight_adapter_hardening.v1"},
+    "status": {"const": "rust_story_preflight_adapter_hardened"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust_module_path", "rust_module_sha256", "rust_test_path", "rust_test_sha256", "s5zf_preflight_sha256", "isolated_rust_tests"],
+      "properties": {
+        "rust_module_path": {"const": "crates/bridge/src/story_contract.rs"},
+        "rust_module_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "rust_test_path": {"const": "crates/bridge/tests/story_contract_core.rs"},
+        "rust_test_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "s5zf_preflight_sha256": {"const": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"},
+        "isolated_rust_tests": {"const": 18}
+      }
+    },
+    "hardening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_allowed_root", "fixed_source_byte_ceiling", "strict_utf8", "hash_bound_evidence_bundle", "cooperative_chunk_cancellation", "owned_worker_join_on_cancel", "structured_errors"],
+      "properties": {
+        "canonical_allowed_root": {"const": true},
+        "fixed_source_byte_ceiling": {"const": true},
+        "strict_utf8": {"const": true},
+        "hash_bound_evidence_bundle": {"const": true},
+        "cooperative_chunk_cancellation": {"const": true},
+        "owned_worker_join_on_cancel": {"const": true},
+        "structured_errors": {"const": true}
+      }
+    },
+    "negative_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_escape_rejected", "oversize_source_rejected", "evidence_hash_drift_rejected", "pre_cancel_rejected_before_work", "runtime_flags_still_rejected"],
+      "properties": {
+        "root_escape_rejected": {"const": true},
+        "oversize_source_rejected": {"const": true},
+        "evidence_hash_drift_rejected": {"const": true},
+        "pre_cancel_rejected_before_work": {"const": true},
+        "runtime_flags_still_rejected": {"const": true}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": {"const": false},
+      "required": ["module_exported", "mcp_registered", "tool_exposed", "deployed", "execution_authorized"]
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": {"const": false},
+      "required": ["loaded_model", "executed_onnx", "rendered_audio", "played_audio", "wrote_cache", "wrote_memory"]
+    },
+    "next_gate": {"const": "owner_authorized_rust_story_registration_implementation_review"}
+  }
+}

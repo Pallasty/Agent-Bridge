@@ -7,6 +7,9 @@ A Unix-native AI-agent control plane: desktop notifications, cross-session memor
 MCP tool registry, terminal multiplexer glue, browser automation (CDP), git-worktree
 orchestration, and sub-agent spawning — all pluggable via Rust traits.
 
+Current single-developer priorities and frozen research lanes are maintained in
+[`docs/ACTIVE-PRODUCT-ROADMAP.md`](docs/ACTIVE-PRODUCT-ROADMAP.md).
+
 ## Install
 
 agent-bridge is distributed as **source only** — there are no prebuilt
@@ -26,6 +29,22 @@ to inspect the current state; choosing a new version or tag remains an explicit
 owner release decision. `scripts/agent-bridge-release-candidate-audit.py`
 profiles the post-tag change set, format debt, and clean-worktree evidence; it
 recommends a candidate version but never writes one or creates a tag.
+
+For day-to-day source/install drift, run the smaller project truth snapshot:
+
+```bash
+python3 scripts/agent-bridge-project-truth-snapshot.py \
+  --probe-remotes --inspect-worktrees \
+  --binary ~/.local/bin/agent-bridge.real
+```
+
+It inspects the current checkout, configured fetch/push endpoints, installed
+binary provenance, and dirty-worktree counts without fetching, changing refs,
+cleaning WIP, installing, or deploying. The explicitly selected binary is run
+with `--version`; the snapshot reports that subprocess separately and does not
+claim to prove the binary's own side effects. `READY_ALIGNED` means the observed
+identities agree; it still requires a fresh-process health/MCP smoke before live
+acceptance.
 
 You need a Rust toolchain ([rustup](https://rustup.rs)) and a working C
 linker; no system libraries otherwise (`zbus` and `rusqlite` with the
@@ -763,7 +782,7 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | plan | `plan_save` | Persist a structured task plan (steps, deps, per-step status) to SQLite (W5) |
 | | `plan_load` | Load plan + `progress` / `next_step_id` summary |
 | | `plan_update` | Set one step's status by id |
-| session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
+| session | `session_bootstrap` | Build a scoped memory bootstrap; an explicit query is a targeted recovery packet on every frontend and omits global letters and auxiliary analysis panels |
 | | `session_curate` | Extract structured memories from conversation text; lifecycle calls inherit project scope and mark outputs inferred (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3; Niche since the 2026-07 prune — `session_lifecycle_step` is the live successor) |

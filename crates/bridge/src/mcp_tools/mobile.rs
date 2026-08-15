@@ -881,6 +881,68 @@ pub(super) fn mobile_screenshot_path(args: &Value, serial: &str) -> PathBuf {
     ))
 }
 
+pub(super) fn mobile_debug_bundle_path(parent: &Path, serial: &str, now: u64) -> PathBuf {
+    parent.join(format!(
+        "agent-bridge-mobile-debug-{}-{now}",
+        sanitize_mobile_path_component(serial)
+    ))
+}
+
+pub(super) fn write_mobile_bundle_text(
+    path: &Path,
+    body: &str,
+) -> std::result::Result<u64, String> {
+    std::fs::write(path, body).map_err(|e| format!("write {} failed: {e}", path.display()))?;
+    harden_mobile_bundle_path(path, false)?;
+    Ok(body.len() as u64)
+}
+
+pub(super) fn harden_mobile_bundle_path(
+    path: &Path,
+    directory: bool,
+) -> std::result::Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if directory { 0o700 } else { 0o600 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("set private permissions on {} failed: {e}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, directory);
+    Ok(())
+}
+
+fn record_mobile_bundle_text(
+    bundle: &Path,
+    name: &str,
+    filename: &str,
+    out: std::result::Result<AdbCommandOutput, String>,
+    artifacts: &mut Vec<Value>,
+) -> bool {
+    match out {
+        Ok(out) if out.ok() => {
+            let path = bundle.join(filename);
+            match write_mobile_bundle_text(&path, &out.stdout) {
+                Ok(bytes) => artifacts.push(json!({ "name": name, "path": path, "status": "ok", "bytes": bytes, "truncated": out.truncated })),
+                Err(e) => {
+                    artifacts.push(json!({ "name": name, "status": "error", "error": e }));
+                    return true;
+                }
+            }
+            false
+        }
+        Ok(out) => {
+            artifacts.push(json!({ "name": name, "status": "error", "adb": out.as_json() }));
+            true
+        }
+        Err(e) => {
+            artifacts.push(json!({ "name": name, "status": "error", "error": e }));
+            true
+        }
+    }
+}
+
 pub(super) fn adb_input_text_arg(text: &str) -> String {
     text.replace(' ', "%s")
 }
@@ -1275,6 +1337,1044 @@ impl McpTool for MobileHealthTool {
     }
 }
 
+mobile_tool_struct!(MobileDebugBundleTool);
+#[async_trait]
+impl McpTool for MobileDebugBundleTool {
+    fn name(&self) -> &'static str {
+        "mobile_debug_bundle"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Collect a bounded, read-only Android app debug bundle into a new local directory. Includes a manifest, focus state, package details, recent logcat, crash-dropbox excerpts, UI XML, and an optional screenshot. Individual collection failures are recorded as partial results instead of discarding the useful artifacts.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "package": { "type": "string", "description": "Android package to inspect. Defaults to the parsed foreground package when available." },
+                    "output_parent": { "type": "string", "description": "Existing local parent directory. Defaults to the system temp directory; a unique child directory is always created." },
+                    "log_lines": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 500 },
+                    "include_ui": { "type": "boolean", "default": true },
+                    "include_screenshot": { "type": "boolean", "default": false },
+                    "include_crash_dropbox": { "type": "boolean", "default": true },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(serial) => serial,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let parent = args
+            .get("output_parent")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        if !parent.is_dir() {
+            return Ok(ToolResult::error(format!(
+                "debug bundle output parent is not an existing directory: {}",
+                parent.display()
+            )));
+        }
+        let bundle = mobile_debug_bundle_path(&parent, &serial, now);
+        if bundle.exists() {
+            return Ok(ToolResult::error(format!(
+                "debug bundle path already exists; retry after the timestamp changes: {}",
+                bundle.display()
+            )));
+        }
+        if let Err(e) = std::fs::create_dir(&bundle) {
+            return Ok(ToolResult::error(format!(
+                "create debug bundle directory {} failed: {e}",
+                bundle.display()
+            )));
+        }
+        if let Err(e) = harden_mobile_bundle_path(&bundle, true) {
+            return Ok(ToolResult::error(e));
+        }
+
+        let mut artifacts = Vec::new();
+        let mut partial = false;
+        let focus = run_adb_command(
+            Some(&serial),
+            &adb_args(&["shell", "dumpsys", "window"]),
+            timeout_ms,
+        )
+        .await;
+        let (focus_lines, foreground_package) = match focus {
+            Ok(out) if out.ok() => {
+                let path = bundle.join("focus.txt");
+                match write_mobile_bundle_text(&path, &out.stdout) {
+                    Ok(bytes) => artifacts.push(json!({ "name": "focus", "path": path, "status": "ok", "bytes": bytes, "truncated": out.truncated })),
+                    Err(e) => { partial = true; artifacts.push(json!({ "name": "focus", "status": "error", "error": e })); }
+                }
+                let lines = parse_focus_lines(&out.stdout);
+                let package = parse_foreground_package(&lines);
+                (lines, package)
+            }
+            Ok(out) => {
+                partial = true;
+                artifacts.push(json!({ "name": "focus", "status": "error", "adb": out.as_json() }));
+                (Vec::new(), None)
+            }
+            Err(e) => {
+                partial = true;
+                artifacts.push(json!({ "name": "focus", "status": "error", "error": e }));
+                (Vec::new(), None)
+            }
+        };
+        let package = args
+            .get("package")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| foreground_package.clone());
+
+        if let Some(package) = package.as_deref() {
+            partial |= record_mobile_bundle_text(
+                &bundle,
+                "package",
+                "package.txt",
+                run_adb_command(
+                    Some(&serial),
+                    &vec![
+                        "shell".into(),
+                        "dumpsys".into(),
+                        "package".into(),
+                        package.into(),
+                    ],
+                    timeout_ms,
+                )
+                .await,
+                &mut artifacts,
+            );
+        } else {
+            partial = true;
+            artifacts.push(json!({ "name": "package", "status": "skipped", "reason": "no package supplied and foreground package unavailable" }));
+        }
+
+        let log_lines = args
+            .get("log_lines")
+            .and_then(Value::as_u64)
+            .unwrap_or(500)
+            .clamp(1, 5000)
+            .to_string();
+        partial |= record_mobile_bundle_text(
+            &bundle,
+            "logcat",
+            "logcat.txt",
+            run_adb_command(
+                Some(&serial),
+                &vec!["logcat".into(), "-d".into(), "-t".into(), log_lines.clone()],
+                timeout_ms,
+            )
+            .await,
+            &mut artifacts,
+        );
+
+        if args
+            .get("include_crash_dropbox")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        {
+            partial |= record_mobile_bundle_text(
+                &bundle,
+                "crash_dropbox",
+                "crash-dropbox.txt",
+                run_adb_command(
+                    Some(&serial),
+                    &adb_args(&["shell", "dumpsys", "dropbox", "--print", "data_app_crash"]),
+                    timeout_ms,
+                )
+                .await,
+                &mut artifacts,
+            );
+        } else {
+            artifacts.push(json!({ "name": "crash_dropbox", "status": "skipped" }));
+        }
+
+        if args
+            .get("include_ui")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        {
+            match mobile_dump_ui_xml(&serial, timeout_ms).await {
+                Ok((_dump, cat)) => {
+                    let path = bundle.join("ui.xml");
+                    match write_mobile_bundle_text(&path, &cat.stdout) {
+                        Ok(bytes) => artifacts.push(json!({ "name": "ui", "path": path, "status": "ok", "bytes": bytes, "truncated": cat.truncated })),
+                        Err(e) => { partial = true; artifacts.push(json!({ "name": "ui", "status": "error", "error": e })); }
+                    }
+                }
+                Err(e) => {
+                    partial = true;
+                    artifacts.push(json!({ "name": "ui", "status": "error", "error": e }));
+                }
+            }
+        } else {
+            artifacts.push(json!({ "name": "ui", "status": "skipped" }));
+        }
+
+        if args
+            .get("include_screenshot")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            match run_adb_binary_command(
+                Some(&serial),
+                &adb_args(&["exec-out", "screencap", "-p"]),
+                timeout_ms,
+            )
+            .await
+            {
+                Ok(out)
+                    if out.ok() && out.stdout.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) =>
+                {
+                    let path = bundle.join("screenshot.png");
+                    match std::fs::write(&path, &out.stdout) {
+                        Ok(()) => match harden_mobile_bundle_path(&path, false) {
+                            Ok(()) => artifacts.push(json!({ "name": "screenshot", "path": path, "status": "ok", "bytes": out.stdout.len() })),
+                            Err(e) => { partial = true; artifacts.push(json!({ "name": "screenshot", "status": "error", "error": e })); }
+                        },
+                        Err(e) => { partial = true; artifacts.push(json!({ "name": "screenshot", "status": "error", "error": e.to_string() })); }
+                    }
+                }
+                Ok(out) => {
+                    partial = true;
+                    artifacts.push(json!({ "name": "screenshot", "status": "error", "adb": out.as_json(), "error": "screencap did not return a valid PNG" }));
+                }
+                Err(e) => {
+                    partial = true;
+                    artifacts.push(json!({ "name": "screenshot", "status": "error", "error": e }));
+                }
+            }
+        } else {
+            artifacts.push(json!({ "name": "screenshot", "status": "skipped" }));
+        }
+
+        let manifest_path = bundle.join("manifest.json");
+        let manifest = json!({
+            "schema": "agent_bridge.mobile_debug_bundle.v1",
+            "status": if partial { "partial" } else { "ok" },
+            "created_at_unix_seconds": now,
+            "serial": serial,
+            "package": package,
+            "foreground_package": foreground_package,
+            "focus_lines": focus_lines,
+            "requested_log_lines": log_lines,
+            "artifacts": artifacts,
+        });
+        let manifest_body =
+            serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| manifest.to_string());
+        if let Err(e) = write_mobile_bundle_text(&manifest_path, &manifest_body) {
+            return Ok(ToolResult::error(e));
+        }
+        Ok(ToolResult::json_text(&json!({
+            "status": manifest["status"],
+            "serial": serial,
+            "package": manifest["package"],
+            "bundle_path": bundle,
+            "manifest_path": manifest_path,
+            "artifact_count": manifest["artifacts"].as_array().map(Vec::len).unwrap_or(0),
+            "artifacts": manifest["artifacts"],
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileProjectionStartTool);
+
+struct MobileProjectionRuntimeState {
+    session_id: String,
+    serial: String,
+    endpoint: String,
+    started_at: i64,
+    expires_at: i64,
+    frame: std::sync::RwLock<crate::mobile_projection::ProjectionFrame>,
+    pulls: std::sync::atomic::AtomicU64,
+    last_served_revision: std::sync::atomic::AtomicU64,
+    last_pull_unix_seconds: std::sync::atomic::AtomicU64,
+    stop_requested: std::sync::atomic::AtomicBool,
+    ended: std::sync::atomic::AtomicBool,
+}
+
+fn mobile_projection_registry(
+) -> &'static std::sync::Mutex<HashMap<String, Arc<MobileProjectionRuntimeState>>> {
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<String, Arc<MobileProjectionRuntimeState>>>,
+    > = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+pub(super) fn mobile_projection_phase(
+    pulls: u64,
+    last_pull_unix_seconds: u64,
+    stop_requested: bool,
+    ended: bool,
+    expires_at: i64,
+    now: i64,
+) -> &'static str {
+    if stop_requested {
+        "stopped"
+    } else if ended || now >= expires_at {
+        "expired"
+    } else if pulls == 0 {
+        "awaiting_consent"
+    } else if last_pull_unix_seconds.saturating_add(5) >= now.max(0) as u64 {
+        "connected_recently"
+    } else {
+        "connected_then_idle"
+    }
+}
+
+fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) -> Value {
+    use std::sync::atomic::Ordering;
+    let pulls = state.pulls.load(Ordering::Relaxed);
+    let last_pull = state.last_pull_unix_seconds.load(Ordering::Relaxed);
+    let stopped = state.stop_requested.load(Ordering::Relaxed);
+    let ended = state.ended.load(Ordering::Relaxed);
+    let frame = state.frame.read().unwrap();
+    let current_revision = frame.revision;
+    let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
+    json!({
+        "session_id": state.session_id,
+        "serial": state.serial,
+        "endpoint": state.endpoint,
+        "started_at_unix_seconds": state.started_at,
+        "expires_at_unix_seconds": state.expires_at,
+        "current_revision": current_revision,
+        "last_served_revision": last_served_revision,
+        "current_revision_observed_by_device": last_served_revision >= current_revision,
+        "title_chars": frame.title.chars().count(),
+        "body_chars": frame.body.chars().count(),
+        "status_present": frame.status.is_some(),
+        "action_count": frame.actions.len(),
+        "phase": mobile_projection_phase(pulls, last_pull, stopped, ended, state.expires_at, now),
+        "pull_count": pulls,
+        "last_pull_unix_seconds": if last_pull == 0 { Value::Null } else { json!(last_pull) },
+        "consent_observed": pulls > 0,
+        "listener_active": !stopped && !ended && now < state.expires_at,
+        "stop_requested": stopped,
+        "ended": ended,
+        "disconnect_inference": "connected_then_idle means pulls stopped or paused; without a signed device disconnect event it is not proof of explicit disconnect"
+    })
+}
+
+fn mobile_projection_presentation(
+    args: &Value,
+) -> std::result::Result<(Option<&str>, Vec<String>), String> {
+    let status = args.get("status").and_then(Value::as_str);
+    if args.get("status").is_some() && status.is_none() {
+        return Err("status must be a string".into());
+    }
+    let actions = match args.get("actions") {
+        None => Vec::new(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "actions must contain only strings".to_string())
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        Some(_) => return Err("actions must be an array of strings".into()),
+    };
+    Ok((status, actions))
+}
+
+pub(super) fn mobile_projection_patch_frame(
+    current: &crate::mobile_projection::ProjectionFrame,
+    args: &Value,
+) -> std::result::Result<(crate::mobile_projection::ProjectionFrame, Vec<&'static str>), String> {
+    let mut changed_fields = Vec::new();
+    let title = match args.get("title") {
+        None => current.title.clone(),
+        Some(Value::String(value)) => {
+            changed_fields.push("title");
+            value.clone()
+        }
+        Some(_) => return Err("title must be a string when provided".into()),
+    };
+    let body = match args.get("body") {
+        None => current.body.clone(),
+        Some(Value::String(value)) => {
+            changed_fields.push("body");
+            value.clone()
+        }
+        Some(_) => return Err("body must be a string when provided".into()),
+    };
+    let status = match args.get("status") {
+        None => current.status.clone(),
+        Some(Value::Null) => {
+            changed_fields.push("status");
+            None
+        }
+        Some(Value::String(value)) => {
+            changed_fields.push("status");
+            Some(value.clone())
+        }
+        Some(_) => return Err("status must be a string or null when provided".into()),
+    };
+    let actions = match args.get("actions") {
+        None => current.actions.clone(),
+        Some(Value::Null) => {
+            changed_fields.push("actions");
+            Vec::new()
+        }
+        Some(Value::Array(values)) => {
+            changed_fields.push("actions");
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "actions must contain only strings".to_string())
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        }
+        Some(_) => return Err("actions must be an array of strings or null when provided".into()),
+    };
+    if changed_fields.is_empty() {
+        return Err("provide at least one of title, body, status, or actions".into());
+    }
+    let revision = current.revision.saturating_add(1);
+    let frame = crate::mobile_projection::ProjectionFrame::new(
+        &current.session_id,
+        revision,
+        current.expires_at_unix_seconds,
+        &title,
+        &body,
+    )
+    .and_then(|frame| frame.with_presentation(status.as_deref(), &actions))
+    .map_err(|error| format!("invalid projection frame: {error}"))?;
+    Ok((frame, changed_fields))
+}
+
+pub(super) fn mobile_projection_wait_outcome(
+    pulls: u64,
+    last_served_revision: u64,
+    stop_requested: bool,
+    ended: bool,
+    expires_at: i64,
+    target_revision: Option<u64>,
+    now: i64,
+) -> Option<&'static str> {
+    if stop_requested {
+        return Some("stopped_before_observation");
+    }
+    if ended || now >= expires_at {
+        return Some("expired_before_observation");
+    }
+    match target_revision {
+        Some(revision) if last_served_revision >= revision => Some("revision_observed_by_device"),
+        None if pulls > 0 => Some("consent_observed"),
+        _ => None,
+    }
+}
+
+#[async_trait]
+impl McpTool for MobileProjectionStartTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_start"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Replace any prior projection Activity, then open an explicit-consent \
+                 Android Activity for one short-lived, \
+                 read-only Agent-Bridge title/text projection. Generates an in-memory token, \
+                 binds a random private-LAN port, and never starts the companion service. \
+                 The device holder must still press Allow and connect; this tool grants no \
+                 attention, memory, sensor, or control authority. Payloads are authenticated \
+                 but not encrypted, so do not project secrets."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["bind", "title", "body"],
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "bind": { "type": "string", "description": "Private or link-local host IP reachable by the phone." },
+                    "title": { "type": "string", "maxLength": 160 },
+                    "body": { "type": "string", "maxLength": 8000 },
+                    "status": { "type": "string", "maxLength": 80, "description": "Optional short state label rendered as a status card." },
+                    "actions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Optional ordered, display-only next actions. They grant no actuation authority." },
+                    "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 300 },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let bind = match args.get("bind").and_then(Value::as_str) {
+            Some(value) => match value.parse::<std::net::IpAddr>() {
+                Ok(address) => address,
+                Err(_) => return Ok(ToolResult::error("bind must be an IP address")),
+            },
+            None => return Ok(ToolResult::error("missing 'bind'")),
+        };
+        let title = match args.get("title").and_then(Value::as_str) {
+            Some(value) => value,
+            None => return Ok(ToolResult::error("missing 'title'")),
+        };
+        let body = match args.get("body").and_then(Value::as_str) {
+            Some(value) => value,
+            None => return Ok(ToolResult::error("missing 'body'")),
+        };
+        let ttl_seconds = args
+            .get("ttl_seconds")
+            .and_then(Value::as_i64)
+            .unwrap_or(300);
+        if !(1..=crate::mobile_projection::MAX_SESSION_SECONDS).contains(&ttl_seconds) {
+            return Ok(ToolResult::error("ttl_seconds must be in 1..=600"));
+        }
+
+        let mut token = [0u8; 32];
+        let random_result = std::fs::File::open("/dev/urandom")
+            .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut token));
+        if let Err(error) = random_result {
+            return Ok(ToolResult::error(format!(
+                "generate projection token failed: {error}"
+            )));
+        }
+        let token_hex: String = token.iter().map(|byte| format!("{byte:02x}")).collect();
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let expires_at = now + ttl_seconds;
+        let session_id = format!("mcp-{now}-{}", &token_hex[..12]);
+        let replaced_listener_count = {
+            use std::sync::atomic::Ordering;
+            let mut registry = mobile_projection_registry().lock().unwrap();
+            registry.retain(|_, state| now <= state.expires_at + 600);
+            let mut stopped = 0u64;
+            for state in registry.values() {
+                if state.serial == serial && !state.ended.load(Ordering::Relaxed) {
+                    state.stop_requested.store(true, Ordering::Relaxed);
+                    stopped += 1;
+                }
+            }
+            if registry.len() >= 32 {
+                return Ok(ToolResult::error(
+                    "projection runtime registry is full; wait for old session records to age out",
+                ));
+            }
+            stopped
+        };
+        let session = match crate::mobile_projection::ProjectionSession::bind(
+            bind,
+            0,
+            &token_hex,
+            &session_id,
+            expires_at,
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "start projection host: {error:#}"
+                )))
+            }
+        };
+        let endpoint = match session.local_addr() {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "read projection endpoint: {error}"
+                )))
+            }
+        };
+        let (status, actions) = match mobile_projection_presentation(&args) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let frame = match crate::mobile_projection::ProjectionFrame::new(
+            &session_id,
+            1,
+            expires_at,
+            title,
+            body,
+        )
+        .and_then(|frame| frame.with_presentation(status, &actions))
+        {
+            Ok(frame) => frame,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "invalid projection frame: {error}"
+                )))
+            }
+        };
+
+        let adb_start = adb_args(&[
+            "shell",
+            "am",
+            "start",
+            "-S",
+            "-n",
+            "dev.agentbridge.companion/.ProjectionActivity",
+            "--es",
+            "projection_host",
+            &bind.to_string(),
+            "--ei",
+            "projection_port",
+            &endpoint.port().to_string(),
+            "--es",
+            "projection_token",
+            &token_hex,
+            "--es",
+            "projection_session_id",
+            &session_id,
+            "--el",
+            "projection_expires_at_unix_seconds",
+            &expires_at.to_string(),
+        ]);
+        let launched = match run_adb_command(Some(&serial), &adb_start, timeout_ms).await {
+            Ok(output)
+                if output.ok()
+                    && !output.stdout.contains("Error:")
+                    && !output.stderr.contains("Error:") =>
+            {
+                output
+            }
+            Ok(output) => {
+                return Ok(ToolResult::error(format!(
+                    "open projection consent Activity failed: {} {}",
+                    output.stdout.trim(),
+                    output.stderr.trim()
+                )))
+            }
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+
+        let runtime = Arc::new(MobileProjectionRuntimeState {
+            session_id: session_id.clone(),
+            serial: serial.clone(),
+            endpoint: endpoint.to_string(),
+            started_at: now,
+            expires_at,
+            frame: std::sync::RwLock::new(frame),
+            pulls: std::sync::atomic::AtomicU64::new(0),
+            last_served_revision: std::sync::atomic::AtomicU64::new(0),
+            last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(0),
+            stop_requested: std::sync::atomic::AtomicBool::new(false),
+            ended: std::sync::atomic::AtomicBool::new(false),
+        });
+        mobile_projection_registry()
+            .lock()
+            .unwrap()
+            .insert(session_id.clone(), runtime.clone());
+        let runtime_thread = runtime.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name(format!("mobile-projection-{session_id}"))
+            .spawn(move || {
+                use std::sync::atomic::Ordering;
+                while !runtime_thread.stop_requested.load(Ordering::Relaxed)
+                    && SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| (duration.as_secs() as i64) < expires_at)
+                        .unwrap_or(false)
+                {
+                    let frame = runtime_thread.frame.read().unwrap().clone();
+                    if let Ok(Some(_peer)) = session.serve_next(&frame, Duration::from_secs(1)) {
+                        runtime_thread.pulls.fetch_add(1, Ordering::Relaxed);
+                        runtime_thread
+                            .last_served_revision
+                            .store(frame.revision, Ordering::Relaxed);
+                        if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                            runtime_thread
+                                .last_pull_unix_seconds
+                                .store(duration.as_secs(), Ordering::Relaxed);
+                        }
+                    }
+                }
+                runtime_thread.ended.store(true, Ordering::Relaxed);
+            })
+        {
+            mobile_projection_registry()
+                .lock()
+                .unwrap()
+                .remove(&session_id);
+            return Ok(ToolResult::error(format!(
+                "start projection listener thread failed: {error}"
+            )));
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "awaiting_device_consent",
+            "serial": serial,
+            "session_id": session_id,
+            "endpoint": endpoint.to_string(),
+            "expires_at_unix_seconds": expires_at,
+            "ttl_seconds": ttl_seconds,
+            "activity_launch_duration_ms": launched.duration_ms,
+            "token_exposed": false,
+            "companion_service_started": false,
+            "replaced_prior_projection_activity": true,
+            "replaced_prior_listener_count": replaced_listener_count,
+            "authority": {
+                "attention": false,
+                "memory": false,
+                "sensor": false,
+                "actuation": false
+            },
+            "next": "The device holder must review the source/session/expiry and press Allow and connect."
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileProjectionUpdateTool);
+#[async_trait]
+impl McpTool for MobileProjectionUpdateTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_update"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Patch one active, already consent-gated projection session. Omitted presentation fields keep their current values; status:null and actions:null (or an empty array) explicitly clear those fields. At least one field must be supplied. The patch keeps the original endpoint, token, expiry, and zero-authority boundary; it does not reopen the Activity, extend TTL, start a service, or grant new authority. Delivery is confirmed separately when status reports the revision as served by an authenticated device pull.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "title": { "type": "string", "maxLength": 160 },
+                    "body": { "type": "string", "maxLength": 8000 }
+                    ,"status": { "type": ["string", "null"], "maxLength": 80, "description": "Short state label. Omit to preserve; pass null to clear." }
+                    ,"actions": { "type": ["array", "null"], "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Ordered, display-only next actions. Omit to preserve; pass null or [] to clear." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(error) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(error));
+        }
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => {
+                    return Ok(ToolResult::error(
+                        "projection session not found in this MCP process",
+                    ))
+                }
+            }
+        };
+        use std::sync::atomic::Ordering;
+        if state.stop_requested.load(Ordering::Relaxed)
+            || state.ended.load(Ordering::Relaxed)
+            || now >= state.expires_at
+        {
+            return Ok(ToolResult::error(
+                "projection session is stopped or expired; start a new consent session",
+            ));
+        }
+        let mut frame = state.frame.write().unwrap();
+        let (updated, changed_fields) = match mobile_projection_patch_frame(&frame, &args) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let revision = updated.revision;
+        *frame = updated;
+        let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
+        Ok(ToolResult::json_text(&json!({
+            "status": "updated_awaiting_authenticated_pull",
+            "session_id": state.session_id,
+            "revision": revision,
+            "changed_fields": changed_fields,
+            "last_served_revision": last_served_revision,
+            "expires_at_unix_seconds": state.expires_at,
+            "ttl_extended": false,
+            "activity_reopened": false,
+            "companion_service_started": false,
+            "authority": {
+                "attention": false,
+                "memory": false,
+                "sensor": false,
+                "actuation": false
+            }
+        })))
+    }
+}
+
+pub struct MobileProjectionStatusTool;
+impl MobileProjectionStatusTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MobileProjectionStatusTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read in-process mobile projection lifecycle state. Reports whether \
+                 consent was observed through authenticated pulls and whether the listener is \
+                 active. An idle connection is reported honestly as ambiguous, not as proof \
+                 that the device explicitly disconnected."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "Optional exact session; omit to list recent sessions." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let session_id = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let registry = mobile_projection_registry().lock().unwrap();
+        if let Some(session_id) = session_id {
+            return match registry.get(session_id) {
+                Some(state) => Ok(ToolResult::json_text(&json!({
+                    "status": "ok",
+                    "session": mobile_projection_snapshot(state, now)
+                }))),
+                None => Ok(ToolResult::error(
+                    "projection session not found in this MCP process",
+                )),
+            };
+        }
+        let mut sessions: Vec<Value> = registry
+            .values()
+            .map(|state| mobile_projection_snapshot(state, now))
+            .collect();
+        sessions.sort_by_key(|value| {
+            std::cmp::Reverse(
+                value
+                    .get("started_at_unix_seconds")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+            )
+        });
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "session_count": sessions.len(),
+            "sessions": sessions
+        })))
+    }
+}
+
+pub struct MobileProjectionWaitTool;
+impl MobileProjectionWaitTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MobileProjectionWaitTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_wait"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Wait for bounded, authenticated evidence that a projection received \
+                consent or that a requested revision was served to the device. A timeout only \
+                reports that no matching evidence arrived; it never infers rejection or an \
+                explicit disconnect. This read-only wait does not extend session TTL."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "target_revision": { "type": "integer", "minimum": 1, "description": "Omit to wait for the first authenticated device pull (consent observation)." },
+                    "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 120000, "default": 30000 }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        let target_revision = args.get("target_revision").and_then(Value::as_u64);
+        if args.get("target_revision").is_some() && target_revision.is_none() {
+            return Ok(ToolResult::error("target_revision must be an integer >= 1"));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(30_000);
+        if !(100..=120_000).contains(&timeout_ms) {
+            return Ok(ToolResult::error("timeout_ms must be in 100..=120000"));
+        }
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => {
+                    return Ok(ToolResult::error(
+                        "projection session not found in this MCP process",
+                    ))
+                }
+            }
+        };
+        if let Some(revision) = target_revision {
+            let current_revision = state.frame.read().unwrap().revision;
+            if revision > current_revision {
+                return Ok(ToolResult::error(format!(
+                    "target_revision {revision} is newer than current revision {current_revision}"
+                )));
+            }
+        }
+
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+        let outcome = loop {
+            use std::sync::atomic::Ordering;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(i64::MAX);
+            if let Some(outcome) = mobile_projection_wait_outcome(
+                state.pulls.load(Ordering::Relaxed),
+                state.last_served_revision.load(Ordering::Relaxed),
+                state.stop_requested.load(Ordering::Relaxed),
+                state.ended.load(Ordering::Relaxed),
+                state.expires_at,
+                target_revision,
+                now,
+            ) {
+                break outcome;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break "timeout_without_matching_evidence";
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(i64::MAX);
+        Ok(ToolResult::json_text(&json!({
+            "status": outcome,
+            "target_revision": target_revision,
+            "waited_without_ttl_extension": true,
+            "timeout_is_not_rejection_or_disconnect": outcome == "timeout_without_matching_evidence",
+            "session": mobile_projection_snapshot(&state, now)
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileProjectionStopTool);
+#[async_trait]
+impl McpTool for MobileProjectionStopTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_stop"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Stop one mobile projection listener before TTL and force-stop the \
+                 companion Activity on its selected Android device. The disabled companion \
+                 service is not enabled or started."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(error) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(error));
+        }
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => {
+                    return Ok(ToolResult::error(
+                        "projection session not found in this MCP process",
+                    ))
+                }
+            }
+        };
+        use std::sync::atomic::Ordering;
+        state.stop_requested.store(true, Ordering::Relaxed);
+        let adb_stop = run_adb_command(
+            Some(&state.serial),
+            &adb_args(&["shell", "am", "force-stop", "dev.agentbridge.companion"]),
+            mobile_timeout_ms(&args),
+        )
+        .await;
+        let adb = match adb_stop {
+            Ok(output) => output.as_json(),
+            Err(error) => json!({ "status": "error", "error": error }),
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": "stop_requested",
+            "session_id": state.session_id,
+            "serial": state.serial,
+            "listener_stop_requested": true,
+            "companion_service_started": false,
+            "adb_force_stop": adb
+        })))
+    }
+}
+
 mobile_tool_struct!(MobileUiSnapshotTool);
 #[async_trait]
 impl McpTool for MobileUiSnapshotTool {
@@ -1362,6 +2462,167 @@ impl McpTool for MobileUiSnapshotTool {
             resp["xml_total_chars"] = json!(xml_total_chars);
         }
         Ok(ToolResult::json_text(&resp))
+    }
+}
+
+pub(super) fn mobile_wait_condition_met(match_count: usize, condition: &str) -> bool {
+    match condition {
+        "absent" => match_count == 0,
+        _ => match_count > 0,
+    }
+}
+
+mobile_tool_struct!(MobileWaitForUiTool);
+#[async_trait]
+impl McpTool for MobileWaitForUiTool {
+    fn name(&self) -> &'static str {
+        "mobile_wait_for_ui"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Poll bounded UIAutomator snapshots until a selector is present or absent. This is read-only and replaces fixed sleeps or repeated manual snapshots after an explicit mobile action. It returns matched compact nodes on success and honest timeout/error metadata otherwise.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["selector"],
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "selector": mobile_schema_selector(),
+                    "condition": { "type": "string", "enum": ["present", "absent"], "default": "present" },
+                    "wait_timeout_ms": { "type": "integer", "minimum": 250, "maximum": 60000, "default": 10000 },
+                    "poll_interval_ms": { "type": "integer", "minimum": 250, "maximum": 5000, "default": 500 },
+                    "stable_polls": { "type": "integer", "minimum": 1, "maximum": 5, "default": 1, "description": "Require the condition on this many consecutive successful snapshots." },
+                    "max_matches": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS, "description": "Per-ADB-command timeout, independent from the total wait timeout." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let adb_timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, adb_timeout_ms).await {
+            Ok(serial) => serial,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let selector = match args.get("selector") {
+            Some(value) => match MobileSelector::from_value(value) {
+                Ok(selector) => selector,
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
+            None => return Ok(ToolResult::error("missing 'selector'")),
+        };
+        let condition = args
+            .get("condition")
+            .and_then(Value::as_str)
+            .unwrap_or("present");
+        if !matches!(condition, "present" | "absent") {
+            return Ok(ToolResult::error("condition must be present or absent"));
+        }
+        let wait_timeout_ms = args
+            .get("wait_timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(10_000)
+            .clamp(250, 60_000);
+        let poll_interval_ms = args
+            .get("poll_interval_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(500)
+            .clamp(250, 5_000);
+        let stable_polls = args
+            .get("stable_polls")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .clamp(1, 5) as usize;
+        let max_matches = args
+            .get("max_matches")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 50) as usize;
+
+        let started = Instant::now();
+        let mut attempts = 0usize;
+        let mut consecutive = 0usize;
+        let mut last_error: Option<String>;
+        let mut last_match_count: Option<usize> = None;
+        loop {
+            attempts += 1;
+            let before_snapshot_ms = started.elapsed().as_millis() as u64;
+            let snapshot_budget_ms = wait_timeout_ms.saturating_sub(before_snapshot_ms).max(1);
+            match tokio::time::timeout(
+                Duration::from_millis(snapshot_budget_ms),
+                mobile_dump_ui_xml(&serial, adb_timeout_ms),
+            )
+            .await
+            {
+                Ok(Ok((_dump, cat))) => match parse_uiautomator_nodes(&cat.stdout) {
+                    Ok(nodes) => {
+                        let matches: Vec<&MobileUiNode> =
+                            nodes.iter().filter(|node| selector.matches(node)).collect();
+                        last_match_count = Some(matches.len());
+                        last_error = None;
+                        if mobile_wait_condition_met(matches.len(), condition) {
+                            consecutive += 1;
+                            if consecutive >= stable_polls {
+                                let elapsed_ms = started.elapsed().as_millis() as u64;
+                                let matched_nodes: Vec<Value> = matches
+                                    .into_iter()
+                                    .take(max_matches)
+                                    .map(MobileUiNode::compact_json)
+                                    .collect();
+                                return Ok(ToolResult::json_text(&json!({
+                                    "status": "matched",
+                                    "serial": serial,
+                                    "condition": condition,
+                                    "attempts": attempts,
+                                    "elapsed_ms": elapsed_ms,
+                                    "stable_polls_required": stable_polls,
+                                    "match_count": last_match_count,
+                                    "returned_matches": matched_nodes.len(),
+                                    "matches": matched_nodes,
+                                    "analysis": MobileUiAnalysis::from_nodes(&nodes).as_json(),
+                                })));
+                            }
+                        } else {
+                            consecutive = 0;
+                        }
+                    }
+                    Err(e) => {
+                        consecutive = 0;
+                        last_error = Some(e);
+                    }
+                },
+                Ok(Err(e)) => {
+                    consecutive = 0;
+                    last_error = Some(e);
+                }
+                Err(_) => {
+                    consecutive = 0;
+                    last_error = Some("UI snapshot exceeded the remaining wait timeout".into());
+                }
+            }
+
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            if elapsed_ms >= wait_timeout_ms {
+                return Ok(ToolResult::json_text(&json!({
+                    "status": "timeout",
+                    "serial": serial,
+                    "condition": condition,
+                    "attempts": attempts,
+                    "elapsed_ms": elapsed_ms,
+                    "wait_timeout_ms": wait_timeout_ms,
+                    "stable_polls_required": stable_polls,
+                    "stable_polls_observed": consecutive,
+                    "last_match_count": last_match_count,
+                    "last_error": last_error,
+                })));
+            }
+            let remaining_ms = wait_timeout_ms.saturating_sub(elapsed_ms);
+            tokio::time::sleep(Duration::from_millis(poll_interval_ms.min(remaining_ms))).await;
+        }
     }
 }
 

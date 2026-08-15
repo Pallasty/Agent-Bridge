@@ -1,0 +1,112 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_single_frame_loop_probe.v1",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "models": [
+    "cpu_int4/talker_cache.onnx",
+    "cpu_int4/code_predictor.onnx",
+    "cpu_int4/residual_embed.onnx"
+  ],
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "provider": "CPUExecutionProvider"
+  },
+  "status": "single_codec_frame_loop_passed_no_audio",
+  "probe": {
+    "status": "single_frame_loop_probe_passed",
+    "selection_contract": {
+      "policy": "raw_argmax_exported_logits_no_suppression",
+      "local_model_config_present": false,
+      "codec_eos_known": false,
+      "reserved_token_suppression_applied": false,
+      "reference_generation_equivalence_claimed": false
+    },
+    "codec_frame": {
+      "shape": [
+        1,
+        16
+      ],
+      "dtype": "int64",
+      "ids": [
+        780,
+        1224,
+        1618,
+        1182,
+        614,
+        904,
+        22,
+        244,
+        14,
+        415,
+        6,
+        529,
+        322,
+        299,
+        1065,
+        23
+      ],
+      "first_group_vocab": 3072,
+      "residual_group_vocab": 2048
+    },
+    "step_embedding": {
+      "shape": [
+        1,
+        2048
+      ],
+      "dtype": "float32",
+      "all_finite": true,
+      "nonzero": true,
+      "minimum": -0.24620768427848816,
+      "maximum": 0.2686523497104645,
+      "mean": -0.0009668012498877943
+    },
+    "second_talker_step": {
+      "logits": {
+        "shape": [
+          1,
+          1,
+          3072
+        ],
+        "dtype": "float32",
+        "all_finite": true,
+        "nonzero": true,
+        "minimum": -16.991558074951172,
+        "maximum": 13.150003433227539,
+        "mean": -1.4946705102920532
+      },
+      "present_cache": {
+        "count": 56,
+        "all_shapes": [
+          [
+            1,
+            8,
+            2,
+            128
+          ]
+        ],
+        "all_finite": true
+      }
+    },
+    "sha256_sequence_1": "afce7c6414374f1ee5d67b2a574f64497732579c1067169676bd0610a1f3a674",
+    "sha256_sequence_2": "afce7c6414374f1ee5d67b2a574f64497732579c1067169676bd0610a1f3a674",
+    "deterministic": true
+  },
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_sessions": 3,
+    "execution_count": 36,
+    "talker_execution_count": 4,
+    "predictor_execution_count": 30,
+    "residual_embed_execution_count": 2,
+    "selected_codec_ids": true,
+    "sampled_codec_ids": false,
+    "generated_codec_frame_count": 1,
+    "cache_feedback_count_per_sequence": 1,
+    "decoded_waveform": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}

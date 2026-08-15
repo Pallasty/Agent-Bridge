@@ -215,8 +215,18 @@ pub struct McpToolSourceStats {
 /// K minutes, which were never referenced).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct McpToolCallRow {
+    /// Monotonic SQLite row id used to order calls that share one-second
+    /// timestamp resolution.
+    pub id: i64,
     pub ts: i64,
     pub tool_name: String,
+    /// Attributed caller class (for example `codex` or `hook`).  This lets
+    /// row-level analyses keep non-interactive lifecycle hooks out of user
+    /// workflow cohorts without discarding their telemetry.
+    pub source: Option<String>,
+    /// Random, process-local MCP connection identifier. `None` denotes
+    /// pre-attribution telemetry written before the additive schema column.
+    pub mcp_session_id: Option<String>,
     pub duration_ms: u32,
     pub ok: bool,
     /// Argument JSON payload size at MCP entry (`None` when not
@@ -1962,6 +1972,168 @@ pub struct CodebaseIndexStats {
     pub calls: u32,
     pub duration_ms: u64,
     pub root_path: String,
+    /// Dispatch provenance is present only when the default-off bounded-index
+    /// feature owns strategy selection. Ordinary builds omit this field and
+    /// retain the historical response shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<CodebaseIndexA1DispatchReceipt>,
+}
+
+/// Structured provenance for an environment-selected codebase index path.
+///
+/// This receipt is part of the stable caller response even though the
+/// strategy-selection implementation remains feature-gated and default-off.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1DispatchReceipt {
+    pub selected_namespace: String,
+    pub requested_strategy: Option<String>,
+    pub effective_strategy: String,
+    pub fallback_reason: Option<String>,
+    pub batch_rows: Option<usize>,
+    pub staging_parent_configured: bool,
+}
+
+/// Evaluation-only options for the default-off staged native A1 path.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1Options {
+    /// Maximum combined symbol/import/call rows retained in the owned batch.
+    pub batch_rows: usize,
+    /// Deterministic evaluation fault. Production callers do not expose A1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failpoint: Option<CodebaseIndexA1Failpoint>,
+    /// Optional explicit parent for the private staging database. Canonical
+    /// evaluation uses a disk-backed trial directory rather than `/tmp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staging_parent: Option<std::path::PathBuf>,
+}
+
+/// Deterministic faults used to prove that staging cannot partially replace
+/// the authoritative index.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CodebaseIndexA1Failpoint {
+    /// Abort the private staging transaction after this many flushed batches.
+    AfterStagingBatch(u64),
+    /// Abort after deleting the target root's symbols.
+    AfterDeleteSymbols,
+    /// Abort after deleting the target root's imports.
+    AfterDeleteImports,
+    /// Abort after deleting the target root's calls.
+    AfterDeleteCalls,
+    /// Abort after replaying this many symbol rows.
+    AfterSymbolRows(u64),
+    /// Abort after replaying this many import rows.
+    AfterImportRows(u64),
+    /// Abort after replaying this many call rows.
+    AfterCallRows(u64),
+    /// Abort after all rows are replayed but before commit.
+    BeforeCommit,
+}
+
+/// Structural evidence emitted by the staged native A1 path.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1Telemetry {
+    pub strategy: String,
+    pub batch_rows: usize,
+    pub emitted_batches: u64,
+    pub max_accumulator_rows: usize,
+    pub max_extractor_output_rows: usize,
+    pub declared_live_row_bound: usize,
+    pub staging_rows: u64,
+    pub staging_file_bytes: u64,
+    /// Canonical path of the actual ephemeral SQLite file, captured before
+    /// cleanup. The path is expected not to exist after a successful call.
+    pub staging_file_path: std::path::PathBuf,
+    /// Filesystem device identity captured from the actual staging file.
+    pub staging_file_device: u64,
+    /// Longest matching mount point for the actual staging file.
+    pub staging_file_mount_point: std::path::PathBuf,
+    /// Filesystem type reported for the actual staging file's mount.
+    pub staging_file_filesystem_type: String,
+    pub staging_parent_was_explicit: bool,
+    pub staging_cleanup_succeeded: bool,
+    pub staging_transaction_committed: bool,
+    pub authoritative_transaction_committed: bool,
+    pub autocommit_before: bool,
+    pub autocommit_during: bool,
+    pub autocommit_after: bool,
+    pub extraction_and_staging_ns: u64,
+    pub authoritative_transaction_ns: u64,
+    pub indexed_at: i64,
+}
+
+/// Result of one evaluation-only staged native index operation.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexA1Outcome {
+    pub stats: CodebaseIndexStats,
+    pub telemetry: CodebaseIndexA1Telemetry,
+}
+
+/// Evaluation-only timing evidence for the unchanged FullVec algorithm.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1FullVecTelemetry {
+    pub strategy: String,
+    pub extraction_and_accumulation_ns: u64,
+    pub authoritative_transaction_ns: u64,
+    pub autocommit_before: bool,
+    pub autocommit_during: bool,
+    pub autocommit_after: bool,
+}
+
+/// Result of the measured FullVec seam used only by the A1 evaluator.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexA1FullVecOutcome {
+    pub stats: CodebaseIndexStats,
+    pub telemetry: CodebaseIndexA1FullVecTelemetry,
+}
+
+/// Explicit dispatch selector for the A1 staged-native dispatch seam.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CodebaseIndexA1DispatchStrategy {
+    FullVec,
+    NativeChunkStagedV0(CodebaseIndexA1Options),
+}
+
+/// Stats plus dispatch provenance for an environment-selected operation.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexA1EnvDispatchOutcome {
+    pub stats: CodebaseIndexStats,
+    pub dispatch: CodebaseIndexA1DispatchReceipt,
+}
+
+/// Result from an explicit strategy dispatch.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CodebaseIndexA1DispatchOutcome {
+    FullVec(CodebaseIndexA1FullVecOutcome),
+    NativeChunkStagedV0(CodebaseIndexA1Outcome),
+}
+
+/// Read-only PRAGMA evidence captured from the authoritative store connection.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1PragmaEvidence {
+    pub journal_mode: String,
+    pub synchronous: i64,
+    pub wal_autocheckpoint: i64,
+    pub cache_size: i64,
+    pub cache_spill: i64,
+    pub temp_store: i64,
+    pub mmap_size: i64,
+    pub foreign_keys: i64,
+    pub busy_timeout_ms: i64,
+    pub locking_mode: String,
+    pub autocommit: bool,
+    pub database_names: Vec<String>,
+    pub database_files: Vec<std::path::PathBuf>,
 }
 
 /// Read-only exact-root inventory for an existing codebase index.
@@ -3043,6 +3215,7 @@ pub trait StateStore: Send + Sync {
         model: Option<String>,
         model_reasoning_effort: Option<String>,
         codex_host: Option<String>,
+        mcp_session_id: Option<String>,
     ) -> Result<()> {
         let _ = (
             tool_name,
@@ -3056,6 +3229,7 @@ pub trait StateStore: Send + Sync {
             model,
             model_reasoning_effort,
             codex_host,
+            mcp_session_id,
         );
         Ok(())
     }

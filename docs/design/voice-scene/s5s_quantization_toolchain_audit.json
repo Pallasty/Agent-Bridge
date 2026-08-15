@@ -1,0 +1,149 @@
+{
+  "schema": "agent_bridge.voice_quantization_toolchain_audit.v1",
+  "status": "audited_lock_and_execution_blocked",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "source_identity": {
+    "declared_revision": "master",
+    "declared_revision_immutable": false,
+    "files": {
+      "optimize.py": "137dcdf7bb5065e49f707ac7a3a40c785993b04ab278e792689f6c368e87c102",
+      "user_script.py": "c980786c7c960fe2f7b598fb27179f30c2671f86c1d4767ad7211d425a50776b",
+      "requirements.txt": "60adc3f255ea8d806aa824c17c6e49484e39c341742f79094193fe0f891ee75f"
+    }
+  },
+  "converter": {
+    "uses_olive": true,
+    "uses_subprocess_isolation": true,
+    "supports_skip_download": true,
+    "can_download_without_skip_download": true,
+    "output_root_inside_source_snapshot": true,
+    "overwrites_existing_outputs": true,
+    "execution_ready": false
+  },
+  "dependency_audit": {
+    "python_declared": ">=3.10",
+    "transformers_pep723": "4.57.3",
+    "requirements_conflict": true,
+    "declared": [
+      "transformers==4.57.3",
+      "torch",
+      "torchvision",
+      "torchaudio",
+      "olive-ai",
+      "onnx",
+      "onnxruntime>=1.20",
+      "onnxruntime-genai",
+      "safetensors",
+      "numpy",
+      "tabulate",
+      "huggingface_hub",
+      "accelerate",
+      "librosa",
+      "numba>=0.60.0",
+      "llvmlite>=0.43.0",
+      "soundfile"
+    ],
+    "unlocked": [
+      "accelerate",
+      "huggingface_hub",
+      "librosa",
+      "llvmlite",
+      "numba",
+      "numpy",
+      "olive-ai",
+      "onnx",
+      "onnxruntime",
+      "onnxruntime-genai",
+      "safetensors",
+      "soundfile",
+      "tabulate",
+      "torch",
+      "torchaudio",
+      "torchvision"
+    ],
+    "fully_locked": false,
+    "uv_available": false
+  },
+  "quantization": {
+    "rtn": {
+      "implemented": true,
+      "bits": 4,
+      "block_size": 32,
+      "symmetric": false,
+      "scope": "weight_only_matmul_and_gather"
+    },
+    "codec_and_speaker_encoder_policy": "fp32_only",
+    "fixed_source_fp32_generated": false,
+    "fixed_source_int4_generated": false,
+    "fp32_int4_parity_verified": false
+  },
+  "existing_artifacts": {
+    "cpu_fp32": true,
+    "cpu_fp16": true,
+    "cpu_int4": true,
+    "cuda_fp32": true,
+    "cuda_fp16": true,
+    "cuda_int4": true
+  },
+  "artifact_size_evidence": {
+    "cpu_fp32_declared_payload_bytes": 8640579071,
+    "cpu_int4_declared_payload_bytes": 1962288831,
+    "fp32_to_int4_compression_ratio": 4.403316644571984,
+    "fp32_to_int4_reduction_fraction": 0.7728984579765094,
+    "quality_or_parity_inferred_from_size": false
+  },
+  "mi50": {
+    "present": true,
+    "arch": "gfx906",
+    "legacy_rocm_lane_image_present": true,
+    "cuda_manifest_counts_as_rocm_evidence": false,
+    "execution_verified": false
+  },
+  "arrowquant_image": {
+    "present": true,
+    "repo_digests": [],
+    "default_command_uses_apt": true,
+    "contains_cloudflare_warp": true,
+    "transformers_version": "4.44.2",
+    "olive_version": null,
+    "onnxruntime_version": null,
+    "admitted_for_tts": false,
+    "reasons": [
+      "image_has_no_repo_digest",
+      "default_command_mutates_packages",
+      "build_history_contains_network_tunnel",
+      "tts_toolchain_versions_not_present"
+    ]
+  },
+  "decision": {
+    "selected_quantizer": "olive_onnx_blockwise_rtn_int4_after_fp32_reference",
+    "generation_lane": "isolated_cpu_fp32_then_cpu_int4",
+    "mi50_lane": "separate_legacy_rocm_inference_only",
+    "quark_status": "watch_not_selected",
+    "next_gate": "pin_complete_offline_environment_and_isolated_workspace"
+  },
+  "blockers": [
+    "community_converter_source_revision_unpinned",
+    "build_dependencies_not_fully_locked",
+    "requirements_transformers_conflicts_with_pep723",
+    "uv_not_installed",
+    "converter_output_root_inside_community_snapshot",
+    "converter_can_download_without_skip_download",
+    "arrowquant_image_not_admitted_for_tts",
+    "fixed_source_fp32_export_not_executed",
+    "fixed_source_int4_quantization_not_executed",
+    "fp32_int4_parity_not_verified",
+    "mi50_execution_not_verified"
+  ],
+  "runtime_effects": {
+    "started_container": false,
+    "installed_packages": false,
+    "downloaded_files": false,
+    "loaded_source_model": false,
+    "executed_converter": false,
+    "executed_quantizer": false,
+    "created_onnx": false,
+    "used_gpu": false,
+    "played_audio": false
+  }
+}

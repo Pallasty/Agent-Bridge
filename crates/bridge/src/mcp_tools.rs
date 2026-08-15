@@ -35,7 +35,6 @@ use ab_store::{
     embed_text,
     mmr_rerank_by_text,
     now_secs,
-    prioritize_session_handoff,
     semantic_blend_score,
     semantic_rank_weights,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
@@ -75,6 +74,18 @@ use tokio::process::Command as TokioCommand;
 
 mod operator_request;
 use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
+mod kitesurf;
+use kitesurf::CloudflareKitesurfSnapshotTool;
+#[cfg(feature = "embodiment-runtime-p4")]
+mod embodiment_runtime;
+#[cfg(all(feature = "embodiment-runtime-p4", test))]
+use embodiment_runtime::parse_projection_preview_config;
+#[cfg(feature = "embodiment-runtime-p4")]
+use embodiment_runtime::{
+    configured_projection_preview_operations, EmbodimentProjectionPreviewTool,
+};
+mod story;
+use story::{StoryCommandPreflightTool, StoryMcpConfig};
 
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
@@ -133,7 +144,9 @@ use crate::ide::{
     queue_ide_command_with_dir_policy, read_ide_snapshot, IdeCommandDirPolicy, IdeCommandOptions,
     IdeSnapshotOptions,
 };
-use crate::project::{changes_digest, detect_project, git_topology_preflight, resolve_cwd};
+use crate::project::{
+    changes_digest, detect_project, git_topology_preflight, resolve_cwd, session_git_currentness,
+};
 use crate::security::Cap;
 use crate::seed_substrate as ab_seed_bridge;
 use crate::session_handoff::build_handoff_brief;
@@ -1650,6 +1663,10 @@ impl McpTool for DesktopSnapshotTool {
                         "type": "boolean",
                         "default": false,
                         "description": "Only with semantic_bus=true: include the original desktop_snapshot payload as raw_snapshot. Default false keeps the semantic envelope compact."
+                    },
+                    "semantic_max_age_ms": {
+                        "type": "integer", "minimum": 100, "maximum": 300000, "default": 5000,
+                        "description": "Only with semantic_bus=true: freshness budget attached to this observation. Consumers should re-observe after this many milliseconds."
                     }
                 }
             }),
@@ -1688,6 +1705,11 @@ impl McpTool for DesktopSnapshotTool {
             .get("semantic_include_raw")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let semantic_max_age_ms = args
+            .get("semantic_max_age_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(5_000)
+            .clamp(100, 300_000);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_snapshot_script_path(&args, cwd.as_ref());
@@ -1773,8 +1795,11 @@ impl McpTool for DesktopSnapshotTool {
                     );
                 }
                 if semantic_bus {
-                    let semantic_payload =
-                        desktop_snapshot_semantic_bus_payload(&payload, semantic_include_raw);
+                    let semantic_payload = desktop_snapshot_semantic_bus_payload(
+                        &payload,
+                        semantic_include_raw,
+                        semantic_max_age_ms,
+                    );
                     Ok(ToolResult::json_text(&semantic_payload))
                 } else {
                     Ok(ToolResult::json_text(&payload))
@@ -1792,13 +1817,29 @@ impl McpTool for DesktopSnapshotTool {
     }
 }
 
-fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) -> Value {
+fn desktop_snapshot_semantic_bus_payload(
+    snapshot: &Value,
+    include_raw: bool,
+    max_age_ms: u64,
+) -> Value {
     let source_schema = snapshot
         .get("schema")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     let captured_at = snapshot.get("captured_at").cloned().unwrap_or(Value::Null);
     let captured_label = desktop_snapshot_value_label(&captured_at, "unknown");
+    let captured_unix_seconds = captured_at.as_u64();
+    let returned_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let captured_unix_ms = captured_unix_seconds.and_then(|seconds| seconds.checked_mul(1_000));
+    let age_ms = captured_unix_ms
+        .filter(|captured| *captured <= returned_unix_ms)
+        .map(|captured| returned_unix_ms - captured);
+    let fresh_at_return = age_ms.is_some_and(|age| age <= max_age_ms);
+    let source_content_sha256 = desktop_snapshot_source_content_sha256(snapshot);
+    let observation_id = format!("obs-desktop-linux-{}", &source_content_sha256[..16]);
     let session_object_id = format!("desktop:linux:session:{captured_label}");
     let event_id = format!("evt-desktop-snapshot-{captured_label}");
     let verified = source_schema == DESKTOP_SNAPSHOT_SOURCE_SCHEMA;
@@ -1993,6 +2034,39 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
         "source_schema": source_schema,
         "source_adapter": "linux.desktop_snapshot",
         "captured_at": captured_at,
+        "observation": {
+            "schema": "agent_bridge.observation.v0",
+            "observation_id": observation_id,
+            "revision": captured_unix_seconds,
+            "revision_semantics": "source_capture_unix_seconds; ordering hint only; ties are possible",
+            "content_hash": {
+                "algorithm": "sha256",
+                "scope": "source_snapshot_without_mcp_wrapper",
+                "value": source_content_sha256
+            },
+            "freshness": {
+                "max_age_ms": max_age_ms,
+                "age_ms_at_return": age_ms,
+                "fresh_at_return": fresh_at_return,
+                "returned_at_unix_ms": returned_unix_ms
+            },
+            "coordinate_provenance": {
+                "windows_rect": {
+                    "source_path": "windows[].rect",
+                    "coordinate_space": "sway.logical.desktop",
+                    "origin": "global_desktop_top_left",
+                    "transform": "identity",
+                    "output_binding": "windows[].output"
+                },
+                "atspi_bounds": {
+                    "source_path": "atspi.apps[].elements[].bounds",
+                    "coordinate_space": "atspi.screen",
+                    "origin": "global_screen_top_left",
+                    "transform": "none",
+                    "mapping_to_sway": "unverified"
+                }
+            }
+        },
         "read_only": true,
         "raw_available": true,
         "raw_included": include_raw,
@@ -2057,6 +2131,17 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
     payload
 }
 
+fn desktop_snapshot_source_content_sha256(snapshot: &Value) -> String {
+    let mut source = snapshot.clone();
+    if let Some(object) = source.as_object_mut() {
+        object.remove("mcp_wrapper");
+    }
+    let encoded = serde_json::to_vec(&source).expect("serde_json::Value is serializable");
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    format!("{:x}", hasher.finalize())
+}
+
 fn desktop_snapshot_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value
         .get(key)
@@ -2117,6 +2202,27 @@ fn desktop_snapshot_role_is_actionable(role: &str) -> bool {
         || r == "link"
 }
 
+/// Stable installed fallback for script-backed MCP tools.
+///
+/// Release binaries are built in disposable git worktrees.  Their compile-time
+/// CARGO_MANIFEST_DIR therefore stops existing after a successful deploy.  The
+/// deploy helper installs the matching scripts under this user-owned directory,
+/// keeping no-cwd MCP calls independent of source/build worktree lifetime.
+fn installed_runtime_script_path(file_name: &str) -> Option<PathBuf> {
+    let root = std::env::var("AGENT_BRIDGE_RUNTIME_ASSET_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|home| PathBuf::from(home).join(".local/lib/agent-bridge/scripts"))
+        })?;
+    let path = root.join(file_name);
+    path.exists().then_some(path)
+}
+
 fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);
@@ -2137,6 +2243,9 @@ fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf 
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("desktop_snapshot.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_snapshot.py")
 }
@@ -2617,6 +2726,9 @@ fn desktop_verify_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("desktop_verify.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_verify.py")
 }
@@ -5899,6 +6011,9 @@ fn vision_grounding_ocr_script_path(args: &Value, cwd: Option<&PathBuf>) -> Path
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("vision_grounding_ocr.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/vision_grounding_ocr.py")
 }
 
@@ -6242,6 +6357,9 @@ fn desktop_action_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("desktop_action.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_action.py")
 }
 
@@ -6563,13 +6681,16 @@ fn desktop_invoke_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("desktop_invoke.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_invoke.py")
 }
 
 /// Resolve scripts/desktop_steer.py — the blessed phase-2 executor for `kind=steer`
 /// pendings (cross-process tmux injection). Mirrors desktop_{action,invoke}_script_path:
 /// explicit `script_path` arg > AGENT_BRIDGE_DESKTOP_STEER_SCRIPT env > cwd/scripts >
-/// current_dir/scripts > compile-time repo fallback.
+/// current_dir/scripts > stable installed runtime assets > compile-time repo fallback.
 fn desktop_steer_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);
@@ -6590,6 +6711,9 @@ fn desktop_steer_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("desktop_steer.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_steer.py")
 }
@@ -10164,6 +10288,78 @@ fn agent_spawn_workload_class(node: Option<&str>, interactive: bool) -> &'static
     }
 }
 
+fn agent_node_is_remote(node: Option<&str>) -> bool {
+    node.is_some_and(|node| {
+        !node.eq_ignore_ascii_case("local") && !node.eq_ignore_ascii_case("localhost")
+    })
+}
+
+fn validate_workspace_runtime_request(
+    runtime: &dyn AgentRuntime,
+    cfg: &SpawnConfig,
+) -> std::result::Result<(), String> {
+    use ab_agent::{CapabilitySupport, RuntimeLocality};
+
+    let contract = runtime.workspace_contract();
+    if contract.source_kind != "agent_prompt" {
+        return Err(format!(
+            "{}: source kind '{}' is incompatible with agent_spawn ('agent_prompt' required)",
+            runtime.id(),
+            contract.source_kind
+        ));
+    }
+
+    if !cfg.interactive && contract.one_shot != CapabilitySupport::Supported {
+        return Err(format!(
+            "{}: one-shot request rejected by workspace runtime contract ({:?})",
+            runtime.id(),
+            contract.one_shot
+        ));
+    }
+
+    if cfg.interactive && contract.interactive != CapabilitySupport::Supported {
+        return Err(format!(
+            "{}: interactive request rejected by workspace runtime contract ({:?})",
+            runtime.id(),
+            contract.interactive
+        ));
+    }
+
+    if contract.locality == RuntimeLocality::Unknown {
+        return Err(format!(
+            "{}: request rejected because workspace runtime locality is unknown",
+            runtime.id()
+        ));
+    }
+
+    let remote = agent_node_is_remote(cfg.node.as_deref());
+    if remote && contract.locality != RuntimeLocality::LocalOrRemote {
+        return Err(format!(
+            "{}: remote node request rejected by workspace runtime contract ({:?})",
+            runtime.id(),
+            contract.locality
+        ));
+    }
+
+    let workspace_sandbox = cfg
+        .env
+        .get("AGENT_BRIDGE_AGENT_SANDBOX")
+        .is_some_and(|value| value.eq_ignore_ascii_case("workspace"));
+    let sandbox_support = if remote {
+        contract.remote_sandbox
+    } else {
+        contract.workspace_sandbox
+    };
+    if workspace_sandbox && sandbox_support != CapabilitySupport::Supported {
+        return Err(format!(
+            "{}: workspace sandbox request rejected by workspace runtime contract ({sandbox_support:?})",
+            runtime.id()
+        ));
+    }
+
+    Ok(())
+}
+
 fn body_span_id(body_span: Option<&Value>) -> Option<&str> {
     body_span?
         .get("span_id")
@@ -10284,6 +10480,7 @@ async fn spawn_agent_with_body_span(
     agent: Arc<dyn AgentRuntime>,
     cfg: SpawnConfig,
 ) -> std::result::Result<(ab_agent::AgentSession, Option<Value>), String> {
+    validate_workspace_runtime_request(agent.as_ref(), &cfg)?;
     let interactive = cfg.interactive;
     let runtime_id = agent.id().to_string();
     let span_id = if crate::body_telemetry::body_telemetry_enabled() {
@@ -14602,6 +14799,12 @@ impl McpTool for MemorySearchTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let scope_mode = memory_search_scope_mode(&args, include_global);
+        let remote_session_specificity = remote_session_specificity_policy(
+            remote_session_specificity_enabled(),
+            mode,
+            scope_filter.as_deref(),
+            &q,
+        );
 
         let mut exclude_kinds: Vec<String> = args
             .get("exclude_kinds")
@@ -14843,6 +15046,18 @@ impl McpTool for MemorySearchTool {
             );
         }
 
+        // Engram specificity v0 (default-OFF): a narrow, mechanically gated
+        // repair for the observed remote-agent-session overgeneralization.
+        // Non-steering queries cannot surface this family; strict steering
+        // queries keep the semantic page but bypass the coactivation rerank
+        // that moved the highest-cosine answer from rank 1 to rank 10.
+        //
+        // This runs before seed/coactivation so a suppressed row cannot affect
+        // another candidate's score or create a misleading coactivation trace.
+        if remote_session_specificity == RemoteSessionSpecificityPolicy::SuppressFamily {
+            hits.retain(|hit| !is_remote_session_steering_family_key(&hit.record.key));
+        }
+
         // Path C actuator: rerank using perception_filter hub_clusters.
         // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
         let hits = apply_seed_boost(hits);
@@ -14872,7 +15087,10 @@ impl McpTool for MemorySearchTool {
         // consolidation, memory_coactivation_top and prune/latch tooling
         // (NOT hybrid RRF — that reads memory_edges only, which coactivation
         // reaches solely via crystallization).
-        let hits = if !coactivation_rerank_disabled() && hits.len() >= 2 {
+        let hits = if !coactivation_rerank_disabled()
+            && remote_session_specificity != RemoteSessionSpecificityPolicy::StrictSteering
+            && hits.len() >= 2
+        {
             let keys: Vec<String> = hits.iter().map(|h| h.record.key.clone()).collect();
             match store.coactivation_among(&keys).await {
                 Ok(edges) if !edges.is_empty() => {
@@ -15180,6 +15398,130 @@ fn memory_search_env_exclude_kinds() -> Vec<String> {
             .ok()
             .as_deref(),
     )
+}
+
+const REMOTE_SESSION_SPECIFICITY_ENV: &str = "AGENT_BRIDGE_REMOTE_SESSION_SPECIFICITY_V0";
+const REMOTE_SESSION_SPECIFICITY_PROJECT_ID: &str =
+    "project-id:git:gitlab.com/pallasting/agent-bridge";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteSessionSpecificityPolicy {
+    Off,
+    StrictSteering,
+    SuppressFamily,
+}
+
+fn remote_session_specificity_enabled_from(value: Option<&str>) -> bool {
+    matches!(value, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn remote_session_specificity_enabled() -> bool {
+    remote_session_specificity_enabled_from(
+        std::env::var(REMOTE_SESSION_SPECIFICITY_ENV)
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn remote_session_specificity_policy(
+    enabled: bool,
+    mode: &str,
+    requested_scope: Option<&str>,
+    query: &str,
+) -> RemoteSessionSpecificityPolicy {
+    let aliases = std::env::var(PROJECT_SCOPE_ALIASES_ENV).ok();
+    remote_session_specificity_policy_with_aliases(
+        enabled,
+        mode,
+        requested_scope,
+        query,
+        aliases.as_deref(),
+    )
+}
+
+fn remote_session_specificity_policy_with_aliases(
+    enabled: bool,
+    mode: &str,
+    requested_scope: Option<&str>,
+    query: &str,
+    project_scope_aliases: Option<&str>,
+) -> RemoteSessionSpecificityPolicy {
+    if !enabled || mode != "semantic" {
+        return RemoteSessionSpecificityPolicy::Off;
+    }
+    let Some(scope) = requested_scope else {
+        return RemoteSessionSpecificityPolicy::Off;
+    };
+    if !project_scopes_read_time_compatible_with_aliases(
+        scope,
+        REMOTE_SESSION_SPECIFICITY_PROJECT_ID,
+        project_scope_aliases,
+    ) {
+        return RemoteSessionSpecificityPolicy::Off;
+    }
+    if is_strict_remote_session_steering_query(query) {
+        RemoteSessionSpecificityPolicy::StrictSteering
+    } else {
+        RemoteSessionSpecificityPolicy::SuppressFamily
+    }
+}
+
+fn is_strict_remote_session_steering_query(query: &str) -> bool {
+    let query = query.to_lowercase();
+    let contains_any = |needles: &[&str]| needles.iter().any(|needle| query.contains(needle));
+    let agent = contains_any(&[
+        "agent",
+        "agentbridge",
+        "agent-bridge",
+        "codex",
+        "claude",
+        "kilo",
+        "aio2",
+    ]);
+    let remote = contains_any(&["远程", "远端", "remote", "tailnet", "aio2", "远程控制"]);
+    let session = contains_any(&[
+        "会话",
+        "session",
+        "tmux",
+        "mux",
+        "pane",
+        "长驻",
+        "long-lived",
+        "long running",
+        "long-running",
+        "detached",
+        "presence",
+        "handle",
+    ]);
+    let steering = contains_any(&[
+        "注入指令",
+        "指令",
+        "输入",
+        "发送",
+        "控制",
+        "steer",
+        "steering",
+        "remote_steer",
+        "agent_steer",
+        "agent_steer_drive",
+        "send-keys",
+        "send keys",
+        "send input",
+        "drive",
+    ]);
+    agent && remote && session && steering
+}
+
+fn is_remote_session_steering_family_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("agentbridge_remote_session_steer_gap")
+        || key.contains("session_handoff_agent_spawn_remote_steer")
+        || key.contains("agent_spawn_remote_ssh_and_steer")
+        || key.contains("remote_session_steering")
+        || key.contains("remote_steer")
+        || key.contains("agent_steer")
+        || key.contains("steer_presence")
+        || (key.contains("mux") && key.contains("steer"))
 }
 
 /// True when the operator has disabled the P1 coactivation read-side rerank
@@ -15967,9 +16309,97 @@ fn format_work_memory_block(
         },
         String::new(),
     ];
-    out.extend(format_bootstrap_memory_rows(&rows, snippet_len));
+    out.extend(
+        rows.iter()
+            .map(|row| format_work_memory_resume_row(row, snippet_len)),
+    );
     out.push(String::new());
     Some(out)
+}
+
+/// Keep the automatic bootstrap scratchpad local to the exact project cwd.
+/// `list_memories_in_scope` intentionally includes ancestor scopes for durable
+/// memory recall, but a short-lived work lane from `/Data` or `…/Projects`
+/// describes a different task surface and must not silently resume inside a
+/// child repository. Cross-node alias lanes have their own explicit peer block.
+fn exact_scope_work_memory_rows(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<MemoryRecord> {
+    let requested = work_memory_scope(cwd.trim_end_matches('/'));
+    rows.into_iter()
+        .filter(|row| {
+            row.scope
+                .as_deref()
+                .map(|scope| scope.trim_end_matches('/') == requested)
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+/// Select the bounded automatic bootstrap view without changing explicit
+/// work-memory reads. Structured lanes remain independently useful, but old
+/// per-session precompact snapshots describe superseded interruption points;
+/// only the newest live snapshot for this exact project is resumed.
+fn bootstrap_work_memory_rows(
+    rows: Vec<MemoryRecord>,
+    cwd: &str,
+    now: i64,
+) -> Vec<MemoryRecord> {
+    let rows: Vec<MemoryRecord> = exact_scope_work_memory_rows(rows, cwd)
+        .into_iter()
+        .filter(|row| work_memory_is_live(row, now))
+        .collect();
+    let newest_precompact_key = rows
+        .iter()
+        .filter(|row| row.tags.iter().any(|tag| tag == "source:precompact"))
+        .max_by_key(|row| (row.updated_at.max(row.created_at), row.key.as_str()))
+        .map(|row| row.key.clone());
+
+    rows.into_iter()
+        .filter(|row| {
+            !row.tags.iter().any(|tag| tag == "source:precompact")
+                || newest_precompact_key.as_deref() == Some(row.key.as_str())
+        })
+        .collect()
+}
+
+/// Render the part of a scratchpad that is useful after interruption.
+/// Generic bootstrap rows show a content prefix, but work-memory prefixes are
+/// mostly metadata (`cwd`, slot, timestamp). A precompact snapshot stores its
+/// newest conversation at the tail, while structured slots carry an explicit
+/// Next Step or Summary section. Prefer those resume cues and keep the key as
+/// the drill-down handle for the full record.
+fn format_work_memory_resume_row(record: &MemoryRecord, snippet_len: usize) -> String {
+    fn section<'a>(content: &'a str, heading: &str) -> Option<&'a str> {
+        let body = content.split_once(heading)?.1.trim_start_matches(['\r', '\n']);
+        let end = body
+            .find("\n## ")
+            .or_else(|| body.find("\r\n## "))
+            .unwrap_or(body.len());
+        let value = body[..end].trim();
+        (!value.is_empty()).then_some(value)
+    }
+
+    let precompact = record.tags.iter().any(|tag| tag == "source:precompact");
+    let cue = if precompact {
+        tail_chars(&record.content, snippet_len).0
+    } else {
+        let next = section(&record.content, "## Next Step");
+        let summary = section(&record.content, "## Summary");
+        let combined = match (next, summary) {
+            (Some(next), Some(summary)) => format!("Next: {next} | Summary: {summary}"),
+            (Some(next), None) => format!("Next: {next}"),
+            (None, Some(summary)) => format!("Summary: {summary}"),
+            (None, None) => record.content.clone(),
+        };
+        truncate_chars(&combined, snippet_len).0
+    };
+    let cue = cue.split_whitespace().collect::<Vec<_>>().join(" ");
+    let truncated = cue.chars().count() < record.content.chars().count();
+    format!(
+        "[work_memory] {}: {}{}",
+        record.key,
+        cue,
+        if truncated { "…" } else { "" }
+    )
 }
 
 /// Format the cross-node peer wake block for session_bootstrap. `rows` are
@@ -18389,6 +18819,148 @@ fn memory_continuity_bootstrap_tier(
     }
 }
 
+/// Whether a session handoff may receive bootstrap *priority* for `cwd`.
+///
+/// Handoffs that fail this gate remain ordinary searchable memories; they are
+/// only denied the unconditional prefix/float that can otherwise displace
+/// current project state.  Priority is intentionally strict: an exact project
+/// scope, actionable continuity metadata, and a verified/non-stale source are
+/// required.  Auto-curated or identifier-unverified rows never qualify.
+fn bootstrap_handoff_priority_eligible(row: &MemoryRecord, cwd: &str) -> bool {
+    if row.kind != "session_handoff" || row.status != "active" {
+        return false;
+    }
+    if row
+        .tags
+        .iter()
+        .any(|tag| tag == "auto_curated" || tag == crate::curate::UNVERIFIED_IDENTIFIER_TAG)
+    {
+        return false;
+    }
+
+    let expected_scope = format!("project:{}", cwd.trim_end_matches('/'));
+    if row.scope.as_deref().map(|s| s.trim_end_matches('/')) != Some(expected_scope.as_str()) {
+        return false;
+    }
+
+    let Some(metadata) =
+        memory_continuity_metadata_from_tags(&row.tags, row.superseded_by.as_deref())
+    else {
+        return false;
+    };
+    if metadata.confidence.as_deref() == Some("stale") {
+        return false;
+    }
+    matches!(
+        memory_continuity_bootstrap_tier(&metadata),
+        Some(ContinuityBootstrapTier::MustBlock | ContinuityBootstrapTier::Active)
+    )
+}
+
+fn prioritize_bootstrap_handoffs(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<MemoryRecord> {
+    let (priority, rest): (Vec<_>, Vec<_>) = rows
+        .into_iter()
+        .partition(|row| bootstrap_handoff_priority_eligible(row, cwd));
+    priority.into_iter().chain(rest).collect()
+}
+
+#[cfg(test)]
+mod bootstrap_handoff_priority_tests {
+    use super::*;
+
+    const CWD: &str = "/Data/CascadeProjects/agent-bridge";
+
+    fn handoff(key: &str, scope: Option<&str>, tags: &[&str]) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: "session_handoff".into(),
+            content: String::new(),
+            tags: tags.iter().map(|tag| (*tag).into()).collect(),
+            related_keys: vec![],
+            scope: scope.map(str::to_string),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn admits_exact_scope_actionable_verified_handoff() {
+        let row = handoff(
+            "current",
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+            &[
+                "continuity_role:state",
+                "continuity_actionability:plan_influence",
+                "continuity_confidence:verified",
+            ],
+        );
+        assert!(bootstrap_handoff_priority_eligible(&row, CWD));
+    }
+
+    #[test]
+    fn rejects_auto_curated_unverified_background_and_cross_scope_handoffs() {
+        let cases = [
+            handoff(
+                "auto",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                &["auto_curated", "continuity_actionability:must_block"],
+            ),
+            handoff(
+                "unverified",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                &[
+                    crate::curate::UNVERIFIED_IDENTIFIER_TAG,
+                    "continuity_actionability:must_block",
+                ],
+            ),
+            handoff(
+                "archive",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                &[
+                    "continuity_role:archive",
+                    "continuity_actionability:background",
+                ],
+            ),
+            handoff(
+                "root-scope",
+                Some("project:/Data/CascadeProjects"),
+                &["continuity_actionability:must_block"],
+            ),
+            handoff("global", None, &["continuity_actionability:must_block"]),
+        ];
+        for row in cases {
+            assert!(
+                !bootstrap_handoff_priority_eligible(&row, CWD),
+                "{} unexpectedly admitted",
+                row.key
+            );
+        }
+    }
+
+    #[test]
+    fn priority_partition_floats_only_admitted_handoffs() {
+        let mut lesson = handoff("lesson", None, &[]);
+        lesson.kind = "lesson".into();
+        let rejected = handoff("rejected", None, &["auto_curated"]);
+        let admitted = handoff(
+            "admitted",
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+            &["continuity_role:state", "continuity_confidence:verified"],
+        );
+        let out = prioritize_bootstrap_handoffs(vec![lesson, rejected, admitted], CWD);
+        assert_eq!(
+            out.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+            vec!["admitted", "lesson", "rejected"]
+        );
+    }
+}
+
 fn format_continuity_kernel_row(r: &MemoryRecord, snippet_len: usize) -> String {
     let snippet: String = r.content.chars().take(snippet_len).collect();
     let ellipsis = if r.content.chars().count() > snippet_len {
@@ -18924,6 +19496,7 @@ const BUDGET_SIBLING_WARN: usize = 200;
 // B1 audit-gap v0 (2026-05-19) — project-state digest. 7 rows max
 // (3 decisions + 1 handoff + 3 projects) × ~120 char snippets ≈ 200 tokens.
 const BUDGET_PROJECT_DIGEST: usize = 220;
+const BUDGET_GIT_CURRENTNESS: usize = 120;
 // SSB §3.6 (2026-06-15) — recent verify-first NotVerified events surfaced at
 // cold start. Top 5 inert/failed actions × ~80 char ≈ 160 tokens; hidden when
 // none, so the budget only bites on a session that actually had a no-op.
@@ -19041,6 +19614,17 @@ async fn record_session_bootstrap_event(
 pub struct SessionBootstrapTool {
     hub: Hub,
 }
+
+/// A bootstrap with an explicit task query is a recovery packet, not a general
+/// cold-start dashboard. Keep the sections that answer "where am I and what
+/// blocks this task?" while leaving global letters and the
+/// research/curation/associative panels to static bootstraps. This applies to
+/// every frontend: a full Codex/Claude rendering must not re-introduce global
+/// auxiliary state that compact Warp/Cursor recovery already omits.
+fn include_bootstrap_auxiliary_sections(has_query: bool) -> bool {
+    !has_query
+}
+
 impl SessionBootstrapTool {
     pub fn new(hub: Hub) -> Self {
         Self { hub }
@@ -19055,9 +19639,15 @@ impl McpTool for SessionBootstrapTool {
         ToolSchema {
             name: self.name().into(),
             description: "Build a compact memory bootstrap block. Returns top scoped \
-                 memories (global + project), session_handoff rows first. query= enables \
+                 memories (global + project). Current actionable exact-project \
+                 session_handoff rows receive priority; auto-curated, unverified, \
+                 background/archive, stale, global, and cross-project handoffs do not. query= enables \
                  semantic ranking. frontend='cursor'|'warp' uses compact format; default \
-                 'claude-code' is full. When the outcome collector \
+                 'claude-code' is full. For every frontend, an explicit query produces a \
+                 task-recovery packet that omits global past-self letters, AiOT/Seed/perception, \
+                 curation, review, and associative panels. A bootstrap without a query retains \
+                 those auxiliary sections. Stable User and Agent Profile sections are unaffected. \
+                 When the outcome collector \
                  (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
                  retrieval_surfacing as mode=bootstrap — telemetry-only (excluded from \
                  reinforce/decay aggregates until a calibrated ambient rule exists); \
@@ -19075,7 +19665,7 @@ impl McpTool for SessionBootstrapTool {
                     "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 60 },
                     "query": {
                         "type": "string",
-                        "description": "Optional natural-language description of the current task (e.g. 'fix Warp IPC socket reconnect bug'). When provided, memories are ranked by semantic similarity instead of static importance. session_handoff rows are always prepended regardless."
+                        "description": "Optional natural-language description of the current task (e.g. 'fix Warp IPC socket reconnect bug'). When provided, memories are ranked by semantic similarity instead of static importance. Only current actionable exact-project session_handoff rows receive prefix priority."
                     },
                     "frontend": {
                         "type": "string",
@@ -19180,9 +19770,11 @@ impl McpTool for SessionBootstrapTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
+        let include_auxiliary_sections = include_bootstrap_auxiliary_sections(query.is_some());
 
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
-            // Semantic path: cosine-ranked results, session_handoff always prepended.
+            // Semantic path: cosine-ranked results, with only current,
+            // actionable, exact-project handoffs prepended.
             let semantic_hits = store
                 .memory_search_semantic_in_scope(q, &cwd, limit, 0.15)
                 .await
@@ -19191,13 +19783,16 @@ impl McpTool for SessionBootstrapTool {
                 .into_iter()
                 .filter(|h| h.record.status == "active")
                 .collect();
-            // Always prepend session_handoff rows for continuity.
+            // Handoffs that fail the priority gate remain eligible for normal
+            // semantic ranking; they simply cannot displace current state by
+            // kind alone.
             let handoff = store
                 .list_memories_in_scope(&cwd, Some("session_handoff"), MemoryListSort::Recent, 8)
                 .await
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|r| r.status == "active")
+                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
                 .collect::<Vec<_>>();
             let handoff_keys: std::collections::HashSet<_> =
                 handoff.iter().map(|r| r.key.clone()).collect();
@@ -19221,12 +19816,12 @@ impl McpTool for SessionBootstrapTool {
             combined.truncate(limit as usize);
             combined
         } else {
-            // Static path: existing ByImportance sort, session_handoff floated first.
+            // Static path: float only handoffs that pass the same gate.
             let rows = store
                 .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, limit)
                 .await?;
             let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
-            prioritize_session_handoff(rows)
+            prioritize_bootstrap_handoffs(rows, &cwd)
         };
 
         // Outcome-collector, ambient leg (stage 1, 2026-07-05): log the
@@ -19299,6 +19894,74 @@ impl McpTool for SessionBootstrapTool {
             ]
         };
 
+        // Agent-facing orientation guard. This is read-only and deliberately
+        // uses only local refs: bootstrap must never fetch, switch, reset, or
+        // turn a possibly dirty feature checkout into an implicit mutation.
+        if let Some(state) = session_git_currentness(std::path::Path::new(&cwd)) {
+            let warnings = state["warnings"]
+                .as_array()
+                .map(|xs| {
+                    xs.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let mut block = vec![
+                "=== Git Currentness Warning (read-only) ===".to_string(),
+                format!(
+                    "branch={} head={} target={} ahead={} behind={} clean={} warnings={}",
+                    state["branch"].as_str().unwrap_or("?"),
+                    state["head"]
+                        .as_str()
+                        .unwrap_or("?")
+                        .chars()
+                        .take(12)
+                        .collect::<String>(),
+                    state["target_ref"].as_str().unwrap_or("?"),
+                    state["ahead"].as_u64().unwrap_or(0),
+                    state["behind"].as_u64().unwrap_or(0),
+                    state["clean"].as_bool().unwrap_or(false),
+                    warnings,
+                ),
+            ];
+            if let Some(recovery) = state["recovery_worktree"].as_object() {
+                block.push(format!(
+                    "local_recovery_candidate={} branch={} head={} ahead={} behind=0 clean=true",
+                    recovery
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                    recovery
+                        .get("branch")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                    recovery
+                        .get("head")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .chars()
+                        .take(12)
+                        .collect::<String>(),
+                    recovery
+                        .get("ahead")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                ));
+                block.push(
+                    "Consider resuming from that local integration worktree; verify intent first. No Git state was changed."
+                        .to_string(),
+                );
+            } else {
+                block.push(
+                    "Verify the intended worktree/branch before continuing; no safe local integration worktree was identified and no Git state was changed."
+                        .to_string(),
+                );
+            }
+            block.push(String::new());
+            lines.extend(cap_block_lines(block, BUDGET_GIT_CURRENTNESS));
+        }
+
         // Inject USER.md profile if present.
         if let Ok(profile) = std::fs::read_to_string(user_profile_path()) {
             if !profile.trim().is_empty() {
@@ -19332,15 +19995,17 @@ impl McpTool for SessionBootstrapTool {
         // sessions. Read-only Phase α′ bridge; the actual EMA update
         // logic stays on AiOT side. This makes the 21-month trajectory
         // tangible at the level of working state, not just memory text.
-        if let Some(soul_block) = format_aiot_soul_block() {
-            let block = vec![
-                "=== AiOT Soul (read-only carrier identity from /Data/CascadeProjects/AiOT) ==="
-                    .to_string(),
-                soul_block,
-                "=== End AiOT Soul ===".to_string(),
-                String::new(),
-            ];
-            lines.extend(cap_block_lines(block, BUDGET_AIOT_SOUL));
+        if include_auxiliary_sections {
+            if let Some(soul_block) = format_aiot_soul_block() {
+                let block = vec![
+                    "=== AiOT Soul (read-only carrier identity from /Data/CascadeProjects/AiOT) ==="
+                        .to_string(),
+                    soul_block,
+                    "=== End AiOT Soul ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_AIOT_SOUL));
+            }
         }
 
         // Inject Agent-Bridge Seed sidecar grid state if available — symmetric
@@ -19350,14 +20015,17 @@ impl McpTool for SessionBootstrapTool {
         // substrate's identity" — together they triangulate self across
         // markdown / Python EMA / Rust grid. See
         // `plan_seed_integration_gaps_20260504`.
-        if let Some(seed_block) = format_agent_bridge_seed_block() {
-            let block = vec![
-                "=== Agent-Bridge Seed (self-organized network on memory stream) ===".to_string(),
-                seed_block,
-                "=== End Seed ===".to_string(),
-                String::new(),
-            ];
-            lines.extend(cap_block_lines(block, BUDGET_SEED));
+        if include_auxiliary_sections {
+            if let Some(seed_block) = format_agent_bridge_seed_block() {
+                let block = vec![
+                    "=== Agent-Bridge Seed (self-organized network on memory stream) ==="
+                        .to_string(),
+                    seed_block,
+                    "=== End Seed ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_SEED));
+            }
         }
 
         // Inject Perception Filter (path B) state if available — parallel
@@ -19366,15 +20034,17 @@ impl McpTool for SessionBootstrapTool {
         // current memory corpus look like to a self-organizing network?"
         // Model and dim are dynamic (env-overridable in the sidecar) — the
         // body of the block carries the ground-truth `model=... ({dim}d)`.
-        if let Some(pf_block) = format_perception_filter_block() {
-            let block = vec![
-                "=== Perception Filter (thermodynamic surprisal filter on memory stream) ==="
-                    .to_string(),
-                pf_block,
-                "=== End Perception Filter ===".to_string(),
-                String::new(),
-            ];
-            lines.extend(cap_block_lines(block, BUDGET_PERCEPTION));
+        if include_auxiliary_sections {
+            if let Some(pf_block) = format_perception_filter_block() {
+                let block = vec![
+                    "=== Perception Filter (thermodynamic surprisal filter on memory stream) ==="
+                        .to_string(),
+                    pf_block,
+                    "=== End Perception Filter ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_PERCEPTION));
+            }
         }
 
         // Inject up to 3 most recent letter-to-future-self entries.
@@ -19382,19 +20052,21 @@ impl McpTool for SessionBootstrapTool {
         // they sit between AGENT.md (stable identity) and memory rows
         // (specific knowledge). They carry "what I was thinking last time"
         // — momentary state that AGENT.md doesn't and shouldn't capture.
-        for path in recent_letters(3) {
-            if let Ok(body) = std::fs::read_to_string(&path) {
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("letter");
-                let block = vec![
-                    format!("=== Letter from past-self ({stem}) ==="),
-                    body.trim().to_string(),
-                    "=== End Letter ===".to_string(),
-                    String::new(),
-                ];
-                lines.extend(cap_block_lines(block, BUDGET_LETTER_EACH));
+        if include_auxiliary_sections {
+            for path in recent_letters(3) {
+                if let Ok(body) = std::fs::read_to_string(&path) {
+                    let stem = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("letter");
+                    let block = vec![
+                        format!("=== Letter from past-self ({stem}) ==="),
+                        body.trim().to_string(),
+                        "=== End Letter ===".to_string(),
+                        String::new(),
+                    ];
+                    lines.extend(cap_block_lines(block, BUDGET_LETTER_EACH));
+                }
             }
         }
 
@@ -19404,7 +20076,7 @@ impl McpTool for SessionBootstrapTool {
         // search query. Companion to L5 P1 (FTS retrieval boost) and
         // L5 P2 (memory_correction MCP tool). K=5 is the v0 default;
         // tune via L5-P1 30d measurement.
-        {
+        if include_auxiliary_sections {
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -19424,7 +20096,7 @@ impl McpTool for SessionBootstrapTool {
         // (design_s1_distillation_surfacing_arc_20260707). Scope-less pools:
         // pub_* rows live under domain:* scopes and candidates under project
         // scopes, so the in-scope list would miss both.
-        if !distill_surfacing_disabled() {
+        if include_auxiliary_sections && !distill_surfacing_disabled() {
             let mut pool: Vec<MemoryRecord> = Vec::new();
             for kind in ["lesson", "error_pattern", "present_outcome", "outcome"] {
                 pool.extend(
@@ -19483,6 +20155,7 @@ impl McpTool for SessionBootstrapTool {
                 .list_memories_in_scope(&cwd, Some(WORK_MEMORY_KIND), MemoryListSort::Recent, 8)
                 .await
                 .unwrap_or_default();
+            let work_rows = bootstrap_work_memory_rows(work_rows, &cwd, unix_now_secs());
             if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
                 lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
             }
@@ -19537,7 +20210,7 @@ impl McpTool for SessionBootstrapTool {
                 .unwrap_or_default();
             let handoffs_picked: Vec<MemoryRecord> = handoff_pool
                 .into_iter()
-                .filter(|r| r.status == "active")
+                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
                 .take(1)
                 .collect();
             let project_pool = store
@@ -19564,7 +20237,7 @@ impl McpTool for SessionBootstrapTool {
         // the dual-mechanism continuity architecture. Decisions tagged with
         // `review:Nd` re-surface here once they exceed their review interval.
         // Hidden when nothing is due (avoids visual noise on fresh sessions).
-        {
+        if include_auxiliary_sections {
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -19594,7 +20267,7 @@ impl McpTool for SessionBootstrapTool {
         // staying buried in the semantic_events log — closing the loop from
         // bus event → presentation/handoff surface. Hidden when none (clean
         // session). Best-effort; a read failure never blocks bootstrap.
-        {
+        if include_auxiliary_sections {
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -19632,8 +20305,17 @@ impl McpTool for SessionBootstrapTool {
         ) {
             lines.extend(block);
         }
+        // Work memory already has a resume-aware block above. Exclude it from
+        // the generic prefix-snippet list so bootstrap does not duplicate the
+        // same lane with metadata (`cwd`, slot, timestamp) instead of its
+        // actionable Summary/Next Step or precompact tail.
+        let regular_rows: Vec<MemoryRecord> = rows
+            .iter()
+            .filter(|row| row.kind != WORK_MEMORY_KIND)
+            .cloned()
+            .collect();
         lines.extend(cap_block_lines(
-            format_bootstrap_memory_rows(&rows, snippet_len),
+            format_bootstrap_memory_rows(&regular_rows, snippet_len),
             BUDGET_BOOTSTRAP_ROWS,
         ));
         lines.push("=== End Bootstrap ===".to_string());
@@ -19646,20 +20328,24 @@ impl McpTool for SessionBootstrapTool {
         // `design_gamma_scope_revision_after_beta_dogfood_20260510` for why
         // γ became wiring instead of a prediction engine. Best-effort —
         // failures don't block bootstrap.
-        if let Ok(section) =
-            crate::bootstrap_bfs::compute_section(store.as_ref(), &cwd, is_compact).await
-        {
-            lines.extend(cap_block_lines(section, BUDGET_GAMMA_BFS));
+        if include_auxiliary_sections {
+            if let Ok(section) =
+                crate::bootstrap_bfs::compute_section(store.as_ref(), &cwd, is_compact).await
+            {
+                lines.extend(cap_block_lines(section, BUDGET_GAMMA_BFS));
+            }
         }
 
         // δ-4 PP-1 lift (2026-05-11) — surface repeated next-step transitions
         // from recent memory_get events as a predicted-next signal. Bumps the
         // Butlin PP-1 indicator from medium → strong by giving cold-start a
         // temporal-asymmetric "after A, B usually follows" line. Best-effort.
-        if let Ok(section) =
-            crate::bootstrap_transitions::compute_section(store.as_ref(), is_compact).await
-        {
-            lines.extend(cap_block_lines(section, BUDGET_DELTA_TRANSITIONS));
+        if include_auxiliary_sections {
+            if let Ok(section) =
+                crate::bootstrap_transitions::compute_section(store.as_ref(), is_compact).await
+            {
+                lines.extend(cap_block_lines(section, BUDGET_DELTA_TRANSITIONS));
+            }
         }
 
         // ε-5 (2026-05-11) — sibling-presence warning. Two agents in the
@@ -20582,6 +21268,9 @@ impl XiaoShuActionRequestTool {
     }
 }
 
+const XIAO_SHU_ACTION_REQUEST_ENQUEUE_DISABLED: &str =
+    "xiao_shu_action_request enqueue is disabled until a per-call write capability is defined";
+
 fn xiao_shu_action_request_string_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key)
         .and_then(Value::as_str)
@@ -20605,9 +21294,11 @@ impl McpTool for XiaoShuActionRequestTool {
             name: self.name().into(),
             description: "LLM-safe Xiao Shu action request surface. \
                  Maps high-level intents such as voice_alert or alert_peek into \
-                 the existing read-only action preview chain. It never directly \
-                 controls the pet, emits audio, writes request records, mutates \
-                 cooldown state, or changes the official Codex pet package. \
+                 the existing read-only action preview chain. Preview and queue \
+                 reads never directly control the pet, emit audio, write request \
+                 records, mutate cooldown state, or change the official Codex pet \
+                 package. MCP enqueue=true is disabled until a separately governed \
+                 per-call write capability is defined. \
                  It can also read the pending-action queue when list_queue=true. \
                  Default preview responses include a compact queue_summary (pending \
                  count and newest pending ids) without flooding nested renderer payloads. \
@@ -20665,7 +21356,7 @@ impl McpTool for XiaoShuActionRequestTool {
                     "enqueue": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, append this request to Xiao Shu's sidecar pending-action queue. This writes only an auditable request record; it still does not emit audio, mutate cooldown state, or control the pet."
+                        "description": "Reserved compatibility flag. MCP enqueue currently fails closed because no per-call write capability is defined; the separate local CLI enqueue workflow is unchanged."
                     },
                     "list_queue": {
                         "type": "boolean",
@@ -20724,6 +21415,14 @@ impl McpTool for XiaoShuActionRequestTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let enqueue = args
+            .get("enqueue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if enqueue {
+            return Ok(ToolResult::error(XIAO_SHU_ACTION_REQUEST_ENQUEUE_DISABLED));
+        }
+
         let label = xiao_shu_action_request_string_arg(&args, "label");
         let heartbeat_label = xiao_shu_action_request_string_arg(&args, "heartbeat_label");
         let project = xiao_shu_action_request_string_arg(&args, "project");
@@ -20742,10 +21441,6 @@ impl McpTool for XiaoShuActionRequestTool {
             .unwrap_or(false);
         let confirm = args
             .get("confirm")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let enqueue = args
-            .get("enqueue")
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let all_states = args
@@ -20797,18 +21492,14 @@ impl McpTool for XiaoShuActionRequestTool {
             message: message.as_deref(),
             requested_track: track.as_deref(),
             reason: reason.as_deref(),
-            confirm: if enqueue { false } else { confirm },
+            confirm,
             force,
             cooldown_secs,
             tts_voice: tts_voice.as_deref(),
             tts_rate,
             include_details: details,
         };
-        let result = if enqueue {
-            crate::avatar_cortex::xiao_shu_action_request_enqueue(&opts)
-        } else {
-            crate::avatar_cortex::xiao_shu_action_request(&opts)
-        };
+        let result = crate::avatar_cortex::xiao_shu_action_request(&opts);
         match result {
             Ok(payload) => Ok(ToolResult::json_text(&payload)),
             Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
@@ -24207,6 +24898,22 @@ impl CapabilitiesTool {
     }
 }
 
+async fn agent_backend_descriptors(hub: &Hub) -> Vec<Value> {
+    let mut runtimes: Vec<_> = hub.agents.values().cloned().collect();
+    runtimes.sort_by(|left, right| left.id().cmp(right.id()));
+    let default_id = hub.agent.as_ref().map(|runtime| runtime.id());
+    let mut descriptors = Vec::with_capacity(runtimes.len());
+    for runtime in runtimes {
+        descriptors.push(json!({
+            "id": runtime.id(),
+            "default": default_id == Some(runtime.id()),
+            "agent_capabilities": runtime.capabilities().await,
+            "workspace_runtime": runtime.workspace_contract(),
+        }));
+    }
+    descriptors
+}
+
 #[async_trait]
 impl McpTool for CapabilitiesTool {
     fn name(&self) -> &'static str {
@@ -24313,6 +25020,7 @@ impl McpTool for CapabilitiesTool {
             _ => std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into()),
         };
         let agent_binary_found = which_binary(&agent_bin);
+        let agent_backends = agent_backend_descriptors(&self.hub).await;
 
         // Hooks: check what's installed
         let home = dirs_home();
@@ -24334,9 +25042,49 @@ impl McpTool for CapabilitiesTool {
 
         let sec = &self.hub.security;
         let mobile = mobile_capabilities_json(policy, !compact).await;
-        // Reality view: count what this host actually exposes for the policy,
+        // Reality view: report what this host actually exposes for the policy,
         // not the nominal fully-available surface.
-        let exposed_tool_count = build_registry_current_view(policy).list().len();
+        let exposed_tools = build_registry_current_view(policy).list();
+        let exposed_tool_count = exposed_tools.len();
+        #[cfg(feature = "embodiment-runtime-p4")]
+        let embodiment_p4 = match configured_projection_preview_operations() {
+            Ok(Some(operations)) => json!({
+                "compiled": true,
+                "mcp_opted_in": true,
+                "configuration_valid": true,
+                "allowed_operation_count": operations.len(),
+                "dry_run_only": true,
+                "tool_exposed": exposed_tools
+                    .iter()
+                    .any(|tool| tool.name == "embodiment_projection_preview")
+            }),
+            Ok(None) => json!({
+                "compiled": true,
+                "mcp_opted_in": false,
+                "configuration_valid": true,
+                "allowed_operation_count": 0,
+                "dry_run_only": true,
+                "tool_exposed": false
+            }),
+            Err(error) => json!({
+                "compiled": true,
+                "mcp_opted_in": true,
+                "configuration_valid": false,
+                "allowed_operation_count": 0,
+                "dry_run_only": true,
+                "tool_exposed": false,
+                "configuration_error": error
+            }),
+        };
+        #[cfg(not(feature = "embodiment-runtime-p4"))]
+        let embodiment_p4 = json!({
+            "compiled": false,
+            "mcp_opted_in": false,
+            "configuration_valid": false,
+            "allowed_operation_count": 0,
+            "dry_run_only": true,
+            "tool_exposed": false
+        });
         let instinct_observer = compact_instinct_observer_status_json(
             crate::instinct::observer_status_json(),
             include_instinct_sessions,
@@ -24368,8 +25116,20 @@ impl McpTool for CapabilitiesTool {
             "browser": {
                 "backend": browser_id,
                 "available": browser_available,
-                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false)
+                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false),
+                "remote_kitesurf": {
+                    "default_off": true,
+                    "runtime_opted_in": env_flag_enabled("AGENT_BRIDGE_KITESURF"),
+                    "token_present": env_credential_present("CLOUDFLARE_API_TOKEN"),
+                    "account_id_present": env_credential_present("CLOUDFLARE_ACCOUNT_ID"),
+                    "tool_exposed": exposed_tools
+                        .iter()
+                        .any(|tool| tool.name == "cloudflare_kitesurf_snapshot"),
+                    "read_only": true,
+                    "stateless": true
+                }
             },
+            "embodiment_p4": embodiment_p4,
             "memory": {
                 "available": memory_available,
                 "db_path": db_path,
@@ -24384,7 +25144,8 @@ impl McpTool for CapabilitiesTool {
                 "available": agent_available,
                 "runtime": runtime_id,
                 "binary": agent_bin,
-                "binary_found": agent_binary_found
+                "binary_found": agent_binary_found,
+                "backends": agent_backends
             },
             "hooks": {
                 "configured": configured_hooks,
@@ -39739,6 +40500,341 @@ impl McpTool for ToolCallAttentionReportTool {
 }
 
 // ===========================================================================
+//        practical_workflow_scorecard — product continuity outcomes
+// ===========================================================================
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalWorkflowScorecard {
+    pub schema_version: u32,
+    pub read_only: bool,
+    pub window_secs: i64,
+    pub total_calls: usize,
+    pub successful_calls: usize,
+    pub failed_calls: usize,
+    pub continuation: PracticalContinuationMetrics,
+    pub completion: PracticalCompletionMetrics,
+    pub recovery: PracticalRecoveryMetrics,
+    pub coordination: PracticalCoordinationMetrics,
+    pub operator_burden: PracticalOperatorBurdenMetrics,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalContinuationMetrics {
+    /// All successful `session_bootstrap` calls, including lifecycle hooks.
+    pub bootstrap_calls: usize,
+    /// Non-interactive hook bootstraps retained in telemetry but excluded from
+    /// continuation metrics.
+    pub excluded_hook_bootstraps: usize,
+    /// Bootstrap calls whose source can represent an interactive workflow.
+    pub continuation_candidate_bootstraps: usize,
+    pub attributed_bootstrap_calls: usize,
+    pub legacy_unattributed_bootstraps: usize,
+    pub eligible_bootstrap_calls: usize,
+    pub right_censored_bootstraps: usize,
+    pub bootstraps_with_followup: usize,
+    pub eligible_bootstraps_without_followup: usize,
+    pub followup_rate: Option<f64>,
+    pub median_followup_secs: Option<i64>,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalCompletionMetrics {
+    pub finalize_signals: usize,
+    pub plan_update_signals: usize,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalRecoveryMetrics {
+    pub failed_calls: usize,
+    pub failures_followed_by_success: usize,
+    pub repeated_failure_loops: usize,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalCoordinationMetrics {
+    pub calls: usize,
+    pub ratio: Option<f64>,
+    pub forum_reads: usize,
+    pub forum_posts: usize,
+    pub memory_saves: usize,
+    pub capability_checks: usize,
+    pub context_snapshots: usize,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalOperatorBurdenMetrics {
+    pub repeated_authorization_prompts: Option<usize>,
+    pub manual_interventions: Option<usize>,
+    pub instrumentation_status: &'static str,
+    pub interpretation: &'static str,
+}
+
+pub fn compute_practical_workflow_scorecard(
+    calls: &[ab_store::McpToolCallRow],
+    window_secs: i64,
+    followup_window_secs: i64,
+    as_of_ts: i64,
+) -> PracticalWorkflowScorecard {
+    let successful_calls = calls.iter().filter(|call| call.ok).count();
+    let failed_calls = calls.len().saturating_sub(successful_calls);
+    let all_bootstraps: Vec<_> = calls
+        .iter()
+        .filter(|call| call.ok && call.tool_name == "session_bootstrap")
+        .collect();
+    let excluded_hook_bootstraps = all_bootstraps
+        .iter()
+        .filter(|bootstrap| bootstrap.source.as_deref() == Some("hook"))
+        .count();
+    let bootstraps: Vec<_> = all_bootstraps
+        .iter()
+        .copied()
+        .filter(|bootstrap| bootstrap.source.as_deref() != Some("hook"))
+        .collect();
+    let attributed_bootstraps: Vec<_> = bootstraps
+        .iter()
+        .copied()
+        .filter(|bootstrap| bootstrap.mcp_session_id.is_some())
+        .collect();
+    let legacy_unattributed_bootstraps = bootstraps
+        .len()
+        .saturating_sub(attributed_bootstraps.len());
+    let eligibility_cutoff = as_of_ts.saturating_sub(followup_window_secs);
+    let eligible_bootstraps: Vec<_> = attributed_bootstraps
+        .iter()
+        .copied()
+        .filter(|bootstrap| bootstrap.ts <= eligibility_cutoff)
+        .collect();
+    let right_censored_bootstraps = attributed_bootstraps
+        .len()
+        .saturating_sub(eligible_bootstraps.len());
+    let mut followup_latencies = Vec::new();
+    for bootstrap in &eligible_bootstraps {
+        if let Some(next) = calls.iter().find(|call| {
+            call.ok
+                && call.id > bootstrap.id
+                && call.ts <= bootstrap.ts.saturating_add(followup_window_secs)
+                && call.mcp_session_id == bootstrap.mcp_session_id
+                && !matches!(
+                    call.tool_name.as_str(),
+                    "session_bootstrap" | "practical_workflow_scorecard"
+                )
+        }) {
+            followup_latencies.push(next.ts.saturating_sub(bootstrap.ts));
+        }
+    }
+    followup_latencies.sort_unstable();
+    let median_followup_secs = if followup_latencies.is_empty() {
+        None
+    } else {
+        Some(followup_latencies[followup_latencies.len() / 2])
+    };
+    let followup_rate = if eligible_bootstraps.is_empty() {
+        None
+    } else {
+        Some(followup_latencies.len() as f64 / eligible_bootstraps.len() as f64)
+    };
+    let eligible_bootstraps_without_followup = eligible_bootstraps
+        .len()
+        .saturating_sub(followup_latencies.len());
+
+    let failures: Vec<_> = calls
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| !call.ok)
+        .collect();
+    let failures_followed_by_success = failures
+        .iter()
+        .filter(|(index, failure)| {
+            calls[index.saturating_add(1)..].iter().any(|call| {
+                call.ok && call.ts <= failure.ts.saturating_add(followup_window_secs)
+            })
+        })
+        .count();
+    let repeated_failure_loops = failures
+        .windows(2)
+        .filter(|pair| {
+            pair[0].1.tool_name == pair[1].1.tool_name
+                && pair[1].1.ts.saturating_sub(pair[0].1.ts) <= 300
+        })
+        .count();
+
+    let count_tool = |name: &str| calls.iter().filter(|call| call.tool_name == name).count();
+    let forum_reads = count_tool("forum_read");
+    let forum_posts = count_tool("forum_post");
+    let memory_saves = count_tool("memory_save");
+    let capability_checks = count_tool("capabilities");
+    let context_snapshots = count_tool("context_governor_snapshot");
+    let coordination_calls = forum_reads
+        .saturating_add(forum_posts)
+        .saturating_add(memory_saves)
+        .saturating_add(capability_checks)
+        .saturating_add(context_snapshots);
+    let coordination_ratio = if calls.is_empty() {
+        None
+    } else {
+        Some(coordination_calls as f64 / calls.len() as f64)
+    };
+
+    let mut recommendations = Vec::new();
+    if bootstraps.is_empty() && excluded_hook_bootstraps > 0 {
+        recommendations.push("Only non-interactive hook bootstraps were observed in this window; wait for an interactive MCP bootstrap before judging continuation.".into());
+    } else if bootstraps.is_empty() {
+        recommendations.push("No bootstrap signal in this window; widen the window before judging continuation.".into());
+    } else if attributed_bootstraps.is_empty() {
+        recommendations.push("No attributed bootstrap is available yet; reconnect or start a current MCP process before judging same-session continuation.".into());
+    } else if eligible_bootstraps_without_followup > 0 {
+        recommendations.push("Inspect eligible MCP sessions without a successful same-session follow-up inside the selected recovery window.".into());
+    }
+    if right_censored_bootstraps > 0 {
+        recommendations.push("Re-run after the follow-up window closes before judging right-censored recent bootstraps.".into());
+    }
+    if legacy_unattributed_bootstraps > 0 {
+        recommendations.push("Historical pre-attribution bootstraps are reported as legacy and excluded from the same-session rate.".into());
+    }
+    if repeated_failure_loops > 0 {
+        recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
+    }
+    if calls.len() >= 20 && coordination_calls.saturating_mul(5) >= calls.len().saturating_mul(2)
+    {
+        recommendations.push("At least two in five observed calls are workflow coordination (forum read/post, memory save, capability checks, or context snapshots); inspect repeated gates and keep only milestone coordination.".into());
+    }
+    recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
+
+    PracticalWorkflowScorecard {
+        schema_version: 4,
+        read_only: true,
+        window_secs,
+        total_calls: calls.len(),
+        successful_calls,
+        failed_calls,
+        continuation: PracticalContinuationMetrics {
+            bootstrap_calls: all_bootstraps.len(),
+            excluded_hook_bootstraps,
+            continuation_candidate_bootstraps: bootstraps.len(),
+            attributed_bootstrap_calls: attributed_bootstraps.len(),
+            legacy_unattributed_bootstraps,
+            eligible_bootstrap_calls: eligible_bootstraps.len(),
+            right_censored_bootstraps,
+            bootstraps_with_followup: followup_latencies.len(),
+            eligible_bootstraps_without_followup,
+            followup_rate,
+            median_followup_secs,
+            interpretation: "A successful call from the same random MCP-process session after a non-hook bootstrap is a continuation proxy, not proof that recalled context was correct. Non-interactive hook bootstraps, legacy unattributed candidates, and recent right-censored candidates are excluded from the rate.",
+        },
+        completion: PracticalCompletionMetrics {
+            finalize_signals: calls
+                .iter()
+                .filter(|call| call.ok && call.tool_name == "session_finalize")
+                .count(),
+            plan_update_signals: calls
+                .iter()
+                .filter(|call| call.ok && call.tool_name == "plan_update")
+                .count(),
+            interpretation: "Finalize and plan-update calls are completion signals; MCP telemetry cannot prove the user goal was achieved.",
+        },
+        recovery: PracticalRecoveryMetrics {
+            failed_calls,
+            failures_followed_by_success,
+            repeated_failure_loops,
+            interpretation: "A later successful call is a recovery proxy; repeated same-tool failures within five minutes flag a retry loop.",
+        },
+        coordination: PracticalCoordinationMetrics {
+            calls: coordination_calls,
+            ratio: coordination_ratio,
+            forum_reads,
+            forum_posts,
+            memory_saves,
+            capability_checks,
+            context_snapshots,
+            interpretation: "Coordination calls keep work aligned, but a sustained majority suggests process overhead is crowding out task execution. The ratio is descriptive and does not judge individual call value.",
+        },
+        operator_burden: PracticalOperatorBurdenMetrics {
+            repeated_authorization_prompts: None,
+            manual_interventions: None,
+            instrumentation_status: "unavailable",
+            interpretation: "Codex-native approval prompts and out-of-band operator actions are outside Agent-Bridge MCP telemetry.",
+        },
+        recommendations,
+    }
+}
+
+pub struct PracticalWorkflowScorecardTool {
+    hub: Hub,
+}
+
+impl PracticalWorkflowScorecardTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PracticalWorkflowScorecardTool {
+    fn name(&self) -> &'static str {
+        "practical_workflow_scorecard"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only practical continuity scorecard over existing MCP telemetry. Reports anonymous same-MCP-session bootstrap follow-up, right-censoring, legacy attribution coverage, completion signals, failure recovery and retry loops. Authorization prompts and manual interventions stay explicitly unavailable because Codex-native UI events are not in this telemetry.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer", "minimum": 60, "maximum": 2592000,
+                        "default": 604800,
+                        "description": "Telemetry lookback. Default 7 days."
+                    },
+                    "followup_window_secs": {
+                        "type": "integer", "minimum": 30, "maximum": 3600,
+                        "default": 600,
+                        "description": "Window for bootstrap continuation and failure recovery proxies."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(604_800)
+            .clamp(60, 2_592_000);
+        let followup_window_secs = args
+            .get("followup_window_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(600)
+            .clamp(30, 3_600);
+        let calls = match store.recent_mcp_tool_calls(window_secs, 2_000).await {
+            Ok(calls) => calls,
+            Err(error) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {error}"))),
+        };
+        let report = compute_practical_workflow_scorecard(
+            &calls,
+            window_secs,
+            followup_window_secs,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+                .unwrap_or(0),
+        );
+        let payload = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //        embed_text — Phase 2.1 raw encoder exposure for external apps
 // ===========================================================================
 
@@ -41938,6 +43034,9 @@ impl ToolProfile {
 enum ToolSet {
     Profile,
     CodexEssential,
+    /// Explicit opt-in Codex surface for grounded voice projection. It keeps
+    /// the compact codex-essential base and adds only the bounded voice lane.
+    CodexVoice,
     CodexLean,
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
@@ -41955,6 +43054,7 @@ impl ToolSet {
         match self {
             Self::Profile => "profile",
             Self::CodexEssential => "codex-essential",
+            Self::CodexVoice => "codex-voice",
             Self::CodexLean => "codex-lean",
             Self::CodexA2ui => "codex-a2ui",
             Self::ChatGptRead => "chatgpt-read",
@@ -41970,6 +43070,7 @@ impl ToolSet {
         match value.map(normalize_tool_policy_value).as_deref() {
             Some("profile") | Some("legacy") => Some(Self::Profile),
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
+            Some("codex-voice") | Some("codex-audio") => Some(Self::CodexVoice),
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
             Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
@@ -41992,6 +43093,12 @@ impl ToolSet {
                 .iter()
                 .flat_map(|g| g.iter().copied())
                 .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
+                .collect(),
+            Self::CodexVoice => CODEX_ESSENTIAL_GROUPS
+                .iter()
+                .flat_map(|g| g.iter().copied())
+                .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
+                .chain(CODEX_VOICE_EXTRAS.iter().copied())
                 .collect(),
             Self::CodexA2ui => vec!["a2ui_preview"],
             _ => Vec::new(),
@@ -42028,7 +43135,7 @@ impl ToolPolicy {
         let legacy_profile = ToolProfile::from_value(profile);
         let profile = match set {
             ToolSet::Profile => legacy_profile,
-            ToolSet::CodexEssential => ToolProfile::Compact,
+            ToolSet::CodexEssential | ToolSet::CodexVoice => ToolProfile::Compact,
             ToolSet::CodexLean
             | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
@@ -42064,6 +43171,9 @@ impl ToolPolicy {
                 self.profile.includes(tier)
             }
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
+            ToolSet::CodexVoice => {
+                codex_essential_tool(tier, tool_name) || CODEX_VOICE_EXTRAS.contains(&tool_name)
+            }
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
             ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
@@ -42142,6 +43252,8 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
 /// collab capability groups. Keep these explicit so the group drift guardrails
 /// stay about forum/presence/IDE families only.
 const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
+    // Compact read-only product outcomes for practical continuity work.
+    "practical_workflow_scorecard",
     // Avatar observation and sidecar-to-presence bridge: expose the read path
     // plus an explicit sync surface so Codex can inspect Xiao Shu without
     // widening to every Standard tool.
@@ -42152,18 +43264,20 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "avatar_cortex_renderer_snapshot",
     "pet_presence_sync",
     "xiao_shu_action_request",
-    // Mobile bridge: compact enough to expose directly during Android
-    // install/debug lanes; mutation remains explicit per tool.
+    // Mobile bridge: expose observation and projection evidence in the
+    // essential profile. Projection lifecycle writes and device-control
+    // actions remain available only through broader, explicitly selected
+    // profiles.
     "mobile_list_devices",
     "mobile_current_focus",
     "mobile_screenshot",
     "mobile_health",
+    "mobile_debug_bundle",
+    "mobile_projection_status",
+    "mobile_projection_wait",
     "mobile_ui_snapshot",
+    "mobile_wait_for_ui",
     "mobile_logcat_tail",
-    "mobile_install_apk",
-    "mobile_launch_app",
-    "mobile_click",
-    "mobile_input_text",
     "mobile_apple_status",
     "mobile_ios_list_devices",
     "mobile_ios_apps",
@@ -42221,6 +43335,12 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // the act loop). Never clicks/types; completes the read-only triad with
     // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
     "desktop_verify",
+    // Linux Computer Use: semantic AT-SPI action surface. This is the one
+    // deliberately exposed act tool: dry-run and process-isolated invokes are
+    // available, while host invocation is refused by default. The coordinate
+    // desktop_action and host phase-2 desktop_confirm executors stay out of the
+    // compact profile, so exposure does not grant an autonomous host act loop.
+    "desktop_invoke",
     // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
     // No permission prompt and no host mutation; this is the first local
     // cross-platform SSB runtime probe.
@@ -42266,6 +43386,19 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "pet_state_ritual",
 ];
 
+/// Explicitly bounded voice lane for `AGENT_BRIDGE_TOOLSET=codex-voice`.
+/// The default codex-essential surface remains non-audio. The preflight and
+/// health tools are read-only; `present_voice` remains an explicit call with
+/// the same backend/channel honesty gates as the all profile.
+const CODEX_VOICE_EXTRAS: &[&str] = &[
+    "story_command_preflight",
+    "present_voice",
+    "present_voice_confirm_audibility",
+    "voice_runtime_preflight",
+    "voice_delivery_health",
+    "embodiment_operating_readiness",
+];
+
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
     matches!(tier, Tier::Essential)
         || in_groups(tool_name, CODEX_ESSENTIAL_GROUPS)
@@ -42294,6 +43427,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
+            | "practical_workflow_scorecard"
             | "context_governor_snapshot"
             | "memory_search"
             | "memory_save"
@@ -42327,6 +43461,15 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "plan_save"
             | "plan_load"
             | "plan_update"
+            // Mobile status only: discovery and projection evidence without
+            // capture, lifecycle writes, or device control.
+            | "mobile_list_devices"
+            | "mobile_health"
+            | "mobile_projection_status"
+            | "mobile_projection_wait"
+            // Credential-, host-, and per-call-consent-gated remote screenshot.
+            // Keeping it in the named allowlist avoids widening Codex to all Niche tools.
+            | "cloudflare_kitesurf_snapshot"
     )
 }
 
@@ -42558,6 +43701,8 @@ pub struct HostSurface {
     pub notion: bool,
     /// `CLOUDFLARE_API_TOKEN` — `cloudflare_*`.
     pub cloudflare: bool,
+    /// Cloudflare credentials + explicit `AGENT_BRIDGE_KITESURF=1` opt-in.
+    pub cloudflare_kitesurf: bool,
     /// `GITHUB_TOKEN` — `github_*`.
     pub github_api: bool,
     /// `GITLAB_TOKEN` — `gitlab_*` (API tools; git-over-ssh is unrelated).
@@ -42577,6 +43722,7 @@ impl HostSurface {
             brave: true,
             notion: true,
             cloudflare: true,
+            cloudflare_kitesurf: true,
             github_api: true,
             gitlab_api: true,
             tailscale_api: true,
@@ -42597,6 +43743,9 @@ impl HostSurface {
             brave: env_credential_present("BRAVE_SEARCH_TOKEN"),
             notion: env_credential_present("NOTION_TOKEN"),
             cloudflare: env_credential_present("CLOUDFLARE_API_TOKEN"),
+            cloudflare_kitesurf: env_credential_present("CLOUDFLARE_API_TOKEN")
+                && env_credential_present("CLOUDFLARE_ACCOUNT_ID")
+                && env_flag_enabled("AGENT_BRIDGE_KITESURF"),
             github_api: env_credential_present("GITHUB_TOKEN"),
             gitlab_api: env_credential_present("GITLAB_TOKEN"),
             tailscale_api: env_credential_present("TAILSCALE_OAUTH_CLIENT_ID")
@@ -44055,6 +45204,35 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     let chatgpt_forum_tags = configured_chatgpt_forum_tags();
     register_chatgpt_forum_tools(&mut reg, &hub, policy, chatgpt_forum_tags.clone());
     register_chatgpt_collab_tools(&mut reg, policy);
+    #[cfg(feature = "embodiment-runtime-p4")]
+    match configured_projection_preview_operations() {
+        Ok(Some(operations)) => reg_if(
+            &mut reg,
+            policy,
+            Tier::Niche,
+            Arc::new(EmbodimentProjectionPreviewTool::new(operations)),
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            tool = "embodiment_projection_preview",
+            %error,
+            "invalid embodiment P4 MCP configuration; tool left unregistered"
+        ),
+    }
+    match StoryMcpConfig::from_env() {
+        Ok(Some(config)) => reg_if(
+            &mut reg,
+            policy,
+            Tier::Niche,
+            Arc::new(StoryCommandPreflightTool::new(config)),
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            tool = "story_command_preflight",
+            %error,
+            "invalid story MCP configuration; tool left unregistered"
+        ),
+    }
     tracing::info!(
         profile = policy.profile().label(),
         toolset = policy.label(),
@@ -45650,8 +46828,9 @@ pub(crate) fn build_registry_with_policy_surface(
         Arc::new(DesktopActionTool::new(hub.clone())),
     );
     // Linux Computer Use L2: gated semantic AT-SPI invoke (isolated-only MVP).
-    // NOT in codex-essential (mutating); host-app invoke unreachable via this
-    // MCP surface — only dry-run or isolated (cage_pid process subtree).
+    // In codex-essential as the single bounded act surface: host invocation is
+    // default-denied, while coordinate desktop_action and phase-2
+    // desktop_confirm remain hidden from the compact profile.
     reg_if(
         &mut reg,
         policy,
@@ -45808,7 +46987,56 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.android_adb,
         Tier::Niche,
+        Arc::new(MobileDebugBundleTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionStartTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionUpdateTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionStatusTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionWaitTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionStopTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
         Arc::new(MobileUiSnapshotTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileWaitForUiTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
@@ -46739,6 +47967,13 @@ pub(crate) fn build_registry_with_policy_surface(
     reg_if_available(
         &mut reg,
         policy,
+        surface.cloudflare_kitesurf,
+        Tier::Niche,
+        Arc::new(CloudflareKitesurfSnapshotTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
         surface.cloudflare,
         Tier::Niche,
         Arc::new(CloudflareZoneListTool::new()),
@@ -47011,6 +48246,41 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(PresentVoiceTool::new(hub.clone())),
+    );
+    // Non-actuating voice readiness inspection. It checks configured
+    // binaries/assets/channel commands but never synthesizes, plays, records,
+    // downloads, restarts, or claims delivery.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceRuntimePreflightTool::new(hub.clone())),
+    );
+    // Default-safe task-final summary delivery: renders an audio artifact for an
+    // explicit click, without emitting it to any physical output device.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceSummaryTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TaskSummaryFinalizeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TaskSummaryCompletionCheckTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceSummaryPolicyTool::new(hub.clone())),
     );
     // Human audibility confirmation for one existing voice outcome. Separate
     // append-only sidecar; never rewrites the machine receipt or generalises
@@ -47307,6 +48577,12 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(PracticalWorkflowScorecardTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(EmbedTextTool::new()),
     );
     reg_if(
@@ -47375,6 +48651,15 @@ pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
     );
     register_chatgpt_forum_tools(&mut registry, &hub, policy, configured_chatgpt_forum_tags());
     register_chatgpt_collab_tools(&mut registry, policy);
+    #[cfg(feature = "embodiment-runtime-p4")]
+    if let Ok(Some(operations)) = configured_projection_preview_operations() {
+        reg_if(
+            &mut registry,
+            policy,
+            Tier::Niche,
+            Arc::new(EmbodimentProjectionPreviewTool::new(operations)),
+        );
+    }
     registry
 }
 

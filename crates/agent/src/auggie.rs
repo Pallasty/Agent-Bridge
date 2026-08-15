@@ -104,6 +104,10 @@ impl AgentRuntime for AuggieRuntime {
         "auggie"
     }
 
+    fn workspace_contract(&self) -> crate::WorkspaceRuntimeContract {
+        crate::WorkspaceRuntimeContract::local_agent(false)
+    }
+
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         cfg.reject_unsupported_interactive(self.id())?;
 

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_bounded_render_acceptance_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "comparison", "machine_acceptance", "human_acceptance", "boundaries", "runtime_effects", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_bounded_render_acceptance_review.v1"},
+    "status": {"const": "story_bounded_render_acceptance_verified"},
+    "decision": {"const": "accepted_by_exact_pcm_continuity_without_new_playback"},
+    "evidence": {
+      "type": "object",
+      "required": ["s603_owner_accepted_receipt_path", "s603_owner_accepted_receipt_sha256", "s617_execution_result_path", "s617_execution_result_sha256", "s617_render_receipt_path", "s617_render_receipt_sha256", "preflight_sha256"],
+      "properties": {
+        "s603_owner_accepted_receipt_path": {"const": "docs/design/voice-scene/s603_story_fixture_bounded_render_receipt.json"},
+        "s603_owner_accepted_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "s617_execution_result_path": {"const": "docs/design/voice-scene/s617_story_bounded_render_execution_result.json"},
+        "s617_execution_result_sha256": {"$ref": "#/$defs/sha256"},
+        "s617_render_receipt_path": {"const": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s617-bounded-render/render-receipt.json"},
+        "s617_render_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "preflight_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["segment_count", "segments", "assembly", "gap_seconds", "all_segment_files_exact", "all_segment_pcm_exact", "all_pcm_exact"],
+      "properties": {
+        "segment_count": {"const": 3},
+        "segments": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["index", "speaker", "reference_file_sha256", "candidate_file_sha256", "file_sha256_equal", "reference_file_bytes", "candidate_file_bytes", "reference_pcm_sha256", "candidate_pcm_sha256", "pcm_sha256_equal", "format_equal", "sample_rate_hz", "channels", "sample_width_bytes", "frames"],
+            "properties": {
+              "index": {"type": "integer", "minimum": 0, "maximum": 2},
+              "speaker": {"enum": ["Vivian", "Serena"]},
+              "reference_file_sha256": {"$ref": "#/$defs/sha256"},
+              "candidate_file_sha256": {"$ref": "#/$defs/sha256"},
+              "file_sha256_equal": {"const": true},
+              "reference_file_bytes": {"type": "integer", "minimum": 45},
+              "candidate_file_bytes": {"type": "integer", "minimum": 45},
+              "reference_pcm_sha256": {"$ref": "#/$defs/sha256"},
+              "candidate_pcm_sha256": {"$ref": "#/$defs/sha256"},
+              "pcm_sha256_equal": {"const": true},
+              "format_equal": {"const": true},
+              "sample_rate_hz": {"const": 24000},
+              "channels": {"const": 1},
+              "sample_width_bytes": {"const": 2},
+              "frames": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "assembly": {
+          "type": "object",
+          "required": ["reference_file_sha256", "candidate_file_sha256", "file_sha256_equal", "reference_file_bytes", "candidate_file_bytes", "reference_pcm_sha256", "candidate_pcm_sha256", "pcm_sha256_equal", "format_equal", "sample_rate_hz", "channels", "sample_width_bytes", "frames"],
+          "properties": {
+            "reference_file_sha256": {"$ref": "#/$defs/sha256"},
+            "candidate_file_sha256": {"$ref": "#/$defs/sha256"},
+            "file_sha256_equal": {"const": false},
+            "reference_file_bytes": {"type": "integer", "minimum": 45},
+            "candidate_file_bytes": {"type": "integer", "minimum": 45},
+            "reference_pcm_sha256": {"$ref": "#/$defs/sha256"},
+            "candidate_pcm_sha256": {"$ref": "#/$defs/sha256"},
+            "pcm_sha256_equal": {"const": true},
+            "format_equal": {"const": true},
+            "sample_rate_hz": {"const": 24000},
+            "channels": {"const": 1},
+            "sample_width_bytes": {"const": 2},
+            "frames": {"const": 165120}
+          },
+          "additionalProperties": false
+        },
+        "gap_seconds": {"const": [1.0, 1.0]},
+        "all_segment_files_exact": {"const": true},
+        "all_segment_pcm_exact": {"const": true},
+        "all_pcm_exact": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "machine_acceptance": {
+      "const": {"all_segments_natural_eos": true, "assembly_non_silent": true, "duration_seconds": 6.88, "sample_rate_hz": 24000, "channels": 1, "sample_width_bytes": 2, "frames": 165120}
+    },
+    "human_acceptance": {
+      "type": "object",
+      "required": ["source_stage", "prior_owner_playback_completed", "prior_owner_acceptance_verified", "prior_owner_feedback_sha256", "inheritance_basis", "current_playback_required", "current_playback_performed", "blind_comparison_claimed"],
+      "properties": {
+        "source_stage": {"const": "s603_owner_accepted_playback"},
+        "prior_owner_playback_completed": {"const": true},
+        "prior_owner_acceptance_verified": {"const": true},
+        "prior_owner_feedback_sha256": {"$ref": "#/$defs/sha256"},
+        "inheritance_basis": {"const": "exact_pcm_sample_sequence"},
+        "current_playback_required": {"const": false},
+        "current_playback_performed": {"const": false},
+        "blind_comparison_claimed": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "boundaries": {"const": {"review_read_only": true, "container_bytes_and_pcm_samples_distinguished": true, "sensitive_receipt_fields_copied": false, "secret_or_nonce_accessed": false, "new_owner_feedback_claimed": false, "story_command_runtime_admitted": false}},
+    "runtime_effects": {"const": {"read_secret": false, "consumed_nonce": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_cache": false, "wrote_memory": false}},
+    "claims": {"const": {"s617_machine_gate_reverified": true, "s617_audio_content_matches_owner_accepted_s603": true, "assembly_container_bytes_differ": true, "assembly_pcm_samples_identical": true, "human_acceptance_continuity_verified": true, "new_playback_unnecessary": true, "blind_audition_performed": false, "story_command_render_runtime_enabled": false}},
+    "next_gate": {"const": "story_command_render_runtime_admission_review"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

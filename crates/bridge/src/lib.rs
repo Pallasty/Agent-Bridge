@@ -43,6 +43,9 @@ pub mod dream_distill;
 pub mod dream_replay;
 pub mod embedding_dim_guard;
 pub mod embodiment_projection;
+/// Default-off P4 runtime gate; no MCP registration or adapter execution.
+#[cfg(feature = "embodiment-runtime-p4")]
+pub mod embodiment_runtime;
 /// Default-off Slice C1 orchestration seam. No store adapter or runtime caller
 /// is provided by this feature.
 #[cfg(feature = "episode-observation-slice-c1")]
@@ -82,6 +85,12 @@ pub mod lswr_snapshot_wrapper_descriptor;
 pub mod lswr_snapshot_wrapper_exposure_dry_run;
 pub mod lswr_snapshot_wrapper_preflight_report;
 pub mod mcp_tools;
+/// Read-only client and verifier for the bounded Android companion LAN/IMU
+/// protocol. This module does not discover, provision, start, or actuate a
+/// mobile device.
+pub mod mobile_companion;
+/// Ephemeral, consent-gated, read-only projection sessions for mobile nodes.
+pub mod mobile_projection;
 /// Default-off, synthetic-only one-shot adapter; no runtime caller is wired.
 #[cfg(feature = "temporal-evidence-s4-synthetic")]
 #[cfg_attr(not(test), allow(dead_code))]
@@ -123,6 +132,46 @@ pub mod session_handoff;
 pub mod shadow_cortex;
 pub mod skills;
 pub mod socket_path;
+pub(crate) mod story_contract;
+/// Dormant S626/S627 fixed provider and replay ledger; no real authority or I/O.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_fixed_synthetic_provider;
+/// Dormant S630 durable replay composition; synthetic tests only.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_durable_synthetic_composition;
+/// Dormant S629 file-backed replay continuity; isolated tests only.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_replay_continuity_file_synthetic;
+/// Dormant S628 persistence seam and synthetic reopened-handle state machine.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_replay_continuity_synthetic;
+/// Dormant S624 synthetic composition; no authority, MCP, or runtime caller.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_synthetic_composition;
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_synthetic_admission;
+/// Dormant S635 ABG2 and sealed Worker plan protocol; no runtime caller.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_guardian_protocol;
+/// Dormant S635 generic Guardian entrypoint; no product entrypoint is wired.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_guardian;
+/// Default-off S635 GuardianV2 Host supervision; synthetic configuration only.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_guardian_supervision;
+/// Dormant S623 synthetic Supervisor; no Worker, MCP, or deployment caller.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_supervisor;
 pub mod sync;
 pub mod tailscale_api;
 pub mod tool_atlas;

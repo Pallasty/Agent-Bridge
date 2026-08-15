@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "receipt_id": "FH-L8-D60-OFFLINE-PAYLOAD-D90-20260810",
+  "payload": {
+    "path": "/Data/CascadeProjects/.fh-l8-staging/d90/payload",
+    "total_bytes": 296304560,
+    "manifest_entries": 12,
+    "manifest_sha256": "c08fe2b3a69aa24e5994f3c25023b8b8913df8deb9dc8c6f8c121bb8e1346126",
+    "manifest_all_entries_verified": true
+  },
+  "artifacts": {
+    "boot/vmlinuz-7.0.0-29-generic": {"bytes": 17295752, "sha256": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682"},
+    "boot/initrd.img-7.0.0-29-generic": {"bytes": 40010273, "sha256": "74faacc386a388ba97ac7d26c628bf2ba927f51cecbedfcf87ad5314542fd342"},
+    "boot/modules-7.0.0-29-generic.tar.xz": {"bytes": 154434816, "sha256": "0e6c71e8b9692d0decc701b22463e14fd676b228bc9811bf8d4d21ce738943e2"},
+    "efi/EFI/BOOT/BOOTX64.EFI": {"bytes": 966768, "sha256": "4c89145e958cf592a6f16552eadf112ef2c1c525e2435c2761e6a99fa88188b3"},
+    "efi/EFI/BOOT/grubx64.efi": {"bytes": 2828168, "sha256": "33e1d46cb68e41a293c767750078bbdb857ad7c1197a2206dea737bc9ccb8dbf"},
+    "rootfs/fh-l8-resolute-amd64-minroot.tar.xz": {"bytes": 43206112, "sha256": "7756c1c849dcf1b7e442d526e18b29a6af9d6601fed0740be294145eadc33889"},
+    "source/agent-bridge.bundle": {"bytes": 37558067, "sha256": "ee5803c1089af4201c268ff84b1b9125e9010309620cdef24257eec5140a1bb6"}
+  },
+  "source_bundle": {
+    "head": "0c1808574d61c5881d9fc8a08275353d491b9334",
+    "complete_history": true,
+    "bundle_verify_pass": true
+  },
+  "static_checks": {
+    "module_tree_matches_kernel": true,
+    "sdhci_pci_module_present": true,
+    "modules_dep_present": true,
+    "grub_template_has_isolation_pair": true,
+    "config_nvme_device_or_uuid_dependency_absent": true,
+    "root_and_esp_uuid_placeholders_unresolved": true,
+    "evidence_directory_present": true
+  },
+  "mmc_post_state": {
+    "disk_bytes": 63864569856,
+    "partition_bytes": 63847792640,
+    "fstype": "f2fs",
+    "uuid": "17a6b72c-efcc-4445-b447-385e96a109a2",
+    "mountpoints": []
+  }
+}

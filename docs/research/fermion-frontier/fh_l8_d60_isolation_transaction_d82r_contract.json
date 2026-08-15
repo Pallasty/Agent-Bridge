@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-ISOLATION-TRANSACTION-D82R-V1",
+  "baseline_commit": "bdb25189150d7015d8ef6eb2effe36093f402126",
+  "source_pins": {
+    "fh_l8_d60_owner_policy_isolation_d82_contract.json": "6b0ffd9f76bee736efac9d55f637e0490bd98b864bdbb235b0199996abb34306",
+    "fh_l8_d60_owner_policy_isolation_d82.py": "adf88de2cdd05d95684b1d1fd20d2951c8efa6678653756d79b245adb7e43636"
+  },
+  "target": {
+    "cpu": 15,
+    "thread_siblings": "15",
+    "parent_cgroup": "fh-l8-d60-isolated.slice",
+    "service_cgroup": "fh-l8-d60-isolated.slice/fh-l8-d82-measurement.service",
+    "parent_partition_state": "root",
+    "service_partition_state": "isolated",
+    "cpu_set": "15",
+    "irq_conflict_count_required": 0,
+    "state_file": "/run/fh-l8-d82-isolation-transaction.json"
+  },
+  "transaction": {
+    "modes": ["plan", "apply", "verify", "run", "rollback"],
+    "apply_requires_euid": 0,
+    "state_written_before_first_mutation": true,
+    "rollback_refuses_populated_service": true,
+    "rollback_refuses_irq_drift": true,
+    "root_cpuset_disabled_only_if_enabled_by_this_transaction": true,
+    "automatic_rollback_on_apply_failure": true,
+    "run_requires_applied_state_and_green_verification": true
+  },
+  "authority": {
+    "tool_construction_only": true,
+    "live_apply_executed": false,
+    "host_cgroup_mutations_executed": 0,
+    "irq_mutations_executed": 0,
+    "timing_measurements_executed": 0,
+    "scientific_kernel_calls_executed": 0,
+    "full53_execution_authorized": false
+  },
+  "decision": "READY_D82R_REVERSIBLE_TRANSACTION_TOOL_LIVE_APPLY_REQUIRES_HOST_ADMIN_CREDENTIAL"
+}

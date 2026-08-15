@@ -1,0 +1,77 @@
+{
+  "schema": "agent_bridge.story_executor_installed_key_composition_review.v1",
+  "status": "story_executor_installed_key_composition_reviewable",
+  "decision": "installed_key_only_public_preparation_accepted_installation_blocked",
+  "evidence": {
+    "review_builder_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_installed_key_composition_review.py",
+    "review_builder_sha256": "cda39492786209a1b4a98542be32206d7e58cfad068cfc4aae3a246c1c99b592",
+    "s612_review_file_sha256": "8fcdabcbf7f6ed742d4b4be65b9915edef54f865e4986c8c36186ef3c95aaf5c",
+    "s612_review_sha256": "6efd39968018f0f5f3bd5c343a40d7927a5ac624f6254a5faaa7b7bb812ec82f",
+    "composition_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_installed_key_composition.py",
+    "composition_sha256": "301743b68338ebb0788c4e9e5dbb6106df26dc9af3d14a10f1dcd7905391a9e3",
+    "composition_test_path": "/Data/CascadeProjects/agent-bridge/tests/test_story_executor_installed_key_composition.py",
+    "composition_test_sha256": "51333d7ad02e87e0c4880697d20326fb5e493b7dfa412f61ede10e22cf612214",
+    "base_composition_sha256": "0ac4ba4116a341310a34a02bf94833bc2d582fa7728b6eac905150c7fb9c27fe",
+    "binding_sha256": "e2fd3d719a9b0996500c7447f1df3d4726db0bca6f3edb9336200aa8aa481208",
+    "test_count": 9,
+    "public_keyword_only_arguments": [
+      "execution_contract",
+      "envelope",
+      "request"
+    ]
+  },
+  "boundaries": {
+    "only_one_public_preparation_entrypoint": true,
+    "caller_supplied_key_parameter_absent": true,
+    "caller_path_override_parameter_absent": true,
+    "envelope_key_id_selects_installed_key": true,
+    "closed_envelope_validated_before_dependency_or_key_load": true,
+    "base_composition_source_pinned": true,
+    "posix_binding_source_pinned": true,
+    "hashed_dependency_bytes_are_executed": true,
+    "base_hashed_verifier_bytes_are_executed": true,
+    "authority_verifier_built_inside_key_context": true,
+    "key_context_exited_before_non_secret_preparation": true,
+    "same_keyless_dependency_context_reused_after_clear": true,
+    "loaded_key_id_rechecked": true,
+    "nonce_binding_rechecked": true,
+    "base_key_seam_private": true,
+    "base_verifier_completion_seam_private": true,
+    "executor_invocation_absent": true,
+    "environment_and_database_fallback_absent": true,
+    "model_runtime_absent": true,
+    "cli_absent": true
+  },
+  "blockers": [
+    "secure_configuration_not_installed",
+    "executor_invocation_not_authorized"
+  ],
+  "implementation_present": true,
+  "installation_authorized": false,
+  "execution_authorized": false,
+  "runtime_effects": {
+    "created_runtime_directory": false,
+    "created_key_bundle": false,
+    "generated_key": false,
+    "created_nonce_store": false,
+    "loaded_installed_key": false,
+    "called_executor": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "recorded_audio": false,
+    "wrote_memory": false
+  },
+  "review_sha256": "5dca1a03756a8051e0b174fa7726543ba5d856fa01106eaa09ed9ecd14cc4c82",
+  "claims": {
+    "installed_key_public_composition_implemented": true,
+    "caller_supplied_key_public_interface_absent": true,
+    "mutable_key_buffer_best_effort_cleared_before_non_secret_preparation": true,
+    "complete_python_key_zeroization_claimed": false,
+    "secure_configuration_installed": false,
+    "installed_key_loaded": false,
+    "executor_invoked": false
+  },
+  "next_gate": "owner_authorized_story_executor_secure_configuration_installation"
+}

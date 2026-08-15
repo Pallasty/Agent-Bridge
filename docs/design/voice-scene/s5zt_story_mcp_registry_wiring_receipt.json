@@ -1,0 +1,35 @@
+{
+  "schema": "agent_bridge.story_mcp_registry_wiring.v1",
+  "status": "story_mcp_source_wiring_verified",
+  "source": {
+    "staged_lib_sha256": "1e872a7a91a00e1ec7943e20d8a483b05e0c0abf6039209f40d2c6802a388620",
+    "staged_registry_sha256": "029a3be4ec50a616f4a8fea5055d8457ba9c381479d5f931dc157f5c1affdfc0",
+    "adapter_sha256": "7fdd0e1534b1ebddf07289188d7769b01aa5d2363ec4b7f88e006abc241ceedd",
+    "story_contract_sha256": "ccfa045db403441cf06a2f88699dc773fe89b6a6ffddd42d89fc142d61e88598",
+    "source_registration_wired": true,
+    "cargo_manifest_changed": false
+  },
+  "policy": {
+    "tier": "Niche",
+    "disabled_absent": true,
+    "invalid_config_absent_with_warning": true,
+    "eager_allowlists_unchanged": true
+  },
+  "verification": {
+    "source_contract_tests": 4,
+    "isolated_rust_tests": 7,
+    "staged_tree_cargo_check": true
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "deployed": false,
+    "client_refreshed": false,
+    "tool_observed_in_live_client": false,
+    "tool_called": false,
+    "loaded_model": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_memory": false
+  },
+  "next_gate": "story_mcp_deployment_adoption_review"
+}

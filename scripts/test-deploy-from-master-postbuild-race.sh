@@ -49,9 +49,14 @@ git init -q -b master "$SEED"
 git -C "$SEED" config user.name deploy-race-test
 git -C "$SEED" config user.email deploy-race-test@example.invalid
 mkdir -p "$SEED/scripts"
-cp "$DEPLOY_SCRIPT" "$SEED/scripts/deploy_from_master.sh"
+for asset in deploy_from_master.sh audio_embody.py desktop_action.py \
+    desktop_confirm_store.py desktop_grant.py desktop_invoke.py \
+    desktop_snapshot.py desktop_steer.py desktop_verify.py \
+    vision_grounding_ocr.py; do
+    cp "$SCRIPT_DIR/$asset" "$SEED/scripts/$asset"
+done
 chmod +x "$SEED/scripts/deploy_from_master.sh"
-git -C "$SEED" add scripts/deploy_from_master.sh
+git -C "$SEED" add scripts
 git -C "$SEED" commit -q -m initial
 git -C "$SEED" remote add origin "$REMOTE"
 git -C "$SEED" push -q -u origin master
@@ -61,6 +66,15 @@ git clone -q "$REMOTE" "$REPO"
 cat > "$FAKE_BIN/cargo" <<'FAKE_CARGO'
 #!/usr/bin/env bash
 set -euo pipefail
+master_sha="$(git --git-dir="$AB_DEPLOY_RACE_TEST_REMOTE" rev-parse refs/heads/master)"
+source_file="$AB_DEPLOY_RACE_TEST_ROOT/fake-agent-bridge.c"
+cat > "$source_file" <<EOF
+#include <stdio.h>
+int main(void) { puts("agent-bridge test ${master_sha}"); return 0; }
+EOF
+mkdir -p "$CARGO_TARGET_DIR/release"
+"$AB_DEPLOY_RACE_TEST_CC" "$source_file" -o "$CARGO_TARGET_DIR/release/agent-bridge"
+
 advance="$AB_DEPLOY_RACE_TEST_ROOT/advance"
 git clone -q "$AB_DEPLOY_RACE_TEST_REMOTE" "$advance"
 git -C "$advance" config user.name deploy-race-test
@@ -69,8 +83,6 @@ printf '%s\n' advanced-during-build > "$advance/advanced-during-build.txt"
 git -C "$advance" add advanced-during-build.txt
 git -C "$advance" commit -q -m advance-during-build
 git -C "$advance" push -q origin master
-mkdir -p "$CARGO_TARGET_DIR/release"
-cp "$AB_DEPLOY_RACE_NATIVE_TRUE" "$CARGO_TARGET_DIR/release/agent-bridge"
 FAKE_CARGO
 chmod +x "$FAKE_BIN/cargo"
 
@@ -85,7 +97,7 @@ output="$({
     AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
     AB_DEPLOY_RACE_TEST_ROOT="$TEST_ROOT" \
     AB_DEPLOY_RACE_TEST_REMOTE="$REMOTE" \
-    AB_DEPLOY_RACE_NATIVE_TRUE="$NATIVE_TRUE" \
+    AB_DEPLOY_RACE_TEST_CC="$(command -v cc)" \
     "$REPO/scripts/deploy_from_master.sh" --yes
 } 2>&1)"
 status=$?

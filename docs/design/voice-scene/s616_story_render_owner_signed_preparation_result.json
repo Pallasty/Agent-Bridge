@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.story_render_owner_signed_preparation_result.v1",
+  "status": "story_render_owner_signed_preparation_verified",
+  "decision": "owner_signed_preparation_accepted_executor_blocked",
+  "authorization": {
+    "owner_authorized": true,
+    "key_id": "story-render-owner-v1",
+    "ttl_seconds": 300,
+    "issued_at": "2026-08-01T19:02:56+00:00",
+    "expires_at": "2026-08-01T19:07:56+00:00",
+    "signed_fields_sha256": "b531fe2ca4768657f0cdd1052998f9876b624991ab16703c9cd36bbe2b243677",
+    "envelope_sha256": "edc6365f8cbc65aef2f89a2edd94912917943468bc8381064b8d1f56e18c92d0",
+    "request_sha256": "fe478b920e82fbd88bd6731f061ec83ac0171e2d7c9d28929a08ba78a80958da",
+    "real_mac_generated": true,
+    "key_material_disclosed": false,
+    "mac_disclosed": false,
+    "nonce_disclosed": false,
+    "envelope_persisted": false
+  },
+  "preparation": {
+    "s613_entrypoint": "prepare_installed_secure_bounded_render",
+    "s613_invoked": true,
+    "accepted": true,
+    "authority_verifier_accepts": true,
+    "real_key_load_count": 1,
+    "borrowed_loaded_context_count": 1,
+    "loaded_key_buffer_cleared": true,
+    "nonce_store_path": "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3",
+    "nonce_store_absent": true,
+    "output_directory": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s616-owner-signed-preparation",
+    "output_directory_absent": true,
+    "model_verifier_constructed": true,
+    "model_verifier_invoked": false
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "read_real_key": true,
+    "generated_real_mac": true,
+    "created_nonce_store": false,
+    "consumed_nonce": false,
+    "imported_executor": false,
+    "called_executor": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "recorded_audio": false,
+    "wrote_memory": false
+  },
+  "grant_references_discarded_after_preparation": true
+}

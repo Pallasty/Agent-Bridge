@@ -1,0 +1,50 @@
+{
+  "status": "VERIFIED_D82_OWNER_POLICY_FROZEN_LOAD_ISOLATION_FAIL_CLOSED",
+  "source_pin_count": 3,
+  "owner_numeric_policy_frozen": true,
+  "runtime_claim_class": "EMPIRICAL_ADMISSION_RUNTIME_ENVELOPE_NOT_DETERMINISTIC_WORST_CASE",
+  "confirmatory_samples_per_operation_class": 459,
+  "operation_class_count": 5,
+  "total_confirmatory_samples": 2295,
+  "familywise_confidence_lower_bound": "95/100",
+  "timeout_policy_frozen": true,
+  "load_isolation_admitted": false,
+  "load_isolation_observation": {
+    "d81_environment_identity_except_cgroup_path_matches": true,
+    "root_cpuset_controller_available": true,
+    "root_cpuset_subtree_enabled": false,
+    "target_service_cgroup_path_exact": false,
+    "partition_state_isolated": false,
+    "effective_cpu_set_exact": false,
+    "exclusive_effective_cpu_set_exact": false,
+    "target_cpu_root_isolated": false,
+    "process_affinity_exact": false,
+    "target_cpu_online": true,
+    "target_cpu_has_no_smt_sibling": true,
+    "irq_affinity_excludes_target": false
+  },
+  "load_isolation_failed_predicates": [
+    "root_cpuset_subtree_enabled",
+    "target_service_cgroup_path",
+    "partition_state_isolated",
+    "effective_cpu_set_exact",
+    "exclusive_effective_cpu_set_exact",
+    "target_cpu_root_isolated",
+    "process_affinity_exact",
+    "irq_affinity_excludes_target"
+  ],
+  "missing_input_count": 1,
+  "missing_inputs": [
+    "concurrent_load_exclusion_mechanism"
+  ],
+  "environment_recapture_required": true,
+  "host_cgroup_mutations_executed": 0,
+  "timing_measurements_executed": 0,
+  "production_io_executed": 0,
+  "external_requests_sent": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "BLOCKED_D82_OWNER_POLICY_FROZEN_HOST_ISOLATION_NOT_ADMITTED",
+  "next_gate": "HOST_ADMIN_CPUSET_ISOLATED_PARTITION_PROVISIONING_AND_FRESH_D82_RECEIPT"
+}

@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/sherpa-render-pack-v1.json",
+  "title": "Agent-Bridge S5B Sherpa render pack receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "plan_id",
+    "status",
+    "blockers",
+    "binary",
+    "binary_sha256",
+    "model_dir",
+    "model_files",
+    "output_dir",
+    "execution",
+    "artifacts",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.story_sherpa_render_pack.v1"
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^audition_plan_[0-9a-f]{20}$"
+    },
+    "status": {
+      "enum": [
+        "blocked",
+        "failed",
+        "three_voice_rendered_asr_pending",
+        "three_voice_rendered_asr_review_failed",
+        "three_voice_render_asr_verified"
+      ]
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "binary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "model_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "expected_size",
+          "expected_sha256",
+          "exists",
+          "size",
+          "sha256",
+          "verified",
+          "reason"
+        ]
+      }
+    },
+    "output_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution": {
+      "type": "object",
+      "required": ["attempted", "completed_items"],
+      "properties": {
+        "attempted": {
+          "const": true
+        },
+        "completed_items": {
+          "const": 3
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blind_label",
+          "role_id",
+          "speaker_id",
+          "voice_profile_version",
+          "reference_text",
+          "synth_receipt",
+          "wav",
+          "asr"
+        ],
+        "properties": {
+          "blind_label": {
+            "enum": ["voice_a", "voice_b", "voice_c"]
+          },
+          "role_id": {
+            "enum": ["narrator", "character_lin", "character_su"]
+          },
+          "speaker_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "voice_profile_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reference_text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "synth_receipt": {
+            "type": "object",
+            "required": ["backend", "sample_rate", "speakers"]
+          },
+          "wav": {
+            "type": "object",
+            "required": [
+              "valid",
+              "path",
+              "sha256",
+              "channels",
+              "sample_width",
+              "sample_rate",
+              "frames",
+              "duration_seconds",
+              "reason"
+            ],
+            "properties": {
+              "valid": {
+                "const": true
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "channels": {
+                "const": 1
+              },
+              "sample_width": {
+                "const": 2
+              },
+              "sample_rate": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "frames": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "duration_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "asr": {
+            "type": "object",
+            "required": [
+              "ok",
+              "transcript",
+              "model",
+              "model_sha256",
+              "cer"
+            ],
+            "properties": {
+              "ok": {
+                "const": true
+              },
+              "model_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "cer": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 0.2
+              }
+            }
+          }
+        }
+      }
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "downloads_models",
+        "renders_audio",
+        "plays_audio",
+        "writes_memory"
+      ],
+      "properties": {
+        "downloads_models": {
+          "const": false
+        },
+        "renders_audio": {
+          "const": true
+        },
+        "plays_audio": {
+          "const": false
+        },
+        "writes_memory": {
+          "const": false
+        }
+      }
+    }
+  }
+}

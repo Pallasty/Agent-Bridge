@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_one_shot_worker_implementation_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "current_source_findings", "implementation_ladder", "selected_next_patch", "pure_protocol_codec", "synthetic_supervisor_plan", "owner_authority_boundary", "mcp_registration_boundary", "fault_matrix", "blockers", "implementation_authorized", "execution_authorized", "deployment_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_render_one_shot_worker_implementation_review.v1"},
+    "status": {"const": "story_render_one_shot_worker_implementation_reviewable"},
+    "decision": {"const": "pure_protocol_then_synthetic_supervisor_real_authority_deferred"},
+    "evidence": {
+      "type": "object",
+      "required": ["s620_contract", "s620_schema", "source_files"],
+      "properties": {
+        "s620_contract": {"type": "object", "required": ["path", "sha256", "contract_sha256"], "properties": {"path": {"const": "docs/design/voice-scene/s620_story_render_one_shot_worker_protocol_contract.json"}, "sha256": {"$ref": "#/$defs/sha256"}, "contract_sha256": {"const": "be4bfc12d9adeda14b8d20048b91baaaf903f155a3fca5bd3413b2b649f7334d"}}, "additionalProperties": false},
+        "s620_schema": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"const": "docs/design/voice-scene/story_render_one_shot_worker_protocol_contract.schema.json"}, "sha256": {"$ref": "#/$defs/sha256"}}, "additionalProperties": false},
+        "source_files": {"type": "object", "required": ["s620_builder", "story_preflight_mcp", "mcp_registry", "bridge_lib", "mcp_server", "orphan_reaper", "bridge_cargo"], "properties": {"s620_builder": {"$ref": "#/$defs/source_file"}, "story_preflight_mcp": {"$ref": "#/$defs/source_file"}, "mcp_registry": {"$ref": "#/$defs/source_file"}, "bridge_lib": {"$ref": "#/$defs/source_file"}, "mcp_server": {"$ref": "#/$defs/source_file"}, "orphan_reaper": {"$ref": "#/$defs/source_file"}, "bridge_cargo": {"$ref": "#/$defs/source_file"}}, "additionalProperties": false}
+      },
+      "additionalProperties": false
+    },
+    "current_source_findings": {"const": {"worker_target_absent": true, "protocol_codec_target_absent": true, "supervisor_target_absent": true, "mcp_render_target_absent": true, "story_command_render_registry_absent": true, "existing_story_preflight_registered": true, "existing_mcp_cancellation_aborts_tool_future": true, "existing_owned_process_group_reaper_present": true, "required_rust_dependencies_already_present": ["libc", "serde", "serde_json", "tokio", "uuid"]}},
+    "implementation_ladder": {"const": [
+      {"id": "pure_protocol_codec", "objective": "strict request_response_validation_and_mcp_redaction", "process_spawn": false, "filesystem_write": false, "real_key_read": false, "real_model_load": false, "mcp_registration": false},
+      {"id": "synthetic_rust_supervisor", "objective": "host_lock_bounded_io_cancel_kill_and_reap_with_fake_workers", "process_spawn": true, "filesystem_write": "temporary_test_roots_only", "real_key_read": false, "real_model_load": false, "mcp_registration": false},
+      {"id": "private_fixture_worker", "objective": "compose_fixed_fixture_with_injected_fake_authority_and_runner", "process_spawn": "synthetic_integration_only", "filesystem_write": "temporary_test_roots_only", "real_key_read": false, "real_model_load": false, "mcp_registration": false},
+      {"id": "owner_confirmation_broker", "objective": "independent_owner_confirmation_and_short_lived_grant_issuance", "process_spawn": false, "filesystem_write": "separate_contract_required", "real_key_read": true, "real_model_load": false, "mcp_registration": false},
+      {"id": "mcp_registration_and_deployment_review", "objective": "default_off_niche_registration_and_current_client_adoption", "process_spawn": false, "filesystem_write": false, "real_key_read": false, "real_model_load": false, "mcp_registration": "review_only_until_owner_authorized"}
+    ]},
+    "selected_next_patch": {"const": {"stage": "pure_protocol_codec", "allowed_files": ["scripts/story_render_worker_protocol.py", "tests/test_story_render_worker_protocol.py", "docs/design/voice-scene/story_render_worker_request.schema.json", "docs/design/voice-scene/story_render_worker_response.schema.json"], "modified_existing_files": [], "forbidden_files": ["crates/bridge/src/mcp_tools.rs", "crates/bridge/src/mcp_tools/story.rs", "crates/bridge/src/main.rs", "crates/bridge/src/mcp_tools/audio.rs", "crates/store", "/home/pallasting/.agent-bridge-secure"], "imports_forbidden": ["subprocess", "sqlite3", "onnxruntime", "torch", "sounddevice"], "filesystem_writes_allowed": false, "network_allowed": false, "environment_reads_allowed": false, "clock_reads_allowed": false, "randomness_allowed": false}},
+    "pure_protocol_codec": {"const": {"entrypoints": ["decode_request", "validate_worker_response", "encode_error_response", "project_mcp_response"], "input_type": "bytes_and_s620_contract", "output_type": "validated_plain_data_or_typed_protocol_error", "authorization_work": "shape_and_binding_validation_only", "mac_verification": false, "nonce_consumption": false, "model_or_executor_import": false, "strict_json": {"duplicate_keys": "reject", "nonfinite_numbers": "reject", "trailing_data": "reject", "unknown_fields": "reject", "utf8_errors": "reject"}, "size_limits_from_s620_only": true, "error_messages": "fixed_codes_no_input_echo"}},
+    "synthetic_supervisor_plan": {"const": {"target": "crates/bridge/src/story_render_supervisor.rs", "ownership": "detached_cleanup_task_owns_child_and_lock", "cancel_path": "drop_guard_signals_cleanup_task_which_terminates_group_and_waits", "kill_on_drop_alone_sufficient": false, "host_lock": "nonblocking_flock_held_by_cleanup_task", "process_identity": "setsid_leader_pid_equals_pgid_and_parent_death_sigkill", "termination": "sigterm_two_second_grace_sigkill_then_wait", "io": "concurrent_bounded_stdout_stderr_drain", "dependencies": ["libc", "serde", "serde_json", "tokio", "uuid"], "new_cargo_dependency_allowed": false, "test_workers": ["success", "malformed_output", "stdout_overflow", "stderr_overflow", "hang", "term_ignoring_descendant"], "test_roots": "temporary_directories_only", "real_worker_allowed": false, "mcp_registration_in_stage": false}},
+    "owner_authority_boundary": {"const": {"mcp_call_is_owner_grant": false, "inline_mcp_signer_allowed": false, "worker_self_signing_allowed": false, "caller_supplied_envelope_is_sufficient": false, "independent_owner_confirmation_required": true, "real_broker_design_deferred_until": "pure_codec_and_synthetic_supervisor_verified", "real_key_read_in_s621": false, "real_grant_issued_in_s621": false}},
+    "mcp_registration_boundary": {"const": {"tool_name": "story_command_render", "annotation_if_later_registered": "conservative_not_read_only", "default_exposed": false, "toolset": "codex-voice", "tier": "Niche", "enable_env": "AB_STORY_COMMAND_RENDER_ENABLE", "register_in_s621": false, "add_to_codex_voice_extras_in_s621": false, "registration_requires": ["pure_codec_verified", "synthetic_supervisor_verified", "private_fixture_worker_verified", "independent_owner_confirmation_broker_verified", "redacted_projection_verified", "deployment_review_owner_authorized"]}},
+    "fault_matrix": {"type": "array", "minItems": 18, "uniqueItems": true, "items": {"$ref": "#/$defs/fault"}},
+    "blockers": {"const": ["pure_protocol_codec_absent", "runtime_request_response_schemas_absent", "synthetic_rust_supervisor_absent", "private_fixture_worker_absent", "independent_owner_confirmation_broker_undecided", "story_command_render_mcp_surface_absent"]},
+    "implementation_authorized": {"const": false},
+    "execution_authorized": {"const": false},
+    "deployment_authorized": {"const": false},
+    "runtime_effects": {"const": {"created_protocol_codec": false, "created_runtime_worker": false, "created_supervisor": false, "created_lock_file": false, "created_output_root": false, "modified_rust_registry": false, "registered_mcp_tool": false, "issued_owner_grant": false, "read_authority_key": false, "consumed_nonce": false, "spawned_worker": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_cache": false, "wrote_memory": false, "modified_configuration": false, "deployed_binary": false}},
+    "review_sha256": {"$ref": "#/$defs/sha256"},
+    "claims": {"const": {"s620_contract_hash_bound": true, "current_runtime_targets_absent": true, "staged_implementation_selected": true, "pure_codec_patch_reviewed": true, "real_owner_authority_deferred": true, "worker_implemented": false, "supervisor_implemented": false, "mcp_tool_registered": false, "runtime_enabled": false}},
+    "next_gate": {"const": "story_render_worker_protocol_codec_implementation"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_file": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}}, "additionalProperties": false},
+    "fault": {"type": "object", "required": ["code", "stage", "disposition", "effects_forbidden", "required_cleanup"], "properties": {"code": {"type": "string", "minLength": 1}, "stage": {"type": "string", "minLength": 1}, "disposition": {"const": "fail_closed"}, "effects_forbidden": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "required_cleanup": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}, "additionalProperties": false}
+  }
+}

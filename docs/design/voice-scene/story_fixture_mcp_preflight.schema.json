@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_fixture_mcp_preflight.v1",
+  "type": "object",
+  "required": ["schema", "status", "runtime", "request", "result", "selection", "render_plan", "evidence", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_fixture_mcp_preflight.v1"},
+    "status": {"const": "story_fixture_mcp_preflight_verified"},
+    "runtime": {"const": {"binary_sha256": "5bd92a9d27629a16ef338ecbf4eb5e157ce1f86d8035f6a9c20d24cb52d921b5", "binary_source": "82fc5f169438", "toolset": "codex-voice", "profile": "essential", "tool_name": "story_command_preflight", "mcp_error": false}},
+    "request": {"type": "object", "required": ["source_path", "source_sha256", "start", "dry_run"], "properties": {"source_path": {"type": "string"}, "source_sha256": {"pattern": "^[0-9a-f]{64}$"}, "start": {"const": {"kind": "chapter", "chapter": 2}}, "dry_run": {"const": true}}, "additionalProperties": false},
+    "result": {"const": {"schema": "agent_bridge.story_command_integration_preflight.v1", "status": "story_command_integration_preflight_reviewable", "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb", "execution_authorized": false, "continuity_receipt_status": "owner_accepted"}},
+    "selection": {"const": {"selected_segments": 3, "excluded_earlier_segments": 4, "excluded_later_segments": 0, "assembly_gap_seconds": [1.0, 1.0], "preceding_scene_gap_seconds": 2.2}},
+    "render_plan": {"type": "object", "required": ["speakers", "texts", "cache_keys", "distinct_cache_keys"], "properties": {"speakers": {"const": ["Vivian", "Serena", "Vivian"]}, "texts": {"type": "array", "minItems": 3, "maxItems": 3}, "cache_keys": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"pattern": "^[0-9a-f]{64}$"}}, "distinct_cache_keys": {"const": true}}, "additionalProperties": false},
+    "evidence": {"type": "object", "required": ["voice_plan_file_sha256", "mapping_file_sha256", "role_acceptance_file_sha256", "continuity_file_sha256", "unchanged_after_call"], "properties": {"voice_plan_file_sha256": {"pattern": "^[0-9a-f]{64}$"}, "mapping_file_sha256": {"pattern": "^[0-9a-f]{64}$"}, "role_acceptance_file_sha256": {"pattern": "^[0-9a-f]{64}$"}, "continuity_file_sha256": {"pattern": "^[0-9a-f]{64}$"}, "unchanged_after_call": {"const": true}}, "additionalProperties": false},
+    "runtime_effects": {"const": {"loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false, "wrote_cache": false, "persistent_mcp_processes_after": 9}},
+    "next_gate": {"const": "story_fixture_bounded_render_authorization"}
+  },
+  "additionalProperties": false
+}

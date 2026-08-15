@@ -45,6 +45,8 @@
 //!                    decoupled per thread 6 #226 / #228 / #231 split with
 //!                    `embed_text` MCP tool. Returns the raw inner backend's
 //!                    output without substrate side-effects.
+//!   - `GET /embed/readiness` — honest local-model readiness plus bounded
+//!                              stale-vector repair status.
 //!   - `POST /agent/messages` — XM v0.1: write a message addressed to
 //!                              a specific session on this node's inbox.
 //!                              See `docs/DESIGN-cross-machine-agent-messaging-2026-05-17.md`.
@@ -75,12 +77,148 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
+
+mod avatar_aura_startup;
+use avatar_aura_startup::preload_avatar_aura_io;
+pub use avatar_aura_startup::{AvatarAuraIoStartupConfig, AvatarAuraIoStartupError};
 
 #[derive(Clone)]
 struct AppState {
     store: Arc<dyn StateStore>,
     embed_backend: Arc<dyn EmbeddingBackend>,
+    embed_maintenance: Arc<Mutex<EmbedMaintenanceStatus>>,
+    avatar_aura_io_default: Option<Arc<crate::avatar_renderer::SanitizedAuraIoReport>>,
+}
+
+#[derive(Clone, Debug)]
+struct EmbedMaintenanceStatus {
+    phase: &'static str,
+    batch_limit: usize,
+    updated: usize,
+    detail: Option<String>,
+}
+
+impl EmbedMaintenanceStatus {
+    fn from_env() -> Self {
+        let enabled = std::env::var("AGENT_BRIDGE_EMBED_AUTO_REPAIR")
+            .ok()
+            .map(|raw| {
+                !matches!(
+                    raw.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "off" | "no"
+                )
+            })
+            .unwrap_or(true);
+        let batch_limit = std::env::var("AGENT_BRIDGE_EMBED_AUTO_REPAIR_BATCH")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .unwrap_or(100)
+            .clamp(1, 1000);
+        Self {
+            phase: if enabled { "waiting" } else { "disabled" },
+            batch_limit,
+            updated: 0,
+            detail: None,
+        }
+    }
+}
+
+async fn prepare_app_state(
+    store: Arc<dyn StateStore>,
+    aura_config: AvatarAuraIoStartupConfig,
+) -> Result<AppState> {
+    let avatar_aura_io_default = preload_avatar_aura_io(aura_config).await?;
+    Ok(AppState {
+        store,
+        embed_backend: build_raw_embed_backend(),
+        embed_maintenance: Arc::new(Mutex::new(EmbedMaintenanceStatus::from_env())),
+        avatar_aura_io_default,
+    })
+}
+
+fn set_embed_maintenance(
+    status: &Arc<Mutex<EmbedMaintenanceStatus>>,
+    phase: &'static str,
+    updated: usize,
+    detail: Option<String>,
+) {
+    let mut current = status
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    current.phase = phase;
+    current.updated = updated;
+    current.detail = detail;
+}
+
+/// Warm the daemon's raw ONNX backend and, once it is genuinely ready, repair
+/// at most one stale batch. This is deliberately once-per-process and bounded:
+/// readiness recovery must not turn daemon startup into an unbounded migration.
+fn spawn_embed_readiness_maintenance(state: &AppState) {
+    let initial = state
+        .embed_maintenance
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if initial.phase == "disabled" {
+        return;
+    }
+    if state.embed_backend.name() == "fnv1a-hash-384" {
+        set_embed_maintenance(
+            &state.embed_maintenance,
+            "skipped",
+            0,
+            Some("explicit hash backend has no semantic model to repair against".into()),
+        );
+        return;
+    }
+
+    let backend = state.embed_backend.clone();
+    let store = state.store.clone();
+    let status = state.embed_maintenance.clone();
+    tokio::spawn(async move {
+        let _ = tokio::task::spawn_blocking(move || backend.embed("warmup")).await;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(120);
+        while ab_store::vector::local_model_ready().is_none()
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        match ab_store::vector::local_model_ready() {
+            Some(true) => {}
+            Some(false) => {
+                set_embed_maintenance(
+                    &status,
+                    "skipped",
+                    0,
+                    Some(
+                        "local semantic model failed to initialize; hash fallback remains active"
+                            .into(),
+                    ),
+                );
+                return;
+            }
+            None => {
+                set_embed_maintenance(
+                    &status,
+                    "timed_out",
+                    0,
+                    Some("local semantic model did not become ready within 120 seconds".into()),
+                );
+                return;
+            }
+        }
+
+        set_embed_maintenance(&status, "running", 0, None);
+        match store
+            .memory_reindex_embeddings(initial.batch_limit, true)
+            .await
+        {
+            Ok(updated) => set_embed_maintenance(&status, "complete", updated, None),
+            Err(error) => set_embed_maintenance(&status, "failed", 0, Some(error.to_string())),
+        }
+    });
 }
 
 /// Parse the `listen` argument into one or more addresses. Comma-separated
@@ -97,6 +235,37 @@ pub fn parse_listen_addrs(listen: &str) -> Vec<String> {
         .collect()
 }
 
+async fn prepare_daemon_http_with_binder<B, F>(
+    store: Arc<dyn StateStore>,
+    listen: &str,
+    aura_config: AvatarAuraIoStartupConfig,
+    mut bind: B,
+) -> Result<(AppState, Vec<tokio::net::TcpListener>)>
+where
+    B: FnMut(String) -> F,
+    F: Future<Output = std::io::Result<tokio::net::TcpListener>>,
+{
+    let addrs = parse_listen_addrs(listen);
+    if addrs.is_empty() {
+        anyhow::bail!("daemon-http listen address is empty: {listen:?}");
+    }
+
+    let state = prepare_app_state(store, aura_config).await?;
+    let mut listeners = Vec::with_capacity(addrs.len());
+    for addr in addrs {
+        let listener = bind(addr.clone())
+            .await
+            .with_context(|| format!("bind {addr}"))?;
+        let bound = listener
+            .local_addr()
+            .map(|address| address.to_string())
+            .unwrap_or(addr);
+        tracing::info!(addr = %bound, "agent-bridge daemon-http listening");
+        listeners.push(listener);
+    }
+    Ok((state, listeners))
+}
+
 /// Run the HTTP daemon on one or more `listen` addresses. Pass a single
 /// address (e.g. `0.0.0.0:7878`) for the legacy single-listener mode, or a
 /// comma-separated list (e.g. `127.0.0.1:7878,100.91.146.24:7878`) to bind
@@ -104,16 +273,20 @@ pub fn parse_listen_addrs(listen: &str) -> Vec<String> {
 /// `0.0.0.0` because public interfaces (WiFi, ethernet) are not bound.
 /// Blocks until all listeners exit or the runtime is cancelled.
 pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
-    let addrs = parse_listen_addrs(listen);
-    if addrs.is_empty() {
-        anyhow::bail!("daemon-http listen address is empty: {listen:?}");
-    }
+    run_with_config(store, listen, AvatarAuraIoStartupConfig::disabled()).await
+}
 
-    let embed_backend = build_raw_embed_backend();
-    let state = AppState {
-        store,
-        embed_backend,
-    };
+pub async fn run_with_config(
+    store: Arc<dyn StateStore>,
+    listen: &str,
+    aura_config: AvatarAuraIoStartupConfig,
+) -> Result<()> {
+    let (state, listeners) =
+        prepare_daemon_http_with_binder(store, listen, aura_config, |addr| async move {
+            tokio::net::TcpListener::bind(addr).await
+        })
+        .await?;
+    spawn_embed_readiness_maintenance(&state);
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/.well-known/agent.json/:session_id", get(agent_card))
@@ -226,6 +399,7 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
         )
         .route("/identity", get(identity_endpoint))
         .route("/embed", post(embed_endpoint))
+        .route("/embed/readiness", get(embed_readiness_endpoint))
         .route("/agent/messages", post(agent_message_write))
         .route("/agent/inbox", get(agent_inbox_read))
         .route(
@@ -233,21 +407,6 @@ pub async fn run(store: Arc<dyn StateStore>, listen: &str) -> Result<()> {
             get(semantic_bus_runtime_conformance_endpoint),
         )
         .with_state(state);
-
-    // Bind all listeners up-front so any bind failure fails the whole
-    // daemon (rather than serving on a subset of addresses silently).
-    let mut listeners = Vec::with_capacity(addrs.len());
-    for addr in &addrs {
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .with_context(|| format!("bind {addr}"))?;
-        let bound = listener
-            .local_addr()
-            .map(|a| a.to_string())
-            .unwrap_or_else(|_| addr.clone());
-        tracing::info!(addr = %bound, "agent-bridge daemon-http listening");
-        listeners.push(listener);
-    }
 
     // Spawn one axum::serve task per listener; first one to error wins.
     // The shared Router (`app`) is cheaply cloneable (state is Arc-based).
@@ -613,7 +772,7 @@ async fn presence_list(
 struct AvatarSurfaceQuery {
     project: Option<String>,
     role: Option<String>,
-    aura_io: Option<std::path::PathBuf>,
+    aura_io: Option<String>,
     #[serde(default = "default_max_idle")]
     max_idle_secs: i64,
     #[serde(default)]
@@ -1092,6 +1251,11 @@ async fn avatar_heartbeat_health(
     State(s): State<AppState>,
     Query(q): Query<AvatarHeartbeatHealthQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    crate::avatar_health::resolve_heartbeat_health_identity(
+        q.label.as_deref(),
+        q.project.as_deref(),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let payload = crate::avatar_health::heartbeat_health(
         s.store.as_ref(),
         q.label.as_deref(),
@@ -1252,6 +1416,21 @@ async fn avatar_linux_renderer_payload(
     s: &AppState,
     q: &AvatarSurfaceQuery,
 ) -> Result<Value, (StatusCode, String)> {
+    let aura_io_report = if q.aura_io.is_some() {
+        let Some(report) = s.avatar_aura_io_default.as_deref() else {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "aura_io_file_access_disabled".to_string(),
+            ));
+        };
+        if q.aura_io.as_deref() != Some("default") {
+            return Err((StatusCode::FORBIDDEN, "aura_io_not_authorized".to_string()));
+        }
+        Some(report)
+    } else {
+        None
+    };
+
     let avatars = avatar_surface_entries(s, q).await?;
     let projected = avatars.first();
     let pet_id = avatar_renderer_pet_id_from_entry(projected);
@@ -1267,25 +1446,20 @@ async fn avatar_linux_renderer_payload(
         .and_then(|value| str_value(value, "cwd"))
         .or_else(|| raw_ref.and_then(|value| str_value(value, "cwd")));
     let scope = crate::avatar_renderer::RendererScope { project, cwd };
-    let mut payload = crate::avatar_renderer::renderer_payload_from_sources_with_aura_io_path(
-        &scope,
-        projected,
-        raw_ref,
-        q.aura_io.as_deref(),
-    )
-    .map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("invalid aura_io sidecar: {e}"),
-        )
-    })?;
+    let mut payload =
+        crate::avatar_renderer::renderer_payload_from_sources_with_sanitized_aura_io_report(
+            &scope,
+            projected,
+            raw_ref,
+            aura_io_report,
+        );
     payload["input"] = json!({
         "presence_avatar_count": avatars.len(),
         "pet_id": pet_id,
         "raw_pet_state_available": raw_ref.is_some(),
         "presence_project": q.project,
         "presence_role": q.role,
-        "aura_io": q.aura_io.as_ref().map(|path| path.display().to_string()),
+        "aura_io": q.aura_io,
         "max_idle_secs": q.effective_max_idle_secs(),
     });
     Ok(payload)
@@ -1332,13 +1506,8 @@ fn avatar_linux_renderer_state_href(q: &AvatarSurfaceQuery) -> String {
     if let Some(role) = q.role.as_deref() {
         append_query_param(&mut href, &mut sep, "role", role);
     }
-    if let Some(aura_io) = q.aura_io.as_ref() {
-        append_query_param(
-            &mut href,
-            &mut sep,
-            "aura_io",
-            &aura_io.display().to_string(),
-        );
+    if q.aura_io.as_deref() == Some("default") {
+        append_query_param(&mut href, &mut sep, "aura_io", "default");
     }
     if q.include_stale {
         append_query_param(&mut href, &mut sep, "include_stale", "true");
@@ -3447,13 +3616,43 @@ fn default_identity_days() -> u32 {
     3
 }
 
-/// Request body for `POST /embed`. Single text → single 384-d vector. For
+/// Request body for `POST /embed`. Single text → one model-dependent vector. For
 /// throughput callers we may later add a `batch` variant; v0 keeps the shape
 /// minimal so non-Rust clients (Unity/C#, Unreal/C++, Godot/GDScript, web/JS)
 /// can hit it with one POST per perception event.
 #[derive(Deserialize, Debug)]
 struct EmbedRequest {
     text: String,
+}
+
+async fn embed_readiness_endpoint(State(s): State<AppState>) -> Json<Value> {
+    let configured_backend = s.embed_backend.name();
+    let (model_state, semantic_ready) = if configured_backend == "fnv1a-hash-384" {
+        ("hash_only", false)
+    } else {
+        match ab_store::vector::local_model_ready() {
+            None => ("loading", false),
+            Some(true) => ("ready", true),
+            Some(false) => ("fallback", false),
+        }
+    };
+    let maintenance = s
+        .embed_maintenance
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    Json(json!({
+        "configured_backend": configured_backend,
+        "configured_dim": s.embed_backend.dim(),
+        "model_state": model_state,
+        "semantic_ready": semantic_ready,
+        "automatic_repair": {
+            "phase": maintenance.phase,
+            "batch_limit": maintenance.batch_limit,
+            "updated": maintenance.updated,
+            "detail": maintenance.detail,
+        }
+    }))
 }
 
 async fn embed_endpoint(
@@ -3467,7 +3666,8 @@ async fn embed_endpoint(
     let text = req.text;
     let (name, dim, vec) = tokio::task::spawn_blocking(move || {
         let v = backend.embed(&text);
-        (backend.name().to_string(), backend.dim(), v)
+        let (name, dim) = embed_response_metadata(backend.name(), backend.dim(), &text, &v);
+        (name, dim, v)
     })
     .await
     .map_err(internal_error)?;
@@ -3476,6 +3676,25 @@ async fn embed_endpoint(
         "backend": name,
         "dim": dim,
     })))
+}
+
+/// Report what actually produced the wire vector, not merely what the optional
+/// ONNX backend was configured to produce. During cold start or model failure,
+/// `OnnxBackend` deliberately returns the deterministic hash fallback; labelling
+/// that 384d vector as gte/768 makes remote clients reject it and previously let
+/// write paths persist dimension-mismatched rows under a false backend tag.
+fn embed_response_metadata(
+    configured_name: &str,
+    _configured_dim: usize,
+    text: &str,
+    vector: &[f32],
+) -> (String, usize) {
+    let actual_dim = vector.len();
+    if configured_name != "fnv1a-hash-384" && vector == HashBackend.embed(text).as_slice() {
+        ("fnv1a-hash-384".to_string(), actual_dim)
+    } else {
+        (configured_name.to_string(), actual_dim)
+    }
 }
 
 /// Select the raw inner embedding backend for `/embed`. Mirrors the env
@@ -3757,9 +3976,11 @@ fn avatar_surface_health_html(health: &Value) -> String {
         None => html_escape("-"),
     };
     let binary_path = avatar_surface_html_json_value(binary.get("path"), "-");
-    let sync = avatar_surface_html_json_value(binary.get("supports_sync_presence"), "false");
+    let configured_sync =
+        avatar_surface_html_json_value(binary.get("configured_sync_presence"), "false");
+    let sync = avatar_surface_html_json_value(binary.get("supports_sync_presence"), "unknown");
     let health_cmd =
-        avatar_surface_html_json_value(binary.get("supports_heartbeat_health"), "false");
+        avatar_surface_html_json_value(binary.get("supports_heartbeat_health"), "unknown");
     let exit_code = avatar_surface_html_json_value(launchd.get("last_exit_code"), "-");
     let runs = avatar_surface_html_json_value(launchd.get("runs"), "-");
 
@@ -3772,7 +3993,7 @@ fn avatar_surface_health_html(health: &Value) -> String {
       </div>
       <dl>
         <div><dt>binary</dt><dd>{binary_path}</dd></div>
-        <div><dt>commands</dt><dd>sync={sync} health={health_cmd}</dd></div>
+        <div><dt>commands</dt><dd>configured_sync={configured_sync} support_sync={sync} health={health_cmd}</dd></div>
         <div><dt>launchd</dt><dd>exit={exit_code} runs={runs}</dd></div>
         <div><dt>presence</dt><dd>{age}</dd></div>
       </dl>
@@ -7323,6 +7544,65 @@ mod tests {
     use super::*;
     use ab_store::{AgentPresenceRecord, ForumPostRecord};
 
+    #[cfg(target_os = "linux")]
+    fn write_avatar_aura_p3_fixture(root: &std::path::Path) {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+
+        let sidecar_dir = root.join("nested");
+        let assets_dir = sidecar_dir.join("assets");
+        for directory in [root, sidecar_dir.as_path(), assets_dir.as_path()] {
+            std::fs::create_dir_all(directory).expect("create trusted Aura directory");
+            std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+                .expect("set trusted Aura directory permissions");
+        }
+
+        let uniform_bytes = vec![7_u8; 1_024];
+        let digest_bytes = br#"{"items":[{"title":"working"}]}"#;
+        let uniform_sha256 = format!("{:x}", Sha256::digest(&uniform_bytes));
+        let digest_sha256 = format!("{:x}", Sha256::digest(digest_bytes));
+        let uniform_path = assets_dir.join("uniform.bin");
+        let digest_path = sidecar_dir.join("digest.json");
+        let sidecar_path = sidecar_dir.join("aura.json");
+        std::fs::write(&uniform_path, &uniform_bytes).expect("write uniform fixture");
+        std::fs::write(&digest_path, digest_bytes).expect("write digest fixture");
+        let sidecar = json!({
+            "schema_version": "lcc.aura_io.v1",
+            "renderer_input": {
+                "kind": "tfe_uniform_f32x256",
+                "contract_version": 1,
+                "path": "assets/uniform.bin",
+                "sha256": format!("sha256:{uniform_sha256}"),
+                "uniform_len": 256,
+                "bin_bytes": 1_024,
+                "encoding": "little_endian_f32"
+            },
+            "source_digest": {
+                "schema_version": "1.0",
+                "item_count": 1,
+                "json_path": "digest.json",
+                "json_sha256": format!("sha256:{digest_sha256}")
+            },
+            "visible_signal_source": "curated_digest_only",
+            "shadow_signal_policy": "shadow_only_until_falsified",
+            "source_state": {
+                "mode": "working",
+                "activity_state": "aura-p3-preload",
+                "focus": "face-aura",
+                "risk_level": "low"
+            }
+        });
+        std::fs::write(
+            &sidecar_path,
+            serde_json::to_vec_pretty(&sidecar).expect("serialize sidecar fixture"),
+        )
+        .expect("write sidecar fixture");
+        for file in [&uniform_path, &digest_path, &sidecar_path] {
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600))
+                .expect("set trusted Aura file permissions");
+        }
+    }
+
     #[test]
     fn parse_listen_addrs_single() {
         assert_eq!(parse_listen_addrs("0.0.0.0:7878"), vec!["0.0.0.0:7878"]);
@@ -7350,6 +7630,398 @@ mod tests {
         // an implicit default surprising the operator.
         assert!(parse_listen_addrs("").is_empty());
         assert!(parse_listen_addrs("  ,  ,  ").is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn avatar_aura_enabled_config_preloads_default_snapshot_before_router() {
+        use std::collections::BTreeMap;
+
+        let temp = tempfile::tempdir().expect("create Aura P3 fixture parent");
+        let root = temp.path().join("trusted-aura-root");
+        write_avatar_aura_p3_fixture(&root);
+
+        let values = BTreeMap::from([
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                root.display().to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY".to_string(),
+                "nested/aura.json".to_string(),
+            ),
+        ]);
+        let config =
+            AvatarAuraIoStartupConfig::from_values(&values).expect("valid enabled startup config");
+        let store: Arc<dyn StateStore> = Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open isolated test store"),
+        );
+
+        let state = prepare_app_state(store, config)
+            .await
+            .expect("preload Aura snapshot before router construction");
+        let report = state
+            .avatar_aura_io_default
+            .as_ref()
+            .expect("default Aura snapshot installed")
+            .to_json_value();
+
+        assert_eq!(report["ok"], true);
+        assert_eq!(report["schema_version"], "lcc.aura_io.v1");
+        assert!(report.get("sidecar_path").is_none());
+        assert!(report.get("uniform_path").is_none());
+        assert!(report.get("digest_path").is_none());
+        assert!(!report.to_string().contains(&root.display().to_string()));
+    }
+
+    #[test]
+    fn avatar_aura_startup_config_enforces_activation_matrix() {
+        use std::collections::BTreeMap;
+
+        let disabled_cases = [
+            BTreeMap::new(),
+            BTreeMap::from([(
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                "".to_string(),
+            )]),
+            BTreeMap::from([(
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                "0".to_string(),
+            )]),
+        ];
+        for values in disabled_cases {
+            assert_eq!(
+                AvatarAuraIoStartupConfig::from_values(&values).expect("canonical disabled form"),
+                AvatarAuraIoStartupConfig::Disabled
+            );
+        }
+
+        let invalid_cases = [
+            (
+                BTreeMap::from([(
+                    "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                    "yes".to_string(),
+                )]),
+                "avatar_aura_io_config_activation_invalid",
+            ),
+            (
+                BTreeMap::from([(
+                    "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                    "/tmp/aura".to_string(),
+                )]),
+                "avatar_aura_io_config_without_activation",
+            ),
+            (
+                BTreeMap::from([
+                    (
+                        "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                        "0".to_string(),
+                    ),
+                    (
+                        "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY".to_string(),
+                        "nested/aura.json".to_string(),
+                    ),
+                ]),
+                "avatar_aura_io_config_without_activation",
+            ),
+            (
+                BTreeMap::from([(
+                    "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                    "1".to_string(),
+                )]),
+                "avatar_aura_io_config_root_missing",
+            ),
+            (
+                BTreeMap::from([
+                    (
+                        "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                        "1".to_string(),
+                    ),
+                    (
+                        "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                        "/tmp/aura".to_string(),
+                    ),
+                ]),
+                "avatar_aura_io_config_entry_missing",
+            ),
+        ];
+        for (values, expected_code) in invalid_cases {
+            let error = AvatarAuraIoStartupConfig::from_values(&values)
+                .expect_err("invalid startup config must fail closed");
+            assert_eq!(error.code(), expected_code);
+            assert!(!error.to_string().contains("/tmp/aura"));
+            assert!(!error.to_string().contains("nested/aura.json"));
+        }
+    }
+
+    #[test]
+    fn avatar_aura_startup_config_rejects_ambient_root_and_entry_authority() {
+        use std::collections::BTreeMap;
+
+        fn enabled_values(root: &str, entry: &str) -> BTreeMap<String, String> {
+            BTreeMap::from([
+                (
+                    "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                    "1".to_string(),
+                ),
+                (
+                    "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                    root.to_string(),
+                ),
+                (
+                    "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY".to_string(),
+                    entry.to_string(),
+                ),
+                ("HOME".to_string(), "/home/operator".to_string()),
+            ])
+        }
+
+        let cases = [
+            (
+                enabled_values("relative/root", "nested/aura.json"),
+                "avatar_aura_io_config_root_not_absolute",
+            ),
+            (
+                enabled_values("/", "nested/aura.json"),
+                "avatar_aura_io_config_root_is_filesystem_root",
+            ),
+            (
+                enabled_values("/home/operator", "nested/aura.json"),
+                "avatar_aura_io_config_root_is_home",
+            ),
+            (
+                enabled_values("/home/operator/.", "nested/aura.json"),
+                "avatar_aura_io_config_root_is_home",
+            ),
+            (
+                enabled_values("/srv/avatar-aura/../avatar-aura", "nested/aura.json"),
+                "avatar_aura_io_config_root_not_normalized",
+            ),
+            (
+                enabled_values("/srv/avatar-aura", "/tmp/aura.json"),
+                "avatar_aura_io_config_entry_not_relative",
+            ),
+            (
+                enabled_values("/srv/avatar-aura", "../aura.json"),
+                "avatar_aura_io_config_entry_parent_component",
+            ),
+        ];
+
+        for (values, expected_code) in cases {
+            let error = AvatarAuraIoStartupConfig::from_values(&values)
+                .expect_err("ambient root or entry authority must reject");
+            assert_eq!(error.code(), expected_code);
+            assert!(!error.to_string().contains("relative/root"));
+            assert!(!error.to_string().contains("/home/operator"));
+            assert!(!error.to_string().contains("/tmp/aura.json"));
+        }
+    }
+
+    #[tokio::test]
+    async fn avatar_aura_enabled_preload_failure_prevents_listener_bind() {
+        use std::collections::BTreeMap;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let temp = tempfile::tempdir().expect("create startup-order fixture parent");
+        let missing_root = temp.path().join("missing-aura-root");
+        let values = BTreeMap::from([
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                missing_root.display().to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY".to_string(),
+                "nested/aura.json".to_string(),
+            ),
+            (
+                "HOME".to_string(),
+                temp.path().join("home").display().to_string(),
+            ),
+        ]);
+        let config = AvatarAuraIoStartupConfig::from_values(&values)
+            .expect("syntactically valid enabled startup config");
+        let store: Arc<dyn StateStore> = Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open isolated test store"),
+        );
+        let bind_count = Arc::new(AtomicUsize::new(0));
+        let observed_bind_count = bind_count.clone();
+        let binder = move |_addr: String| {
+            let bind_count = bind_count.clone();
+            async move {
+                bind_count.fetch_add(1, Ordering::SeqCst);
+                tokio::net::TcpListener::bind("127.0.0.1:0").await
+            }
+        };
+
+        let result = prepare_daemon_http_with_binder(store, "127.0.0.1:0", config, binder).await;
+        let error = match result {
+            Ok(_) => panic!("unsafe enabled preload must fail before binding"),
+            Err(error) => error,
+        };
+
+        assert_eq!(observed_bind_count.load(Ordering::SeqCst), 0);
+        assert!(error
+            .to_string()
+            .contains("avatar_aura_io_startup_preload_"));
+        assert!(!error
+            .to_string()
+            .contains(&missing_root.display().to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn avatar_aura_symlink_root_prevents_listener_bind() {
+        use std::collections::BTreeMap;
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let temp = tempfile::tempdir().expect("create symlink-root fixture parent");
+        let actual_root = temp.path().join("actual-aura-root");
+        let symlink_root = temp.path().join("symlink-aura-root");
+        std::fs::create_dir(&actual_root).expect("create actual Aura root");
+        std::fs::set_permissions(&actual_root, std::fs::Permissions::from_mode(0o700))
+            .expect("set trusted Aura root permissions");
+        symlink(&actual_root, &symlink_root).expect("create Aura root symlink");
+        let values = BTreeMap::from([
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                symlink_root.display().to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY".to_string(),
+                "aura.json".to_string(),
+            ),
+            (
+                "HOME".to_string(),
+                temp.path().join("home").display().to_string(),
+            ),
+        ]);
+        let config = AvatarAuraIoStartupConfig::from_values(&values)
+            .expect("symlink root is rejected by capability admission, not pure parsing");
+        let store: Arc<dyn StateStore> = Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open isolated test store"),
+        );
+        let bind_count = Arc::new(AtomicUsize::new(0));
+        let observed_bind_count = bind_count.clone();
+        let binder = move |_addr: String| {
+            let bind_count = bind_count.clone();
+            async move {
+                bind_count.fetch_add(1, Ordering::SeqCst);
+                tokio::net::TcpListener::bind("127.0.0.1:0").await
+            }
+        };
+
+        let result = prepare_daemon_http_with_binder(store, "127.0.0.1:0", config, binder).await;
+        let error = match result {
+            Ok(_) => panic!("symlink root must fail before binding"),
+            Err(error) => error,
+        };
+
+        assert_eq!(observed_bind_count.load(Ordering::SeqCst), 0);
+        assert!(error
+            .to_string()
+            .contains("avatar_aura_io_startup_preload_"));
+        assert!(!error
+            .to_string()
+            .contains(&symlink_root.display().to_string()));
+        assert!(!error
+            .to_string()
+            .contains(&actual_root.display().to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn avatar_aura_default_selector_uses_cached_report_after_root_removed() {
+        use std::collections::BTreeMap;
+
+        let temp = tempfile::tempdir().expect("create Aura selector fixture parent");
+        let root = temp.path().join("trusted-aura-root");
+        write_avatar_aura_p3_fixture(&root);
+        let values = BTreeMap::from([
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT".to_string(),
+                root.display().to_string(),
+            ),
+            (
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY".to_string(),
+                "nested/aura.json".to_string(),
+            ),
+            (
+                "HOME".to_string(),
+                temp.path().join("home").display().to_string(),
+            ),
+        ]);
+        let config =
+            AvatarAuraIoStartupConfig::from_values(&values).expect("valid enabled startup config");
+        let disabled_state = isolated_avatar_renderer_state(&temp).await;
+        let enabled_state = prepare_app_state(disabled_state.store.clone(), config)
+            .await
+            .expect("preload default Aura report");
+
+        std::fs::remove_dir_all(&root).expect("remove Aura root after preload");
+        assert!(!root.exists());
+
+        for _ in 0..2 {
+            let query = isolated_avatar_renderer_query(Some("default".to_string()));
+            let payload = avatar_linux_renderer_payload(&enabled_state, &query)
+                .await
+                .expect("default selector must use cached report only");
+            assert_eq!(payload["aura_io"]["ok"], true);
+            assert_eq!(payload["input"]["aura_io"], "default");
+            assert!(!payload.to_string().contains(&root.display().to_string()));
+
+            let href = avatar_linux_renderer_state_href(&query);
+            let html = avatar_surface_linux_renderer_html(&payload, 1, &href, false);
+            assert!(html.contains("aura_io=default"));
+            assert!(!html.contains(&root.display().to_string()));
+        }
+
+        for selector in ["", "other", "/tmp/aura.json"] {
+            let result = avatar_linux_renderer_payload(
+                &enabled_state,
+                &isolated_avatar_renderer_query(Some(selector.to_string())),
+            )
+            .await;
+            assert_eq!(
+                result,
+                Err((StatusCode::FORBIDDEN, "aura_io_not_authorized".to_string()))
+            );
+        }
+
+        let disabled_result = avatar_linux_renderer_payload(
+            &disabled_state,
+            &isolated_avatar_renderer_query(Some("default".to_string())),
+        )
+        .await;
+        assert_eq!(
+            disabled_result,
+            Err((
+                StatusCode::FORBIDDEN,
+                "aura_io_file_access_disabled".to_string()
+            ))
+        );
     }
 
     #[test]
@@ -7631,6 +8303,82 @@ mod tests {
     }
 
     #[test]
+    fn embed_response_metadata_exposes_hash_fallback_honestly() {
+        let text = "cold model";
+        let vector = HashBackend.embed(text);
+        let (name, dim) = embed_response_metadata("gte-multilingual-base", 768, text, &vector);
+        assert_eq!(name, "fnv1a-hash-384");
+        assert_eq!(dim, vector.len());
+    }
+
+    #[test]
+    fn embed_response_metadata_uses_actual_vector_length() {
+        let vector = vec![0.1, 0.2, 0.3];
+        let (name, dim) = embed_response_metadata("test-model", 768, "text", &vector);
+        assert_eq!(name, "test-model");
+        assert_eq!(dim, 3);
+    }
+
+    #[tokio::test]
+    async fn embed_readiness_reports_hash_only_and_bounded_repair_status() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let store: Arc<dyn StateStore> = Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open temporary store"),
+        );
+        let status = EmbedMaintenanceStatus {
+            phase: "skipped",
+            batch_limit: 100,
+            updated: 0,
+            detail: Some("explicit hash backend".into()),
+        };
+        let Json(body) = embed_readiness_endpoint(State(AppState {
+            store,
+            embed_backend: Arc::new(HashBackend),
+            embed_maintenance: Arc::new(Mutex::new(status)),
+            avatar_aura_io_default: None,
+        }))
+        .await;
+
+        assert_eq!(body["model_state"], "hash_only");
+        assert_eq!(body["semantic_ready"], false);
+        assert_eq!(body["automatic_repair"]["phase"], "skipped");
+        assert_eq!(body["automatic_repair"]["batch_limit"], 100);
+    }
+
+    #[tokio::test]
+    async fn avatar_heartbeat_health_rejects_unsafe_label_as_bad_request() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let store: std::sync::Arc<dyn StateStore> = std::sync::Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open temporary store"),
+        );
+        let result = avatar_heartbeat_health(
+            State(AppState {
+                store,
+                embed_backend: build_raw_embed_backend(),
+                embed_maintenance: Arc::new(Mutex::new(EmbedMaintenanceStatus::from_env())),
+                avatar_aura_io_default: None,
+            }),
+            Query(AvatarHeartbeatHealthQuery {
+                label: Some("/tmp/escape".to_string()),
+                project: None,
+                stale_secs: 300,
+            }),
+        )
+        .await;
+
+        let (status, message) = result.expect_err("unsafe label must be rejected");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            message.contains("invalid heartbeat label"),
+            "message={message}"
+        );
+    }
+
+    #[test]
     fn avatar_surface_query_include_stale_disables_ttl() {
         let q = AvatarSurfaceQuery {
             project: Some("agent-bridge".into()),
@@ -7657,11 +8405,11 @@ mod tests {
     }
 
     #[test]
-    fn avatar_linux_renderer_state_href_preserves_aura_io_sidecar_path() {
-        let q = AvatarSurfaceQuery {
+    fn avatar_linux_renderer_state_href_preserves_only_default_aura_selector() {
+        let default_query = AvatarSurfaceQuery {
             project: Some("agent-bridge".into()),
             role: Some("main".into()),
-            aura_io: Some("/tmp/a2_working_aura_io.json".into()),
+            aura_io: Some("default".into()),
             max_idle_secs: 300,
             include_stale: true,
             limit: 5,
@@ -7672,14 +8420,211 @@ mod tests {
             transparent: true,
         };
 
-        let href = avatar_linux_renderer_state_href(&q);
+        let href = avatar_linux_renderer_state_href(&default_query);
 
         assert!(href.starts_with("/avatar-surface/linux-renderer-state?"));
         assert!(href.contains("project=agent-bridge"));
         assert!(href.contains("role=main"));
-        assert!(href.contains("aura_io=%2Ftmp%2Fa2_working_aura_io.json"));
+        assert!(href.contains("aura_io=default"));
         assert!(href.contains("include_stale=true"));
         assert!(href.contains("transparent=true"));
+
+        for selector in ["", "other", "/tmp/a2_working_aura_io.json"] {
+            let query = AvatarSurfaceQuery {
+                aura_io: Some(selector.to_string()),
+                ..AvatarSurfaceQuery {
+                    project: None,
+                    role: None,
+                    aura_io: None,
+                    max_idle_secs: 300,
+                    include_stale: false,
+                    limit: 5,
+                    refresh_secs: 10,
+                    stale_secs: 300,
+                    include_raw_presence: false,
+                    include_compat: false,
+                    transparent: false,
+                }
+            };
+            let href = avatar_linux_renderer_state_href(&query);
+            assert!(!href.contains("aura_io="), "href={href}");
+            if !selector.is_empty() {
+                assert!(!href.contains(selector), "href={href}");
+            }
+        }
+    }
+
+    #[test]
+    fn avatar_aura_query_rejects_duplicate_and_cannot_promote_invalid_encoding() {
+        let duplicate: axum::http::Uri =
+            "/avatar-surface/linux-renderer-state?aura_io=default&aura_io=default"
+                .parse()
+                .expect("valid duplicate-query URI envelope");
+        let duplicate_result: Result<Query<AvatarSurfaceQuery>, _> =
+            Query::try_from_uri(&duplicate);
+        assert!(duplicate_result.is_err());
+
+        let invalid_encoding: axum::http::Uri = "/avatar-surface/linux-renderer-state?aura_io=%FF"
+            .parse()
+            .expect("valid URI envelope");
+        let Query(query): Query<AvatarSurfaceQuery> = Query::try_from_uri(&invalid_encoding)
+            .expect("Axum replaces invalid UTF-8 instead of rejecting it");
+        assert!(query.aura_io.is_some());
+        assert_ne!(query.aura_io.as_deref(), Some("default"));
+    }
+
+    async fn isolated_avatar_renderer_state(temp: &tempfile::TempDir) -> AppState {
+        let store: std::sync::Arc<dyn StateStore> = std::sync::Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open temporary store"),
+        );
+        let capabilities = json!({
+            "avatar_state": {
+                "agent_avatar_protocol": 1,
+                "agent_id": "aura-p1-default-disabled-test",
+                "runtime": "codex",
+                "avatar_id": "aura-p1-no-ambient-pet-state",
+                "project": "aura-p1-default-disabled-test"
+            }
+        });
+        store
+            .agent_presence_announce(
+                "aura-p1-default-disabled-test",
+                ab_store::AgentPresenceUpsert {
+                    name: Some("Aura P1 default-disabled test"),
+                    node: Some("test"),
+                    project: Some("aura-p1-default-disabled-test"),
+                    role: Some("gate"),
+                    capabilities: Some(&capabilities),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("seed isolated avatar presence");
+
+        AppState {
+            store,
+            embed_backend: build_raw_embed_backend(),
+            embed_maintenance: Arc::new(Mutex::new(EmbedMaintenanceStatus::from_env())),
+            avatar_aura_io_default: None,
+        }
+    }
+
+    fn isolated_avatar_renderer_query(aura_io: Option<String>) -> AvatarSurfaceQuery {
+        AvatarSurfaceQuery {
+            project: Some("aura-p1-default-disabled-test".into()),
+            role: Some("gate".into()),
+            aura_io,
+            max_idle_secs: 300,
+            include_stale: true,
+            limit: 1,
+            refresh_secs: 10,
+            stale_secs: 300,
+            include_raw_presence: false,
+            include_compat: false,
+            transparent: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn avatar_linux_renderer_rejects_successfully_parsed_aura_io_before_payload_acquisition()
+    {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let invalid_aura_io = temp.path().join("invalid-aura-io.json");
+        std::fs::write(&invalid_aura_io, b"not valid json").expect("write invalid aura fixture");
+        let state = isolated_avatar_renderer_state(&temp).await;
+
+        let result = avatar_linux_renderer_payload(
+            &state,
+            &isolated_avatar_renderer_query(Some(invalid_aura_io.display().to_string())),
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err((
+                StatusCode::FORBIDDEN,
+                "aura_io_file_access_disabled".to_string()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn avatar_linux_renderer_without_aura_io_preserves_existing_payload() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let state = isolated_avatar_renderer_state(&temp).await;
+
+        let payload = avatar_linux_renderer_payload(&state, &isolated_avatar_renderer_query(None))
+            .await
+            .expect("a request without aura_io must preserve the renderer payload");
+
+        assert_eq!(payload["surface"], "linux_codex_avatar_renderer_state");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["project"], "aura-p1-default-disabled-test");
+        assert_eq!(payload["input"]["presence_avatar_count"], 1);
+        assert_eq!(payload["input"]["pet_id"], "aura-p1-no-ambient-pet-state");
+        assert_eq!(payload["input"]["raw_pet_state_available"], false);
+        assert_eq!(
+            payload["input"]["presence_project"],
+            "aura-p1-default-disabled-test"
+        );
+        assert_eq!(payload["input"]["presence_role"], "gate");
+        assert!(payload["input"]["aura_io"].is_null());
+    }
+
+    #[test]
+    fn avatar_linux_renderer_aura_guard_precedes_payload_acquisition() {
+        let source = include_str!("daemon_http.rs");
+        let handler_start = source
+            .find("async fn avatar_linux_renderer_payload(")
+            .expect("renderer payload handler");
+        let handler_end = source[handler_start..]
+            .find("\nasync fn avatar_linux_renderer_state(")
+            .map(|offset| handler_start + offset)
+            .expect("renderer state handler boundary");
+        let handler = &source[handler_start..handler_end];
+        let aura_guard = handler
+            .find("if q.aura_io.is_some()")
+            .expect("unconditional aura_io guard");
+        let presence_read = handler
+            .find("avatar_surface_entries(s, q).await?")
+            .expect("presence payload acquisition");
+        let pet_state_read = handler
+            .find("read_pet_state(&pet_id)")
+            .expect("pet-state payload acquisition");
+
+        assert!(aura_guard < presence_read);
+        assert!(aura_guard < pet_state_read);
+    }
+
+    #[test]
+    fn avatar_aura_app_state_retains_only_sanitized_default_report() {
+        let source = include_str!("daemon_http.rs");
+        let state_start = source.find("struct AppState {").expect("AppState start");
+        let state_end = source[state_start..]
+            .find("\n}\n\nasync fn prepare_app_state(")
+            .map(|offset| state_start + offset)
+            .expect("AppState boundary");
+        let state = &source[state_start..state_end];
+
+        assert!(state.contains("SanitizedAuraIoReport"));
+        assert!(!state.contains("AuraIoReadCapability"));
+        assert!(!state.contains("PathBuf"));
+
+        let handler_start = source
+            .find("async fn avatar_linux_renderer_payload(")
+            .expect("renderer payload handler");
+        let handler_end = source[handler_start..]
+            .find("\nasync fn avatar_linux_renderer_state(")
+            .map(|offset| handler_start + offset)
+            .expect("renderer state handler boundary");
+        let handler = &source[handler_start..handler_end];
+
+        assert!(handler.contains("renderer_payload_from_sources_with_sanitized_aura_io_report"));
+        assert!(!handler.contains("renderer_payload_from_sources_with_aura_io_path"));
+        assert!(!handler.contains("AuraIoReadCapability"));
+        assert!(!handler.contains("preload_avatar_aura_io"));
     }
 
     #[test]
@@ -7753,8 +8698,9 @@ mod tests {
             "summary": "healthy <binary>",
             "binary": {
                 "path": "/Users/me/.local/bin/agent-bridge.real",
-                "supports_sync_presence": true,
-                "supports_heartbeat_health": true
+                "configured_sync_presence": true,
+                "supports_sync_presence": null,
+                "supports_heartbeat_health": null
             },
             "launchd": {
                 "last_exit_code": 0,
@@ -8093,7 +9039,7 @@ mod tests {
         assert!(html.contains("delta=0 lag=20s unhealthy=0"));
         assert!(html.contains("abc&lt;123&gt;"));
         assert!(html.contains("/Users/me/.local/bin/agent-bridge.real"));
-        assert!(html.contains("sync=true health=true"));
+        assert!(html.contains("configured_sync=true support_sync=unknown health=unknown"));
         assert!(html.contains(r#"<meta http-equiv="refresh" content="10">"#));
         assert!(html.contains("last update=1779193140 refresh=10s stale_after=300s"));
         assert!(html.contains("status-fresh"));

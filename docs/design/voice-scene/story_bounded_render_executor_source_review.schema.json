@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_bounded_render_executor_source_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "source", "evidence", "call_order", "boundaries", "blockers", "implementation_present", "deployment_authorized", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_bounded_render_executor_source_review.v1"},
+    "status": {"const": "story_bounded_render_executor_source_reviewable"},
+    "decision": {"const": "source_implementation_accepted_runtime_blocked"},
+    "source": {
+      "type": "object",
+      "required": ["review_builder_path", "review_builder_sha256", "executor_path", "executor_sha256", "executor_test_path", "executor_test_sha256", "trusted_runner_path", "trusted_runner_sha256", "line_count", "function_count", "execute_keyword_only_arguments", "has_cli_entrypoint", "has_mcp_or_rust_wiring", "stdlib_import_roots"],
+      "properties": {
+        "review_builder_path": {"type": "string", "minLength": 1}, "review_builder_sha256": {"$ref": "#/$defs/sha256"},
+        "executor_path": {"type": "string", "minLength": 1}, "executor_sha256": {"$ref": "#/$defs/sha256"},
+        "executor_test_path": {"type": "string", "minLength": 1}, "executor_test_sha256": {"$ref": "#/$defs/sha256"},
+        "trusted_runner_path": {"type": "string", "minLength": 1}, "trusted_runner_sha256": {"$ref": "#/$defs/sha256"},
+        "line_count": {"type": "integer", "minimum": 1}, "function_count": {"type": "integer", "minimum": 1},
+        "execute_keyword_only_arguments": {"const": ["contract", "authorization", "request", "now", "authority_verifier", "model_verifier", "nonce_store_path"]},
+        "has_cli_entrypoint": {"const": false}, "has_mcp_or_rust_wiring": {"const": false},
+        "stdlib_import_roots": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["s604_contract_file_sha256", "s604_contract_sha256", "s605_review_file_sha256", "s605_review_sha256", "s605_executor_target_absent_was_historical_precondition", "executor_static_test_count", "required_negative_controls_present"],
+      "properties": {
+        "s604_contract_file_sha256": {"$ref": "#/$defs/sha256"}, "s604_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "s605_review_file_sha256": {"$ref": "#/$defs/sha256"}, "s605_review_sha256": {"$ref": "#/$defs/sha256"},
+        "s605_executor_target_absent_was_historical_precondition": {"const": true},
+        "executor_static_test_count": {"type": "integer", "minimum": 7},
+        "required_negative_controls_present": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "call_order": {"const": ["validate_contract", "validate_request", "validate_authorization", "model_verifier", "consume_nonce", "create_output_directory", "load_runner"]},
+    "boundaries": {"const": {"external_authority_verifier_required": true, "external_model_bundle_verifier_required": true, "authority_before_model_admission": true, "nonce_before_output_directory": true, "nonce_before_runner_load": true, "single_use_nonce_persistent_sqlite": true, "existing_output_rejected": true, "atomic_segment_and_receipt_finalization": true, "cleanup_scoped_to_owned_paths": true, "machine_pcm_and_non_silence_gate": true, "playback_absent": true, "recording_absent": true, "memory_integration_absent": true, "runner_override_absent": true, "shell_and_subprocess_absent": true}},
+    "blockers": {"const": ["authority_verifier_implementation_external", "model_bundle_verifier_implementation_external", "model_directory_manifest_not_bound_by_s604_contract", "nonce_store_path_not_contract_bound_or_deployed", "secure_runtime_configuration_not_installed", "bounded_render_receipt_schema_not_defined"]},
+    "implementation_present": {"const": true},
+    "deployment_authorized": {"const": false},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"const": {"imported_executor": false, "called_executor": false, "created_nonce_store": false, "created_output_directory": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false}},
+    "review_sha256": {"$ref": "#/$defs/sha256"},
+    "claims": {"const": {"source_implementation_present": true, "authorization_and_model_hooks_present": true, "single_use_and_output_custody_present": true, "machine_audio_gate_present": true, "playback_recording_and_memory_closed": true, "real_model_executed": false, "runtime_execution_admitted": false}},
+    "next_gate": {"const": "story_executor_authority_model_nonce_contract"}
+  },
+  "additionalProperties": false,
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_trusted_onnx_audition_receipt.schema.json",
+  "title": "Agent-Bridge trusted ONNX audition receipt",
+  "type": "object",
+  "required": [
+    "schema", "status", "runner", "request", "audio", "asr", "playback",
+    "owner_feedback", "claims", "next_gate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_trusted_onnx_audition_receipt.v1"
+    },
+    "status": {
+      "const": "owner_audition_accepted_with_length_followup"
+    },
+    "runner": {"type": "object"},
+    "request": {"type": "object"},
+    "audio": {"type": "object"},
+    "asr": {"type": "object"},
+    "playback": {
+      "type": "object",
+      "properties": {
+        "authorized": {"const": true},
+        "completed": {"const": true}
+      }
+    },
+    "owner_feedback": {
+      "type": "object",
+      "properties": {
+        "audible": {"const": true},
+        "clarity": {"const": "clear"},
+        "voice_impression": {"const": "gentle"}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "properties": {
+        "this_candidate_human_audible": {"const": true},
+        "this_candidate_clear": {"const": true},
+        "this_candidate_gentle": {"const": true},
+        "full_text_completed": {"const": false},
+        "all_texts_natural": {"const": false},
+        "mi50_verified": {"const": false},
+        "production_admitted": {"const": false}
+      }
+    },
+    "next_gate": {"const": "length_control_and_complete_sentence_audition"}
+  }
+}

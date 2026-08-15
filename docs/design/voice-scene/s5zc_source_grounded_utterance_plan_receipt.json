@@ -1,0 +1,176 @@
+{
+  "schema": "agent_bridge.story_chapter_voice_plan.v1",
+  "status": "chapter_voice_plan_reviewable",
+  "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566",
+  "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
+  "pause_policy": {
+    "paragraph_break": 1.4,
+    "same_paragraph": 0.65,
+    "scene_break": 2.2,
+    "speaker_turn": 1.0
+  },
+  "segments": [
+    {
+      "segment_index": 0,
+      "event_id": "event_1b5ea67f7f42735bcc9d",
+      "source_event_id": "event_1b5ea67f7f42735bcc9d",
+      "sequence": 1,
+      "source_line": 3,
+      "source_span": {
+        "line": 3,
+        "char_start": 10,
+        "char_end": 23,
+        "source_text": "林默（又名阿默）走进车站。",
+        "normalization": "none"
+      },
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "display_name": "旁白",
+      "qwen_speaker": "Vivian",
+      "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+      "voice_profile_version": 2,
+      "text": "林默（又名阿默）走进车站。",
+      "transition_after": "same_paragraph",
+      "pause_after_seconds": 0.65
+    },
+    {
+      "segment_index": 1,
+      "event_id": "event_91865f54bd0a137ae957.narration",
+      "source_event_id": "event_91865f54bd0a137ae957",
+      "sequence": 2,
+      "source_line": 4,
+      "source_span": {
+        "line": 4,
+        "char_start": 24,
+        "char_end": 31,
+        "source_text": "林默对苏岚说：",
+        "normalization": "terminal_colon_to_full_stop"
+      },
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "display_name": "旁白",
+      "qwen_speaker": "Vivian",
+      "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+      "voice_profile_version": 2,
+      "text": "林默对苏岚说。",
+      "transition_after": "speaker_turn",
+      "pause_after_seconds": 1.0
+    },
+    {
+      "segment_index": 2,
+      "event_id": "event_91865f54bd0a137ae957.dialogue",
+      "source_event_id": "event_91865f54bd0a137ae957",
+      "sequence": 3,
+      "source_line": 4,
+      "source_span": {
+        "line": 4,
+        "char_start": 32,
+        "char_end": 40,
+        "source_text": "我们得马上离开。",
+        "normalization": "none"
+      },
+      "speaker_id": "speaker_e6003d6d0222150b5ab3",
+      "display_name": "林默",
+      "qwen_speaker": "Dylan",
+      "style_instruction": "青年声线，冷静而坚定，紧张时仍保持清楚吐字。",
+      "voice_profile_version": 2,
+      "text": "我们得马上离开。",
+      "transition_after": "speaker_turn",
+      "pause_after_seconds": 1.0
+    },
+    {
+      "segment_index": 3,
+      "event_id": "event_14f990cfa1125874bdbd",
+      "source_event_id": "event_14f990cfa1125874bdbd",
+      "sequence": 4,
+      "source_line": 5,
+      "source_span": {
+        "line": 5,
+        "char_start": 42,
+        "char_end": 51,
+        "source_text": "林默是苏岚的朋友。",
+        "normalization": "none"
+      },
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "display_name": "旁白",
+      "qwen_speaker": "Vivian",
+      "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+      "voice_profile_version": 2,
+      "text": "林默是苏岚的朋友。",
+      "transition_after": "scene_break",
+      "pause_after_seconds": 2.2
+    },
+    {
+      "segment_index": 4,
+      "event_id": "event_75676e738dacbfa37b90.narration",
+      "source_event_id": "event_75676e738dacbfa37b90",
+      "sequence": 5,
+      "source_line": 9,
+      "source_span": {
+        "line": 9,
+        "char_start": 63,
+        "char_end": 68,
+        "source_text": "苏岚回答：",
+        "normalization": "terminal_colon_to_full_stop"
+      },
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "display_name": "旁白",
+      "qwen_speaker": "Vivian",
+      "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+      "voice_profile_version": 2,
+      "text": "苏岚回答。",
+      "transition_after": "speaker_turn",
+      "pause_after_seconds": 1.0
+    },
+    {
+      "segment_index": 5,
+      "event_id": "event_75676e738dacbfa37b90.dialogue",
+      "source_event_id": "event_75676e738dacbfa37b90",
+      "sequence": 6,
+      "source_line": 9,
+      "source_span": {
+        "line": 9,
+        "char_start": 69,
+        "char_end": 76,
+        "source_text": "我听见钟声了。",
+        "normalization": "none"
+      },
+      "speaker_id": "speaker_54151648be8fd67718fc",
+      "display_name": "苏岚",
+      "qwen_speaker": "Serena",
+      "style_instruction": "温暖而警觉，语速自然，避免过度戏剧化。",
+      "voice_profile_version": 2,
+      "text": "我听见钟声了。",
+      "transition_after": "speaker_turn",
+      "pause_after_seconds": 1.0
+    },
+    {
+      "segment_index": 6,
+      "event_id": "event_ef9cc37b3f50ca6583d7",
+      "source_event_id": "event_ef9cc37b3f50ca6583d7",
+      "sequence": 7,
+      "source_line": 10,
+      "source_span": {
+        "line": 10,
+        "char_start": 78,
+        "char_end": 87,
+        "source_text": "苏岚打开了旧木门。",
+        "normalization": "none"
+      },
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "display_name": "旁白",
+      "qwen_speaker": "Vivian",
+      "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+      "voice_profile_version": 2,
+      "text": "苏岚打开了旧木门。"
+    }
+  ],
+  "review_queue": [],
+  "chapter_render_ready": true,
+  "plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+  "runtime_effects": {
+    "loaded_model": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "registered_story_command": false
+  },
+  "next_gate": "bounded_first_chapter_qwen_render"
+}

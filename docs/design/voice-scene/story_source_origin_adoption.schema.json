@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_source_origin_adoption.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "remotes", "configuration", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_source_origin_adoption.v1"},
+    "status": {"const": "story_source_origin_adopted"},
+    "decision": {"const": {"source_adopted": true, "configuration_installed": false, "deployment_dry_run_admitted": false}},
+    "remotes": {"const": {"adopted_source_tip": "682cce5a48547bc7285b9d087dd452568e0974e3", "gitlab_master_observed": "682cce5a48547bc7285b9d087dd452568e0974e3", "github_master_observed": "682cce5a48547bc7285b9d087dd452568e0974e3", "all_equal": true}},
+    "configuration": {"type": "object", "required": ["fragment_path", "fragment_sha256", "fixture_pilot_only", "installed"], "properties": {"fragment_path": {"type": "string", "minLength": 1}, "fragment_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "fixture_pilot_only": {"const": true}, "installed": {"const": false}}, "additionalProperties": false},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 9, "additionalProperties": {"const": false}},
+    "next_gate": {"const": "story_fixture_configuration_installation_review"}
+  }
+}

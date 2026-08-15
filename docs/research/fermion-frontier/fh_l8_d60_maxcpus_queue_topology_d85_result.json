@@ -1,0 +1,18 @@
+{
+  "status": "VERIFIED_D85_MAXCPUS_NOT_INSTALLED_NVME_QUEUE_STILL_ON_CPU15",
+  "source_pin_count": 3,
+  "cmdline_tokens_admitted": false,
+  "maxcpus_token_present": false,
+  "cpu15_online": true,
+  "nvme_queue_count": 16,
+  "d82r_irq_conflict_count": 1,
+  "d82r_isolation_admitted": false,
+  "transaction_residue_absent": true,
+  "runtime_lock_precommitted": false,
+  "measurement_authorized": false,
+  "timing_measurements_executed": 0,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "NO_GO_D85_MAXCPUS_TOKEN_MISSING_AND_NVME0Q15_IRQ_CONFLICT_REMAINS",
+  "next_gate": "HOST_ADMIN_INSTALL_MAXCPUS_BOOT_CONFIG_THEN_RESTART"
+}

@@ -1,0 +1,116 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_cache_feedback_probe.v1",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "model": "cpu_int4/talker_cache.onnx",
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "provider": "CPUExecutionProvider"
+  },
+  "status": "talker_cache_feedback_passed_no_sampling",
+  "probe": {
+    "status": "cache_feedback_probe_passed",
+    "sequence_contract": {
+      "sequence_count": 2,
+      "steps_per_sequence": 2,
+      "first_position": 0,
+      "second_position": 1,
+      "second_attention_length": 2,
+      "first_embedding_fixture": "bounded_linear_-0.01_0.01",
+      "second_embedding_fixture": "bounded_linear_0.01_-0.01"
+    },
+    "first_step": {
+      "past_length": 0,
+      "logits": {
+        "shape": [
+          1,
+          1,
+          3072
+        ],
+        "dtype": "float32",
+        "all_finite": true,
+        "nonzero": true,
+        "minimum": -16.334016799926758,
+        "maximum": 10.391515731811523,
+        "mean": -1.8467050790786743
+      },
+      "hidden": {
+        "shape": [
+          1,
+          1,
+          2048
+        ],
+        "dtype": "float32",
+        "all_finite": true
+      },
+      "present_cache": {
+        "count": 56,
+        "all_shapes": [
+          [
+            1,
+            8,
+            1,
+            128
+          ]
+        ],
+        "all_finite": true
+      }
+    },
+    "second_step": {
+      "past_length": 1,
+      "logits": {
+        "shape": [
+          1,
+          1,
+          3072
+        ],
+        "dtype": "float32",
+        "all_finite": true,
+        "nonzero": true,
+        "minimum": -14.616663932800293,
+        "maximum": 12.355203628540039,
+        "mean": -1.3078316450119019
+      },
+      "hidden": {
+        "shape": [
+          1,
+          1,
+          2048
+        ],
+        "dtype": "float32",
+        "all_finite": true
+      },
+      "present_cache": {
+        "count": 56,
+        "all_shapes": [
+          [
+            1,
+            8,
+            2,
+            128
+          ]
+        ],
+        "all_finite": true
+      }
+    },
+    "sha256_sequence_1": "79fa85a3f1f5233219b558a01e3fcf6ed00ecbf6a6c07dd9cb78e45005d8429c",
+    "sha256_sequence_2": "79fa85a3f1f5233219b558a01e3fcf6ed00ecbf6a6c07dd9cb78e45005d8429c",
+    "deterministic": true
+  },
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_session": true,
+    "executed_graphs": true,
+    "execution_count": 4,
+    "produced_kv_cache": true,
+    "fed_back_kv_cache": true,
+    "cache_feedback_count_per_sequence": 1,
+    "sampled_codec_ids": false,
+    "generated_tokens": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}

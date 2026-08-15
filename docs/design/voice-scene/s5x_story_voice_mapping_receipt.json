@@ -1,0 +1,66 @@
+{
+  "schema": "agent_bridge.story_voice_mapping.v1",
+  "status": "mapping_reviewable_auditions_pending",
+  "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566",
+  "backend": "qwen3_tts_existing_onnx_cpu_int4",
+  "model": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
+  "roles": [
+    {
+      "speaker_id": "speaker_3c9aef950848fbb970ea",
+      "display_name": "旁白",
+      "role_kind": "narrator",
+      "qwen_speaker": "Vivian",
+      "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+      "language": "Chinese",
+      "voice_profile_version": 2,
+      "audition_status": "owner_accepted",
+      "render_authorized": true,
+      "stability_key": "2abb0be56d5714794639374319b0c6945e3e63c413fd32d0b26f01e3321e5e15"
+    },
+    {
+      "speaker_id": "speaker_e6003d6d0222150b5ab3",
+      "display_name": "林默",
+      "role_kind": "character",
+      "qwen_speaker": "Dylan",
+      "style_instruction": "青年声线，冷静而坚定，紧张时仍保持清楚吐字。",
+      "language": "Chinese",
+      "voice_profile_version": 2,
+      "audition_status": "audition_pending",
+      "render_authorized": false,
+      "stability_key": "86fe034366bf031935bb742328c0aba1529c41a73b2b837b33964698f83fdb30"
+    },
+    {
+      "speaker_id": "speaker_54151648be8fd67718fc",
+      "display_name": "苏岚",
+      "role_kind": "character",
+      "qwen_speaker": "Serena",
+      "style_instruction": "温暖而警觉，语速自然，避免过度戏剧化。",
+      "language": "Chinese",
+      "voice_profile_version": 2,
+      "audition_status": "audition_pending",
+      "render_authorized": false,
+      "stability_key": "b39a13a9d92fdd1bf33c11053ab96bd97cb5a13a63d6ecaa7e09912672cdf773"
+    }
+  ],
+  "pending_auditions": [
+    "Dylan",
+    "Serena"
+  ],
+  "chapter_render_ready": false,
+  "fallback_policy": {
+    "missing_role": "fail_closed_no_audio",
+    "unapproved_voice": "fail_closed_no_audio",
+    "generation_reaches_frame_cap": "fail_closed_no_wav",
+    "asr_incomplete": "reject_segment",
+    "profile_change": "increment_version_and_reaudition"
+  },
+  "runtime_effects": {
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_story_plan": false,
+    "used_gpu": false
+  }
+}

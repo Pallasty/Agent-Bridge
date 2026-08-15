@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_mcp_registry_wiring.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "source", "policy", "verification", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_mcp_registry_wiring.v1"},
+    "status": {"const": "story_mcp_source_wiring_verified"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staged_lib_sha256", "staged_registry_sha256", "adapter_sha256", "story_contract_sha256", "source_registration_wired", "cargo_manifest_changed"],
+      "properties": {
+        "staged_lib_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "staged_registry_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "story_contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_registration_wired": {"const": true},
+        "cargo_manifest_changed": {"const": false}
+      }
+    },
+    "policy": {"const": {"tier": "Niche", "disabled_absent": true, "invalid_config_absent_with_warning": true, "eager_allowlists_unchanged": true}},
+    "verification": {"const": {"source_contract_tests": 4, "isolated_rust_tests": 7, "staged_tree_cargo_check": true}},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {
+      "const": {"deployed": false, "client_refreshed": false, "tool_observed_in_live_client": false, "tool_called": false, "loaded_model": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false}
+    },
+    "next_gate": {"const": "story_mcp_deployment_adoption_review"}
+  }
+}

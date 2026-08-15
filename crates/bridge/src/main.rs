@@ -2,26 +2,12 @@ use ab_agent::{
     AcpRuntime, AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
-use ab_bridge::biocortex_capability_ledger::{
-    build_biocortex_capability_ledger_report_packet, consume_biocortex_capability_ledger,
-};
 use ab_bridge::biocortex_shadow::{
-    biocortex_replay_comparison, biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
-    biocortex_retrieval_opt_in_audit_report,
-    biocortex_retrieval_opt_in_authorization_decision_packet,
-    biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet,
+    biocortex_replay_comparison, biocortex_retrieval_opt_in_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
-    biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
-    biocortex_retrieval_opt_in_post_implementation_review_gate,
-    biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
-    biocortex_retrieval_opt_in_runtime_influence_decision_packet,
-    biocortex_retrieval_opt_in_runtime_influence_review_request,
-    biocortex_retrieval_opt_in_runtime_readiness_packet,
-    biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
-    biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
-    biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
-    supported_benchmarks, BioCortexReplayComparisonOptions,
+    biocortex_retrieval_opt_in_gated_store_trial,
+    biocortex_retrieval_opt_in_runtime_trial, biocortex_retrieval_opt_in_store_trial,
+    BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
     BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
@@ -38,19 +24,16 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInRuntimeTransitionGateOptions,
     BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
-    BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions,
-    BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+    BioCortexRetrievalOptInStoreTrialOptions, BIOCORTEX_RETRIEVAL_DISABLE_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
 };
-use ab_bridge::lswr_interaction_feedback::build_interaction_feedback_packet_consumption_preflight;
-use ab_bridge::operator_request::{OperatorDecision, OperatorRequestStore, OperatorRequestView};
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
-use ab_bridge::{a2ui, browser_lite, instinct, skills};
+use ab_bridge::{instinct, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -63,11 +46,43 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+mod cli;
 mod doctor;
 mod seed_substrate;
 mod setup;
 mod shadow_cortex;
 use ab_bridge::sync;
+use cli::workflow_feedback::{
+    run_workflow_feedback_baseline_evidence, run_workflow_feedback_lift_evidence,
+    run_workflow_feedback_owner_review_packet, run_workflow_feedback_promotion_gate,
+    run_workflow_feedback_promotion_record, run_workflow_feedback_report,
+    run_workflow_feedback_shadow_score,
+};
+use cli::{
+    aggregate_skill_retro, drift_coverage_ratio, drift_tokens,
+    run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
+    run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
+    run_biocortex_retrieval_opt_in_authorization_decision_packet,
+    run_biocortex_retrieval_opt_in_controlled_order_fixture_result,
+    run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
+    run_biocortex_retrieval_opt_in_order_diff_packet,
+    run_biocortex_retrieval_opt_in_post_implementation_review_gate,
+    run_biocortex_retrieval_opt_in_redacted_evidence_aggregate,
+    run_biocortex_retrieval_opt_in_redacted_order_artifact,
+    run_biocortex_retrieval_opt_in_review_packet,
+    run_biocortex_retrieval_opt_in_runtime_influence_decision_packet,
+    run_biocortex_retrieval_opt_in_runtime_influence_review_request,
+    run_biocortex_retrieval_opt_in_runtime_readiness_packet,
+    run_biocortex_retrieval_opt_in_runtime_transition_gate,
+    run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
+    run_biocortex_retrieval_opt_in_status, run_biocortex_retrieval_opt_in_evidence_summary,
+    run_biocortex_retrieval_opt_in_store_trial_result,
+    run_biocortex_shadow_digest, run_browser_lite, render_codebase_report_html, render_promote_html,
+    run_lswr_interaction_feedback_consumption_preflight, run_substrate, shadow_json_display,
+    short_key, triage_agent_md_drift_candidate, truncate_chars, A2uiOp, BrowserLiteOp,
+    OperatorRequestOp, PromoteDecision, PromoteStatus, SubstrateOp,
+    AGENT_MD_DRIFT_COVERAGE_THRESHOLD,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -829,36 +844,6 @@ enum InstinctOp {
 }
 
 #[derive(Subcommand, Debug)]
-enum BrowserLiteOp {
-    /// Probe an optional browser-lite backend and print a capability report.
-    Probe {
-        /// Backend to probe. Defaults to obscura.
-        #[arg(value_enum, default_value = "obscura")]
-        backend: BrowserLiteBackend,
-        /// Override backend binary path. Otherwise uses AGENT_BRIDGE_OBSCURA_BIN, then PATH.
-        #[arg(long)]
-        bin: Option<PathBuf>,
-        /// Probe MCP tools/list in addition to `--help`.
-        ///
-        /// Enabled by default because tool count is part of the provenance
-        /// evidence for external browser-lite routing decisions.
-        #[arg(long = "no-mcp-tools", default_value_t = false)]
-        no_mcp_tools: bool,
-        /// Per-probe timeout for backend commands.
-        #[arg(long, default_value_t = 5_000)]
-        timeout_ms: u64,
-        /// Emit raw JSON payload instead of a command line summary.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-enum BrowserLiteBackend {
-    Obscura,
-}
-
-#[derive(Subcommand, Debug)]
 enum AvatarOp {
     /// Render the Agent Avatar Protocol surface from local presence rows.
     Surface {
@@ -1198,7 +1183,7 @@ enum AvatarOp {
         /// Force an alert even if the event key is unchanged.
         #[arg(long)]
         force: bool,
-        /// Compute and record the event but do not emit notification or TTS.
+        /// Compute the alert without writing alert state/events or emitting notification/TTS.
         #[arg(long)]
         preview: bool,
         /// Suppress desktop notification emission.
@@ -2860,109 +2845,6 @@ enum DreamOp {
 }
 
 #[derive(Subcommand, Debug)]
-enum SubstrateOp {
-    /// Print substrate config + (if installed) live stats. Output
-    /// shows N / D / outer_dim / step_count / surprise / connection
-    /// mean. JSON mode is machine-readable for forum / dream pipeline
-    /// integration.
-    ///
-    /// **Phase 3 (C)**: also reads `substrate.parquet` when available
-    /// (installed-substrate's configured path, or `--snapshot-path`
-    /// override, or `default_snapshot_path()`) and reports total rows,
-    /// hot vs long counts, latest Long/Hot step + ts + fingerprint, and
-    /// file size — useful for cross-process determinism / freshness
-    /// checks without needing `AB_SUBSTRATE=1` in the inspecting process.
-    Stats {
-        /// Override snapshot file path. Default: installed substrate's
-        /// path, falling back to `default_snapshot_path()`.
-        #[arg(long)]
-        snapshot_path: Option<PathBuf>,
-        /// Emit raw JSON instead of pretty text.
-        #[arg(long)]
-        json: bool,
-    },
-    /// **v22 Phase 3 (B)** — Replay a JSONL event log against a fresh
-    /// in-process substrate, write the resulting `substrate.parquet`, and
-    /// emit the SHA256 fingerprint of the latest Long row. Tool for v22
-    /// §4 P5 (cross-machine determinism) — note that `NeuronGrid` currently
-    /// uses `rand::thread_rng()` internally, so fingerprints differ across
-    /// machines until the AiOT crate ships a seeded variant; `--seed` is
-    /// reserved + logged but not yet effective.
-    ///
-    /// Event log: one JSON object per line, e.g.
-    /// `{"text": "hello", "ts": 1700000000}`. Only `text` is required.
-    /// `ts` and `kind` are informational; parse errors / empty lines are
-    /// skipped with a warning.
-    Replay {
-        /// JSONL event log file. Each line `{text, ts?, kind?}`.
-        #[arg(long)]
-        log: PathBuf,
-        /// RNG seed (reserved; logged but not yet effective — pending
-        /// upstream AiOT seed_neuron::NeuronGrid::new_seeded support).
-        #[arg(long, default_value_t = 0)]
-        seed: u64,
-        /// Grid size N. Default 256 (memo §3.3).
-        #[arg(long, default_value_t = 256)]
-        n: usize,
-        /// Substrate dim D. Default 192 (memo §3.3 + post 56 PCA).
-        #[arg(long, default_value_t = 192)]
-        d: usize,
-        /// Force HashBackend (deterministic encoder, no ONNX load).
-        /// Default false → ONNX (encoder is deterministic on same hw).
-        #[arg(long)]
-        use_hash: bool,
-        /// Output path for substrate.parquet. Default temp file.
-        #[arg(long)]
-        output: Option<PathBuf>,
-        /// Emit JSON summary instead of pretty text.
-        #[arg(long)]
-        json: bool,
-    },
-    /// **v22 Phase 3 (A)** — Query substrate topology: for `--key K`,
-    /// return up to `--k` other keys that the substrate's neuron(s)
-    /// which fired on K connect to most strongly. Reads the latest Long
-    /// snapshot row from `substrate.parquet` (no live install_default
-    /// required) so short-lived CLI invocations get useful answers.
-    Neighbors {
-        /// Memory key to look up (must have been perceived by the
-        /// substrate process that wrote the snapshot file).
-        #[arg(long)]
-        key: String,
-        /// Max number of distinct neighbor keys to return.
-        #[arg(long, default_value_t = 20)]
-        k: usize,
-        /// Override file path (default: `$HOME/.local/share/agent-bridge/substrate.parquet`).
-        #[arg(long)]
-        path: Option<PathBuf>,
-        /// Emit raw JSON `[{"key":..., "score":...}]` for scripts.
-        #[arg(long)]
-        json: bool,
-    },
-    /// **Phase 2.2 read side** — Read rows from `substrate.parquet`
-    /// without touching the in-process substrate (no install_default
-    /// required). Useful for cross-process inspection, forum/dream
-    /// pipeline, and G4 fingerprint comparisons across machines.
-    Snapshot {
-        /// Override file path (default: `$HOME/.local/share/agent-bridge/substrate.parquet`).
-        #[arg(long)]
-        path: Option<PathBuf>,
-        /// Number of trailing rows to show (0 = all). Default 5.
-        #[arg(long, default_value_t = 5)]
-        limit: usize,
-        /// Filter by tier (`hot` or `long`).
-        #[arg(long)]
-        tier: Option<String>,
-        /// Print only the SHA256 fingerprint per row (one per line) —
-        /// for cross-machine determinism compare (G4).
-        #[arg(long)]
-        fingerprint_only: bool,
-        /// Emit JSON summary (omits bulk per-neuron arrays).
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 enum BioCortexOp {
     /// Run a read-only BioCortex shadow adapter and print an AB digest.
     ShadowDigest {
@@ -4034,59 +3916,6 @@ enum SyncOp {
     },
 }
 
-#[derive(Subcommand, Debug)]
-enum OperatorRequestOp {
-    /// List recent staged requests without changing them.
-    List {
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show one exact request and any local decision evidence.
-    Show {
-        request_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record approval evidence for separate executor review.
-    Approve {
-        request_id: String,
-        /// Human/operator identifier to record with the decision.
-        #[arg(long)]
-        operator: String,
-        /// Why this exact request digest is approved for executor review.
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reject a pending request. Rejected requests cannot be revived.
-    Reject {
-        request_id: String,
-        /// Human/operator identifier to record with the decision.
-        #[arg(long)]
-        operator: String,
-        /// Why this exact request digest is rejected.
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum A2uiOp {
-    /// Validate a JSON array, single message, or JSONL stream. Use `-` for stdin.
-    Validate {
-        /// Input path, or `-` to read stdin.
-        input: String,
-        /// Emit the complete machine-readable validation report.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum SyncProvider {
     /// Use `gh` CLI to host on GitHub (legacy default).
@@ -4521,6 +4350,28 @@ fn which_in_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|p| p.join(bin).is_file())
 }
 
+const AVATAR_AURA_IO_STARTUP_ENV_KEYS: [&str; 4] = [
+    "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE",
+    "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT",
+    "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY",
+    "HOME",
+];
+
+fn avatar_aura_io_startup_values_from_lookup<F>(
+    mut lookup: F,
+) -> Result<std::collections::BTreeMap<String, String>>
+where
+    F: FnMut(&str) -> Result<Option<String>>,
+{
+    let mut values = std::collections::BTreeMap::new();
+    for key in AVATAR_AURA_IO_STARTUP_ENV_KEYS {
+        if let Some(value) = lookup(key)? {
+            values.insert(key.to_string(), value);
+        }
+    }
+    Ok(values)
+}
+
 #[cfg(unix)]
 fn restore_sigpipe_default() {
     // Rust ignores SIGPIPE by default, which converts a closed downstream pipe
@@ -4785,13 +4636,13 @@ async fn real_main() -> Result<()> {
     // Operator requests are a local file-backed control plane. They do not
     // need the daemon Hub, and decisions never invoke an executor.
     if let Cmd::OperatorRequest { op } = &cmd {
-        return run_operator_request_cli(op);
+        return cli::run_operator_request(op);
     }
 
     // A2UI P0 is deliberately read-only: parse and report before any Hub,
     // renderer, action dispatcher, browser, terminal, or agent runtime exists.
     if let Cmd::A2ui { op } = &cmd {
-        return run_a2ui_cli(op);
+        return cli::run_a2ui(op);
     }
 
     // Skills subcommand: short-lived; no daemon hub needed.
@@ -4916,20 +4767,7 @@ async fn real_main() -> Result<()> {
 
     // Browser-lite probes: short-lived; no Hub and no persistent backend service.
     if let Cmd::BrowserLite { op } = &cmd {
-        return match op {
-            BrowserLiteOp::Probe {
-                backend: BrowserLiteBackend::Obscura,
-                bin,
-                no_mcp_tools,
-                timeout_ms,
-                json,
-            } => browser_lite::run_obscura_probe(browser_lite::ObscuraProbeOptions {
-                bin: bin.clone(),
-                timeout_ms: *timeout_ms,
-                probe_mcp_tools: !*no_mcp_tools,
-                json: *json,
-            }),
-        };
+        return run_browser_lite(op);
     }
 
     // Avatar subcommand: short-lived read-only terminal surface over presence rows.
@@ -5873,40 +5711,9 @@ async fn real_main() -> Result<()> {
         };
     }
 
-    // Substrate subcommand: short-lived read-only introspection over
-    // in-process seed-bridge global. No state.db touched.
+    // Substrate executes before shared store and Hub construction.
     if let Cmd::Substrate { op } = &cmd {
-        return match op {
-            SubstrateOp::Stats {
-                snapshot_path,
-                json,
-            } => run_substrate_stats(snapshot_path.clone(), *json).await,
-            SubstrateOp::Neighbors { key, k, path, json } => {
-                run_substrate_neighbors(key.clone(), *k, path.clone(), *json).await
-            }
-            SubstrateOp::Replay {
-                log,
-                seed,
-                n,
-                d,
-                use_hash,
-                output,
-                json,
-            } => {
-                run_substrate_replay(log.clone(), *seed, *n, *d, *use_hash, output.clone(), *json)
-                    .await
-            }
-            SubstrateOp::Snapshot {
-                path,
-                limit,
-                tier,
-                fingerprint_only,
-                json,
-            } => {
-                run_substrate_snapshot(path.clone(), *limit, tier.clone(), *fingerprint_only, *json)
-                    .await
-            }
-        };
+        return run_substrate(op).await;
     }
 
     // BioCortex is intentionally a shadow-only external adapter. It runs a
@@ -6088,10 +5895,13 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let body = std::fs::read_to_string(dry_run_json)
+                    .map_err(|e| anyhow::anyhow!("read dry-run JSON at {dry_run_json:?}: {e}"))?;
+                let dry_run_plan = serde_json::from_str(&body)
+                    .map_err(|e| anyhow::anyhow!("parse dry-run JSON at {dry_run_json:?}: {e}"))?;
                 run_biocortex_retrieval_opt_in_review_packet(
-                    dry_run_json,
                     BioCortexRetrievalOptInReviewPacketOptions {
-                        dry_run_plan: Value::Null,
+                        dry_run_plan,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6108,10 +5918,15 @@ async fn real_main() -> Result<()> {
                 commit,
                 json,
             } => {
+                let body = std::fs::read_to_string(review_packet_json).map_err(|e| {
+                    anyhow::anyhow!("read review-packet JSON at {review_packet_json:?}: {e}")
+                })?;
+                let review_packet = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!("parse review-packet JSON at {review_packet_json:?}: {e}")
+                })?;
                 run_biocortex_retrieval_opt_in_execution_packet(
-                    review_packet_json,
                     BioCortexRetrievalOptInExecutionPacketOptions {
-                        review_packet: Value::Null,
+                        review_packet,
                         per_call_opt_in: *per_call_opt_in,
                         attempt_id: attempt_id.clone(),
                         commit: commit.clone(),
@@ -6162,10 +5977,15 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let body = std::fs::read_to_string(runtime_trial_json).map_err(|e| {
+                    anyhow::anyhow!("read runtime-trial JSON at {runtime_trial_json:?}: {e}")
+                })?;
+                let runtime_trial = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!("parse runtime-trial JSON at {runtime_trial_json:?}: {e}")
+                })?;
                 run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
-                    runtime_trial_json,
                     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
-                        runtime_trial: Value::Null,
+                        runtime_trial,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6183,10 +6003,15 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let body = std::fs::read_to_string(source_json).map_err(|e| {
+                    anyhow::anyhow!("read order-diff source JSON at {source_json:?}: {e}")
+                })?;
+                let source_packet = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!("parse order-diff source JSON at {source_json:?}: {e}")
+                })?;
                 run_biocortex_retrieval_opt_in_order_diff_packet(
-                    source_json,
                     BioCortexRetrievalOptInOrderDiffPacketOptions {
-                        source_packet: Value::Null,
+                        source_packet,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6204,10 +6029,19 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let body = std::fs::read_to_string(source_json).map_err(|e| {
+                    anyhow::anyhow!(
+                        "read redacted-order artifact source JSON at {source_json:?}: {e}"
+                    )
+                })?;
+                let source_packet = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse redacted-order artifact source JSON at {source_json:?}: {e}"
+                    )
+                })?;
                 run_biocortex_retrieval_opt_in_redacted_order_artifact(
-                    source_json,
                     BioCortexRetrievalOptInRedactedOrderArtifactOptions {
-                        source_packet: Value::Null,
+                        source_packet,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6226,12 +6060,34 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let request_body =
+                    std::fs::read_to_string(authorization_request_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in authorization request JSON at {authorization_request_json:?}: {e}"
+                        )
+                    })?;
+                let authorization_request =
+                    serde_json::from_str(&request_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in authorization request JSON at {authorization_request_json:?}: {e}"
+                        )
+                    })?;
+                let decision_body =
+                    std::fs::read_to_string(authorization_decision_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in authorization decision JSON at {authorization_decision_json:?}: {e}"
+                        )
+                    })?;
+                let authorization_decision =
+                    serde_json::from_str(&decision_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in authorization decision JSON at {authorization_decision_json:?}: {e}"
+                        )
+                    })?;
                 run_biocortex_retrieval_opt_in_authorization_decision_packet(
-                    authorization_request_json,
-                    authorization_decision_json,
                     BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {
-                        authorization_decision: Value::Null,
-                        authorization_request: Value::Null,
+                        authorization_decision,
+                        authorization_request,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6250,12 +6106,30 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let packet_body = std::fs::read_to_string(authorization_decision_packet_json)
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
+                        )
+                    })?;
+                let authorization_decision_packet =
+                    serde_json::from_str(&packet_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
+                        )
+                    })?;
+                let plan_body = std::fs::read_to_string(opt_in_plan_json).map_err(|e| {
+                    anyhow::anyhow!("read opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}")
+                })?;
+                let opt_in_plan = serde_json::from_str(&plan_body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}"
+                    )
+                })?;
                 run_biocortex_retrieval_opt_in_post_implementation_review_gate(
-                    authorization_decision_packet_json,
-                    opt_in_plan_json,
                     BioCortexRetrievalOptInPostImplementationReviewGateOptions {
-                        authorization_decision_packet: Value::Null,
-                        opt_in_plan: Value::Null,
+                        authorization_decision_packet,
+                        opt_in_plan,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6277,18 +6151,94 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let gate_body =
+                    std::fs::read_to_string(post_implementation_review_gate_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
+                        )
+                    })?;
+                let post_implementation_review_gate =
+                    serde_json::from_str(&gate_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
+                        )
+                    })?;
+                let artifact_body =
+                    std::fs::read_to_string(redacted_order_artifact_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
+                        )
+                    })?;
+                let redacted_order_artifact =
+                    serde_json::from_str(&artifact_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
+                        )
+                    })?;
+                let redacted_evidence_aggregate = if let Some(redacted_evidence_aggregate_json) =
+                    redacted_evidence_aggregate_json.as_deref()
+                {
+                    let aggregate_body =
+                            std::fs::read_to_string(redacted_evidence_aggregate_json).map_err(
+                                |e| {
+                                    anyhow::anyhow!(
+                                        "read opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
+                                    )
+                                },
+                            )?;
+                    Some(serde_json::from_str(&aggregate_body).map_err(|e| {
+                            anyhow::anyhow!(
+                                "parse opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
+                            )
+                        })?)
+                } else {
+                    None
+                };
+                let evidence_summary = if let Some(evidence_summary_json) =
+                    evidence_summary_json.as_deref()
+                {
+                    let evidence_body =
+                            std::fs::read_to_string(evidence_summary_json).map_err(|e| {
+                                anyhow::anyhow!(
+                                    "read opt-in evidence summary JSON at {evidence_summary_json:?}: {e}"
+                                )
+                            })?;
+                    Some(serde_json::from_str(&evidence_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in evidence summary JSON at {evidence_summary_json:?}: {e}"
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                let capability_ledger_report_packet = if let Some(
+                    capability_ledger_report_packet_json,
+                ) =
+                    capability_ledger_report_packet_json.as_deref()
+                {
+                    let ledger_body =
+                        std::fs::read_to_string(capability_ledger_report_packet_json).map_err(
+                            |e| {
+                                anyhow::anyhow!(
+                                    "read BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
+                                )
+                            },
+                        )?;
+                    Some(serde_json::from_str(&ledger_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
+                        )
+                    })?)
+                } else {
+                    None
+                };
                 run_biocortex_retrieval_opt_in_runtime_influence_review_request(
-                    post_implementation_review_gate_json,
-                    redacted_order_artifact_json,
-                    redacted_evidence_aggregate_json.as_deref(),
-                    evidence_summary_json.as_deref(),
-                    capability_ledger_report_packet_json.as_deref(),
                     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
-                        post_implementation_review_gate: Value::Null,
-                        redacted_order_artifact: Value::Null,
-                        redacted_evidence_aggregate: None,
-                        evidence_summary: None,
-                        capability_ledger_report_packet: None,
+                        post_implementation_review_gate,
+                        redacted_order_artifact,
+                        redacted_evidence_aggregate,
+                        evidence_summary,
+                        capability_ledger_report_packet,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6307,12 +6257,34 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let request_body =
+                    std::fs::read_to_string(runtime_influence_review_request_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
+                        )
+                    })?;
+                let runtime_influence_review_request =
+                    serde_json::from_str(&request_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
+                        )
+                    })?;
+                let decision_body =
+                    std::fs::read_to_string(runtime_influence_decision_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
+                        )
+                    })?;
+                let runtime_influence_decision =
+                    serde_json::from_str(&decision_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
+                        )
+                    })?;
                 run_biocortex_retrieval_opt_in_runtime_influence_decision_packet(
-                    runtime_influence_review_request_json,
-                    runtime_influence_decision_json,
                     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
-                        runtime_influence_review_request: Value::Null,
-                        runtime_influence_decision: Value::Null,
+                        runtime_influence_review_request,
+                        runtime_influence_decision,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -6491,21 +6463,50 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_runtime_readiness_packet(
-                runtime_influence_decision_packet_json,
-                store_trial_json,
-                batch_diagnostics_json,
-                BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
-                    runtime_influence_decision_packet: Value::Null,
-                    store_trial: Value::Null,
-                    batch_diagnostics: Value::Null,
-                    reviewer: reviewer.clone(),
-                    commit: commit.clone(),
-                    forum_post_id: forum_post_id.clone(),
-                    memory_key: memory_key.clone(),
-                },
-                *json,
-            ),
+            } => {
+                let decision_body =
+                    std::fs::read_to_string(runtime_influence_decision_packet_json).map_err(
+                        |e| {
+                            anyhow::anyhow!(
+                                "read opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+                            )
+                        },
+                    )?;
+                let runtime_influence_decision_packet =
+                    serde_json::from_str(&decision_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+                        )
+                    })?;
+                let store_body = std::fs::read_to_string(store_trial_json).map_err(|e| {
+                    anyhow::anyhow!("read opt-in store trial JSON at {store_trial_json:?}: {e}")
+                })?;
+                let store_trial = serde_json::from_str(&store_body).map_err(|e| {
+                    anyhow::anyhow!("parse opt-in store trial JSON at {store_trial_json:?}: {e}")
+                })?;
+                let batch_body = std::fs::read_to_string(batch_diagnostics_json).map_err(|e| {
+                    anyhow::anyhow!(
+                        "read opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}"
+                    )
+                })?;
+                let batch_diagnostics = serde_json::from_str(&batch_body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}"
+                    )
+                })?;
+                run_biocortex_retrieval_opt_in_runtime_readiness_packet(
+                    BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                        runtime_influence_decision_packet,
+                        store_trial,
+                        batch_diagnostics,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+            }
             BioCortexOp::RetrievalOptInRuntimeTransitionGate {
                 runtime_readiness_packet_json,
                 mode,
@@ -6516,21 +6517,34 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_runtime_transition_gate(
-                runtime_readiness_packet_json,
-                BioCortexRetrievalOptInRuntimeTransitionGateOptions {
-                    runtime_readiness_packet: Value::Null,
-                    mode: mode.clone(),
-                    per_call_opt_in: *per_call_opt_in,
-                    operator_disabled: *operator_disabled
-                        || cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
-                    reviewer: reviewer.clone(),
-                    commit: commit.clone(),
-                    forum_post_id: forum_post_id.clone(),
-                    memory_key: memory_key.clone(),
-                },
-                *json,
-            ),
+            } => {
+                let readiness_body =
+                    std::fs::read_to_string(runtime_readiness_packet_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
+                        )
+                    })?;
+                let runtime_readiness_packet =
+                    serde_json::from_str(&readiness_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
+                        )
+                    })?;
+                run_biocortex_retrieval_opt_in_runtime_transition_gate(
+                    BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                        runtime_readiness_packet,
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        operator_disabled: *operator_disabled
+                            || cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+            }
             BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff {
                 checkpoint_selection_json,
                 post_semantic_diverse_review_json,
@@ -6540,23 +6554,75 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
-                checkpoint_selection_json,
-                post_semantic_diverse_review_json,
-                controlled_trial_readiness_json.as_deref(),
-                BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
-                    checkpoint_selection: Value::Null,
-                    post_semantic_diverse_review: Value::Null,
-                    controlled_trial_readiness: None,
-                    reviewer: reviewer.clone(),
-                    commit: commit.clone(),
-                    forum_post_id: forum_post_id.clone(),
-                    memory_key: memory_key.clone(),
-                },
-                *json,
-            ),
+            } => {
+                let checkpoint_body =
+                    std::fs::read_to_string(checkpoint_selection_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
+                        )
+                    })?;
+                let checkpoint_selection =
+                    serde_json::from_str(&checkpoint_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
+                        )
+                    })?;
+                let review_body =
+                    std::fs::read_to_string(post_semantic_diverse_review_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
+                        )
+                    })?;
+                let post_semantic_diverse_review =
+                    serde_json::from_str(&review_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
+                        )
+                    })?;
+                let controlled_trial_readiness = if let Some(controlled_trial_readiness_json) =
+                    controlled_trial_readiness_json.as_deref()
+                {
+                    let controlled_body = std::fs::read_to_string(
+                        controlled_trial_readiness_json,
+                    )
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "read controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
+                        )
+                    })?;
+                    Some(serde_json::from_str(&controlled_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+                    BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                        checkpoint_selection,
+                        post_semantic_diverse_review,
+                        controlled_trial_readiness,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+            }
             BioCortexOp::LswrInteractionFeedbackConsumptionPreflight { input_json, json } => {
-                run_lswr_interaction_feedback_consumption_preflight(input_json, *json)
+                let body = std::fs::read_to_string(input_json).map_err(|e| {
+                    anyhow::anyhow!(
+                        "read LSWR interaction feedback input JSON at {input_json:?}: {e}"
+                    )
+                })?;
+                let input = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse LSWR interaction feedback input JSON at {input_json:?}: {e}"
+                    )
+                })?;
+                run_lswr_interaction_feedback_consumption_preflight(input, *json)
             }
             BioCortexOp::RetrievalOptInControlledOrderFixture {
                 runtime_influence_decision_packet_json,
@@ -6605,16 +6671,18 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_evidence_summary(
-                batch_diagnostics_json,
-                controlled_order_fixture_run_json,
-                runtime_readiness_packet_json.as_deref(),
-                reviewer.clone(),
-                commit.clone(),
-                forum_post_id.clone(),
-                memory_key.clone(),
-                *json,
-            ),
+            } => {
+                let payload = build_biocortex_retrieval_opt_in_evidence_summary(
+                    batch_diagnostics_json,
+                    controlled_order_fixture_run_json,
+                    runtime_readiness_packet_json.as_deref(),
+                    reviewer.clone(),
+                    commit.clone(),
+                    forum_post_id.clone(),
+                    memory_key.clone(),
+                )?;
+                run_biocortex_retrieval_opt_in_evidence_summary(payload, *json)
+            }
             BioCortexOp::RetrievalOptInRedactedEvidenceAggregate {
                 movement_fixture_run_json,
                 coverage_fixture_run_json,
@@ -6623,15 +6691,17 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
-                movement_fixture_run_json,
-                coverage_fixture_run_json,
-                reviewer.clone(),
-                commit.clone(),
-                forum_post_id.clone(),
-                memory_key.clone(),
-                *json,
-            ),
+            } => {
+                let payload = build_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+                    movement_fixture_run_json,
+                    coverage_fixture_run_json,
+                    reviewer.clone(),
+                    commit.clone(),
+                    forum_post_id.clone(),
+                    memory_key.clone(),
+                )?;
+                run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(payload, *json)
+            }
             #[cfg(feature = "biocortex-retrieval-shadow")]
             BioCortexOp::RetrievalShadow {
                 query,
@@ -6947,7 +7017,7 @@ async fn real_main() -> Result<()> {
 
     // ShellInit: print snippet to stdout. Pure function, no daemon, no state.
     if let Cmd::ShellInit { shell } = &cmd {
-        print!("{}", shell_init_snippet(*shell));
+        print!("{}", cli::shell_init_snippet(*shell));
         return Ok(());
     }
 
@@ -8196,6 +8266,17 @@ async fn real_main() -> Result<()> {
                 )
             })?;
             let listen = listen.unwrap_or_else(|| "0.0.0.0:7878".to_string());
+            let aura_values =
+                avatar_aura_io_startup_values_from_lookup(|key| match std::env::var(key) {
+                    Ok(value) => Ok(Some(value)),
+                    Err(std::env::VarError::NotPresent) => Ok(None),
+                    Err(std::env::VarError::NotUnicode(_)) => {
+                        bail!("avatar_aura_io_environment_not_unicode:{key}")
+                    }
+                })?;
+            let aura_config =
+                ab_bridge::daemon_http::AvatarAuraIoStartupConfig::from_values(&aura_values)
+                    .context("Avatar Aura I/O startup configuration rejected")?;
             tracing::info!(
                 listen = %listen,
                 "starting agent-bridge daemon-http (v20 read-only Stage 1)"
@@ -8208,7 +8289,7 @@ async fn real_main() -> Result<()> {
             // warn-only for the other classes.
             dim_guard_strict_preflight(&store).await;
             ab_bridge::embedding_dim_guard::spawn(store.clone());
-            ab_bridge::daemon_http::run(store, &listen).await
+            ab_bridge::daemon_http::run_with_config(store, &listen, aura_config).await
         }
         #[cfg(feature = "g14-wasi-component-runtime")]
         Cmd::G14WasiComponent { .. } | Cmd::G14WasiBusinessComponent { .. } => unreachable!(),
@@ -8240,141 +8321,6 @@ async fn real_main() -> Result<()> {
     }
 }
 
-fn run_a2ui_cli(op: &A2uiOp) -> Result<()> {
-    use std::io::Read as _;
-
-    match op {
-        A2uiOp::Validate { input, json } => {
-            let raw = if input == "-" {
-                let mut raw = String::new();
-                std::io::stdin()
-                    .read_to_string(&mut raw)
-                    .context("read A2UI stream from stdin")?;
-                raw
-            } else {
-                std::fs::read_to_string(input)
-                    .with_context(|| format!("read A2UI stream {input}"))?
-            };
-            let report = a2ui::validate_stream(&raw);
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
-            } else if report.valid {
-                println!(
-                    "A2UI {} valid: {} messages, {} surfaces, {} components, {} described actions; execution=false rendering=false",
-                    report.protocol_version,
-                    report.message_count,
-                    report.surface_count,
-                    report.component_count,
-                    report.action_count
-                );
-            } else {
-                eprintln!(
-                    "A2UI {} invalid: {} error(s); execution=false rendering=false",
-                    report.protocol_version,
-                    report.errors.len()
-                );
-                for issue in &report.errors {
-                    eprintln!("- {}: {}", issue.code, issue.message);
-                }
-            }
-            if !report.valid {
-                std::process::exit(2);
-            }
-            Ok(())
-        }
-    }
-}
-
-fn run_operator_request_cli(op: &OperatorRequestOp) -> Result<()> {
-    let store = OperatorRequestStore::default();
-    match op {
-        OperatorRequestOp::List { limit, json } => {
-            let views = store.list(*limit)?;
-            if *json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({
-                        "schema": "agent_bridge.operator_request_list.v0",
-                        "store": store.root(),
-                        "requests": views,
-                    }))?
-                );
-            } else if views.is_empty() {
-                println!("No staged operator requests in {}.", store.root().display());
-            } else {
-                println!(
-                    "{:<38}  {:<28}  {:<20}  DIGEST",
-                    "REQUEST ID", "STATUS", "CAPABILITY"
-                );
-                for view in views {
-                    println!(
-                        "{:<38}  {:<28}  {:<20}  {}",
-                        view.request.request_id,
-                        view.status,
-                        view.request.requested_capability.as_str(),
-                        &view.request.request_digest[..12]
-                    );
-                }
-            }
-        }
-        OperatorRequestOp::Show { request_id, json } => {
-            print_operator_request_view(&store.get(request_id)?, *json)?;
-        }
-        OperatorRequestOp::Approve {
-            request_id,
-            operator,
-            reason,
-            json,
-        } => {
-            let view = store.decide(request_id, OperatorDecision::Approve, operator, reason)?;
-            print_operator_request_view(&view, *json)?;
-        }
-        OperatorRequestOp::Reject {
-            request_id,
-            operator,
-            reason,
-            json,
-        } => {
-            let view = store.decide(request_id, OperatorDecision::Reject, operator, reason)?;
-            print_operator_request_view(&view, *json)?;
-        }
-    }
-    Ok(())
-}
-
-fn print_operator_request_view(view: &OperatorRequestView, as_json: bool) -> Result<()> {
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(view)?);
-        return Ok(());
-    }
-    println!("Request: {}", view.request.request_id);
-    println!("Status: {}", view.status);
-    println!("Digest: {}", view.request.request_digest);
-    println!("Capability: {}", view.request.requested_capability.as_str());
-    println!("Target: {}", view.request.target);
-    println!("Channel: {}", view.request.channel_id);
-    println!("Identity strength: {}", view.request.identity_strength);
-    println!("Created: {}", view.request.created_at);
-    println!("Expires: {}", view.request.expires_at);
-    println!("Execution allowed: {}", view.execution_allowed);
-    println!(
-        "Canonical write performed: {}",
-        view.request.canonical_write_performed
-    );
-    if let Some(decision) = &view.decision {
-        println!("Decision: {}", decision.decision.as_str());
-        println!("Operator: {}", decision.operator_id);
-        println!("Reason: {}", decision.reason);
-        println!("Approval scope: {}", decision.approval_scope);
-        println!(
-            "Separate executor gate required: {}",
-            decision.requires_separate_executor_gate
-        );
-    }
-    println!("Next step: {}", view.next_step);
-    Ok(())
-}
-
 /// Goal C standing continuity `U` report: build the store-side embedding-space
 /// health snapshot via `ab_bridge::continuity` and print the human report (or
 /// `--json`). Read-only; no Hub/daemon.
@@ -8394,207 +8340,6 @@ async fn run_continuity_report(as_json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Read-only workflow feedback report: compose existing store statistics and
-/// MCP tool-call telemetry into a maturity scorecard. No Hub/daemon and no
-/// writes.
-async fn run_workflow_feedback_report(
-    as_json: bool,
-    window_secs: i64,
-    top_tools: u32,
-) -> Result<()> {
-    let db_path = std::env::var("AB_BASELINE_DB")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(ab_store::default_db_path);
-    let store = SqliteStore::open(&db_path)
-        .await
-        .context("opening store for workflow feedback report")?;
-    let scope = std::env::current_dir()
-        .ok()
-        .map(|p| format!("project:{}", p.display()));
-    let report = ab_bridge::workflow_feedback::build_report(
-        &store,
-        ab_bridge::workflow_feedback::WorkflowFeedbackReportOptions {
-            window_secs,
-            top_tools,
-            scope,
-        },
-    )
-    .await
-    .context("building workflow feedback report")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
-fn run_workflow_feedback_shadow_score(
-    fixtures: &[PathBuf],
-    scenarios: &[String],
-    as_json: bool,
-) -> Result<()> {
-    let report = ab_bridge::workflow_feedback::build_shadow_score_report_from_paths(
-        fixtures,
-        scenarios.to_vec(),
-    )
-    .context("building workflow feedback shadow score")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_workflow_feedback_promotion_gate(
-    shadow_scores: &[PathBuf],
-    owner_approval_refs: &[String],
-    rollback_refs: &[String],
-    behavior_lift_refs: &[String],
-    min_shadow_reports: usize,
-    min_scenarios: usize,
-    min_strong_scenarios: usize,
-    min_top_shadow_score: u32,
-    as_json: bool,
-) -> Result<()> {
-    let report = ab_bridge::workflow_feedback::build_promotion_gate_report_from_paths(
-        shadow_scores,
-        ab_bridge::workflow_feedback::WorkflowFeedbackPromotionGateOptions {
-            owner_approval_refs: owner_approval_refs.to_vec(),
-            rollback_refs: rollback_refs.to_vec(),
-            behavior_lift_refs: behavior_lift_refs.to_vec(),
-            min_shadow_reports,
-            min_scenarios,
-            min_strong_scenarios,
-            min_top_shadow_score,
-        },
-    )
-    .context("building workflow feedback promotion gate")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_workflow_feedback_lift_evidence(
-    scenario_fixture: &PathBuf,
-    shadow_scores: &[PathBuf],
-    baseline_correct: Option<u32>,
-    baseline_total: Option<u32>,
-    min_accuracy: f64,
-    min_lift: f64,
-    as_json: bool,
-) -> Result<()> {
-    let report = ab_bridge::workflow_feedback::build_lift_evidence_report_from_paths(
-        scenario_fixture,
-        shadow_scores,
-        ab_bridge::workflow_feedback::WorkflowFeedbackLiftEvidenceOptions {
-            baseline_correct,
-            baseline_total,
-            min_accuracy,
-            min_lift,
-        },
-    )
-    .context("building workflow feedback lift evidence")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
-fn run_workflow_feedback_baseline_evidence(
-    scenario_fixture: &PathBuf,
-    baseline_observations: &[PathBuf],
-    rollback_refs: &[String],
-    as_json: bool,
-) -> Result<()> {
-    let report = ab_bridge::workflow_feedback::build_baseline_evidence_report_from_paths(
-        scenario_fixture,
-        baseline_observations,
-        ab_bridge::workflow_feedback::WorkflowFeedbackBaselineEvidenceOptions {
-            rollback_refs: rollback_refs.to_vec(),
-        },
-    )
-    .context("building workflow feedback baseline evidence")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_workflow_feedback_owner_review_packet(
-    scenario_fixture: &PathBuf,
-    baseline_observations: &[PathBuf],
-    shadow_scores: &[PathBuf],
-    rollback_refs: &[String],
-    owner_approval_refs: &[String],
-    min_accuracy: f64,
-    min_lift: f64,
-    min_shadow_reports: usize,
-    min_scenarios: usize,
-    min_strong_scenarios: usize,
-    min_top_shadow_score: u32,
-    as_json: bool,
-) -> Result<()> {
-    let report = ab_bridge::workflow_feedback::build_owner_review_packet_from_paths(
-        scenario_fixture,
-        baseline_observations,
-        shadow_scores,
-        ab_bridge::workflow_feedback::WorkflowFeedbackOwnerReviewPacketOptions {
-            rollback_refs: rollback_refs.to_vec(),
-            owner_approval_refs: owner_approval_refs.to_vec(),
-            min_accuracy,
-            min_lift,
-            min_shadow_reports,
-            min_scenarios,
-            min_strong_scenarios,
-            min_top_shadow_score,
-        },
-    )
-    .context("building workflow feedback owner review packet")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
-fn run_workflow_feedback_promotion_record(
-    owner_review_packet: &PathBuf,
-    promotion_scopes: &[String],
-    owner_approval_refs: &[String],
-    rollback_refs: &[String],
-    as_json: bool,
-) -> Result<()> {
-    let report = ab_bridge::workflow_feedback::build_promotion_record_from_path(
-        owner_review_packet,
-        ab_bridge::workflow_feedback::WorkflowFeedbackPromotionRecordOptions {
-            owner_approval_refs: owner_approval_refs.to_vec(),
-            rollback_refs: rollback_refs.to_vec(),
-            promotion_scopes: promotion_scopes.to_vec(),
-        },
-    )
-    .context("building workflow feedback promotion record")?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
-    } else {
-        print!("{}", report.render_markdown());
-    }
-    Ok(())
-}
-
 /// Daily-wire mechanism for the evidence-anchored session walkthrough: read a
 /// walkthrough `doc` JSON (file path, or `-` for stdin), render it through
 /// `present::write_walkthrough_artifact` into the present gallery, and read the
@@ -8603,22 +8348,6 @@ fn run_workflow_feedback_promotion_record(
 /// this surfaces "you handed me an empty walkthrough" as a hard failure rather
 /// than silently writing a useless artifact). NO new MCP tool; the `/walkthrough`
 /// skill assembles the doc from session evidence and shells out to this.
-/// True iff a rendered walkthrough artifact's `#ab-render` region carries actual
-/// content (a summary, or >=1 step with a heading / narrative / evidence) — not just
-/// the always-present `<section>` wrapper and the per-step `wt-step` shells. This is
-/// the honesty falsifier behind `walkthrough`'s self-check, factored out so the
-/// marker contract against `present::render_walkthrough_body` is unit-tested.
-fn walkthrough_region_has_content(html: &str) -> bool {
-    ab_bridge::present::render_region(html)
-        .map(|r| {
-            r.contains("wt-summary")
-                || r.contains("wt-heading")
-                || r.contains("wt-narrative")
-                || r.contains("wt-ev")
-        })
-        .unwrap_or(false)
-}
-
 fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<()> {
     use ab_bridge::present::{extract_ab_payload, presentations_dir, write_walkthrough_artifact};
     use std::io::Read as _;
@@ -8650,7 +8379,7 @@ fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<
     // (`wt-summary` / `wt-heading` / `wt-narrative` / `wt-ev`), each emitted only when
     // its field is actually present. A content-less doc must FAIL — we never silently
     // write a blank "walkthrough".
-    let region_has_content = walkthrough_region_has_content(&html);
+    let region_has_content = cli::walkthrough_region_has_content(&html);
     let self_check = payload_ok && region_has_content;
 
     if as_json {
@@ -8834,50 +8563,7 @@ fn memory_record_from_instinct_plan(value: &Value) -> Result<ab_store::MemoryRec
 fn run_avatar_backend_probe(as_json: bool) -> Result<()> {
     let info = ab_bridge::avatar_floater::detect_compositor();
     let rec = ab_bridge::avatar_floater::recommend_backend(&info);
-    if as_json {
-        let payload = serde_json::json!({
-            "surface": "linux_avatar_backend_probe",
-            "compositor": {
-                "session_type": info.session_type,
-                "current_desktop": info.current_desktop,
-                "has_wayland_display": info.has_wayland_display,
-                "wlroots_signal": info.wlroots_signal,
-            },
-            "recommendation": {
-                "backend": rec.backend.as_str(),
-                "transparency_available": rec.transparency_available,
-                "reason": rec.reason,
-            },
-            "read_only": true,
-        });
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-    } else {
-        println!("avatar backend probe (read-only)");
-        println!(
-            "  session_type    : {}",
-            info.session_type.as_deref().unwrap_or("?")
-        );
-        println!(
-            "  current_desktop : {}",
-            info.current_desktop.as_deref().unwrap_or("?")
-        );
-        println!("  wayland_display : {}", info.has_wayland_display);
-        println!(
-            "  wlroots_signal  : {}",
-            info.wlroots_signal.as_deref().unwrap_or("none")
-        );
-        println!("  => backend      : {}", rec.backend.as_str());
-        println!(
-            "     transparency : {}",
-            if rec.transparency_available {
-                "available"
-            } else {
-                "NOT available (degraded browser floater)"
-            }
-        );
-        println!("     reason       : {}", rec.reason);
-    }
-    Ok(())
+    cli::render_avatar_backend_probe_result(&info, &rec, as_json)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -10000,6 +9686,8 @@ async fn run_avatar_install_cortex_runner(
         print!("{plist}");
         return Ok(());
     }
+
+    ab_bridge::avatar_cortex::require_avatar_cortex_replay_capability()?;
 
     std::fs::create_dir_all(plist_path.parent().unwrap())
         .with_context(|| format!("create {}", plist_path.parent().unwrap().display()))?;
@@ -11647,6 +11335,10 @@ async fn run_avatar_heartbeat_health(
     stale_secs: i64,
     as_json: bool,
 ) -> Result<()> {
+    ab_bridge::avatar_health::resolve_heartbeat_health_identity(
+        label.as_deref(),
+        project.as_deref(),
+    )?;
     let store = SqliteStore::open(&default_db_path())
         .await
         .context("open state.db")?;
@@ -11686,12 +11378,15 @@ async fn run_avatar_heartbeat_health(
         avatar_health_display(launchd.get("run_interval_secs"), "-")
     );
     println!(
-        "binary.path={} exists={} supports_sync_presence={} supports_heartbeat_health={} missing_command={}",
+        "binary.path={} exists={} supports_sync_presence={} supports_heartbeat_health={} missing_command={} configured_sync_presence={} probe_mode={} executable_invoked={}",
         avatar_health_display(binary.get("path"), "-"),
         avatar_health_display(binary.get("exists"), "false"),
-        avatar_health_display(binary.get("supports_sync_presence"), "false"),
-        avatar_health_display(binary.get("supports_heartbeat_health"), "false"),
-        avatar_health_display(binary.get("missing_command"), "false")
+        avatar_health_display(binary.get("supports_sync_presence"), "unknown"),
+        avatar_health_display(binary.get("supports_heartbeat_health"), "unknown"),
+        avatar_health_display(binary.get("missing_command"), "false"),
+        avatar_health_display(binary.get("configured_sync_presence"), "false"),
+        avatar_health_display(binary.get("probe_mode"), "unknown"),
+        avatar_health_display(binary.get("executable_invoked"), "false")
     );
     println!(
         "presence.exists={} fresh={} age_secs={} heartbeat={}",
@@ -11733,6 +11428,10 @@ async fn run_avatar_heartbeat_alert(
     tts_rate: Option<u64>,
     as_json: bool,
 ) -> Result<()> {
+    ab_bridge::avatar_health::resolve_heartbeat_health_identity(
+        label.as_deref(),
+        project.as_deref(),
+    )?;
     let store = SqliteStore::open(&default_db_path())
         .await
         .context("open state.db")?;
@@ -11771,114 +11470,6 @@ async fn run_avatar_heartbeat_alert(
         "state={} events={}",
         avatar_health_display(payload.get("state_path"), "-"),
         avatar_health_display(payload.get("events_path"), "-")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_shadow_digest(
-    checkout: Option<PathBuf>,
-    benchmark: String,
-    timeout_ms: u64,
-    include_raw: bool,
-    as_json: bool,
-) -> Result<()> {
-    let payload = biocortex_shadow_digest(BioCortexShadowOptions {
-        checkout,
-        benchmark,
-        timeout_ms,
-        include_raw,
-        fixture_projection: None,
-    })
-    .await;
-
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex shadow digest");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!("status={}", shadow_json_display(payload.get("status"), "-"));
-    println!(
-        "benchmark={} example={}",
-        shadow_json_display(payload.get("benchmark"), "-"),
-        shadow_json_display(payload.get("example"), "-")
-    );
-    if let Some(path) = payload.get("checkout_path") {
-        println!("checkout={}", shadow_json_display(Some(path), "-"));
-    }
-    if let Some(reason) = payload.get("reason").or_else(|| payload.get("error")) {
-        println!("reason={}", shadow_json_display(Some(reason), "-"));
-    }
-
-    let summary = payload.get("summary").unwrap_or(&Value::Null);
-    println!(
-        "verdict={} demonstrated={}",
-        shadow_json_display(summary.get("verdict"), "-"),
-        shadow_json_display(summary.get("demonstrated"), "false")
-    );
-    println!(
-        "demonstrated_keys={}",
-        shadow_json_display(summary.get("demonstrated_keys"), "[]")
-    );
-    println!(
-        "failed_predicates={}",
-        shadow_json_display(summary.get("failed_predicates"), "[]")
-    );
-    println!(
-        "open_limitations={}",
-        shadow_json_display(summary.get("open_limitations"), "[]")
-    );
-    println!("supported_benchmarks={}", supported_benchmarks().join(","));
-
-    let boundary = payload.get("boundary").unwrap_or(&Value::Null);
-    println!(
-        "boundary=shadow_only links_runtime={} mutates_ab_memory={} mutates_retrieval={}",
-        shadow_json_display(boundary.get("links_biocortex_into_ab_runtime"), "false"),
-        shadow_json_display(boundary.get("mutates_ab_memory"), "false"),
-        shadow_json_display(boundary.get("changes_retrieval_vector"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_capability_ledger_report_packet(
-    ledger: &std::path::Path,
-    as_json: bool,
-) -> Result<()> {
-    let ledger_body = std::fs::read_to_string(ledger)
-        .map_err(|e| anyhow::anyhow!("read BioCortex capability ledger at {ledger:?}: {e}"))?;
-    let summary = consume_biocortex_capability_ledger(&ledger_body);
-    let packet = build_biocortex_capability_ledger_report_packet(&summary);
-
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&packet)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex capability ledger report packet");
-    println!("schema={}", packet.schema);
-    println!("input_schema={}", packet.input_schema);
-    println!(
-        "input_schema_version={}",
-        packet.input_schema_version.as_deref().unwrap_or("-")
-    );
-    println!("verdict={}", packet.verdict);
-    println!("read_only_confirmed={}", packet.read_only_confirmed);
-    println!("downstream_action={}", packet.downstream_action);
-    println!("integration_decision={}", packet.integration_decision);
-    println!(
-        "static_artifact_only={} memory_write_attempted={} retrieval_order_change_attempted={} runtime_authority_observed={}",
-        packet.safety.static_artifact_only,
-        packet.safety.memory_write_attempted,
-        packet.safety.retrieval_order_change_attempted,
-        packet.safety.runtime_authority_observed
-    );
-    println!(
-        "executor_enablement_observed={} mcp_tool_registration={} language_generation_observed={} cognition_claim_observed={}",
-        packet.safety.executor_enablement_observed,
-        packet.safety.mcp_tool_registration,
-        packet.safety.language_generation_observed,
-        packet.safety.cognition_claim_observed
     );
     Ok(())
 }
@@ -11979,149 +11570,6 @@ async fn run_biocortex_replay_compare(
     Ok(())
 }
 
-async fn run_biocortex_retrieval_approval_packet(
-    opts: BioCortexRetrievalApprovalPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let payload = biocortex_retrieval_runtime_approval_packet_preview(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval runtime approval packet preview");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "approval_state={} default_decision={}",
-        shadow_json_display(payload.get("approval_state"), "-"),
-        shadow_json_display(payload.get("default_decision"), "-")
-    );
-    println!(
-        "runtime_adapter_approved={} approval_writes_allowed={} default_search_order_change_allowed={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("approval_writes_allowed"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false")
-    );
-    println!(
-        "requires_separate_human_approval={} ready_for_human_approval_review={}",
-        shadow_json_display(payload.get("requires_separate_human_approval"), "true"),
-        shadow_json_display(payload.get("ready_for_human_approval_review"), "false")
-    );
-    let attestation = payload
-        .get("agent_technical_attestation")
-        .unwrap_or(&Value::Null);
-    let authorization = payload.get("human_authorization").unwrap_or(&Value::Null);
-    println!(
-        "agent_attestation_decision={} agent_can_authorize_runtime_influence={}",
-        shadow_json_display(attestation.get("decision"), "-"),
-        shadow_json_display(attestation.get("can_authorize_runtime_influence"), "false")
-    );
-    println!(
-        "human_authorization_status={} human_authorization_scope={}",
-        shadow_json_display(authorization.get("status"), "not_authorized"),
-        shadow_json_display(authorization.get("scope"), "-")
-    );
-    let gates = payload.get("gates").unwrap_or(&Value::Null);
-    println!(
-        "gates feature_enabled={} runtime_enabled={} operator_disabled={}",
-        shadow_json_display(gates.get("compile_feature_enabled"), "false"),
-        shadow_json_display(gates.get("runtime_enabled"), "false"),
-        shadow_json_display(gates.get("operator_disabled"), "false")
-    );
-    let missing_count = payload
-        .get("missing_evidence")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
-    println!("missing_evidence_count={missing_count}");
-    if let Some(paths) = payload.get("missing_evidence").and_then(Value::as_array) {
-        for path in paths.iter().take(8).filter_map(Value::as_str) {
-            println!("missing={path}");
-        }
-        if paths.len() > 8 {
-            println!("missing=...{} more", paths.len() - 8);
-        }
-    }
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_status(
-    opts: BioCortexRetrievalOptInAuditOptions,
-    as_json: bool,
-) -> Result<()> {
-    let payload = biocortex_retrieval_opt_in_audit_report(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in status");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "mode={} mode_authorized={} implementation_stage={}",
-        shadow_json_display(payload.get("mode"), "-"),
-        shadow_json_display(payload.get("mode_authorized"), "false"),
-        shadow_json_display(payload.get("implementation_stage"), "-")
-    );
-    let gate = payload.get("gate").unwrap_or(&Value::Null);
-    println!(
-        "gate_status={} gate_ready={} per_call_opt_in={}",
-        shadow_json_display(gate.get("status"), "-"),
-        shadow_json_display(gate.get("ready_for_explicit_opt_in_experiment"), "false"),
-        shadow_json_display(
-            payload
-                .get("per_call_opt_in")
-                .and_then(|value| value.get("present")),
-            "false"
-        )
-    );
-    println!(
-        "runtime_enabled={} operator_disabled={}",
-        shadow_json_display(gate.get("runtime_enabled"), "false"),
-        shadow_json_display(gate.get("operator_disabled"), "false")
-    );
-    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
-    println!(
-        "baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
-        shadow_json_display(baseline.get("key_count"), "0"),
-        shadow_json_display(baseline.get("hash"), "-"),
-        shadow_json_display(baseline.get("raw_keys_included"), "false"),
-        shadow_json_display(baseline.get("content_included"), "false")
-    );
-    let fallback = payload.get("fallback").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} fallback_reason={}",
-        shadow_json_display(
-            payload
-                .get("returned_order")
-                .and_then(|value| value.get("source")),
-            "baseline"
-        ),
-        shadow_json_display(fallback.get("reason"), "-")
-    );
-    println!(
-        "ordering_behavior_connected={} may_change_search_order_now={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false"),
-        shadow_json_display(payload.get("may_change_search_order_now"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    let controlled = payload
-        .get("controlled_trial_readiness")
-        .unwrap_or(&Value::Null);
-    println!(
-        "controlled_trial_status={} ready={} evidence_provided={} blockers={}",
-        shadow_json_display(controlled.get("status"), "-"),
-        shadow_json_display(controlled.get("ready_for_controlled_trial"), "false"),
-        shadow_json_display(controlled.get("evidence_provided"), "false"),
-        controlled
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    Ok(())
-}
-
 fn read_optional_json_file(path: Option<&std::path::Path>, label: &str) -> Result<Option<Value>> {
     let Some(path) = path else {
         return Ok(None);
@@ -12131,231 +11579,6 @@ fn read_optional_json_file(path: Option<&std::path::Path>, label: &str) -> Resul
     serde_json::from_str(&body)
         .map(Some)
         .map_err(|e| anyhow::anyhow!("parse opt-in {label} JSON at {path:?}: {e}"))
-}
-
-fn run_lswr_interaction_feedback_consumption_preflight(
-    input_json: &std::path::Path,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(input_json).map_err(|e| {
-        anyhow::anyhow!("read LSWR interaction feedback input JSON at {input_json:?}: {e}")
-    })?;
-    let input: Value = serde_json::from_str(&body).map_err(|e| {
-        anyhow::anyhow!("parse LSWR interaction feedback input JSON at {input_json:?}: {e}")
-    })?;
-    let payload = build_interaction_feedback_packet_consumption_preflight(&input);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# LSWR interaction feedback consumption preflight");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} accepted={} input_kind={} source_kind={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.get("accepted"), "false"),
-        shadow_json_display(payload.get("input_kind"), "-"),
-        shadow_json_display(payload.get("source_kind"), "-")
-    );
-    println!(
-        "world_verdict={} reason={} blockers={}",
-        shadow_json_display(payload.get("world_verdict"), "-"),
-        shadow_json_display(payload.get("reason"), "-"),
-        payload
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "writes_state={} store_access_required={} mcp_tool_registered={} implicit_live_runtime_lookup_attempted={}",
-        shadow_json_display(payload.pointer("/guardrails/writes_state"), "false"),
-        shadow_json_display(payload.pointer("/guardrails/store_access_required"), "false"),
-        shadow_json_display(payload.pointer("/guardrails/mcp_tool_registered"), "false"),
-        shadow_json_display(payload.get("implicit_live_runtime_lookup_attempted"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_dry_run(
-    opts: BioCortexRetrievalOptInDryRunOptions,
-    as_json: bool,
-) -> Result<()> {
-    let payload = biocortex_retrieval_opt_in_dry_run_plan(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in dry run");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "mode={} mode_authorized={} dry_run={} implementation_stage={}",
-        shadow_json_display(payload.get("mode"), "-"),
-        shadow_json_display(payload.get("mode_authorized"), "false"),
-        shadow_json_display(payload.get("dry_run"), "true"),
-        shadow_json_display(payload.get("implementation_stage"), "-")
-    );
-    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
-    println!(
-        "baseline_completed={} baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
-        shadow_json_display(baseline.get("completed"), "false"),
-        shadow_json_display(baseline.get("key_count"), "0"),
-        shadow_json_display(baseline.get("hash"), "-"),
-        shadow_json_display(baseline.get("raw_keys_included"), "false"),
-        shadow_json_display(baseline.get("content_included"), "false")
-    );
-    let planner = payload.get("planner_result").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} fallback_reason={} execution_ready={}",
-        shadow_json_display(planner.get("returned_order_source"), "baseline"),
-        shadow_json_display(planner.get("fallback_reason"), "-"),
-        shadow_json_display(planner.get("execution_ready"), "false")
-    );
-    let side_signal = payload.get("planned_side_signal").unwrap_or(&Value::Null);
-    println!(
-        "side_signal_status={} timeout_ms={} coverage_threshold={} runs_biocortex={}",
-        shadow_json_display(side_signal.get("status"), "-"),
-        shadow_json_display(side_signal.get("timeout_ms"), "-"),
-        shadow_json_display(side_signal.get("coverage_threshold"), "-"),
-        shadow_json_display(payload.get("runs_biocortex"), "false")
-    );
-    println!(
-        "calls_memory_search={} ordering_behavior_connected={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_review_packet(
-    dry_run_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInReviewPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(dry_run_json)
-        .map_err(|e| anyhow::anyhow!("read dry-run JSON at {dry_run_json:?}: {e}"))?;
-    opts.dry_run_plan = serde_json::from_str(&body)
-        .map_err(|e| anyhow::anyhow!("parse dry-run JSON at {dry_run_json:?}: {e}"))?;
-    let payload = biocortex_retrieval_opt_in_review_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in review packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "review_ready={} approval_state={} may_implement_ordering_now={}",
-        shadow_json_display(
-            payload
-                .get("boundary_check")
-                .and_then(|value| value.get("review_ready")),
-            "false"
-        ),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let target = payload.get("review_target").unwrap_or(&Value::Null);
-    println!(
-        "mode={} mode_authorized={} commit={}",
-        shadow_json_display(target.get("mode"), "-"),
-        shadow_json_display(target.get("mode_authorized"), "false"),
-        shadow_json_display(target.get("commit"), "-")
-    );
-    let summary = payload.get("dry_run_summary").unwrap_or(&Value::Null);
-    let baseline = summary.get("baseline_order").unwrap_or(&Value::Null);
-    let planner = summary.get("planner_result").unwrap_or(&Value::Null);
-    println!(
-        "baseline_key_count={} baseline_hash={} returned_order={} fallback_reason={}",
-        shadow_json_display(baseline.get("key_count"), "0"),
-        shadow_json_display(baseline.get("hash"), "-"),
-        shadow_json_display(planner.get("returned_order_source"), "baseline"),
-        shadow_json_display(planner.get("fallback_reason"), "-")
-    );
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "violations={}",
-        boundary
-            .get("violations")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_execution_packet(
-    review_packet_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInExecutionPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(review_packet_json)
-        .map_err(|e| anyhow::anyhow!("read review-packet JSON at {review_packet_json:?}: {e}"))?;
-    opts.review_packet = serde_json::from_str(&body)
-        .map_err(|e| anyhow::anyhow!("parse review-packet JSON at {review_packet_json:?}: {e}"))?;
-    let payload = biocortex_retrieval_opt_in_execution_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in execution packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "execution_allowed={} approval_state={} may_change_search_order_now={}",
-        shadow_json_display(
-            payload
-                .get("preflight")
-                .and_then(|value| value.get("execution_allowed")),
-            "false"
-        ),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_change_search_order_now"), "false")
-    );
-    let attempt = payload.get("attempt").unwrap_or(&Value::Null);
-    println!(
-        "attempt_id={} mode={} per_call_opt_in={}",
-        shadow_json_display(attempt.get("attempt_id"), "-"),
-        shadow_json_display(attempt.get("mode"), "-"),
-        shadow_json_display(attempt.get("per_call_opt_in"), "false")
-    );
-    let preflight = payload.get("preflight").unwrap_or(&Value::Null);
-    println!(
-        "baseline_preflight={} fallback_reason={} packet_blockers={} store_blockers={}",
-        shadow_json_display(
-            preflight.get("preflight_passed_for_baseline_only_contract"),
-            "false"
-        ),
-        shadow_json_display(preflight.get("fallback_reason"), "-"),
-        preflight
-            .get("packet_blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
-        preflight
-            .get("store_blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    let execution = payload.get("execution_decision").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} baseline_returned={} calls_memory_search={} runs_biocortex={}",
-        shadow_json_display(execution.get("returned_order_source"), "baseline"),
-        shadow_json_display(execution.get("baseline_returned"), "true"),
-        shadow_json_display(execution.get("calls_memory_search_now"), "false"),
-        shadow_json_display(execution.get("runs_biocortex_now"), "false")
-    );
-    Ok(())
 }
 
 async fn run_biocortex_retrieval_opt_in_runtime_trial(
@@ -12461,510 +11684,6 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
     Ok(())
 }
 
-async fn run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
-    runtime_trial_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(runtime_trial_json)
-        .map_err(|e| anyhow::anyhow!("read runtime-trial JSON at {runtime_trial_json:?}: {e}"))?;
-    opts.runtime_trial = serde_json::from_str(&body)
-        .map_err(|e| anyhow::anyhow!("parse runtime-trial JSON at {runtime_trial_json:?}: {e}"))?;
-    let payload = biocortex_retrieval_opt_in_runtime_trial_review_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime trial review packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "review_ready={} approval_state={} may_implement_ordering_now={}",
-        shadow_json_display(
-            boundary.get("review_ready_for_baseline_runtime_trial"),
-            "false"
-        ),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let target = payload.get("review_target").unwrap_or(&Value::Null);
-    println!(
-        "mode={} per_call_opt_in={} commit={}",
-        shadow_json_display(target.get("mode"), "-"),
-        shadow_json_display(target.get("per_call_opt_in"), "false"),
-        shadow_json_display(target.get("commit"), "-")
-    );
-    let summary = payload.get("runtime_trial_summary").unwrap_or(&Value::Null);
-    let side_signal = summary.get("side_signal").unwrap_or(&Value::Null);
-    println!(
-        "side_signal_status={} attempted={} coverage={} latency_ms={}",
-        shadow_json_display(side_signal.get("status"), "-"),
-        shadow_json_display(side_signal.get("attempted"), "false"),
-        shadow_json_display(side_signal.get("coverage"), "0"),
-        shadow_json_display(side_signal.get("latency_ms"), "0")
-    );
-    let returned = summary.get("returned_order").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} baseline_returned={} violations={}",
-        shadow_json_display(returned.get("source"), "baseline"),
-        shadow_json_display(returned.get("baseline_returned"), "true"),
-        boundary
-            .get("violations")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_order_diff_packet(
-    source_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInOrderDiffPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(source_json)
-        .map_err(|e| anyhow::anyhow!("read order-diff source JSON at {source_json:?}: {e}"))?;
-    opts.source_packet = serde_json::from_str(&body)
-        .map_err(|e| anyhow::anyhow!("parse order-diff source JSON at {source_json:?}: {e}"))?;
-    let payload = biocortex_retrieval_opt_in_order_diff_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in order diff packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "diff_ready={} approval_state={} may_implement_ordering_now={}",
-        shadow_json_display(boundary.get("diff_ready"), "false"),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let comparison = payload.get("order_comparison").unwrap_or(&Value::Null);
-    let hash_diff = comparison.get("hash_diff").unwrap_or(&Value::Null);
-    println!(
-        "order_hash_changed={} top_key_changed={} order_hashes_comparable={}",
-        shadow_json_display(hash_diff.get("order_hash_changed"), "-"),
-        shadow_json_display(hash_diff.get("top_key_changed"), "-"),
-        shadow_json_display(hash_diff.get("order_hashes_comparable"), "false")
-    );
-    let expected = comparison.get("expected_key_rank").unwrap_or(&Value::Null);
-    println!(
-        "expected_rank_delta={} direction={} regressed={}",
-        shadow_json_display(expected.get("rank_delta_advisory_minus_baseline"), "-"),
-        shadow_json_display(expected.get("direction"), "unknown"),
-        shadow_json_display(expected.get("regressed"), "false")
-    );
-    let returned = comparison.get("returned_order").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} actual_return_order_changed={} violations={}",
-        shadow_json_display(returned.get("source"), "baseline"),
-        shadow_json_display(returned.get("actual_return_order_changed"), "false"),
-        boundary
-            .get("violations")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_redacted_order_artifact(
-    source_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRedactedOrderArtifactOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(source_json).map_err(|e| {
-        anyhow::anyhow!("read redacted-order artifact source JSON at {source_json:?}: {e}")
-    })?;
-    opts.source_packet = serde_json::from_str(&body).map_err(|e| {
-        anyhow::anyhow!("parse redacted-order artifact source JSON at {source_json:?}: {e}")
-    })?;
-    let payload = biocortex_retrieval_opt_in_redacted_order_artifact(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in redacted order artifact");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "artifact_ready={} approval_state={} may_implement_ordering_now={}",
-        shadow_json_display(boundary.get("artifact_ready"), "false"),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let comparison = payload
-        .get("redacted_order_comparison")
-        .unwrap_or(&Value::Null);
-    let distribution = comparison
-        .get("rank_delta_distribution")
-        .unwrap_or(&Value::Null);
-    println!(
-        "improved={} regressed={} unchanged={} max_abs_delta={}",
-        shadow_json_display(distribution.get("improved_count"), "0"),
-        shadow_json_display(distribution.get("regressed_count"), "0"),
-        shadow_json_display(distribution.get("unchanged_count"), "0"),
-        shadow_json_display(distribution.get("max_abs_delta"), "0")
-    );
-    let overlap_k1 = comparison
-        .get("top_k_overlap")
-        .and_then(Value::as_array)
-        .and_then(|rows| {
-            rows.iter()
-                .find(|row| row.get("k").and_then(Value::as_u64) == Some(1))
-        })
-        .unwrap_or(&Value::Null);
-    println!(
-        "top1_overlap={} top1_jaccard={} redacted_rows_comparable={} violations={}",
-        shadow_json_display(overlap_k1.get("overlap_count"), "0"),
-        shadow_json_display(overlap_k1.get("jaccard"), "-"),
-        shadow_json_display(boundary.get("redacted_rows_comparable"), "false"),
-        boundary
-            .get("violations")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_authorization_decision_packet(
-    authorization_request_json: &std::path::Path,
-    authorization_decision_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let request_body = std::fs::read_to_string(authorization_request_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in authorization request JSON at {authorization_request_json:?}: {e}"
-        )
-    })?;
-    opts.authorization_request = serde_json::from_str(&request_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in authorization request JSON at {authorization_request_json:?}: {e}"
-        )
-    })?;
-    let decision_body = std::fs::read_to_string(authorization_decision_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in authorization decision JSON at {authorization_decision_json:?}: {e}"
-        )
-    })?;
-    opts.authorization_decision = serde_json::from_str(&decision_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in authorization decision JSON at {authorization_decision_json:?}: {e}"
-        )
-    })?;
-    let payload = biocortex_retrieval_opt_in_authorization_decision_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in authorization decision packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "implementation_authorized={} approval_state={} authorization_state={}",
-        shadow_json_display(boundary.get("implementation_authorized"), "false"),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("authorization_state"), "not_authorized")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} may_implement_ordering_now={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let authorized = payload
-        .get("authorized_implementation")
-        .unwrap_or(&Value::Null);
-    println!(
-        "fts_only={} per_call_surface={} post_review_required={}",
-        shadow_json_display(
-            authorized.get("may_affect_only_explicitly_opted_in_fts_calls"),
-            "false"
-        ),
-        shadow_json_display(authorized.get("may_add_per_call_opt_in_surface"), "false"),
-        shadow_json_display(
-            authorized.get("requires_post_implementation_review_before_use"),
-            "true"
-        )
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_post_implementation_review_gate(
-    authorization_decision_packet_json: &std::path::Path,
-    opt_in_plan_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInPostImplementationReviewGateOptions,
-    as_json: bool,
-) -> Result<()> {
-    let packet_body = std::fs::read_to_string(authorization_decision_packet_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
-        )
-    })?;
-    opts.authorization_decision_packet = serde_json::from_str(&packet_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
-        )
-    })?;
-    let plan_body = std::fs::read_to_string(opt_in_plan_json).map_err(|e| {
-        anyhow::anyhow!("read opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}")
-    })?;
-    opts.opt_in_plan = serde_json::from_str(&plan_body).map_err(|e| {
-        anyhow::anyhow!("parse opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}")
-    })?;
-    let payload = biocortex_retrieval_opt_in_post_implementation_review_gate(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in post-implementation review gate");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "ready_for_human_runtime_influence_review={} review_state={} approval_state={}",
-        shadow_json_display(
-            boundary.get("ready_for_human_runtime_influence_review"),
-            "false"
-        ),
-        shadow_json_display(payload.get("review_state"), "blocked"),
-        shadow_json_display(payload.get("approval_state"), "not_approved")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connected={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false")
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
-    post_implementation_review_gate_json: &std::path::Path,
-    redacted_order_artifact_json: &std::path::Path,
-    redacted_evidence_aggregate_json: Option<&std::path::Path>,
-    evidence_summary_json: Option<&std::path::Path>,
-    capability_ledger_report_packet_json: Option<&std::path::Path>,
-    mut opts: BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
-    as_json: bool,
-) -> Result<()> {
-    let gate_body = std::fs::read_to_string(post_implementation_review_gate_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
-        )
-    })?;
-    opts.post_implementation_review_gate = serde_json::from_str(&gate_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
-        )
-    })?;
-    let artifact_body = std::fs::read_to_string(redacted_order_artifact_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
-        )
-    })?;
-    opts.redacted_order_artifact = serde_json::from_str(&artifact_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
-        )
-    })?;
-    if let Some(redacted_evidence_aggregate_json) = redacted_evidence_aggregate_json {
-        let aggregate_body = std::fs::read_to_string(redacted_evidence_aggregate_json).map_err(|e| {
-            anyhow::anyhow!(
-                "read opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
-            )
-        })?;
-        opts.redacted_evidence_aggregate =
-            Some(serde_json::from_str(&aggregate_body).map_err(|e| {
-                anyhow::anyhow!(
-                    "parse opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
-                )
-            })?);
-    }
-    if let Some(evidence_summary_json) = evidence_summary_json {
-        let evidence_body = std::fs::read_to_string(evidence_summary_json).map_err(|e| {
-            anyhow::anyhow!("read opt-in evidence summary JSON at {evidence_summary_json:?}: {e}")
-        })?;
-        opts.evidence_summary = Some(serde_json::from_str(&evidence_body).map_err(|e| {
-            anyhow::anyhow!("parse opt-in evidence summary JSON at {evidence_summary_json:?}: {e}")
-        })?);
-    }
-    if let Some(capability_ledger_report_packet_json) = capability_ledger_report_packet_json {
-        let ledger_body =
-            std::fs::read_to_string(capability_ledger_report_packet_json).map_err(|e| {
-                anyhow::anyhow!(
-                    "read BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
-                )
-            })?;
-        opts.capability_ledger_report_packet =
-            Some(serde_json::from_str(&ledger_body).map_err(|e| {
-                anyhow::anyhow!(
-                    "parse BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
-                )
-            })?);
-    }
-    let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime-influence review request");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "request_ready={} request_state={} approval_state={}",
-        shadow_json_display(
-            boundary.get("runtime_influence_review_request_ready"),
-            "false"
-        ),
-        shadow_json_display(payload.get("review_request_state"), "blocked"),
-        shadow_json_display(payload.get("approval_state"), "not_approved")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connected={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false")
-    );
-    let evidence = payload.get("evidence_summary").unwrap_or(&Value::Null);
-    println!(
-        "redacted_evidence_aggregate_provided={} redacted_evidence_aggregate_ready={} post_runtime_evidence_summary_ready={}",
-        shadow_json_display(
-            evidence.get("redacted_evidence_aggregate_provided"),
-            "false"
-        ),
-        shadow_json_display(evidence.get("redacted_evidence_aggregate_ready"), "false"),
-        shadow_json_display(
-            evidence.get("post_runtime_evidence_summary_ready"),
-            "false"
-        )
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_runtime_influence_decision_packet(
-    runtime_influence_review_request_json: &std::path::Path,
-    runtime_influence_decision_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let request_body = std::fs::read_to_string(runtime_influence_review_request_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
-        )
-    })?;
-    opts.runtime_influence_review_request = serde_json::from_str(&request_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
-        )
-    })?;
-    let decision_body = std::fs::read_to_string(runtime_influence_decision_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
-        )
-    })?;
-    opts.runtime_influence_decision = serde_json::from_str(&decision_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
-        )
-    })?;
-    let payload = biocortex_retrieval_opt_in_runtime_influence_decision_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime-influence decision packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "runtime_influence_authorized={} approval_state={} authorization_state={}",
-        shadow_json_display(boundary.get("runtime_influence_authorized"), "false"),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("authorization_state"), "not_authorized")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connection_authorized={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(
-            payload.get("ordering_behavior_connection_authorized"),
-            "false"
-        )
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
 async fn run_biocortex_retrieval_opt_in_store_trial(
     runtime_influence_decision_packet_json: &std::path::Path,
     mut opts: BioCortexRetrievalOptInStoreTrialOptions,
@@ -12992,66 +11711,7 @@ async fn run_biocortex_retrieval_opt_in_store_trial(
         .await
         .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
     let payload = biocortex_retrieval_opt_in_store_trial(&store, opts).await;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in store trial");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} implementation_stage={} approval_state={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.get("implementation_stage"), "-"),
-        shadow_json_display(payload.get("approval_state"), "not_approved")
-    );
-    let preflight = payload.get("runtime_preflight").unwrap_or(&Value::Null);
-    println!(
-        "adapter_allowed={} blockers={} compile_feature_enabled={} runtime_enabled={} operator_disabled={}",
-        shadow_json_display(preflight.get("adapter_allowed"), "false"),
-        preflight
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
-        shadow_json_display(preflight.get("compile_feature_enabled"), "false"),
-        shadow_json_display(preflight.get("runtime_enabled"), "false"),
-        shadow_json_display(preflight.get("operator_disabled"), "false")
-    );
-    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
-    println!(
-        "baseline_completed={} baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
-        shadow_json_display(baseline.get("completed"), "false"),
-        shadow_json_display(baseline.get("key_count"), "0"),
-        shadow_json_display(baseline.get("hash"), "-"),
-        shadow_json_display(baseline.get("raw_keys_included"), "false"),
-        shadow_json_display(baseline.get("content_included"), "false")
-    );
-    let side_signal = payload.get("side_signal").unwrap_or(&Value::Null);
-    println!(
-        "side_signal_attempted={} side_signal_status={} matched_candidate_count={} coverage={} raw_included={}",
-        shadow_json_display(side_signal.get("attempted"), "false"),
-        shadow_json_display(side_signal.get("status"), "-"),
-        shadow_json_display(side_signal.get("matched_candidate_count"), "0"),
-        shadow_json_display(side_signal.get("coverage"), "0"),
-        shadow_json_display(side_signal.get("raw_included"), "false")
-    );
-    let returned = payload.get("returned_order").unwrap_or(&Value::Null);
-    println!(
-        "returned_source={} baseline_returned={} actual_return_order_changed={} fallback_reason={}",
-        shadow_json_display(returned.get("source"), "baseline"),
-        shadow_json_display(returned.get("baseline_returned"), "true"),
-        shadow_json_display(returned.get("actual_return_order_changed"), "false"),
-        shadow_json_display(returned.get("fallback_reason"), "-")
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
-        shadow_json_display(payload.get("default_calls_unchanged"), "true")
-    );
-    Ok(())
+    run_biocortex_retrieval_opt_in_store_trial_result(payload, as_json)
 }
 
 async fn run_biocortex_retrieval_opt_in_gated_store_trial(
@@ -13306,92 +11966,6 @@ async fn run_biocortex_retrieval_opt_in_gated_batch_diagnostics(
     Ok(())
 }
 
-fn run_biocortex_retrieval_opt_in_runtime_readiness_packet(
-    runtime_influence_decision_packet_json: &std::path::Path,
-    store_trial_json: &std::path::Path,
-    batch_diagnostics_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let decision_body = std::fs::read_to_string(runtime_influence_decision_packet_json)
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "read opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
-            )
-        })?;
-    opts.runtime_influence_decision_packet =
-        serde_json::from_str(&decision_body).map_err(|e| {
-            anyhow::anyhow!(
-                "parse opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
-            )
-        })?;
-    let store_body = std::fs::read_to_string(store_trial_json).map_err(|e| {
-        anyhow::anyhow!("read opt-in store trial JSON at {store_trial_json:?}: {e}")
-    })?;
-    opts.store_trial = serde_json::from_str(&store_body).map_err(|e| {
-        anyhow::anyhow!("parse opt-in store trial JSON at {store_trial_json:?}: {e}")
-    })?;
-    let batch_body = std::fs::read_to_string(batch_diagnostics_json).map_err(|e| {
-        anyhow::anyhow!("read opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}")
-    })?;
-    opts.batch_diagnostics = serde_json::from_str(&batch_body).map_err(|e| {
-        anyhow::anyhow!("parse opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}")
-    })?;
-
-    let payload = biocortex_retrieval_opt_in_runtime_readiness_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime readiness packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} control_plane_ready={} live_probe_state={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/readiness/control_plane_ready"), "false"),
-        shadow_json_display(payload.pointer("/readiness/live_probe_state"), "-")
-    );
-    println!(
-        "may_accept_controlled_opt_in={} live_order_influence_ready={} default_influence_ready={}",
-        shadow_json_display(
-            payload.pointer("/readiness/may_accept_controlled_explicit_opt_in_fts_calls"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/readiness/live_order_influence_ready"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/readiness/default_influence_ready"),
-            "false"
-        )
-    );
-    println!(
-        "batch_evidence_source={} transition_gated={}",
-        shadow_json_display(payload.pointer("/batch_summary/evidence_source"), "-"),
-        shadow_json_display(payload.pointer("/batch_summary/transition_gated"), "false")
-    );
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "runtime_readiness_ready={} blockers={}",
-        shadow_json_display(boundary.get("runtime_readiness_ready"), "false"),
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
-        shadow_json_display(payload.get("default_calls_unchanged"), "true")
-    );
-    Ok(())
-}
-
 fn cli_env_truthy(key: &str) -> bool {
     std::env::var(key)
         .ok()
@@ -13414,145 +11988,6 @@ fn cli_env_falsey(key: &str) -> bool {
             )
         })
         .unwrap_or(false)
-}
-
-fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
-    runtime_readiness_packet_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeTransitionGateOptions,
-    as_json: bool,
-) -> Result<()> {
-    let readiness_body = std::fs::read_to_string(runtime_readiness_packet_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
-        )
-    })?;
-    opts.runtime_readiness_packet = serde_json::from_str(&readiness_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
-        )
-    })?;
-
-    let payload = biocortex_retrieval_opt_in_runtime_transition_gate(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime transition gate");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} transition_allowed={} mode={} per_call_opt_in={} operator_disabled={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/transition/transition_allowed"), "false"),
-        shadow_json_display(payload.pointer("/requested_transition/mode"), "-"),
-        shadow_json_display(
-            payload.pointer("/requested_transition/per_call_opt_in"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/requested_transition/operator_disabled"),
-            "false"
-        )
-    );
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "runtime_transition_allowed={} blockers={}",
-        shadow_json_display(boundary.get("runtime_transition_allowed"), "false"),
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
-        shadow_json_display(payload.get("default_calls_unchanged"), "true")
-    );
-    Ok(())
-}
-
-fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
-    checkpoint_selection_json: &std::path::Path,
-    post_semantic_diverse_review_json: &std::path::Path,
-    controlled_trial_readiness_json: Option<&std::path::Path>,
-    mut opts: BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
-    as_json: bool,
-) -> Result<()> {
-    let checkpoint_body = std::fs::read_to_string(checkpoint_selection_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
-        )
-    })?;
-    opts.checkpoint_selection = serde_json::from_str(&checkpoint_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
-        )
-    })?;
-    let review_body = std::fs::read_to_string(post_semantic_diverse_review_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
-        )
-    })?;
-    opts.post_semantic_diverse_review = serde_json::from_str(&review_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
-        )
-    })?;
-    if let Some(controlled_trial_readiness_json) = controlled_trial_readiness_json {
-        let controlled_body =
-            std::fs::read_to_string(controlled_trial_readiness_json).map_err(|e| {
-                anyhow::anyhow!(
-                    "read controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
-                )
-            })?;
-        opts.controlled_trial_readiness =
-            Some(serde_json::from_str(&controlled_body).map_err(|e| {
-                anyhow::anyhow!(
-                    "parse controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
-                )
-            })?);
-    }
-
-    let payload = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex downstream AIO runtime evidence handoff");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} handoff_ready={} checkpoint={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/boundary_check/handoff_ready"), "false"),
-        shadow_json_display(
-            payload.pointer("/checkpoint_summary/selected_checkpoint"),
-            "-"
-        )
-    );
-    println!(
-        "ssb_target={} recover={} raw_available={}",
-        shadow_json_display(payload.pointer("/ssb_handoff/target_schema_family"), "-"),
-        shadow_json_display(payload.pointer("/ssb_handoff/recover"), "-"),
-        shadow_json_display(payload.pointer("/ssb_handoff/raw_available"), "false")
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} calls_aiot_runtime={} executes_lswr_actions={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(
-            payload.pointer("/boundary_check/this_packet_calls_aiot_runtime"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/boundary_check/this_packet_executes_lswr_actions"),
-            "false"
-        )
-    );
-    Ok(())
 }
 
 const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =
@@ -13748,36 +12183,10 @@ async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(
         "default_calls_unchanged": true,
     });
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in controlled order fixture");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} expected_met={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/expected/met"), "false")
-    );
-    println!(
-        "seeded_memories={} queries={} actual_order_changed={} experimental_source={} side_signal_ok={}",
-        shadow_json_display(payload.pointer("/attempt/seeded_memory_count"), "0"),
-        shadow_json_display(payload.pointer("/attempt/query_count"), "0"),
-        actual_moved,
-        experimental_source,
-        side_signal_ok
-    );
-    println!(
-        "raw_queries_included={} raw_keys_included={} content_included={}",
-        shadow_json_display(payload.get("raw_queries_included"), "false"),
-        shadow_json_display(payload.get("raw_keys_included"), "false"),
-        shadow_json_display(payload.get("content_included"), "false")
-    );
-    Ok(())
+    run_biocortex_retrieval_opt_in_controlled_order_fixture_result(payload, as_json)
 }
 
-fn run_biocortex_retrieval_opt_in_evidence_summary(
+fn build_biocortex_retrieval_opt_in_evidence_summary(
     batch_diagnostics_json: &std::path::Path,
     controlled_order_fixture_run_json: &std::path::Path,
     runtime_readiness_packet_json: Option<&std::path::Path>,
@@ -13785,8 +12194,7 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
     commit: Option<String>,
     forum_post_id: Option<String>,
     memory_key: Option<String>,
-    as_json: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let batch =
         load_biocortex_redacted_json(batch_diagnostics_json, "opt-in batch diagnostics JSON")?;
     let controlled = load_biocortex_redacted_json(
@@ -14176,64 +12584,17 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         "side_signal_raw_included": false,
     });
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in evidence summary");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "review_state={} evidence_ready={} default_influence_ready={}",
-        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
-        shadow_json_display(payload.pointer("/interpretation/evidence_ready"), "false"),
-        shadow_json_display(
-            payload.pointer("/interpretation/default_influence_ready"),
-            "false"
-        )
-    );
-    println!(
-        "batch_queries={} batch_moved={} controlled_moved={} controlled_expected_met={}",
-        batch_query_count, batch_actual_moved, controlled_actual_moved, controlled_expected_met
-    );
-    if runtime_readiness_provided {
-        println!(
-            "runtime_readiness_ready={} readiness_batch_source={} transition_gated={}",
-            shadow_json_display(
-                payload.pointer("/runtime_readiness/runtime_readiness_ready"),
-                "false"
-            ),
-            shadow_json_display(
-                payload.pointer("/runtime_readiness/batch_evidence_source"),
-                "-"
-            ),
-            shadow_json_display(
-                payload.pointer("/runtime_readiness/batch_transition_gated"),
-                "false"
-            )
-        );
-    }
-    println!(
-        "recommended_next_step={} raw_flags batch={} controlled={}",
-        shadow_json_display(
-            payload.pointer("/interpretation/recommended_next_step"),
-            "-"
-        ),
-        batch_raw_flags_all_false,
-        controlled_raw_flags_all_false
-    );
-    Ok(())
+    Ok(payload)
 }
 
-fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+fn build_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
     movement_fixture_run_json: &std::path::Path,
     coverage_fixture_run_json: &std::path::Path,
     reviewer: Option<String>,
     commit: Option<String>,
     forum_post_id: Option<String>,
     memory_key: Option<String>,
-    as_json: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let movement = load_biocortex_redacted_json(
         movement_fixture_run_json,
         "opt-in movement fixture run JSON",
@@ -14318,42 +12679,7 @@ fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
         "side_signal_raw_included": false,
     });
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in redacted evidence aggregate");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "review_state={} aggregate_ready={} default_influence_ready={}",
-        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
-        shadow_json_display(
-            payload.pointer("/interpretation/aggregate_evidence_ready"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/interpretation/default_influence_ready"),
-            "false"
-        )
-    );
-    println!(
-        "movement_moved={} coverage_queries={} coverage_experimental={} coverage_moved={}",
-        movement_summary.actual_order_changed_count,
-        coverage_summary.query_count,
-        coverage_summary.experimental_source_count,
-        coverage_summary.actual_order_changed_count
-    );
-    println!(
-        "recommended_next_step={} raw_flags movement={} coverage={}",
-        shadow_json_display(
-            payload.pointer("/interpretation/recommended_next_step"),
-            "-"
-        ),
-        movement_summary.raw_flags_all_false,
-        coverage_summary.raw_flags_all_false
-    );
-    Ok(())
+    Ok(payload)
 }
 
 #[derive(Debug, Clone)]
@@ -14677,225 +13003,6 @@ async fn run_biocortex_retrieval_shadow(
     Ok(())
 }
 
-fn shadow_json_display(value: Option<&Value>, default: &str) -> String {
-    match value {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Bool(b)) => b.to_string(),
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::Array(items)) => {
-            if items.is_empty() {
-                "[]".to_string()
-            } else {
-                items
-                    .iter()
-                    .map(|v| shadow_json_display(Some(v), "null"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            }
-        }
-        Some(Value::Null) | None => default.to_string(),
-        Some(other) => other.to_string(),
-    }
-}
-
-/// **v22** — Substrate stats CLI. Reads the in-process global installed by
-/// `ab_seed_bridge::install_default()`. If substrate is not installed (env
-/// not set, or process didn't install), reports config + the disabled state
-/// — useful for confirming env var spelling.
-///
-/// **Phase 3 (C)**: in addition, attempts to read `substrate.parquet`
-/// from `path_override` → installed-substrate's path →
-/// `default_snapshot_path()`, and reports row counts / latest fingerprints
-/// / file size. Snapshot section appears in both pretty and JSON output
-/// when a readable file is found.
-async fn run_substrate_stats(path_override: Option<PathBuf>, as_json: bool) -> Result<()> {
-    use ab_seed_bridge::snapshot;
-    let env_on = ab_seed_bridge::env_enabled();
-    let installed = ab_seed_bridge::current();
-    let stats = installed.as_ref().map(|s| s.stats());
-
-    let resolved_path: Option<PathBuf> = path_override
-        .or_else(|| installed.as_ref().and_then(|s| s.snapshot_path()))
-        .or_else(snapshot::default_snapshot_path);
-
-    let snapshot_summary = match resolved_path.as_ref() {
-        Some(p) if p.exists() => match snapshot::read_all(p) {
-            Ok(rows) => {
-                let bytes = std::fs::metadata(p).ok().map(|m| m.len());
-                Some(summarize_snapshot_rows(p, bytes, &rows))
-            }
-            Err(e) => {
-                eprintln!("warn: read substrate snapshot {}: {}", p.display(), e);
-                None
-            }
-        },
-        _ => None,
-    };
-
-    if as_json {
-        let payload = json!({
-            "env_var": ab_seed_bridge::SUBSTRATE_ENV_VAR,
-            "env_enabled": env_on,
-            "installed": stats.is_some(),
-            "stats": stats,
-            "snapshot_path": resolved_path.as_ref().map(|p| p.to_string_lossy()),
-            "snapshot": snapshot_summary,
-        });
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# v22 substrate stats");
-    println!(
-        "env: {var}={state}",
-        var = ab_seed_bridge::SUBSTRATE_ENV_VAR,
-        state = if env_on {
-            "enabled"
-        } else {
-            "unset (substrate disabled)"
-        }
-    );
-    match stats {
-        Some(s) => {
-            println!("backend (inner) : {}", s.backend_name);
-            println!("projection      : {}", s.projection);
-            println!("N (neurons)     : {}", s.n);
-            println!("D (substrate)   : {}", s.d);
-            println!("outer_dim       : {}", s.outer_dim);
-            println!("step_count      : {}", s.step_count);
-            println!(
-                "last surprise   : mean={:.4} max={:.4}",
-                s.last_surprise_mean, s.last_surprise_max
-            );
-            println!("|conn| mean     : {:.6}", s.connection_mean_abs);
-            match resolved_path.as_ref() {
-                Some(p) => println!("snapshot path   : {}", p.display()),
-                None => println!("snapshot path   : (no path configured)"),
-            }
-            if s.step_count == 0 {
-                println!();
-                println!("(no perception events yet — substrate is opt-in to this process only;");
-                println!(" trigger via memory_save / memory_search inside an MCP session with");
-                println!(" `AB_SUBSTRATE=1` in env — phase 2.2 will append snapshot rows once");
-                println!(" the cadence triggers (every 20 events / every 100 events or 6h))");
-            }
-        }
-        None => {
-            println!("not installed");
-            match resolved_path.as_ref() {
-                Some(p) => println!("(snapshot probe path: {})", p.display()),
-                None => println!(),
-            }
-            if snapshot_summary.is_none() {
-                println!("(set `AB_SUBSTRATE=1` in env and re-launch the long-lived process;");
-                println!(" phase 2.2 ships snapshot persistence to");
-                println!(" `$HOME/.local/share/agent-bridge/substrate.parquet`)");
-            }
-        }
-    }
-    if let Some(sum) = &snapshot_summary {
-        println!();
-        println!("# snapshot file");
-        println!("file size       : {}", human_bytes(sum.file_bytes));
-        println!(
-            "rows            : total={} hot={} long={}",
-            sum.total_rows, sum.hot_rows, sum.long_rows
-        );
-        match &sum.latest_long {
-            Some(li) => println!(
-                "latest Long     : step={} ts={} fp={}",
-                li.step, li.cycle_ts, li.fingerprint
-            ),
-            None => println!("latest Long     : (none)"),
-        }
-        match &sum.latest_hot {
-            Some(hi) => println!(
-                "latest Hot      : step={} ts={} fp={}",
-                hi.step, hi.cycle_ts, hi.fingerprint
-            ),
-            None => println!("latest Hot      : (none)"),
-        }
-    }
-    Ok(())
-}
-
-/// Phase 3 (C) snapshot summary returned from `summarize_snapshot_rows`.
-/// Exposed as serde for the JSON payload of `substrate stats`.
-#[derive(Debug, Clone, serde::Serialize)]
-struct SnapshotSummary {
-    path: String,
-    file_bytes: Option<u64>,
-    total_rows: usize,
-    hot_rows: usize,
-    long_rows: usize,
-    latest_hot: Option<SnapshotEntry>,
-    latest_long: Option<SnapshotEntry>,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-struct SnapshotEntry {
-    step: i64,
-    cycle_ts: i64,
-    fingerprint: String,
-}
-
-/// Build a [`SnapshotSummary`] from `read_all` rows. Pure helper, tested.
-fn summarize_snapshot_rows(
-    path: &std::path::Path,
-    file_bytes: Option<u64>,
-    rows: &[ab_seed_bridge::SnapshotRow],
-) -> SnapshotSummary {
-    use ab_seed_bridge::{snapshot, SnapshotTier};
-    let mut hot_rows = 0usize;
-    let mut long_rows = 0usize;
-    for r in rows {
-        match r.tier {
-            SnapshotTier::Hot => hot_rows += 1,
-            SnapshotTier::Long => long_rows += 1,
-        }
-    }
-    let latest_hot = rows
-        .iter()
-        .rev()
-        .find(|r| matches!(r.tier, SnapshotTier::Hot))
-        .map(|r| SnapshotEntry {
-            step: r.step,
-            cycle_ts: r.cycle_ts,
-            fingerprint: snapshot::fingerprint(r),
-        });
-    let latest_long = rows
-        .iter()
-        .rev()
-        .find(|r| matches!(r.tier, SnapshotTier::Long))
-        .map(|r| SnapshotEntry {
-            step: r.step,
-            cycle_ts: r.cycle_ts,
-            fingerprint: snapshot::fingerprint(r),
-        });
-    SnapshotSummary {
-        path: path.to_string_lossy().to_string(),
-        file_bytes,
-        total_rows: rows.len(),
-        hot_rows,
-        long_rows,
-        latest_hot,
-        latest_long,
-    }
-}
-
-/// Human-readable byte size for `Option<u64>`. Returns `"(unknown)"` for None.
-fn human_bytes(b: Option<u64>) -> String {
-    match b {
-        None => "(unknown)".to_string(),
-        Some(n) if n < 1024 => format!("{} B", n),
-        Some(n) if n < 1024 * 1024 => format!("{:.1} KiB", n as f64 / 1024.0),
-        Some(n) if n < 1024 * 1024 * 1024 => {
-            format!("{:.1} MiB", n as f64 / (1024.0 * 1024.0))
-        }
-        Some(n) => format!("{:.2} GiB", n as f64 / (1024.0 * 1024.0 * 1024.0)),
-    }
-}
-
 /// **v22 §4 P2 measurement** — Spearman rank correlation between the
 /// substrate's `neighbors_of(key, k)` (from the latest Long snapshot row)
 /// and the α-graph's `cofires` neighbors of the same key. Aggregates
@@ -15099,459 +13206,6 @@ async fn run_dream_substrate_corr_audit(
     Ok(())
 }
 
-/// **v22 Phase 3 (A)** — `substrate neighbors` CLI. Loads the most recent
-/// Long-tier row from `substrate.parquet` and runs
-/// [`ab_seed_bridge::neighbors_from_snapshot`] against it. Pure disk read,
-/// no `install_default()` — CLI is short-lived so a fresh in-process grid
-/// would always be empty; reading the snapshot is the only way to answer.
-///
-/// When the snapshot file is missing or has no Long row yet, output is
-/// empty (still exit 0). MCP `substrate_neighbors_of` is the live-grid
-/// counterpart for in-daemon queries.
-async fn run_substrate_neighbors(
-    key: String,
-    k: usize,
-    path_override: Option<PathBuf>,
-    as_json: bool,
-) -> Result<()> {
-    use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    let path = match path_override.or_else(snapshot::default_snapshot_path) {
-        Some(p) => p,
-        None => {
-            if as_json {
-                println!(
-                    "{}",
-                    serde_json::json!({"neighbors": [], "reason": "no snapshot path"})
-                );
-            } else {
-                println!("# v22 substrate neighbors");
-                println!("(no snapshot path configured; rerun with --path)");
-            }
-            return Ok(());
-        }
-    };
-    if !path.exists() {
-        if as_json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "neighbors": [],
-                    "reason": "snapshot file missing",
-                    "path": path.to_string_lossy(),
-                })
-            );
-        } else {
-            println!("# v22 substrate neighbors");
-            println!("(snapshot file not found at {})", path.to_string_lossy());
-        }
-        return Ok(());
-    }
-    let rows = snapshot::read_all(&path)
-        .with_context(|| format!("read substrate snapshot {}", path.display()))?;
-    let latest_long = rows
-        .iter()
-        .rev()
-        .find(|r| matches!(r.tier, SnapshotTier::Long));
-    let neighbors = match latest_long {
-        Some(row) => ab_seed_bridge::neighbors_from_snapshot(row, &key, k),
-        None => Vec::new(),
-    };
-    if as_json {
-        let payload: Vec<_> = neighbors
-            .iter()
-            .map(|(k_text, score)| serde_json::json!({"key": k_text, "score": score}))
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "key": key,
-                "k": k,
-                "row_step": latest_long.map(|r| r.step),
-                "row_ts": latest_long.map(|r| r.cycle_ts),
-                "neighbors": payload,
-            }))?
-        );
-        return Ok(());
-    }
-    println!("# v22 substrate neighbors of {}", key);
-    match latest_long {
-        Some(row) => println!("(source: snapshot step={} ts={})", row.step, row.cycle_ts),
-        None => {
-            println!("(no Long-tier snapshot row yet — substrate needs ≥100 perception events)")
-        }
-    }
-    if neighbors.is_empty() {
-        println!("(no neighbors)");
-    } else {
-        for (i, (k_text, score)) in neighbors.iter().enumerate() {
-            println!("{:>3}. {:.6}  {}", i + 1, score, k_text);
-        }
-    }
-    Ok(())
-}
-
-/// **v22 Phase 3 (B)** — `substrate replay` CLI. Reads a JSONL event log,
-/// runs each event through a fresh in-process `SeedBackend`, force-writes
-/// a final Long-tier snapshot, and emits the SHA256 fingerprint of that
-/// row. Tool for v22 §4 P5 cross-machine determinism.
-///
-/// **Determinism caveat**: `seed_neuron::NeuronGrid::new` and `step` both
-/// use `rand::thread_rng()`, so fingerprints will differ across runs (and
-/// across machines) until the AiOT crate exposes a seeded variant.
-/// `--seed` is reserved and emitted in the JSON output so once the
-/// upstream supports it, this CLI becomes a true determinism gate.
-async fn run_substrate_replay(
-    log_path: PathBuf,
-    seed: u64,
-    n: usize,
-    d: usize,
-    use_hash: bool,
-    output_override: Option<PathBuf>,
-    as_json: bool,
-) -> Result<()> {
-    use ab_seed_bridge::snapshot::{self, SnapshotTier};
-    use ab_seed_bridge::{SeedBackend, SubstrateConfig};
-    use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
-    use std::sync::Arc;
-
-    // --- 1. Parse event log ---
-    // P-γ: each event is (text_to_embed, key_to_perceive_opt). When key
-    // is None we fall back to text (backward-compat with pre-P-γ replay
-    // JSONL that only carried `text`). Production-style replays should
-    // include `key` so substrate.neighbors_of(memory_key) is queryable.
-    let raw = std::fs::read_to_string(&log_path)
-        .with_context(|| format!("read event log {}", log_path.display()))?;
-    let mut events: Vec<(String, String)> = Vec::new();
-    let mut parse_skips = 0u64;
-    for line in raw.lines() {
-        match parse_event_line(line) {
-            Some((text, key_opt)) => {
-                let key = key_opt.unwrap_or_else(|| text.clone());
-                events.push((text, key));
-            }
-            None => parse_skips += 1,
-        }
-    }
-
-    // --- 2. Prepare output path ---
-    let output: PathBuf = match output_override {
-        Some(p) => p,
-        None => {
-            let mut p = std::env::temp_dir();
-            p.push(format!(
-                "agent-bridge-replay-{}.parquet",
-                std::process::id()
-            ));
-            p
-        }
-    };
-    if output.exists() {
-        std::fs::remove_file(&output)
-            .with_context(|| format!("clearing prior replay output at {}", output.display()))?;
-    }
-
-    // --- 3. Build SeedBackend on chosen inner backend ---
-    let inner: Arc<dyn EmbeddingBackend> = if use_hash {
-        Arc::new(HashBackend)
-    } else {
-        Arc::new(OnnxBackend)
-    };
-    let cfg = SubstrateConfig {
-        n,
-        d,
-        state_noise: 0.01,
-        lr: 0.01,
-    };
-    let backend = SeedBackend::wrap_with(inner, cfg);
-    backend.set_snapshot_path(Some(output.clone()));
-
-    // --- 4. Replay ---
-    // P-γ: perceive(text, key) lets the substrate index by key while
-    // embedding text — falls back to embed-equivalent behaviour when
-    // event omitted `key` (key=text via the parse step above).
-    for (text, key) in &events {
-        let _ = backend.perceive(text, key);
-    }
-    let stats = backend.stats();
-
-    // --- 5. Force a final Long snapshot (so cross-machine compare always has a target) ---
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let final_fp = match backend.build_row(SnapshotTier::Long, now) {
-        Some(row) => match snapshot::append_row(&output, row) {
-            Ok(fp) => Some(fp),
-            Err(e) => {
-                eprintln!("warn: forced Long snapshot append failed: {e}");
-                None
-            }
-        },
-        None => None,
-    };
-
-    // --- 6. Re-read snapshot to count rows + latest fingerprint ---
-    let rows = snapshot::read_all(&output).unwrap_or_default();
-    let latest_long = rows
-        .iter()
-        .rev()
-        .find(|r| matches!(r.tier, SnapshotTier::Long));
-    let latest_long_fp = latest_long.map(snapshot::fingerprint);
-
-    let warnings = vec![
-        "NeuronGrid::new / step use rand::thread_rng() — cross-machine sha256 will differ"
-            .to_string(),
-        format!("--seed {seed} logged but not yet effective (AiOT crate pending)"),
-    ];
-
-    if as_json {
-        let payload = serde_json::json!({
-            "log_path": log_path.to_string_lossy(),
-            "events_parsed": events.len(),
-            "events_skipped": parse_skips,
-            "step_count_final": stats.step_count,
-            "seed": seed,
-            "n": n,
-            "d": d,
-            "encoder": if use_hash { "hash" } else { "onnx" },
-            "snapshot_path": output.to_string_lossy(),
-            "snapshot_rows": rows.len(),
-            "latest_long_fingerprint": latest_long_fp,
-            "forced_final_fingerprint": final_fp,
-            "rng_determinism": false,
-            "warnings": warnings,
-        });
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# v22 Phase 3 (B) — substrate replay");
-    println!("log              : {}", log_path.display());
-    println!(
-        "events           : parsed={} skipped={}",
-        events.len(),
-        parse_skips
-    );
-    println!(
-        "config           : n={n}  d={d}  encoder={}",
-        if use_hash { "hash" } else { "onnx" }
-    );
-    println!("seed (reserved)  : {seed}");
-    println!("snapshot         : {}", output.display());
-    println!("snapshot rows    : {}", rows.len());
-    match (&latest_long_fp, &final_fp) {
-        (Some(fp), _) => println!("latest Long fp   : {}", fp),
-        (None, Some(fp)) => println!("forced final fp  : {}", fp),
-        (None, None) => println!("(no Long row produced)"),
-    }
-    println!("step_count       : {}", stats.step_count);
-    println!();
-    println!("Warnings:");
-    for w in &warnings {
-        println!("  - {w}");
-    }
-    Ok(())
-}
-
-/// Parse one JSONL event line. Returns `Some((text, key_opt))` when the
-/// line is a JSON object with a non-empty `text` string field; `None`
-/// for blank lines, parse errors, or missing-field lines.
-///
-/// **P-γ** — optional `key` field carries the perception identifier
-/// (memory key in production semantics). When absent, falls back to
-/// `text` as both embedded content AND perceived identifier, matching
-/// pre-P-γ replay behaviour for backward compat.
-///
-/// Pure helper, used by `run_substrate_replay`.
-fn parse_event_line(line: &str) -> Option<(String, Option<String>)> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_str(trimmed).ok()?;
-    let text = v.get("text")?.as_str()?;
-    if text.is_empty() {
-        return None;
-    }
-    let key = v
-        .get("key")
-        .and_then(|k| k.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-    Some((text.to_string(), key))
-}
-
-/// **v22 Phase 2.2 read side** — `substrate snapshot` CLI. Reads the
-/// Parquet file written by long-lived substrate-enabled processes. Pure
-/// disk read, no `install_default()` needed — this is the asymmetric
-/// counterpart to `substrate stats` (which queries the in-process global).
-///
-/// Use cases:
-/// 1. Inspect what a *different* process has been learning ("forum
-///    pipeline can read what MCP saw").
-/// 2. Cross-machine fingerprint compare for G4 determinism gate
-///    (`--fingerprint-only` then `diff` two outputs).
-/// 3. Forum/dream offline analysis of trailing surprise trends.
-async fn run_substrate_snapshot(
-    path_override: Option<PathBuf>,
-    limit: usize,
-    tier_filter: Option<String>,
-    fingerprint_only: bool,
-    as_json: bool,
-) -> Result<()> {
-    use anyhow::anyhow;
-
-    let path = path_override
-        .or_else(ab_seed_bridge::snapshot::default_snapshot_path)
-        .ok_or_else(|| anyhow!("no $HOME — pass --path explicitly"))?;
-
-    let mut rows = ab_seed_bridge::snapshot::read_all(&path)
-        .map_err(|e| anyhow!("read {}: {}", path.display(), e))?;
-
-    if let Some(t) = tier_filter.as_deref() {
-        let want = ab_seed_bridge::snapshot::SnapshotTier::from_str(t)
-            .ok_or_else(|| anyhow!("unknown tier '{t}' — expected hot|long"))?;
-        rows.retain(|r| r.tier == want);
-    }
-
-    if limit > 0 && rows.len() > limit {
-        let skip = rows.len() - limit;
-        rows = rows.into_iter().skip(skip).collect();
-    }
-
-    if fingerprint_only {
-        for row in &rows {
-            println!("{}", ab_seed_bridge::snapshot::fingerprint(row));
-        }
-        return Ok(());
-    }
-
-    if as_json {
-        let payload: Vec<_> = rows
-            .iter()
-            .map(|r| {
-                json!({
-                    "step": r.step,
-                    "cycle_ts": r.cycle_ts,
-                    "tier": r.tier.as_str(),
-                    "n_alive": r.n_alive,
-                    "trailing_surprise_mean_short": r.trailing_surprise_mean_short,
-                    "trailing_surprise_mean_long": r.trailing_surprise_mean_long,
-                    "connection_logits_len": r.connection_logits.len(),
-                    "in_strengths_mean": mean_f32(&r.in_strengths),
-                    "fingerprint": ab_seed_bridge::snapshot::fingerprint(r),
-                })
-            })
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&json!({
-                "path": path.display().to_string(),
-                "rows_shown": payload.len(),
-                "rows": payload,
-            }))?
-        );
-        return Ok(());
-    }
-
-    println!("# v22 substrate snapshot");
-    println!("path : {}", path.display());
-    if rows.is_empty() {
-        println!("(no rows yet — file absent or empty)");
-        return Ok(());
-    }
-    println!("rows : {} shown", rows.len());
-    println!();
-    for r in &rows {
-        let fp = ab_seed_bridge::snapshot::fingerprint(r);
-        let fp_short = if fp.len() >= 16 {
-            &fp[..16]
-        } else {
-            fp.as_str()
-        };
-        println!(
-            "step={:<6} ts={} tier={:<4} n_alive={:<4} surprise(s/l)={:.4}/{:.4} logits={:<6} fp={}",
-            r.step,
-            r.cycle_ts,
-            r.tier.as_str(),
-            r.n_alive,
-            r.trailing_surprise_mean_short,
-            r.trailing_surprise_mean_long,
-            r.connection_logits.len(),
-            fp_short,
-        );
-    }
-    Ok(())
-}
-
-fn mean_f32(xs: &[f32]) -> f32 {
-    if xs.is_empty() {
-        0.0
-    } else {
-        xs.iter().sum::<f32>() / xs.len() as f32
-    }
-}
-
-/// OSC 133 shell-integration snippets. Source-of-truth lives here; the
-/// human-readable copy in `docs/SHELL-INTEGRATION-OSC133.md` is intended
-/// to track this verbatim. If you edit one, mirror the change in the doc
-/// (or vice-versa) so the install instructions stay consistent.
-fn shell_init_snippet(shell: ShellKind) -> &'static str {
-    match shell {
-        ShellKind::Bash => {
-            "\
-# agent-bridge — OSC 133 shell integration (bash)
-# See: docs/SHELL-INTEGRATION-OSC133.md
-__ab_osc133_preexec() { printf '\\e]133;C\\a'; }
-__ab_osc133_precmd() {
-    local exit=$?
-    printf '\\e]133;D;%s\\a\\e]133;A\\a' \"$exit\"
-    PS1='\\[\\e]133;B\\a\\]'\"${PS1_ORIG:-$PS1}\"
-    PS1_ORIG=\"${PS1_ORIG:-$PS1}\"
-}
-trap '__ab_osc133_preexec' DEBUG
-PROMPT_COMMAND=\"__ab_osc133_precmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}\"
-"
-        }
-        ShellKind::Zsh => {
-            "\
-# agent-bridge — OSC 133 shell integration (zsh)
-# See: docs/SHELL-INTEGRATION-OSC133.md
-__ab_osc133_preexec() { print -nP '\\e]133;C\\a'; }
-__ab_osc133_precmd() {
-    local exit=$?
-    print -nP \"\\e]133;D;${exit}\\a\\e]133;A\\a\"
-}
-__ab_osc133_prompt_b() { print -nP '\\e]133;B\\a'; }
-PS1='%{$(__ab_osc133_prompt_b)%}'\"$PS1\"
-autoload -Uz add-zsh-hook
-add-zsh-hook preexec __ab_osc133_preexec
-add-zsh-hook precmd __ab_osc133_precmd
-"
-        }
-        ShellKind::Fish => {
-            "\
-# agent-bridge — OSC 133 shell integration (fish)
-# See: docs/SHELL-INTEGRATION-OSC133.md
-function __ab_osc133_preexec --on-event fish_preexec
-    printf '\\e]133;C\\a'
-end
-function __ab_osc133_postexec --on-event fish_postexec
-    printf '\\e]133;D;%s\\a\\e]133;A\\a' $status
-end
-function fish_prompt_osc133 --description 'wrap fish_prompt with OSC 133 B marker'
-    functions -c fish_prompt __ab_orig_fish_prompt 2>/dev/null
-    function fish_prompt
-        __ab_orig_fish_prompt
-        printf '\\e]133;B\\a'
-    end
-end
-fish_prompt_osc133
-"
-        }
-    }
-}
-
 /// v21 — `agent-bridge dream stats`. Open a read-only handle to state.db,
 /// pull `coactivation_stats`, and print a human-readable health snapshot
 /// (or raw JSON with `--json`). The β trigger metric (top10/median ratio)
@@ -15643,15 +13297,6 @@ async fn run_dream_stats(as_json: bool) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn short_key(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max - 1).collect();
-        format!("{truncated}…")
-    }
 }
 
 /// ε-5 — `agent-bridge worktree-session new`. Wraps `git worktree add` with
@@ -15990,31 +13635,6 @@ fn run_dream_shadow_cortex_feedback_list(
 ///   - before promote: pair shown as cyan dotted bezier underlay
 ///   - after  promote: pair shown as neutral solid edge in main skeleton
 ///                     (coact dedup hides the underlay since explicit wins)
-/// Per-pair audit row captured during promote. Drives both terminal output
-/// and `--html` rendering. Status is the immutable record of what happened
-/// (or, in dry-run, what would happen) for that pair this run.
-#[derive(Debug, Clone)]
-struct PromoteDecision {
-    key_a: String,
-    key_b: String,
-    count: u64,
-    weight: f64,
-    status: PromoteStatus,
-}
-
-#[derive(Debug, Clone)]
-enum PromoteStatus {
-    /// Live-run wrote a new `cofires` edge.
-    Promoted,
-    /// Dry-run would promote (no write).
-    WouldPromote,
-    /// Pair already has a `cofires` edge — promote is idempotent on cofires
-    /// itself (other edge types no longer block; see ε-1 2026-05-11).
-    Skipped,
-    /// Live-run memory_link returned an error (key tombstoned, etc.).
-    Failed(String),
-}
-
 async fn run_dream_promote(
     min_count: u64,
     limit: u32,
@@ -16048,7 +13668,8 @@ async fn run_dream_promote(
         println!("(no coactivation pairs with count ≥ {min_count})");
         println!("DB: {}", path.display());
         if let Some(p) = html_path {
-            let html = render_promote_html(min_count, limit, dry_run, &path, &[]);
+            let generated_at = chrono_now_utc_string();
+            let html = render_promote_html(min_count, limit, dry_run, &path, &[], &generated_at);
             std::fs::write(p, html)
                 .map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
             println!("html report: {}", p.display());
@@ -16224,659 +13845,19 @@ async fn run_dream_promote(
     }
 
     if let Some(p) = html_path {
-        let html = render_promote_html(min_count, limit, dry_run, &path, &decisions);
+        let generated_at = chrono_now_utc_string();
+        let html = render_promote_html(
+            min_count,
+            limit,
+            dry_run,
+            &path,
+            &decisions,
+            &generated_at,
+        );
         std::fs::write(p, html).map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
         println!("html report: {}", p.display());
     }
     Ok(())
-}
-
-/// Render a self-contained HTML audit report for a `dream promote` run.
-///
-/// Layout (top → bottom):
-///   1. Header banner — title, timestamp, dry-run badge, summary stats
-///   2. Strength Map — chips colored by status × weight bin (jump anchors)
-///   3. Per-pair cards — full keys (linked to Palace ?focus=KEY), count,
-///      weight bar, status badge, error text if Failed
-///   4. Footer — DB path, CLI invocation, generation timestamp
-///
-/// Design lifted from thariqs/html-effectiveness Risk Map pattern: a
-/// horizontal colored-tag row replaces a TOC for spatial-information
-/// navigation. Color motif matches Palace C3.6 (cyan = co-activation
-/// strength, purple = structural, red = error).
-fn render_promote_html(
-    min_count: u64,
-    limit: u32,
-    dry_run: bool,
-    db_path: &std::path::Path,
-    decisions: &[PromoteDecision],
-) -> String {
-    let now = chrono_now_utc_string();
-    let total = decisions.len();
-    let promoted = decisions
-        .iter()
-        .filter(|d| {
-            matches!(
-                d.status,
-                PromoteStatus::Promoted | PromoteStatus::WouldPromote
-            )
-        })
-        .count();
-    let skipped = decisions
-        .iter()
-        .filter(|d| matches!(d.status, PromoteStatus::Skipped))
-        .count();
-    let errors = decisions
-        .iter()
-        .filter(|d| matches!(d.status, PromoteStatus::Failed(_)))
-        .count();
-
-    let dry_badge = if dry_run {
-        r#"<span class="badge badge-dry">DRY RUN — NO WRITES</span>"#
-    } else {
-        r#"<span class="badge badge-live">LIVE RUN</span>"#
-    };
-
-    // Strength Map: one chip per decision. Chip CSS class encodes status +
-    // weight bin so coloring is purely declarative.
-    let mut strength_map = String::new();
-    for (i, d) in decisions.iter().enumerate() {
-        let cls = chip_class(&d.status, d.weight);
-        let label = format!("{} ↔ {}", short_key(&d.key_a, 24), short_key(&d.key_b, 24));
-        let title = format!(
-            "{} ↔ {} — {} fires, w={:.2}",
-            d.key_a, d.key_b, d.count, d.weight
-        );
-        strength_map.push_str(&format!(
-            r##"<a class="chip {cls}" href="#pair-{i}" title="{title}">{label} <span class="chip-count">{count}</span></a>"##,
-            cls = cls,
-            i = i,
-            title = html_escape(&title),
-            label = html_escape(&label),
-            count = d.count,
-        ));
-    }
-
-    // Per-pair cards.
-    let mut cards = String::new();
-    for (i, d) in decisions.iter().enumerate() {
-        let (status_text, status_cls) = match &d.status {
-            PromoteStatus::Promoted => ("PROMOTED", "status-promoted"),
-            PromoteStatus::WouldPromote => ("WOULD PROMOTE", "status-would"),
-            PromoteStatus::Skipped => ("SKIPPED — cofires already exists", "status-skipped"),
-            PromoteStatus::Failed(_) => ("FAILED", "status-failed"),
-        };
-        let err_block = match &d.status {
-            PromoteStatus::Failed(msg) => {
-                format!(r#"<div class="error-msg">{}</div>"#, html_escape(msg))
-            }
-            _ => String::new(),
-        };
-        let weight_pct = (d.weight * 100.0).round() as u32;
-        cards.push_str(&format!(
-            r##"<div id="pair-{i}" class="card">
-  <div class="card-head">
-    <span class="card-num">#{n}</span>
-    <span class="badge {status_cls}">{status_text}</span>
-    <span class="card-meta">{count} fires · w={weight:.2}</span>
-  </div>
-  <div class="card-pair">
-    <a class="key" href="http://localhost:7979/?focus={key_a_url}" title="{key_a_full}">{key_a_disp}</a>
-    <span class="sep">↔</span>
-    <a class="key" href="http://localhost:7979/?focus={key_b_url}" title="{key_b_full}">{key_b_disp}</a>
-  </div>
-  <div class="weight-bar"><div class="weight-fill" style="width:{weight_pct}%"></div></div>
-  {err_block}
-</div>
-"##,
-            i = i,
-            n = i + 1,
-            status_text = status_text,
-            status_cls = status_cls,
-            count = d.count,
-            weight = d.weight,
-            weight_pct = weight_pct,
-            key_a_url = url_escape(&d.key_a),
-            key_b_url = url_escape(&d.key_b),
-            key_a_full = html_escape(&d.key_a),
-            key_b_full = html_escape(&d.key_b),
-            key_a_disp = html_escape(&d.key_a),
-            key_b_disp = html_escape(&d.key_b),
-            err_block = err_block,
-        ));
-    }
-
-    let empty_msg = if decisions.is_empty() {
-        r#"<p class="empty">No co-activation pairs at or above the threshold. Either the system is quiet (try lowering <code>--min-count</code>) or all strong pairs are already structurally wired.</p>"#
-    } else {
-        ""
-    };
-
-    format!(
-        r##"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>dream promote — {timestamp}</title>
-<style>
-  :root {{
-    --bg: #0f0f14;
-    --panel: #1a1a22;
-    --border: #2a2a38;
-    --text: #e0e0e8;
-    --dim: #8a8a96;
-    --cyan-strong: #5cc8c8;
-    --cyan-mid: #4a8b9c;
-    --amber: #d4a64a;
-    --purple: #7a4ba8;
-    --red: #c8505c;
-    --green: #5cc88a;
-  }}
-  * {{ box-sizing: border-box; }}
-  html, body {{ margin: 0; padding: 0; }}
-  body {{
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
-    padding: 28px 36px 60px;
-    max-width: 1200px;
-    margin: 0 auto;
-  }}
-  h1 {{ margin: 0 0 8px; font-size: 22px; font-weight: 600; }}
-  h2 {{ margin: 32px 0 12px; font-size: 14px; font-weight: 600; color: var(--dim);
-        text-transform: uppercase; letter-spacing: 0.08em; }}
-  code, .key, .weight-bar {{ font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; }}
-  a {{ color: inherit; text-decoration: none; }}
-  .header {{ display: flex; flex-direction: column; gap: 6px; padding-bottom: 18px;
-            border-bottom: 1px solid var(--border); }}
-  .meta-row {{ display: flex; gap: 14px; flex-wrap: wrap; color: var(--dim); font-size: 12px; }}
-  .meta-row code {{ color: var(--text); }}
-  .stats {{ display: flex; gap: 18px; margin-top: 6px; }}
-  .stat {{ font-size: 13px; }}
-  .stat .num {{ font-size: 18px; font-weight: 600; margin-right: 4px; }}
-  .stat-promoted .num {{ color: var(--cyan-strong); }}
-  .stat-skipped  .num {{ color: var(--purple); }}
-  .stat-failed   .num {{ color: var(--red); }}
-
-  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 3px;
-           font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }}
-  .badge-dry  {{ background: #2a2316; color: var(--amber); border: 1px solid var(--amber); }}
-  .badge-live {{ background: #16241e; color: var(--green);  border: 1px solid var(--green);  }}
-  .status-promoted {{ background: #16242a; color: var(--cyan-strong); border: 1px solid var(--cyan-strong); }}
-  .status-would    {{ background: #16242a; color: var(--cyan-mid);    border: 1px solid var(--cyan-mid); }}
-  .status-skipped  {{ background: #1f1830; color: var(--purple);      border: 1px solid var(--purple); }}
-  .status-failed   {{ background: #2a161a; color: var(--red);         border: 1px solid var(--red); }}
-
-  .strength-map {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }}
-  .chip {{ display: inline-flex; align-items: center; gap: 6px;
-          padding: 4px 9px; border-radius: 3px; font-size: 12px;
-          border: 1px solid var(--border); background: var(--panel);
-          font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; }}
-  .chip:hover {{ filter: brightness(1.25); }}
-  .chip-count {{ font-size: 10px; padding: 1px 5px; border-radius: 2px;
-                background: rgba(255,255,255,0.08); color: var(--dim); }}
-  .chip-strong  {{ border-color: var(--cyan-strong); color: var(--cyan-strong); }}
-  .chip-mid     {{ border-color: var(--cyan-mid);    color: var(--cyan-mid); }}
-  .chip-weak    {{ border-color: var(--amber);       color: var(--amber); }}
-  .chip-skipped {{ border-color: var(--purple);      color: var(--purple); }}
-  .chip-failed  {{ border-color: var(--red);         color: var(--red); }}
-
-  .card {{ background: var(--panel); border: 1px solid var(--border);
-          border-radius: 4px; padding: 14px 16px; margin: 10px 0; }}
-  .card-head {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
-  .card-num {{ color: var(--dim); font-size: 12px; }}
-  .card-meta {{ color: var(--dim); font-size: 12px; margin-left: auto; }}
-  .card-pair {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-               font-size: 13px; padding: 4px 0; }}
-  .card-pair .key {{ color: var(--text); border-bottom: 1px dotted var(--dim);
-                     padding: 1px 2px; }}
-  .card-pair .key:hover {{ color: var(--cyan-strong); border-bottom-color: var(--cyan-strong); }}
-  .card-pair .sep {{ color: var(--dim); }}
-  .weight-bar {{ height: 4px; background: rgba(255,255,255,0.04);
-                border-radius: 2px; overflow: hidden; margin-top: 8px; }}
-  .weight-fill {{ height: 100%; background: linear-gradient(90deg, var(--amber), var(--cyan-strong)); }}
-  .error-msg {{ margin-top: 8px; padding: 6px 10px; background: #2a161a;
-               border-left: 3px solid var(--red); border-radius: 2px;
-               font-family: monospace; font-size: 12px; color: var(--red); }}
-
-  .footer {{ margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border);
-            color: var(--dim); font-size: 12px; }}
-  .empty {{ color: var(--dim); padding: 16px; background: var(--panel);
-           border-radius: 4px; border: 1px dashed var(--border); }}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>dream promote — Hebbian crystallization</h1>
-  <div class="meta-row">
-    {dry_badge}
-    <span>min_count <code>{min_count}</code></span>
-    <span>limit <code>{limit}</code></span>
-    <span>generated <code>{timestamp}</code></span>
-  </div>
-  <div class="stats">
-    <span class="stat stat-promoted"><span class="num">{promoted}</span>{promoted_label}</span>
-    <span class="stat stat-skipped"><span class="num">{skipped}</span>skipped</span>
-    {errors_stat}
-    <span class="stat" style="color: var(--dim);"><span class="num">{total}</span>candidates</span>
-  </div>
-</div>
-
-<h2>Strength Map</h2>
-<div class="strength-map">{strength_map}</div>
-
-<h2>Decisions</h2>
-{empty_msg}
-{cards}
-
-<div class="footer">
-  DB: <code>{db_display}</code><br>
-  Pairs link to Palace at <code>http://localhost:7979/?focus=KEY</code> — start with <code>agent-bridge palace serve</code> if not running.<br>
-  Generated by <code>agent-bridge dream promote</code> · cyan = co-activation strength · purple = structural · red = error
-</div>
-
-</body>
-</html>
-"##,
-        timestamp = html_escape(&now),
-        dry_badge = dry_badge,
-        min_count = min_count,
-        limit = limit,
-        total = total,
-        promoted = promoted,
-        skipped = skipped,
-        promoted_label = if dry_run { "would promote" } else { "promoted" },
-        errors_stat = if errors > 0 {
-            format!(
-                r#"<span class="stat stat-failed"><span class="num">{}</span>failed</span>"#,
-                errors
-            )
-        } else {
-            String::new()
-        },
-        strength_map = strength_map,
-        empty_msg = empty_msg,
-        cards = cards,
-        db_display = html_escape(&db_path.display().to_string()),
-    )
-}
-
-/// Render a self-contained HTML report for `dream codebase-report`.
-///
-/// Layout (top → bottom):
-///   1. Header — root path, timestamp, totals
-///   2. Per-language pills
-///   3. Hot callees table (callee · count · callers · langs)
-///   4. Hot callers table (caller · file · fan-out · total)
-///   5. Fan-out files table
-///   6. Orphan function candidates list (with caveat banner)
-///   7. Footer — DB path, generation timestamp
-///
-/// Color motif matches `render_promote_html` (cyan = activity intensity,
-/// purple = orphan/structural, amber = caveat) so both audit reports
-/// read as a coherent family in a browser.
-fn render_codebase_report_html(
-    stats: &ab_store::CodebaseCallStats,
-    db_path: &std::path::Path,
-) -> String {
-    let now = chrono_now_utc_string();
-
-    let lang_pills = if stats.per_language.is_empty() {
-        r#"<span class="empty-inline">no calls</span>"#.to_string()
-    } else {
-        stats
-            .per_language
-            .iter()
-            .map(|l| {
-                format!(
-                    r#"<span class="lang-pill"><b>{lang}</b> <span class="num">{calls}</span> calls · <span class="num">{files}</span> files</span>"#,
-                    lang = html_escape(&l.language),
-                    calls = l.call_count,
-                    files = l.distinct_files,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    let callee_peak = stats.hot_callees.first().map(|x| x.call_count).unwrap_or(1);
-    let hot_callee_rows = stats
-        .hot_callees
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            format!(
-                r##"<tr>
-  <td class="rank">{rank}</td>
-  <td class="callee"><code>{callee}</code></td>
-  <td class="num"><span class="bar" style="width:{bar_pct}%"></span>{count}</td>
-  <td class="num">{callers}</td>
-  <td class="langs">{langs}</td>
-</tr>"##,
-                rank = i + 1,
-                callee = html_escape(&h.callee),
-                bar_pct = bar_pct(h.call_count, callee_peak),
-                count = h.call_count,
-                callers = h.distinct_callers,
-                langs = h
-                    .languages
-                    .iter()
-                    .map(|l| format!(r#"<span class="lang-chip">{}</span>"#, html_escape(l)))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )
-        })
-        .collect::<String>();
-
-    let caller_peak = stats
-        .hot_callers
-        .first()
-        .map(|x| x.distinct_callees)
-        .unwrap_or(1);
-    let hot_caller_rows = stats
-        .hot_callers
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            format!(
-                r##"<tr>
-  <td class="rank">{rank}</td>
-  <td class="caller"><code>{caller}</code></td>
-  <td class="file"><code>{file}</code></td>
-  <td class="num"><span class="bar bar-purple" style="width:{bar_pct}%"></span>{fanout}</td>
-  <td class="num">{total}</td>
-  <td class="langs"><span class="lang-chip">{lang}</span></td>
-</tr>"##,
-                rank = i + 1,
-                caller = html_escape(&c.caller),
-                file = html_escape(&c.file_path),
-                bar_pct = bar_pct(c.distinct_callees, caller_peak),
-                fanout = c.distinct_callees,
-                total = c.total_calls,
-                lang = html_escape(&c.language),
-            )
-        })
-        .collect::<String>();
-
-    let file_peak = stats
-        .fan_out_files
-        .first()
-        .map(|x| x.distinct_callees)
-        .unwrap_or(1);
-    let fan_file_rows = stats
-        .fan_out_files
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            format!(
-                r##"<tr>
-  <td class="rank">{rank}</td>
-  <td class="file"><code>{file}</code></td>
-  <td class="num"><span class="bar bar-purple" style="width:{bar_pct}%"></span>{fanout}</td>
-  <td class="num">{total}</td>
-  <td class="langs"><span class="lang-chip">{lang}</span></td>
-</tr>"##,
-                rank = i + 1,
-                file = html_escape(&f.file_path),
-                bar_pct = bar_pct(f.distinct_callees, file_peak),
-                fanout = f.distinct_callees,
-                total = f.total_calls,
-                lang = html_escape(&f.language),
-            )
-        })
-        .collect::<String>();
-
-    // Split orphans into high-confidence + likely-FP for visual demotion.
-    let (orphan_real, orphan_fp): (Vec<_>, Vec<_>) =
-        stats.orphan_functions.iter().partition(|o| !o.likely_fp);
-    let orphan_rows = orphan_real
-        .iter()
-        .enumerate()
-        .map(|(i, o)| {
-            format!(
-                r##"<tr>
-  <td class="rank">{rank}</td>
-  <td class="kind"><span class="kind-chip">{kind}</span></td>
-  <td class="name"><code>{name}</code></td>
-  <td class="file"><code>{file}:{line}</code></td>
-  <td class="langs"><span class="lang-chip">{lang}</span></td>
-</tr>"##,
-                rank = i + 1,
-                kind = html_escape(&o.kind),
-                name = html_escape(&o.name),
-                file = html_escape(&o.file_path),
-                line = o.line,
-                lang = html_escape(&o.language),
-            )
-        })
-        .collect::<String>();
-    let orphan_fp_rows = orphan_fp
-        .iter()
-        .enumerate()
-        .map(|(i, o)| {
-            format!(
-                r##"<tr class="fp-row">
-  <td class="rank">{rank}</td>
-  <td class="kind"><span class="kind-chip">{kind}</span></td>
-  <td class="name"><code>{name}</code></td>
-  <td class="fp-reason"><span class="fp-chip">{reason}</span></td>
-  <td class="file"><code>{file}:{line}</code></td>
-  <td class="langs"><span class="lang-chip">{lang}</span></td>
-</tr>"##,
-                rank = i + 1,
-                kind = html_escape(&o.kind),
-                name = html_escape(&o.name),
-                reason = html_escape(&o.likely_fp_reason),
-                file = html_escape(&o.file_path),
-                line = o.line,
-                lang = html_escape(&o.language),
-            )
-        })
-        .collect::<String>();
-
-    let empty_state = if stats.total_calls == 0 {
-        r#"<p class="empty">No calls indexed for this root. Run <code>agent-bridge codebase index &lt;root&gt;</code> first, or check that the root path matches the indexed one (canonical form).</p>"#
-    } else {
-        ""
-    };
-
-    format!(
-        r##"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>codebase report — {timestamp}</title>
-<style>
-  :root {{
-    --bg: #0f0f14;
-    --panel: #1a1a22;
-    --border: #2a2a38;
-    --text: #e0e0e8;
-    --dim: #8a8a96;
-    --cyan-strong: #5cc8c8;
-    --cyan-mid: #4a8b9c;
-    --amber: #d4a64a;
-    --purple: #7a4ba8;
-    --red: #c8505c;
-    --green: #5cc88a;
-  }}
-  * {{ box-sizing: border-box; }}
-  html, body {{ margin: 0; padding: 0; }}
-  body {{
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
-    padding: 28px 36px 60px;
-    max-width: 1280px;
-    margin: 0 auto;
-  }}
-  h1 {{ margin: 0 0 8px; font-size: 22px; font-weight: 600; }}
-  h2 {{ margin: 32px 0 12px; font-size: 14px; font-weight: 600; color: var(--dim);
-        text-transform: uppercase; letter-spacing: 0.08em; }}
-  code {{ font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; color: var(--text); }}
-  a {{ color: inherit; text-decoration: none; }}
-  .header {{ display: flex; flex-direction: column; gap: 6px; padding-bottom: 18px;
-            border-bottom: 1px solid var(--border); }}
-  .meta-row {{ display: flex; gap: 14px; flex-wrap: wrap; color: var(--dim); font-size: 12px; }}
-  .meta-row code {{ color: var(--text); }}
-  .stats {{ display: flex; gap: 18px; margin-top: 6px; }}
-  .stat .num {{ font-size: 18px; font-weight: 600; margin-right: 4px; }}
-  .stat-calls .num {{ color: var(--cyan-strong); }}
-  .stat-files .num {{ color: var(--cyan-mid); }}
-
-  .lang-pills {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }}
-  .lang-pill {{ padding: 6px 12px; border-radius: 4px;
-               background: var(--panel); border: 1px solid var(--border);
-               font-size: 13px; color: var(--cyan-mid); }}
-  .lang-pill b {{ color: var(--text); }}
-  .lang-pill .num {{ color: var(--cyan-strong); font-weight: 600; }}
-
-  table {{ width: 100%; border-collapse: collapse; margin: 8px 0 0;
-          font-size: 13px; }}
-  th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }}
-  th {{ color: var(--dim); font-weight: 600; font-size: 11px;
-       text-transform: uppercase; letter-spacing: 0.06em; }}
-  tr:hover td {{ background: rgba(255,255,255,0.025); }}
-  td.rank {{ color: var(--dim); width: 36px; }}
-  td.num {{ font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-           font-variant-numeric: tabular-nums; white-space: nowrap;
-           position: relative; }}
-  td.callee code, td.caller code, td.name code {{ color: var(--cyan-strong); }}
-  td.file code {{ color: var(--dim); font-size: 12px; }}
-
-  .bar {{ display: inline-block; height: 100%;
-         position: absolute; left: 0; top: 0;
-         background: linear-gradient(90deg, var(--cyan-mid), var(--cyan-strong));
-         opacity: 0.18; }}
-  .bar-purple {{ background: linear-gradient(90deg, var(--purple), #b07ed0); }}
-
-  .lang-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
-               background: rgba(92,200,200,0.1); color: var(--cyan-mid);
-               font-size: 11px; font-family: "JetBrains Mono", monospace;
-               margin-right: 3px; }}
-  .kind-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
-               background: rgba(122,75,168,0.12); color: var(--purple);
-               font-size: 11px; font-family: "JetBrains Mono", monospace; }}
-  .fp-chip {{ display: inline-block; padding: 1px 6px; border-radius: 2px;
-             background: rgba(212,166,74,0.10); color: var(--amber);
-             font-size: 11px; font-family: "JetBrains Mono", monospace; }}
-  .fp-table tr.fp-row td {{ color: var(--dim); }}
-  .fp-table tr.fp-row td.name code,
-  .fp-table tr.fp-row td.file code {{ color: var(--dim); }}
-
-  .caveat {{ margin: 10px 0; padding: 8px 12px;
-            background: #2a2316; border-left: 3px solid var(--amber);
-            border-radius: 2px; color: var(--amber); font-size: 12px; }}
-  .caveat b {{ color: #f0c468; }}
-
-  .empty {{ color: var(--dim); padding: 16px; background: var(--panel);
-           border-radius: 4px; border: 1px dashed var(--border); }}
-  .empty-inline {{ color: var(--dim); font-style: italic; }}
-
-  .footer {{ margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border);
-            color: var(--dim); font-size: 12px; }}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>codebase call-graph audit</h1>
-  <div class="meta-row">
-    <span>root <code>{root}</code></span>
-    <span>generated <code>{timestamp}</code></span>
-  </div>
-  <div class="stats">
-    <span class="stat stat-calls"><span class="num">{total_calls}</span>calls</span>
-    <span class="stat stat-files"><span class="num">{files}</span>files with calls</span>
-  </div>
-</div>
-
-{empty_state}
-
-<h2>Per-language</h2>
-<div class="lang-pills">{lang_pills}</div>
-
-<h2>Hot callees — top {hc_n}</h2>
-<table>
-<thead><tr>
-  <th></th><th>callee (raw)</th><th>calls</th><th>callers</th><th>langs</th>
-</tr></thead>
-<tbody>{hot_callee_rows}</tbody>
-</table>
-
-<h2>Fan-out callers — top {hcr_n}</h2>
-<table>
-<thead><tr>
-  <th></th><th>caller</th><th>file</th><th>fan-out</th><th>total</th><th>lang</th>
-</tr></thead>
-<tbody>{hot_caller_rows}</tbody>
-</table>
-
-<h2>Fan-out files — top {ff_n}</h2>
-<table>
-<thead><tr>
-  <th></th><th>file</th><th>fan-out</th><th>total</th><th>lang</th>
-</tr></thead>
-<tbody>{fan_file_rows}</tbody>
-</table>
-
-<h2>Orphan function candidates — {orphan_real_n} high-confidence</h2>
-<div class="caveat">
-  <b>Best-effort, alias-blind.</b> Last-segment matching only — false positives include trait dispatch, dyn dispatch, reflection / string-key dispatch, FFI exports, and macro-generated callers. Use as a starting list, not a verdict.
-</div>
-<table>
-<thead><tr>
-  <th></th><th>kind</th><th>name</th><th>file:line</th><th>lang</th>
-</tr></thead>
-<tbody>{orphan_rows}</tbody>
-</table>
-
-<h2>Likely false positives — {orphan_fp_n}</h2>
-<div class="caveat" style="background: #1f1a2a; border-left-color: var(--purple); color: var(--dim);">
-  Rows tagged with known false-positive heuristics: test-file paths (callers via <code>#[test]</code> / pytest macros are invisible to the extractor), <code>main</code> entries (runtime-called), pytest <code>test_*</code> naming convention. Shown for completeness — verify before acting.
-</div>
-<table class="fp-table">
-<thead><tr>
-  <th></th><th>kind</th><th>name</th><th>reason</th><th>file:line</th><th>lang</th>
-</tr></thead>
-<tbody>{orphan_fp_rows}</tbody>
-</table>
-
-<div class="footer">
-  DB: <code>{db_display}</code><br>
-  Generated by <code>dream codebase-report</code> at <code>{timestamp}</code>.
-</div>
-
-</body>
-</html>
-"##,
-        timestamp = html_escape(&now),
-        root = html_escape(&stats.root_path),
-        total_calls = stats.total_calls,
-        files = stats.distinct_caller_files,
-        lang_pills = lang_pills,
-        hc_n = stats.hot_callees.len(),
-        hot_callee_rows = hot_callee_rows,
-        hcr_n = stats.hot_callers.len(),
-        hot_caller_rows = hot_caller_rows,
-        ff_n = stats.fan_out_files.len(),
-        fan_file_rows = fan_file_rows,
-        orphan_real_n = orphan_real.len(),
-        orphan_rows = orphan_rows,
-        orphan_fp_n = orphan_fp.len(),
-        orphan_fp_rows = orphan_fp_rows,
-        empty_state = empty_state,
-        db_display = html_escape(&db_path.display().to_string()),
-    )
-}
-
-/// Map an absolute count to a 0–100 bar width relative to a peak value.
-/// Used in HTML tables to give callees / callers a visual scale-bar.
-fn bar_pct(count: u64, peak: u64) -> u32 {
-    if peak == 0 {
-        return 0;
-    }
-    let raw = (count as f64 / peak as f64) * 100.0;
-    raw.round().clamp(0.0, 100.0) as u32
 }
 
 /// Phase 2.x #8 — CLI mirror of the `memory_decay_unused` MCP tool.
@@ -19828,21 +16809,13 @@ async fn run_dream_codebase_report(
     }
 
     if let Some(p) = html_path {
-        let html = render_codebase_report_html(&stats, &db_path);
+        let generated_at = chrono_now_utc_string();
+        let html = render_codebase_report_html(&stats, &db_path, &generated_at);
         std::fs::write(p, html).map_err(|e| anyhow::anyhow!("write html report to {p:?}: {e}"))?;
         println!();
         println!("html report: {}", p.display());
     }
     Ok(())
-}
-
-fn truncate_chars(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        let prefix: String = s.chars().take(n.saturating_sub(1)).collect();
-        format!("{prefix}…")
-    }
 }
 
 /// P-ε — Substrate-Readiness Audit CLI. Calls the same trait method as
@@ -20100,54 +17073,6 @@ fn default_promote_report_path() -> Result<PathBuf> {
     Ok(dir.join(format!("promote-{date}.html")))
 }
 
-fn chip_class(status: &PromoteStatus, weight: f64) -> &'static str {
-    match status {
-        PromoteStatus::Skipped => "chip-skipped",
-        PromoteStatus::Failed(_) => "chip-failed",
-        PromoteStatus::Promoted | PromoteStatus::WouldPromote => {
-            if weight >= 0.8 {
-                "chip-strong"
-            } else if weight >= 0.65 {
-                "chip-mid"
-            } else {
-                "chip-weak"
-            }
-        }
-    }
-}
-
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
-fn url_escape(s: &str) -> String {
-    // Minimal percent-encode for URL query values: encode bytes outside the
-    // unreserved set per RFC 3986. Memory keys are usually plain ASCII
-    // identifiers but be defensive about spaces/&/=/#.
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        let safe =
-            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b':' | b'/');
-        if safe {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{:02X}", b));
-        }
-    }
-    out
-}
-
 fn chrono_now_utc_string() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -20321,218 +17246,6 @@ struct AgentMdDriftReport {
     proposed: usize,
     proposals: Vec<AgentMdDriftProposal>,
     dry_run: bool,
-}
-
-/// L7 P2 — coverage threshold below which a lesson is considered NOT
-/// represented in AGENT.md. 0.30 means: if fewer than 30% of the
-/// lesson's distinctive tokens appear in AGENT.md, propose an update.
-const AGENT_MD_DRIFT_COVERAGE_THRESHOLD: f64 = 0.30;
-
-/// Tokenise text into lowercase alphanumeric tokens of length >= 4.
-/// Pure, no allocation beyond the returned set.
-fn drift_tokens(text: &str) -> std::collections::HashSet<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|t| t.chars().count() >= 4)
-        .map(|t| t.to_lowercase())
-        .collect()
-}
-
-/// Fraction of `lesson_tokens` that also appear in `preamble_tokens`.
-/// Returns 0.0 when `lesson_tokens` is empty (no signal to compare).
-fn drift_coverage_ratio(
-    lesson_tokens: &std::collections::HashSet<String>,
-    preamble_tokens: &std::collections::HashSet<String>,
-) -> f64 {
-    if lesson_tokens.is_empty() {
-        return 0.0;
-    }
-    let covered = lesson_tokens
-        .iter()
-        .filter(|t| preamble_tokens.contains(*t))
-        .count();
-    covered as f64 / lesson_tokens.len() as f64
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct AgentMdTriageDecision {
-    accept: bool,
-    kind: &'static str,
-    reason: &'static str,
-}
-
-fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
-}
-
-/// Deterministic v1 gate for AGENT.md drift proposals.
-///
-/// The coverage detector compares long lesson bodies against a deliberately
-/// short self-profile, so low overlap is only candidate pressure. This gate
-/// keeps stable behavior/posture candidates and rejects transient operational
-/// facts before `l7_proposed_update` memories are written.
-fn triage_agent_md_drift_candidate(
-    lesson_key: &str,
-    tags: &[String],
-    content: &str,
-) -> AgentMdTriageDecision {
-    let lower = content.to_lowercase();
-    let key_lower = lesson_key.to_lowercase();
-    let tag_blob = tags.join(" ").to_lowercase();
-    let all = format!("{key_lower}\n{tag_blob}\n{lower}");
-
-    let token_count = drift_tokens(content).len();
-    if token_count < 8 {
-        return AgentMdTriageDecision {
-            accept: false,
-            kind: "low_signal",
-            reason: "too few distinctive tokens",
-        };
-    }
-
-    let transient_markers = [
-        "commit ",
-        "origin/master",
-        "github/master",
-        "gitlab",
-        "branch ",
-        "worktree",
-        "pushed",
-        "deployed",
-        ".real",
-        "pid ",
-        "http://",
-        "https://",
-        "post `#",
-        "pr ",
-        "mr ",
-        "next step",
-        "current ",
-        "status:",
-        "cwd:",
-        "当前",
-        "已经",
-        "刚",
-        "正在",
-        "接下来",
-        "下一步",
-        "看板已更新",
-        "远端",
-        "重启",
-        "重连",
-        "提交",
-        "推送",
-    ];
-    if contains_any(&all, &transient_markers) {
-        return AgentMdTriageDecision {
-            accept: false,
-            kind: "transient_operational",
-            reason: "contains branch/commit/deploy/current-state markers",
-        };
-    }
-
-    let domain_markers = [
-        "godot",
-        "onsen",
-        "nexus",
-        "wuxing",
-        "palace graph",
-        "sprite",
-        "atlas",
-        "facility",
-        "lantern",
-        "bath",
-        "biocortex",
-        "五行",
-        "温泉",
-        "灯笼",
-        "浴池",
-        "贴图",
-    ];
-    if contains_any(&all, &domain_markers) {
-        return AgentMdTriageDecision {
-            accept: false,
-            kind: "domain_specific",
-            reason: "domain lesson belongs in memory, not global agent profile",
-        };
-    }
-
-    let implementation_markers = [
-        "candidate reviewed",
-        "from_key",
-        "writes_memory",
-        "state.db",
-        "memory_search",
-        "store api",
-        "route ",
-        "packet",
-        "artifact",
-        "mcp surface",
-        "t5/t6",
-        "s76",
-        "s32",
-        "s33",
-        "db ",
-    ];
-    if contains_any(&all, &implementation_markers) {
-        return AgentMdTriageDecision {
-            accept: false,
-            kind: "implementation_specific",
-            reason: "implementation fact belongs in memory, not global agent profile",
-        };
-    }
-
-    let stable_markers = [
-        "always ",
-        "never ",
-        "should ",
-        "must ",
-        "avoid ",
-        "prefer ",
-        "before ",
-        "separate ",
-        "split ",
-        "verify ",
-        "evidence",
-        "boundary",
-        "stable",
-        "posture",
-        "preference",
-        "principle",
-        "self-evaluation",
-        "do not ",
-        "don't ",
-        "不要",
-        "必须",
-        "应该",
-        "避免",
-        "先验证",
-        "再规划",
-        "再落地",
-        "保持",
-        "区分",
-        "验证",
-        "边界",
-        "原则",
-        "姿态",
-        "偏好",
-    ];
-    let stable_hits = stable_markers
-        .iter()
-        .filter(|marker| all.contains(**marker))
-        .count();
-    if stable_hits >= 2 {
-        return AgentMdTriageDecision {
-            accept: true,
-            kind: "stable_posture_candidate",
-            reason: "contains reusable behavior/posture markers",
-        };
-    }
-
-    AgentMdTriageDecision {
-        accept: false,
-        kind: "no_stable_posture_signal",
-        reason: "does not contain enough reusable behavior markers",
-    }
 }
 
 async fn run_dream_agent_md_drift(
@@ -20732,74 +17445,6 @@ async fn run_dream_agent_md_drift(
 }
 
 // ─── L7 P3 — Weekly skill-rating retro ──────────────────────────────
-
-#[derive(Debug, serde::Serialize)]
-struct SkillRetroLessonRow {
-    key: String,
-    created_at: i64,
-    last_accessed_at: i64,
-    access_count: u64,
-    importance: f64,
-    consulted: bool,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct SkillRetroReport {
-    window_days: u32,
-    cutoff_unix: i64,
-    now_unix: i64,
-    lessons_total: usize,
-    lessons_consulted: usize,
-    consulted_ratio: f64,
-    mean_access_count: f64,
-    rows: Vec<SkillRetroLessonRow>,
-}
-
-/// Pure aggregator for [`run_dream_skill_retro`]. `now` and `cutoff`
-/// are caller-injected for deterministic testing.
-fn aggregate_skill_retro(
-    lessons: Vec<ab_store::MemoryRecord>,
-    window_days: u32,
-    now: i64,
-    cutoff: i64,
-) -> SkillRetroReport {
-    let mut rows: Vec<SkillRetroLessonRow> = lessons
-        .into_iter()
-        .map(|m| SkillRetroLessonRow {
-            consulted: m.access_count > 0,
-            key: m.key,
-            created_at: m.created_at,
-            last_accessed_at: m.last_accessed_at,
-            access_count: m.access_count,
-            importance: m.importance,
-        })
-        .collect();
-    // Order by access_count DESC (most-consulted first) for readable
-    // text output; JSON consumers can re-sort.
-    rows.sort_by(|a, b| b.access_count.cmp(&a.access_count));
-    let total = rows.len();
-    let consulted = rows.iter().filter(|r| r.consulted).count();
-    let mean_access = if total == 0 {
-        0.0
-    } else {
-        rows.iter().map(|r| r.access_count as f64).sum::<f64>() / total as f64
-    };
-    let consulted_ratio = if total == 0 {
-        0.0
-    } else {
-        consulted as f64 / total as f64
-    };
-    SkillRetroReport {
-        window_days,
-        cutoff_unix: cutoff,
-        now_unix: now,
-        lessons_total: total,
-        lessons_consulted: consulted,
-        consulted_ratio,
-        mean_access_count: mean_access,
-        rows,
-    }
-}
 
 async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
     use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};
@@ -21090,6 +17735,57 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn avatar_aura_daemon_http_composition_reads_bounded_env_once() {
+        let mut calls = Vec::new();
+        let values = avatar_aura_io_startup_values_from_lookup(|key| {
+            calls.push(key.to_string());
+            Ok(match key {
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE" => Some("1".to_string()),
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT" => Some("/srv/avatar-aura".to_string()),
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY" => Some("aura.json".to_string()),
+                "HOME" => Some("/home/operator".to_string()),
+                _ => panic!("unexpected ambient key: {key}"),
+            })
+        })
+        .expect("bounded environment lookup should succeed");
+
+        assert_eq!(
+            calls,
+            [
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE",
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT",
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY",
+                "HOME",
+            ]
+        );
+        let config = ab_bridge::daemon_http::AvatarAuraIoStartupConfig::from_values(&values)
+            .expect("bounded values should parse");
+        assert!(matches!(
+            config,
+            ab_bridge::daemon_http::AvatarAuraIoStartupConfig::Enabled { .. }
+        ));
+    }
+
+    #[test]
+    fn avatar_aura_adds_no_cli_or_mcp_path_surface() {
+        let main_source = include_str!("main.rs");
+        let daemon_start = main_source
+            .find("    DaemonHttp {")
+            .expect("DaemonHttp clap schema start");
+        let daemon_end = main_source[daemon_start..]
+            .find("\n    /// Run the explicitly hash-pinned G1.4")
+            .map(|offset| daemon_start + offset)
+            .expect("DaemonHttp clap schema boundary");
+        let daemon_schema = &main_source[daemon_start..daemon_end];
+        assert!(!daemon_schema.contains("aura_io"));
+        assert!(!daemon_schema.contains("aura-io"));
+
+        let mcp_tools = include_str!("mcp_tools.rs");
+        assert!(!mcp_tools.contains("aura_io"));
+        assert!(!mcp_tools.contains("aura-io"));
+    }
+
     // ── `walkthrough` CLI self-check: the honesty falsifier behind the daily-wire ──
     #[test]
     fn walkthrough_region_has_content_rejects_empty_accepts_each_channel() {
@@ -21102,7 +17798,7 @@ mod tests {
         ] {
             let html = build_walkthrough_html(&doc, None, None);
             assert!(
-                !walkthrough_region_has_content(&html),
+                !cli::walkthrough_region_has_content(&html),
                 "empty/degenerate doc must be content-less: {doc}"
             );
         }
@@ -21117,160 +17813,10 @@ mod tests {
         for doc in cases {
             let html = build_walkthrough_html(&doc, None, None);
             assert!(
-                walkthrough_region_has_content(&html),
+                cli::walkthrough_region_has_content(&html),
                 "doc with real content must pass: {doc}"
             );
         }
-    }
-
-    // ── Phase 3 (C): summarize_snapshot_rows + human_bytes ──────────────
-
-    use ab_seed_bridge::{SnapshotRow, SnapshotTier};
-    use std::path::Path;
-
-    fn make_row(step: i64, ts: i64, tier: SnapshotTier) -> SnapshotRow {
-        SnapshotRow {
-            step,
-            cycle_ts: ts,
-            tier,
-            n_alive: 2,
-            in_strengths: vec![0.1, 0.2],
-            last_perceived_key: vec!["a".into(), "b".into()],
-            last_perceived_ts: vec![ts, ts],
-            trailing_surprise_mean_short: 0.5,
-            trailing_surprise_mean_long: 0.5,
-            connection_logits: if matches!(tier, SnapshotTier::Long) {
-                vec![0.0, 0.0]
-            } else {
-                Vec::new()
-            },
-        }
-    }
-
-    fn assert_snapshot_fingerprint_contract(fingerprint: &str) {
-        let is_sha256_hex = fingerprint.len() == 64
-            && fingerprint
-                .chars()
-                .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase());
-        let is_disabled_stub = fingerprint.starts_with("seed-substrate-disabled-");
-        assert!(
-            is_sha256_hex || is_disabled_stub,
-            "unexpected snapshot fingerprint shape: {fingerprint}"
-        );
-    }
-
-    #[test]
-    fn summarize_snapshot_rows_empty_returns_zero_counts() {
-        let p = Path::new("/tmp/none.parquet");
-        let sum = summarize_snapshot_rows(p, Some(0), &[]);
-        assert_eq!(sum.total_rows, 0);
-        assert_eq!(sum.hot_rows, 0);
-        assert_eq!(sum.long_rows, 0);
-        assert!(sum.latest_hot.is_none());
-        assert!(sum.latest_long.is_none());
-        assert_eq!(sum.path, "/tmp/none.parquet");
-    }
-
-    #[test]
-    fn summarize_snapshot_rows_mixed_counts_and_latest_per_tier() {
-        // 5 rows interleaved hot/long. Latest hot at step=80; latest long at step=100.
-        let p = Path::new("/tmp/x.parquet");
-        let rows = vec![
-            make_row(20, 1000, SnapshotTier::Hot),
-            make_row(40, 2000, SnapshotTier::Hot),
-            make_row(60, 3000, SnapshotTier::Hot),
-            make_row(80, 4000, SnapshotTier::Hot),
-            make_row(100, 5000, SnapshotTier::Long),
-        ];
-        let sum = summarize_snapshot_rows(p, Some(12345), &rows);
-        assert_eq!(sum.total_rows, 5);
-        assert_eq!(sum.hot_rows, 4);
-        assert_eq!(sum.long_rows, 1);
-        assert_eq!(sum.file_bytes, Some(12345));
-        let latest_hot = sum.latest_hot.expect("latest hot");
-        assert_eq!(latest_hot.step, 80);
-        assert_eq!(latest_hot.cycle_ts, 4000);
-        assert_snapshot_fingerprint_contract(&latest_hot.fingerprint);
-        let latest_long = sum.latest_long.expect("latest long");
-        assert_eq!(latest_long.step, 100);
-        assert_eq!(latest_long.cycle_ts, 5000);
-        assert_snapshot_fingerprint_contract(&latest_long.fingerprint);
-    }
-
-    #[test]
-    fn summarize_snapshot_rows_picks_last_per_tier_not_first() {
-        // Two Long rows; latest_long must be the later one (rev iteration).
-        let p = Path::new("/tmp/y.parquet");
-        let rows = vec![
-            make_row(100, 5000, SnapshotTier::Long),
-            make_row(200, 6000, SnapshotTier::Long),
-        ];
-        let sum = summarize_snapshot_rows(p, None, &rows);
-        assert_eq!(sum.long_rows, 2);
-        let latest = sum.latest_long.expect("latest");
-        assert_eq!(latest.step, 200);
-    }
-
-    #[test]
-    fn human_bytes_renders_units_correctly() {
-        assert_eq!(human_bytes(None), "(unknown)");
-        assert_eq!(human_bytes(Some(0)), "0 B");
-        assert_eq!(human_bytes(Some(512)), "512 B");
-        assert_eq!(human_bytes(Some(1024)), "1.0 KiB");
-        assert_eq!(human_bytes(Some(2048)), "2.0 KiB");
-        assert_eq!(human_bytes(Some(1024 * 1024)), "1.0 MiB");
-        assert_eq!(human_bytes(Some(3 * 1024 * 1024 * 1024)), "3.00 GiB");
-    }
-
-    // ── Phase 3 (B): parse_event_line unit tests ─────────────────────────
-
-    #[test]
-    fn parse_event_line_happy_path_returns_text() {
-        let got = parse_event_line(r#"{"text":"hello world"}"#);
-        assert_eq!(got, Some(("hello world".to_string(), None)));
-    }
-
-    #[test]
-    fn parse_event_line_with_ts_and_kind_ignores_extras() {
-        let got = parse_event_line(r#"{"text":"foo","ts":1700000000,"kind":"save"}"#);
-        assert_eq!(got, Some(("foo".to_string(), None)));
-    }
-
-    #[test]
-    fn parse_event_line_blank_returns_none() {
-        assert!(parse_event_line("").is_none());
-        assert!(parse_event_line("   \t  ").is_none());
-    }
-
-    #[test]
-    fn parse_event_line_malformed_returns_none() {
-        // Garbage JSON, missing text field, text=null, text="" all → None.
-        assert!(parse_event_line("not json").is_none());
-        assert!(parse_event_line(r#"{"ts":1}"#).is_none());
-        assert!(parse_event_line(r#"{"text":null}"#).is_none());
-        assert!(parse_event_line(r#"{"text":""}"#).is_none());
-        // text not a string
-        assert!(parse_event_line(r#"{"text":42}"#).is_none());
-    }
-
-    // P-γ: optional `key` field carries perception identifier.
-    #[test]
-    fn parse_event_line_with_key_returns_text_and_key() {
-        let got = parse_event_line(r#"{"text":"content body","key":"memory_key_42"}"#);
-        assert_eq!(
-            got,
-            Some((
-                "content body".to_string(),
-                Some("memory_key_42".to_string())
-            ))
-        );
-    }
-
-    #[test]
-    fn parse_event_line_empty_key_falls_back_to_none() {
-        // Empty key string is treated as absent so caller defaults to text.
-        let got = parse_event_line(r#"{"text":"hello","key":""}"#);
-        assert_eq!(got, Some(("hello".to_string(), None)));
     }
 
     #[test]
@@ -21312,7 +17858,7 @@ mod tests {
         // letter would give silently-broken read_blocks output (e.g. no
         // exit code if D is absent).
         for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
-            let s = shell_init_snippet(shell);
+            let s = cli::shell_init_snippet(shell);
             for letter in ["133;A", "133;B", "133;C", "133;D"] {
                 assert!(
                     s.contains(letter),
@@ -21328,7 +17874,7 @@ mod tests {
         // "where do I read more?" — make sure the doc path is right
         // there in the comment.
         for shell in [ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish] {
-            let s = shell_init_snippet(shell);
+            let s = cli::shell_init_snippet(shell);
             assert!(
                 s.contains("docs/SHELL-INTEGRATION-OSC133.md"),
                 "{shell:?} snippet missing doc reference"

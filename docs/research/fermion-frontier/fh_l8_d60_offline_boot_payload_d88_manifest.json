@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "manifest_id": "FH-L8-D60-OFFLINE-BOOT-PAYLOAD-D88-V1",
+  "kernel_release": "7.0.0-29-generic",
+  "packages": {
+    "linux-image-7.0.0-29-generic": "7.0.0-29.29",
+    "dracut": "110-11",
+    "grub-efi-amd64-bin": "2.14-2ubuntu1",
+    "grub-efi-amd64-signed": "1.215+2.14-2ubuntu1",
+    "shim-signed": "1.59+15.8-0ubuntu2",
+    "python3-minimal": "3.14.3-0ubuntu2"
+  },
+  "readable_artifacts": {
+    "/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed": "33e1d46cb68e41a293c767750078bbdb857ad7c1197a2206dea737bc9ccb8dbf",
+    "/usr/lib/shim/shimx64.efi.signed.latest": "4c89145e958cf592a6f16552eadf112ef2c1c525e2435c2761e6a99fa88188b3",
+    "/usr/bin/python3": "b8d8288faefdd300201f43fcf00f6f539a27218eeed3a3dff5ab10b9c4c99700"
+  },
+  "d82r_source_artifacts": {
+    "FH_L8_D60_ISOLATION_TRANSACTION_D82R_ZH.md": "12947a53f4c4c6649c5d3560770d1a0f50edd34626143190dd789e92bbfb1c2b",
+    "fh_l8_d60_isolation_receipt_capture_d82r.py": "264db5cd848233cc4bd8d727365963514b1fe35881b57662e763314e0c04caf9",
+    "fh_l8_d60_isolation_transaction_d82r.py": "c806273d889482d9408fb94a464ec653fdfaabbc42b9f14df98d2be7a229e835",
+    "fh_l8_d60_isolation_transaction_d82r_checker.py": "75718f4d188d8a375ec9cbcee25c520cecae0b13a8830b8ea736c8aa29bbb099",
+    "fh_l8_d60_isolation_transaction_d82r_contract.json": "1ebafbbb43795d6b4416dbe6d8add5366f73bd68cfe780f85b45d04e5e1a880c"
+  },
+  "protected_boot_artifacts": {
+    "/boot/vmlinuz-7.0.0-29-generic": {"bytes": 17295752, "mode": "0600", "sha256": null},
+    "/boot/initrd.img-7.0.0-29-generic": {"bytes": 40010273, "mode": "0600", "sha256": null}
+  },
+  "root_image_builder": {
+    "debootstrap_present": false,
+    "mmdebstrap_present": false,
+    "complete": false
+  }
+}

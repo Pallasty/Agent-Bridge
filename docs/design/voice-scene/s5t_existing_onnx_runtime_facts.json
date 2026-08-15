@@ -1,0 +1,7 @@
+{
+  "onnxruntime": true,
+  "numpy": true,
+  "transformers": false,
+  "soundfile": false,
+  "librosa": false
+}

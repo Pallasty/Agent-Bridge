@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_authorization_proposal_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "boundaries", "blockers", "implementation_present", "owner_signature_authorized", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_render_authorization_proposal_review.v1"},
+    "status": {"const": "story_render_authorization_proposal_reviewable"},
+    "decision": {"const": "unsigned_proposal_source_accepted_owner_signature_blocked"},
+    "evidence": {"type": "object"},
+    "boundaries": {"type": "object", "minProperties": 20, "additionalProperties": {"const": true}},
+    "blockers": {"const": ["owner_authorized_envelope_signature_not_granted", "executor_invocation_not_authorized"]},
+    "implementation_present": {"const": true},
+    "owner_signature_authorized": {"const": false},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 10, "additionalProperties": {"const": false}},
+    "review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"unsigned_owner_review_proposal_implemented": true, "exact_request_content_addressed": true, "real_authority_key_read": false, "real_owner_mac_generated": false, "executor_invoked": false}},
+    "next_gate": {"const": "owner_authorized_story_render_envelope_signing_preflight"}
+  },
+  "additionalProperties": false
+}

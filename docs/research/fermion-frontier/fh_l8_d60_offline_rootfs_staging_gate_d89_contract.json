@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-OFFLINE-ROOTFS-STAGING-GATE-D89-V1",
+  "baseline_commit": "f2fddfba785ccf17cc82bea1e28932c678e786a2",
+  "source_pins": {
+    "FH_L8_D60_PRIVILEGED_BOOT_PAYLOAD_GATE_D88R_ZH.md": "7d54087ca0f328cb327d5128c110c1ba696474265e478954bf91f9957f741f70",
+    "fh_l8_d60_privileged_boot_payload_gate_d88r_contract.json": "62b2776121c2f0da7547c54511d21192b7c27a3ca89203ce5e6923fa77c9a612",
+    "fh_l8_d60_privileged_boot_payload_gate_d88r_result.json": "64c04ed884c3e0f154005a68ce7565d51aa01ec1090e610419e2c95492f1eae6",
+    "fh_l8_d60_privileged_boot_payload_d88r_receipt.json": "1925a3b6a89cc0fd7aff901e22261a1beb1da18217a53832eca24fd271cae645"
+  },
+  "receipt": "fh_l8_d60_offline_rootfs_staging_d89_receipt.json",
+  "requirements": {
+    "maximum_compressed_bytes": 1000000000,
+    "minimum_archive_entries": 1000,
+    "minimum_required_packages": 10,
+    "expected_mmc_uuid": "17a6b72c-efcc-4445-b447-385e96a109a2"
+  },
+  "authority": {
+    "receipt_verification_only": true,
+    "payload_assembly_authorized": false,
+    "mmc_mount_authorized": false,
+    "mmc_write_authorized": false,
+    "bootloader_change_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

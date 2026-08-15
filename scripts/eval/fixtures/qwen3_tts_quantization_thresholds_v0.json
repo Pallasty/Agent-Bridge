@@ -1,0 +1,90 @@
+{
+  "schema": "agent_bridge.qwen3_tts.quantization_thresholds.v0",
+  "status": "PREREGISTERED_BEFORE_CANDIDATE",
+  "source_baseline": {
+    "corpus_sha256": "9193f6e5359fcf3ecd9c0a5a2726886908ffa3a266ab7597f283629e710a7afd",
+    "report_sha256": "b2f4fecf12d7257029cedf5ea92f04574a85fa1dcb6b53c7d77d23b9bb2529a1",
+    "engine": "qwen3-pytorch",
+    "device": "mps",
+    "dtype": "float16",
+    "cases": 16,
+    "observed_median_rtf": 1.5140196644444457
+  },
+  "source_stt_reference": {
+    "report_sha256": "e5e6868604ea3e31c4487247c513e6bab5bd873d89187fe63d8f9433f7672942",
+    "whisper_model": "base",
+    "cases": 16,
+    "mean_cer": 0.1001806554931555,
+    "median_cer": 0.0,
+    "max_cer": 0.5454545454545454,
+    "use": "paired_candidate_delta_only_not_absolute_quality_claim"
+  },
+  "source_speaker_expression_reference": {
+    "report_sha256": "c6d4de41ab5be0556f8ce8810ae2f5bb76539b5f5859eb590f7735f5f4f89e30",
+    "schema": "agent_bridge.qwen3_tts.speaker_expression_reference.v0",
+    "cases": 16,
+    "fp16_runs": 3,
+    "use": "paired_candidate_delta_only_not_named_voice_identity_or_absolute_expression_claim"
+  },
+  "blinded_review_protocol": {
+    "path": "scripts/eval/fixtures/qwen3_tts_blinded_review_protocol_v0.json",
+    "sha256": "3851aeb87cdb04a62b74b02eab6b2ea5cd7f6c823ff48cad41698fb8f89f034b",
+    "status": "PREREGISTERED_BEFORE_CANDIDATE"
+  },
+  "comparison_protocol": {
+    "required_repetitions_per_case": 3,
+    "seed_status": "unsupported_by_current_worker",
+    "pairing": "same_text_speaker_instruct_runtime_generation_config",
+    "aggregation": "per_case_median_then_corpus_distribution",
+    "candidate_must_remain_isolated_and_default_off": true
+  },
+  "hard_gates": {
+    "identity": {
+      "model_family_exact": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+      "protocol_exact": "ab.tts.worker.v1",
+      "required_capabilities": ["custom_voice", "instruct", "zh"],
+      "same_tokenizer_codec_hash": true
+    },
+    "artifact_integrity": {
+      "successful_cases_fraction_min": 1.0,
+      "wav_sample_rate_exact": 24000,
+      "wav_channels_exact": 1,
+      "wav_sample_width_bytes_exact": 2,
+      "truncated_cases_max": 0
+    },
+    "performance": {
+      "median_rtf_ratio_to_fp16_max": 1.25,
+      "p95_rtf_ratio_to_fp16_max": 1.35,
+      "minimum_artifact_size_reduction_fraction_or": 0.20,
+      "minimum_resident_memory_reduction_fraction_or": 0.15
+    },
+    "sequence_and_duration": {
+      "per_case_median_duration_relative_drift_max": 0.08,
+      "corpus_p95_duration_relative_drift_max": 0.12,
+      "speech_token_kl": "required_if_probe_exposes_logits_or_tokens",
+      "speech_token_topk_retention": "required_if_probe_exposes_logits_or_tokens"
+    },
+    "intelligibility": {
+      "stt_cer_absolute_delta_max": 0.02,
+      "per_case_stt_cer_delta_max": 0.08,
+      "status": "FP16_REFERENCE_CAPTURED"
+    },
+    "speaker_and_expression": {
+      "speaker_similarity_absolute_drop_max": 0.03,
+      "paired_emotion_adherence_mean_drop_max": 0.25,
+      "status": "FP16_REFERENCE_CAPTURED"
+    },
+    "human_exact_artifact": {
+      "paired_naturalness_mean_drop_max": 0.25,
+      "complete_intelligibility_fraction_min": 0.95,
+      "partial_or_truncated_cases_max": 0,
+      "status": "BLINDED_REVIEW_PROTOCOL_FROZEN"
+    }
+  },
+  "authorization": {
+    "allows_candidate_generation": false,
+    "allows_runtime_wiring": false,
+    "allows_fallback_or_promotion": false,
+    "next_gate": "complete_fp16_repetitions_stt_reference_metrics_and_activation_probe"
+  }
+}

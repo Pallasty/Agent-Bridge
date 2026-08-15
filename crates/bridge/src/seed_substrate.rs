@@ -15,7 +15,7 @@ mod disabled {
     pub const SUBSTRATE_ENV_VAR: &str = "AB_SUBSTRATE";
 
     const DISABLED: &str =
-        "seed substrate support is disabled at build time; rebuild with --features seed-substrate";
+        "legacy Seed substrate support is unavailable; seed-substrate is a reserved compatibility marker and does not enable runtime or snapshot I/O";
 
     pub fn current() -> Option<Arc<SeedBackend>> {
         None
@@ -201,8 +201,12 @@ mod disabled {
 
         #[derive(Debug, thiserror::Error)]
         pub enum SnapshotError {
-            #[error("seed substrate support is disabled at build time; rebuild with --features seed-substrate")]
+            #[error("legacy Seed substrate support is unavailable; seed-substrate is a reserved compatibility marker and does not enable runtime or snapshot I/O")]
             Disabled,
+        }
+
+        pub fn require_write_capability() -> Result<(), SnapshotError> {
+            Err(SnapshotError::Disabled)
         }
 
         pub fn default_snapshot_path() -> Option<PathBuf> {

@@ -355,6 +355,10 @@ impl AgentRuntime for AcpRuntime {
         "acp"
     }
 
+    fn workspace_contract(&self) -> crate::WorkspaceRuntimeContract {
+        crate::WorkspaceRuntimeContract::local_agent(true)
+    }
+
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         if cfg.node.is_some() || cfg.user.is_some() {
             return Err(Error::InvalidArgument(

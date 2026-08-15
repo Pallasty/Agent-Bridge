@@ -1,0 +1,15 @@
+{
+  "status": "VERIFIED_D91R_DIRECT_KERNEL_ONLY_ACCEPTED",
+  "direct_kernel_evidence_accepted": true,
+  "uefi_chain_open": true,
+  "physical_sd_boot_proven": false,
+  "physical_media_execution_ready": false,
+  "mmc_write_authorized": false,
+  "efi_variable_change_authorized": false,
+  "reboot_authorized": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "ACCEPTED_LIMITED_DIRECT_KERNEL_REHEARSAL_ONLY",
+  "next_gate": "OWNER_PROVIDE_DISPOSABLE_64GB_MEDIA_OR_SAFE_BACKUP_TARGET_AND_SD_BOOT_PROOF"
+}

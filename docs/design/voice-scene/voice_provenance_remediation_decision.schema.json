@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_provenance_remediation_decision.schema.json",
+  "title": "Agent-Bridge voice provenance remediation decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "official_model_id",
+    "status",
+    "selected_path",
+    "path_a",
+    "path_b",
+    "reference_generation_ready",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_provenance_remediation_decision.v1"
+    },
+    "official_model_id": {
+      "const": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    },
+    "status": {
+      "enum": [
+        "blocked",
+        "artifact_lineage_recovery_available",
+        "fixed_source_reexport_selected_authorization_required"
+      ]
+    },
+    "selected_path": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "A_recover_artifact_lineage",
+        "B_fixed_source_reexport"
+      ]
+    },
+    "path_a": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "path_b": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "reference_generation_ready": {"const": false},
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "downloaded_files",
+        "executed_converter",
+        "executed_onnx_graphs",
+        "replaced_current_snapshot",
+        "used_gpu",
+        "played_audio",
+        "wrote_global_memory",
+        "wrote_forum"
+      ],
+      "properties": {
+        "downloaded_files": {"const": false},
+        "executed_converter": {"const": false},
+        "executed_onnx_graphs": {"const": false},
+        "replaced_current_snapshot": {"const": false},
+        "used_gpu": {"const": false},
+        "played_audio": {"const": false},
+        "wrote_global_memory": {"const": false},
+        "wrote_forum": {"const": false}
+      }
+    }
+  }
+}

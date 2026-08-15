@@ -6,6 +6,8 @@
 //! - **Kokoro-82M** (StyleTTS2, Apache-2.0, 24 kHz) — `misaki-rs` g2p + `ort` ONNX.
 //! - **Piper** (VITS, 22.05 kHz) — the `piper_phonemize` CLI (espeak-ng, GPL-3.0)
 //!   + `ort` ONNX.
+//! - **Sherpa VITS** (offline Chinese multi-speaker) — `sherpa-onnx`'s Rust API
+//!   owns the model-specific Chinese frontend and ONNX execution.
 //!
 //! Design decisions (forum #92):
 //! - **Inference via `ort`** (ONNX Runtime) — the compute-dense forward pass is
@@ -157,6 +159,8 @@ pub trait TtsBackend: Send + Sync {
 pub mod kokoro;
 #[cfg(feature = "piper")]
 pub mod piper;
+#[cfg(feature = "sherpa")]
+pub mod sherpa;
 
 #[cfg(test)]
 mod tests {

@@ -3,7 +3,7 @@
 report_schema: agent_bridge.lswr.readonly_bridge_report.v0
 summary_schema: agent_bridge.lswr.readonly_bridge_consumer_summary.v0
 projection_schema: agent_bridge.lswr.readonly_bridge_snapshot.v0
-snapshot_sha256: sha256:5ff171f505327b9d93f01a1dfc44a6159a00f48e6085a5e7a63e5eded6629495
+snapshot_sha256: sha256:9ab9297aa85d3ac5e0db9e21d98f20e134a94991819d48ca1a1880a6d421137e
 readback_mode: counts_only
 read_only_confirmed: true
 

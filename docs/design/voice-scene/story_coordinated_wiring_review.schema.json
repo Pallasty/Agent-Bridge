@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_coordinated_wiring_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "evidence", "overlap", "blockers", "minimal_patch_contract", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_coordinated_wiring_review.v1"},
+    "status": {"const": "story_coordinated_wiring_review_complete"},
+    "decision": {
+      "const": {"selected": "defer_wiring_until_shared_surfaces_clean", "minimal_patch_contract_admitted": true, "wiring_implementation_admitted": false}
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["s5zq_adapter_verified", "registry_name_collision", "story_module_currently_exported", "adapter_module_currently_declared", "lib_sha256", "registry_sha256", "cargo_sha256", "adapter_sha256", "story_contract_sha256", "adapter_receipt_sha256", "active_cargo_processes_observed"],
+      "properties": {
+        "s5zq_adapter_verified": {"const": true},
+        "registry_name_collision": {"const": false},
+        "story_module_currently_exported": {"const": false},
+        "adapter_module_currently_declared": {"const": false},
+        "lib_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "registry_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cargo_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "story_contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "adapter_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "active_cargo_processes_observed": {"type": "integer", "minimum": 1}
+      }
+    },
+    "overlap": {"const": {"lib_worktree_overlap": true, "registry_worktree_overlap": true, "cargo_worktree_overlap": true}},
+    "blockers": {"const": ["lib_module_tree_overlap_active", "registry_worktree_overlap_active", "cargo_manifest_overlap_active", "shared_cargo_activity_active"]},
+    "minimal_patch_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module_tree_declaration", "registry_module_declaration", "registry_imports", "tool_name", "tier", "activation_env", "invalid_enabled_config", "disabled_config", "eager_profile_exposure", "cargo_manifest_change_required", "required_tests"],
+      "properties": {
+        "module_tree_declaration": {"const": "pub(crate) mod story_contract;"},
+        "registry_module_declaration": {"const": "mod story;"},
+        "registry_imports": {"const": ["StoryCommandPreflightTool", "StoryMcpConfig"]},
+        "tool_name": {"const": "story_command_preflight"},
+        "tier": {"const": "Niche"},
+        "activation_env": {"const": "AB_STORY_COMMAND_PREFLIGHT_ENABLE=1"},
+        "invalid_enabled_config": {"const": "warn_and_leave_tool_unregistered"},
+        "disabled_config": {"const": "leave_tool_unregistered_without_warning"},
+        "eager_profile_exposure": {"const": false},
+        "cargo_manifest_change_required": {"const": false},
+        "required_tests": {"type": "array", "minItems": 4, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 11, "additionalProperties": {"const": false}},
+    "next_gate": {"const": "clean_surface_story_wiring_readiness_recheck"}
+  }
+}

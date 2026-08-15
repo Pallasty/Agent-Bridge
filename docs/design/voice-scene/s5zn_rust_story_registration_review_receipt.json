@@ -1,0 +1,57 @@
+{
+  "schema": "agent_bridge.story_rust_registration_review.v1",
+  "status": "rust_story_registration_review_complete",
+  "decision": {
+    "selected": "harden_native_adapter_before_registration",
+    "registration_implementation_admitted": false,
+    "rejected_options": ["register_current_adapter_now", "reintroduce_python_adapter"]
+  },
+  "evidence": {
+    "s5zm_full_parity_verified": true,
+    "current_registry_collision": false,
+    "prior_registry_provenance_drift": true,
+    "story_module_exported": false,
+    "registry_source_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/mcp_tools.rs",
+    "registry_source_sha256": "fe791449f4de296377d393e3ca5b34ad8152af0f672eae5c32b09284bd0b5903",
+    "prior_registry_source_sha256": "119603b4c2fc90998ddded9a56841c5562e9504ca30efa8a45e6e3247e8676d7",
+    "lib_source_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/lib.rs",
+    "lib_source_sha256": "7fb33d55d9c91b74aec1dc288319f3ec2a3af95912764801df11ac22db6b0b81",
+    "story_module_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/story_contract.rs",
+    "story_module_sha256": "ea152f000691443df63405dd51597be8ca7d706707a90c774f9dd3e707ab086f",
+    "s5zm_receipt_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5zm_rust_story_preflight_adapter_receipt.json",
+    "s5zm_receipt_sha256": "e721e95dabf90c63814257f274e0f23c9254d42b1a9d7c51bc391d5fc3bdc136"
+  },
+  "hardening_probes": {
+    "bounded_source_admission": false,
+    "configured_evidence_bundle_resolver": false,
+    "async_cancellation_contract": false
+  },
+  "blockers": ["bounded_source_admission_missing", "configured_evidence_bundle_resolver_missing", "async_cancellation_contract_missing"],
+  "proposed_surface": {
+    "tool_name": "story_command_preflight",
+    "tier": "Niche",
+    "default_exposed": false,
+    "codex_essential_exposed": false,
+    "codex_voice_exposed": false,
+    "activation_env": "AB_STORY_COMMAND_PREFLIGHT_ENABLE",
+    "activation_env_required_value": "1"
+  },
+  "hardening_contract": {
+    "source_admission": "canonical allowed root plus fixed byte ceiling and strict UTF-8",
+    "evidence_resolution": "configured hash-bound accepted evidence bundle",
+    "cancellation": "async caller cancellation must stop owned blocking work",
+    "tool_failure": "return a structured tool error without panic"
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "modified_rust_registry": false,
+    "registered_story_command": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "rust_story_preflight_adapter_hardening"
+}

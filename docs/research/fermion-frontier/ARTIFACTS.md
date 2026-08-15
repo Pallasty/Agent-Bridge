@@ -2,6 +2,37 @@
 
 All copied JSON files are research-only outputs. They contain no credentials.
 
+## FH-L8 D60 GRUB UEFI rehearsal fix D91R
+
+- `FH_L8_D60_GRUB_UEFI_REHEARSAL_D91R_ZH.md`: five-attempt result and authority boundary.
+- `fh_l8_d60_run_grub_uefi_rehearsal_d91r.sh`: one-shot isolated virtual rehearsal.
+- `fh_l8_d60_grub_uefi_rehearsal_d91r_contract.json`, receipt, result and verifier bind the pass.
+- `test_fh_l8_d60_grub_uefi_rehearsal_d91r.py`: failure and authority regressions.
+
+## FH-L8 D60 maxcpus queue topology D85
+
+- `FH_L8_D60_MAXCPUS_QUEUE_TOPOLOGY_D85_ZH.md`: latest reboot evidence and gate.
+- `fh_l8_d60_maxcpus_queue_topology_d85_contract.json`: source-pinned queue/IRQ acceptance.
+- `fh_l8_d60_maxcpus_queue_topology_d85.py`: read-only verifier.
+- `fh_l8_d60_maxcpus_queue_topology_d85_result.json`: committed blocked result.
+- `test_fh_l8_d60_maxcpus_queue_topology_d85.py`: fail-closed regressions.
+
+## FH-L8 D60 managed-IRQ reboot outcome D84
+
+- `FH_L8_D60_MANAGED_IRQ_REBOOT_OUTCOME_D84_ZH.md`: reboot evidence and revised gate.
+- `fh_l8_d60_managed_irq_reboot_outcome_d84_contract.json`: source-pinned observed snapshot.
+- `fh_l8_d60_managed_irq_reboot_outcome_d84.py`: read-only fail-closed verifier.
+- `fh_l8_d60_managed_irq_reboot_outcome_d84_result.json`: committed NO-GO result.
+- `test_fh_l8_d60_managed_irq_reboot_outcome_d84.py`: acceptance and authority regressions.
+
+## FH-L8 D60 runtime-rule precommit D83
+
+- `FH_L8_D60_RUNTIME_RULE_PRECOMMIT_D83_ZH.md`: scope, blocker and authority boundary.
+- `fh_l8_d60_runtime_rule_precommit_d83_contract.json`: source-pinned frozen rule and fresh-input gate.
+- `fh_l8_d60_runtime_rule_precommit_d83.py`: read-only fail-closed verifier.
+- `fh_l8_d60_runtime_rule_precommit_d83_result.json`: committed blocked result.
+- `test_fh_l8_d60_runtime_rule_precommit_d83.py`: rule, mutation, scope and authority regressions.
+
 ## FH-L8 independent reference route S0
 
 - `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`: route decision and D1 boundary.
@@ -430,6 +461,45 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_production_io_page_cache_d59.py`, result and tests: fail-closed phase, two-generation,
   environment and authority checks.
 - `FH_L8_PRODUCTION_IO_PAGE_CACHE_D59_ZH.md`: Chinese NO-GO rationale and D60 handoff.
+
+## FH-L8 D60 premeasurement rule and D81 environment precommit
+
+- `fh_l8_runtime_rule_d60_contract.json`, checker, result and tests: freeze the five operation
+  populations, admissible static/measurement rule forms, environment obligations and forbidden
+  margin sources without timing execution.
+- `fh_l8_d60_environment_margin_precommit_d81_contract.json`, checker, result and tests: freeze the
+  capture-host identity and selected measurement-rule form while leaving exactly owner margin,
+  timeout and load isolation fail-closed.
+- `FH_L8_D60_ENVIRONMENT_MARGIN_PRECOMMIT_D81_ZH.md`: Chinese D81 scope, missing-input and authority
+  summary.
+
+## FH-L8 D82 owner policy and load-isolation gate
+
+- `fh_l8_d60_owner_policy_isolation_d82_contract.json`: owner-approved 99%/99% distribution-free
+  sample-maximum rule, exact 459-per-class/2,295-total population, no-scalar timeout semantics and
+  exact CPU15 cgroup-v2 isolated-partition receipt requirements.
+- `fh_l8_d60_owner_policy_isolation_d82.py` and result: validate the statistical arithmetic,
+  timeout nonclaims, upstream pins and eleven live isolation predicates. The current host remains
+  fail-closed because root cpuset propagation, exact service cgroup, exclusive CPU, affinity,
+  root-isolated membership and IRQ exclusion are absent.
+- `test_fh_l8_d60_owner_policy_isolation_d82.py`: owner-policy, scalar/posthoc rejection, admitted
+  synthetic receipt, SMT/IRQ drift and authority regressions.
+- `FH_L8_D60_OWNER_POLICY_ISOLATION_D82_ZH.md`: Chinese decision, live blocker and administrator
+  handoff summary.
+- D82 executes no host mutation or measurement. A fresh all-green D82 receipt is required before
+  D83 may seal the exact confirmatory measurement packet.
+
+## FH-L8 D82R reversible CPU15 isolation transaction
+
+- `fh_l8_d60_isolation_transaction_d82r_contract.json`: exact CPU15 parent/service cgroups,
+  five transaction modes, state-before-mutation and rollback safety rules.
+- `fh_l8_d60_isolation_transaction_d82r.py`: root-gated plan/apply/verify/run/rollback tool with
+  per-IRQ restoration records and automatic failure rollback.
+- `fh_l8_d60_isolation_receipt_capture_d82r.py`: exclusive fresh-receipt writer that only accepts an
+  all-green live D82 result from inside the exact service cgroup.
+- D82R result/checker and nine simulation tests prove the tool path while recording the live
+  credential blocker and zero host mutation.
+- `FH_L8_D60_ISOLATION_TRANSACTION_D82R_ZH.md`: Chinese operator sequence and rollback boundary.
 
 ## FH-L8 D64 owner-local capacity observation
 

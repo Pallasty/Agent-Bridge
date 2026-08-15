@@ -1,0 +1,69 @@
+{
+  "schema": "agent_bridge.story_command_static_registration_contract.v1",
+  "status": "story_command_static_registration_contract_reviewable",
+  "tool": {
+    "name": "story_command_preflight",
+    "description": "Validate a source-bound story chapter render preflight without registering playback, loading a model, rendering audio, or writing state.",
+    "proposed_tier": "Niche",
+    "proposed_toolset_extras": [],
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_path": {"type": "string", "minLength": 1, "pattern": "(?i)\\.(txt|md|markdown)$", "description": "UTF-8 TXT or Markdown novel path."},
+        "start": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "from_start"}}},
+            {"type": "object", "additionalProperties": false, "required": ["kind", "chapter"], "properties": {"kind": {"const": "chapter"}, "chapter": {"type": "integer", "minimum": 1}}}
+          ]
+        },
+        "dry_run": {"const": true}
+      },
+      "required": ["source_path", "start", "dry_run"]
+    },
+    "output_schema": "agent_bridge.story_command_integration_preflight.v1"
+  },
+  "activation": {
+    "compiled_registered": false,
+    "current_registry_collision": false,
+    "registry_source_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/mcp_tools.rs",
+    "registry_source_sha256": "119603b4c2fc90998ddded9a56841c5562e9504ca30efa8a45e6e3247e8676d7",
+    "default_exposed": false,
+    "codex_essential_exposed": false,
+    "codex_voice_exposed": false,
+    "activation_env": "AB_STORY_COMMAND_PREFLIGHT_ENABLE",
+    "activation_env_required_value": "1",
+    "activation_env_evaluated": false
+  },
+  "handler": {
+    "kind": "future_isolated_python_adapter",
+    "preflight_script_path": "/Data/CascadeProjects/agent-bridge/scripts/story_command_integration_preflight.py",
+    "preflight_script_sha256": "cda6bfbf9b1dae56e52e21fb63ee742fe590a4dd5380c3ef8ef2c5933debef78",
+    "preflight_schema_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/story_command_integration_preflight.schema.json",
+    "preflight_schema_sha256": "3cfa5305a3427985d4fc9ca3c8350f5013399759c7f58e32c7f3948457c31152",
+    "accepted_preflight_receipt_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5zf_story_command_integration_preflight_receipt.json",
+    "accepted_preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb",
+    "subprocess_allowed": false
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "modified_rust_registry": false,
+    "registered_story_command": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "contract_sha256": "a66876b79ff8675e4c0798670f8569cd31af78c14d7913d3d11c5513c448b12a",
+  "claims": {
+    "input_boundary_defined": true,
+    "implementation_and_schema_hash_bound": true,
+    "current_registry_collision_absent": true,
+    "default_hidden": true,
+    "static_registration_contract_ready": true,
+    "runtime_registration_ready": false
+  },
+  "next_gate": "isolated_story_preflight_adapter"
+}

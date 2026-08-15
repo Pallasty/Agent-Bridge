@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.story_render_one_shot_worker_protocol.v1",
+  "status": "story_render_one_shot_worker_protocol_reviewable",
+  "decision": "static_protocol_complete_implementation_and_runtime_blocked",
+  "evidence": {
+    "s619_runtime_admission": {"path": "docs/design/voice-scene/s619_story_render_runtime_admission_review.json", "sha256": "36f68a6887d2e8d6366640f1c36cec64cc47c1dcbabfe5b246d86e07a0fc3ac3", "selected_pattern": "one_shot_supervised_python_worker"},
+    "s602_fixed_preflight": {"path": "docs/design/voice-scene/s602_story_fixture_mcp_preflight_receipt.json", "sha256": "2584a0d3152a4d2a06a80e790dada67144b31ad95b4e2787c99f7c1579cf9a32", "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566", "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"},
+    "s604_fixture_execution_contract": {"path": "docs/design/voice-scene/s604_story_bounded_render_execution_contract.json", "sha256": "9d458de17f1c18da93c773452707b538879e4fd28892a85e12804752e91ba369", "contract_sha256": "24edc82e885c7f8e5a934019e78530f0d70a482e15ec04c52824395fef1e0fe8", "usage": "fixture_and_model_provenance_only", "legacy_fuse_output_root_admitted": false},
+    "s608_authority_contract": {"path": "docs/design/voice-scene/s608_story_executor_authority_model_nonce_contract.json", "sha256": "6c16e7aeed567d7d32a4b8183845acf0f929dee4afadc38adcd9e707db1dc05f", "contract_sha256": "228c5936521d2a07be2074a538acc654a306f80fff7264b47024490fbf3fbbfd", "domain_separator": "agent-bridge.story-render-authorization.v1"},
+    "s614_installed_custody": {"path": "docs/design/voice-scene/s614_story_render_secure_configuration_installation_result.json", "sha256": "c3e50d1b9bd716e3274c670f15a47622416fbe6b7b5391486f085acc85a9edb4", "status": "story_render_secure_configuration_installed", "active_key_id": "story-render-owner-v1", "key_material_disclosed": false}
+  },
+  "activation": {"tool_name": "story_command_render", "tier": "Niche", "toolset": "codex-voice", "default_exposed": false, "enable_env": "AB_STORY_COMMAND_RENDER_ENABLE", "enable_required_value": "1", "enabled_now": false},
+  "protocol": {"name": "agent_bridge.story-render-worker.v1", "encoding": "strict_utf8_json_object", "framing": "one_document_then_eof", "cardinality": "one_request_one_response", "stdin_max_bytes": 65536, "stdout_max_bytes": 65536, "stderr_max_bytes": 16384, "duplicate_object_keys_allowed": false, "nonfinite_numbers_allowed": false, "trailing_data_allowed": false},
+  "request": {
+    "exact_fields": ["protocol", "request_id", "fixture", "authorization"],
+    "protocol": "agent_bridge.story-render-worker.v1",
+    "request_id": "supervisor_generated_32_lowercase_hex",
+    "fixture": {"preflight": "fixed_s602_fixture_only", "chapter": 2, "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb", "execution_contract_sha256": "24edc82e885c7f8e5a934019e78530f0d70a482e15ec04c52824395fef1e0fe8"},
+    "authorization": {"shape": "s608_closed_hmac_sha256_envelope", "exact_fields": ["authorization_id", "contract_sha256", "preflight_sha256", "output_directory", "action", "issued_at", "expires_at", "single_use_nonce", "issuer", "subject", "key_id", "mac_sha256"], "action": "render", "maximum_ttl_seconds": 300, "contract_sha256_binding": "s620_protocol_contract_sha256", "preflight_sha256_binding": "fixed_s602_preflight_sha256", "output_directory_policy": "one_private_root_child_named_by_supervisor_render_id", "installed_key_read_by": "one_shot_worker_only", "key_material_enters_mcp_process": false, "nonce_consumed_before_output_creation": true, "persisted_or_logged_by_supervisor": false},
+    "caller_supplied_text_allowed": false,
+    "caller_supplied_paths_allowed": false
+  },
+  "host_admission": {"scope": "host_wide_across_mcp_processes", "mechanism": "nonblocking_exclusive_flock", "lock_path": "/home/pallasting/.agent-bridge-secure/story-render/render-worker.lock", "lock_mode": "0600", "max_active": 1, "when_busy": "reject_without_queue_or_spawn", "held_until": "worker_reaped_and_response_projected"},
+  "supervisor": {
+    "spawn": {"shell": false, "absolute_executable_and_script": true, "new_process_group": true, "worker_subprocess_spawn_allowed": false, "stdin": "pipe_write_once_then_close", "stdout": "bounded_pipe", "stderr": "bounded_redacted_pipe"},
+    "io_collection": "drain_stdout_and_stderr_concurrently",
+    "termination": {"deadline_seconds": 300, "on_mcp_cancel": "terminate_process_group_then_reap", "on_protocol_limit": "terminate_process_group_then_reap", "on_parent_death": "worker_receives_sigkill", "grace_seconds": 2, "escalation": "sigterm_then_sigkill", "wait_required_on_every_spawned_path": true}
+  },
+  "environment": {"inherit_parent_environment": false, "allowlist": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "CUDA_VISIBLE_DEVICES": "", "HIP_VISIBLE_DEVICES": "", "ROCR_VISIBLE_DEVICES": ""}, "network_allowed": false, "cache_writes_allowed": false, "gpu_allowed": false},
+  "output_custody": {"root": "/home/pallasting/.agent-bridge-secure/story-render/outputs", "root_mode": "0700", "job_directory_mode": "0700", "artifact_mode": "0600", "job_name_source": "supervisor_generated_render_id", "render_id_relation": "render_id_equals_request_id", "authorization_id_in_job_name": false, "existing_target_rejected": true, "symlinks_rejected": true, "absolute_paths_in_mcp_response": false},
+  "response": {
+    "success_exact_fields": ["protocol", "request_id", "status", "render_id", "segment_count", "assembly", "playback_authorized", "memory_authorized"],
+    "assembly_exact_fields": ["sha256", "sample_rate_hz", "channels", "frames", "duration_seconds"],
+    "error_exact_fields": ["protocol", "request_id", "status", "code", "retryable"],
+    "error_codes": ["invalid_request", "authority_rejected", "nonce_reused", "custody_rejected", "model_rejected", "render_failed", "internal_failure"],
+    "forbidden_fields": ["authorization_id", "mac_sha256", "single_use_nonce", "key_material", "output_directory", "absolute_path", "exception", "traceback"],
+    "mcp_projection_allowlist": ["status", "render_id", "segment_count", "assembly", "playback_authorized", "memory_authorized"],
+    "playback_authorized": false,
+    "memory_authorized": false
+  },
+  "lifecycle": ["activation_gate_checked", "fixed_fixture_call_validated", "host_lock_try_acquired", "render_identity_generated", "explicit_owner_grant_issued", "worker_request_validated", "one_shot_worker_spawned", "request_written_and_stdin_closed", "bounded_streams_drained", "worker_reaped", "response_schema_validated", "redacted_mcp_projection_emitted", "host_lock_released"],
+  "failure_policy": {"disabled": "reject_without_grant_lock_or_spawn", "busy": "reject_without_queue_spawn_or_nonce_consumption", "malformed_request": "reject_before_spawn", "owner_grant_declined": "release_lock_without_spawn", "spawn_failure": "discard_grant_reference_release_lock_and_require_new_grant", "worker_authority_rejection": "reap_and_return_redacted_error", "cancel_or_deadline": "terminate_group_reap_and_never_reuse_grant", "output_or_protocol_overflow": "terminate_group_reap_and_redact", "post_nonce_failure": "new_owner_grant_required_for_retry"},
+  "implementation_authorized": false,
+  "execution_authorized": false,
+  "deployment_authorized": false,
+  "runtime_effects": {"created_lock_file": false, "created_output_root": false, "issued_owner_grant": false, "read_authority_key": false, "consumed_nonce": false, "spawned_worker": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_cache": false, "wrote_memory": false, "modified_configuration": false, "deployed_binary": false},
+  "contract_sha256": "be4bfc12d9adeda14b8d20048b91baaaf903f155a3fca5bd3413b2b649f7334d",
+  "claims": {"s619_architecture_hash_bound": true, "fixed_fixture_only": true, "host_wide_single_job_admission_defined": true, "owned_worker_reaping_defined": true, "private_output_custody_defined": true, "redacted_projection_defined": true, "worker_implemented": false, "supervisor_implemented": false, "owner_grant_broker_implemented": false, "mcp_tool_registered": false, "runtime_enabled": false},
+  "implementation_blockers": ["owner_grant_broker_absent", "host_lock_and_supervisor_absent", "one_shot_worker_absent", "private_output_contract_not_implemented", "redacted_mcp_projection_absent", "story_command_render_not_registered"],
+  "next_gate": "story_render_one_shot_worker_protocol_implementation_review"
+}

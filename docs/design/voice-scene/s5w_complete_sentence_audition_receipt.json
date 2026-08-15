@@ -1,0 +1,57 @@
+{
+  "schema": "agent_bridge.voice_complete_sentence_audition_receipt.v1",
+  "status": "complete_sentence_owner_accepted",
+  "request": {
+    "text": "你好，我是小树。今天很高兴和你说话。",
+    "speaker": "Vivian",
+    "language": "Chinese",
+    "frame_cap": 100
+  },
+  "generation": {
+    "generated_codec_frames": 58,
+    "stopped_before_frame_cap": true,
+    "natural_eos_observed": true,
+    "tokenizer_fix_mistral_regex": true,
+    "local_files_only": true,
+    "provider_policy": "cpu_only_gpu_hidden"
+  },
+  "audio": {
+    "path": "/Data/Models/agent-bridge/evidence/voice-scene/s5w-complete-sentence-20260730/vivian-complete.wav",
+    "sha256": "4e318a11477d49c8b3a091637184098a6f13aee13e05c83b8826926febd35bec",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "frames": 111360,
+    "duration_seconds": 4.64,
+    "rms": 0.10663723200559616,
+    "peak": 0.597900390625
+  },
+  "asr": {
+    "engine": "sherpa-onnx-sense-voice-int8-2024-07-17",
+    "transcript": "你好，我是小树，今天很高兴和你说话。",
+    "language": "zh",
+    "emotion": "happy",
+    "real_time_factor": 0.075,
+    "full_requested_text_recovered": true
+  },
+  "playback": {
+    "authorized": true,
+    "backend": "pw-play",
+    "completed": true
+  },
+  "owner_feedback": {
+    "complete": true,
+    "clear": true,
+    "natural": true,
+    "verbatim_zh": "完整！清晰，自然"
+  },
+  "claims": {
+    "natural_eos_verified": true,
+    "full_sentence_asr_verified": true,
+    "playback_completed": true,
+    "owner_acceptance_recorded": true,
+    "story_renderer_integrated": false,
+    "mi50_verified": false,
+    "production_admitted": false
+  },
+  "next_gate": "story_voice_mapping_contract"
+}

@@ -1,0 +1,135 @@
+{
+  "schema": "agent_bridge.agent_authority_receipt_durable_replay_s5_fixture.v0",
+  "source": {
+    "latest_master_commit": "0b95c231b4ac61743c297b45b0abf81690bd3fd6",
+    "s4_result_commit": "17d106f21d4540b81c609eaaf8fca7ce9462faf6",
+    "s5_lineage_merge_commit": "5335bab516dccd6706094ecd96544e2c19463b4d",
+    "s7_implementation_commit": "21d16c64c00ca1ba66b6833cc018e2796e76b5ef",
+    "s3_verifier_sha256": "b845f23afddb48e0b5a60f90fc6317e79f0e8495914e4634281a315c3e1d0d19",
+    "s3_trust_registry_sha256": "1e26edf7a5c71ac972d5c1c7e2496d8c1baa772d9571db995cfac04fe6c3d573",
+    "s3_signed_receipts_sha256": "1a15620e6dc16166d71b4458d5207eacf30579b8f631c48f85ac62fba2456d8d",
+    "s4_replay_schedules_sha256": "dd24e1a8678205ce4f7ae6bae940eeb1e75136f7614b425b7989abe4e0d908d3",
+    "s7_registry_source_sha256": "10f3d1041e594f46b00ebf3db9800c6eb5adc44330978d11e4814ec5cf0c711d",
+    "s7_design_sha256": "9744bebb4bffec6c0816f5d6c264a71395354b964839e0401d0246cf4035ad53"
+  },
+  "contract": {
+    "transaction_identity_domain": "agent_bridge.agent_authority.s5.receipt_transaction_identity.v0",
+    "scope_commitment_domain": "agent_bridge.agent_authority.s5.signed_scope_commitment.v0",
+    "framing": "u64be_length_prefixed_domain_then_ordered_utf8_parts",
+    "payload_commitment": "sha256_of_exact_s3_canonical_claims_bytes",
+    "consume_time_unix": 1784259000,
+    "eligible_s3_case_ids": [
+      "verified_primary_control",
+      "verified_secondary_control"
+    ],
+    "s3_case_count": 27,
+    "s3_verified_case_count": 4,
+    "s4_referenced_verified_case_count": 2,
+    "composition_eligible_case_count": 2,
+    "s4_reviewable_step_count": 7,
+    "s4_end_to_end_identity_match_count": 0,
+    "s4_end_to_end_identity_mismatch_count": 7,
+    "s3_expected_labels_are_authority": false,
+    "caller_supplied_transaction_identity_accepted": false,
+    "caller_supplied_receipt_identity_accepted": false,
+    "caller_supplied_nonce_accepted": false,
+    "test_only": true,
+    "default_off": true,
+    "temporary_store_only": true,
+    "live_state_db_allowed": false,
+    "runtime_consumer_enabled": false,
+    "production_authority_granted": false
+  },
+  "scope_field_order": [
+    "claims_schema",
+    "envelope_version",
+    "issuer_id",
+    "principal_id",
+    "action_class",
+    "target_digest",
+    "scope_digest",
+    "decision_source_digest",
+    "session_epoch_digest",
+    "resume_parent_digest",
+    "adapter_id",
+    "adapter_build_digest",
+    "adapter_capabilities_digest",
+    "evidence_digest",
+    "verifier_id",
+    "policy_version",
+    "key_id",
+    "algorithm"
+  ],
+  "cases": [
+    {
+      "case_id": "verified_primary_control",
+      "receipt_id": "receipt:verified-primary",
+      "nonce": "nonce:verified-primary",
+      "consumed_at_unix": 1784259000,
+      "expires_at_unix": 1784262600,
+      "transaction_identity_sha256": "af2958488e09ae49c84e86f36682537547bdbab7677204a81be183a92ddb2233",
+      "scope_commitment_sha256": "d12591e0f0a6116474d2a4c3e80bc7dbd3deb3e9a67b932d901c6daee0dfb7a8",
+      "payload_sha256": "c0fa51ffc4c3a594cd7c8881d1a5bd34f9047e465cf86194f6eafd3e48234e81"
+    },
+    {
+      "case_id": "verified_secondary_control",
+      "receipt_id": "receipt:verified-secondary",
+      "nonce": "nonce:verified-secondary",
+      "consumed_at_unix": 1784259000,
+      "expires_at_unix": 1784262600,
+      "transaction_identity_sha256": "a9847db819df31ecb6ad9d9acec4cfe4a5e826c46484097ec43fe8423fe45ea7",
+      "scope_commitment_sha256": "d12591e0f0a6116474d2a4c3e80bc7dbd3deb3e9a67b932d901c6daee0dfb7a8",
+      "payload_sha256": "6d2475a244cb378a397da03c97d9ae47deb7646a0564554b048a4b8c61a96850"
+    }
+  ],
+  "fault_expectations": [
+    {
+      "id": "first_exact_consume",
+      "expected": "durable_success"
+    },
+    {
+      "id": "restart_exact_replay",
+      "expected": "replay_rejected"
+    },
+    {
+      "id": "post_commit_result_loss",
+      "expected": "indeterminate_then_replay_rejected"
+    },
+    {
+      "id": "sigkill_before_commit",
+      "expected": "rollback_then_clean_first_accept"
+    },
+    {
+      "id": "sigkill_after_commit",
+      "expected": "durable_replay_rejected"
+    },
+    {
+      "id": "signed_scope_substitution",
+      "expected": "scope_collision_rejected"
+    },
+    {
+      "id": "canonical_payload_substitution",
+      "expected": "scope_collision_rejected"
+    },
+    {
+      "id": "non_verified_or_non_allowlisted_s3_case",
+      "expected": "rejected_before_registry_open"
+    }
+  ],
+  "authority": {
+    "may_dispatch": false,
+    "may_run_shadow": false,
+    "may_enable_runtime": false,
+    "may_run_executor": false,
+    "may_write_memory": false,
+    "may_write_graph": false,
+    "may_change_retrieval": false,
+    "may_change_session": false,
+    "may_open_live_state_db": false,
+    "may_create_production_replay_registry": false,
+    "production_trust_root_proven": false,
+    "production_atomicity_proven": false,
+    "production_crash_durability_proven": false,
+    "production_authority_granted": false
+  }
+}

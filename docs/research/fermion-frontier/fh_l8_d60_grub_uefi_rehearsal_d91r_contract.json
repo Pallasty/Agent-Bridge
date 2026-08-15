@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-GRUB-UEFI-REHEARSAL-D91R-V1",
+  "baseline_commit": "d6c67c945acdc4b17251d7b134be869a3bc9a5e5",
+  "source_pins": {
+    "FH_L8_D60_OFFLINE_BOOT_REHEARSAL_GATE_D91_ZH.md": "982c9753d298741168cb8b206819fcc2e3a6090d5780d8610aca2de6e3aa0061",
+    "fh_l8_d60_offline_boot_rehearsal_gate_d91_contract.json": "4b0120e328c2d495feb2f0093b19d41d826789856662df4993736e5b83fa0e41",
+    "fh_l8_d60_offline_boot_rehearsal_gate_d91_result.json": "a2702efe84ed950f61d1915943733d24e17e262f984f18f3acec9cd58519b2c1",
+    "fh_l8_d60_offline_boot_rehearsal_d91_receipt.json": "0e2e969cfb71b8f0c93662603de4dc7a4941059cbbd0aa282f36f45a61939c2c"
+  },
+  "receipt": "fh_l8_d60_grub_uefi_rehearsal_d91r_receipt.json",
+  "requirements": {
+    "standalone_efi_uses_embedded_memdisk_kernel": true,
+    "uefi_grub_kernel_chain_required": true,
+    "rootfs_switch_required": true,
+    "systemd_basic_target_required": true,
+    "grub_prompt_forbidden": true,
+    "kernel_panic_forbidden": true,
+    "multi_user_target_required": false,
+    "mmc_must_remain_untouched": true,
+    "host_must_not_reboot": true
+  },
+  "authority": {
+    "receipt_verification_only": true,
+    "mmc_mount_authorized": false,
+    "mmc_write_authorized": false,
+    "bootloader_change_authorized": false,
+    "host_reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

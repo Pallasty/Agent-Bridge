@@ -1,0 +1,53 @@
+{
+  "schema": "agent_bridge.voice_provenance_remediation_decision.v1",
+  "official_model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "reference_generation_ready": false,
+  "runtime_effects": {
+    "downloaded_files": false,
+    "executed_converter": false,
+    "executed_onnx_graphs": false,
+    "replaced_current_snapshot": false,
+    "used_gpu": false,
+    "played_audio": false,
+    "wrote_global_memory": false,
+    "wrote_forum": false
+  },
+  "status": "fixed_source_reexport_selected_authorization_required",
+  "selected_path": "B_fixed_source_reexport",
+  "path_a": {
+    "name": "recover_artifact_lineage",
+    "status": "published_evidence_insufficient",
+    "onnx_repository": "onnx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "onnx_upload_commit": "0ac9e3de55c326eec31a3cdf3b2dcd98cc86ff82",
+    "declared_base_model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "declared_base_model_revision": null,
+    "artifact_bound_attestation": false,
+    "can_close_lineage": false
+  },
+  "path_b": {
+    "name": "fixed_source_reexport",
+    "status": "selected_not_started",
+    "official_model_commit": "6c3e96b6a2c593ce3e546ee699a5d944de81850e",
+    "minimum_weight_payload": {
+      "model_safetensors_bytes": 3833402552,
+      "speech_tokenizer_weights_bytes": 682293092,
+      "total_bytes": 4515695644
+    },
+    "stages": [
+      "B0_acquire_and_hash_fixed_revision_small_files",
+      "B1_authorize_and_acquire_fixed_revision_weights",
+      "B2_audit_and_pin_isolated_export_toolchain",
+      "B3_export_cpu_fp32_reference_lane",
+      "B4_verify_component_and_full_greedy_parity_then_quantization",
+      "B5_separately_authorize_snapshot_adoption"
+    ],
+    "owner_authorization_required_before_weights": true
+  },
+  "blockers": [
+    "converter_artifact_bound_attestation_missing",
+    "fixed_revision_small_files_not_locally_acquired",
+    "fixed_revision_weights_not_authorized",
+    "fixed_source_reexport_not_executed",
+    "parity_not_reverified"
+  ]
+}

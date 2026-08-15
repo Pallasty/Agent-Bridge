@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_bounded_render_execution_result.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "authorization", "model", "execution", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_bounded_render_execution_result.v1"},
+    "status": {"const": "story_bounded_render_execution_verified"},
+    "decision": {"const": "bounded_render_completed_playback_and_memory_blocked"},
+    "authorization": {
+      "type": "object",
+      "required": ["owner_authorized", "key_id", "ttl_seconds", "issued_at", "expires_at", "signed_fields_sha256", "envelope_sha256", "request_sha256", "successful_envelope_real_key_load_count", "total_real_key_load_count", "real_mac_generated_count", "envelope_attempts", "pre_nonce_rejections", "post_nonce_failures", "loaded_key_buffers_cleared", "key_material_disclosed", "mac_disclosed", "nonce_disclosed", "authorization_id_disclosed", "envelope_persisted", "grant_references_discarded_after_execution"],
+      "properties": {
+        "owner_authorized": {"const": true},
+        "key_id": {"const": "story-render-owner-v1"},
+        "ttl_seconds": {"const": 300},
+        "issued_at": {"type": "string", "minLength": 1},
+        "expires_at": {"type": "string", "minLength": 1},
+        "signed_fields_sha256": {"$ref": "#/$defs/sha256"},
+        "envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "request_sha256": {"$ref": "#/$defs/sha256"},
+        "successful_envelope_real_key_load_count": {"const": 1},
+        "total_real_key_load_count": {"const": 3},
+        "real_mac_generated_count": {"const": 3},
+        "envelope_attempts": {"const": 3},
+        "pre_nonce_rejections": {"const": 1},
+        "post_nonce_failures": {"const": 1},
+        "loaded_key_buffers_cleared": {"const": true},
+        "key_material_disclosed": {"const": false},
+        "mac_disclosed": {"const": false},
+        "nonce_disclosed": {"const": false},
+        "authorization_id_disclosed": {"const": false},
+        "envelope_persisted": {"const": false},
+        "grant_references_discarded_after_execution": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "model": {
+      "const": {
+        "name": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "variant": "community_cpu_int4_onnx",
+        "execution_provider": "CPUExecutionProvider",
+        "offline": true
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["s613_entrypoint", "executor_entrypoint", "output_root_created_for_execution", "output_directory", "output_filesystem", "output_directory_mode_observed", "output_permission_semantics", "render_receipt_path", "render_receipt_sha256", "nonce_store_path", "nonce_store_mode", "nonce_rows_after_execution", "consumed_nonce_attempts", "failed_post_nonce_attempts", "failed_attempt_cleanup_verified", "successful_attempts", "segment_count", "segment_audio_sha256", "all_segments_natural_eos", "assembly", "playback_authorized", "memory_authorized"],
+      "properties": {
+        "s613_entrypoint": {"const": "prepare_installed_secure_bounded_render"},
+        "executor_entrypoint": {"const": "execute_bounded_render"},
+        "output_root_created_for_execution": {"const": true},
+        "output_directory": {"const": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s617-bounded-render"},
+        "output_filesystem": {"const": "fuseblk"},
+        "output_directory_mode_observed": {"const": "0777"},
+        "output_permission_semantics": {"const": "mount_reports_fixed_permissions_posix_privacy_not_claimed"},
+        "render_receipt_path": {"const": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s617-bounded-render/render-receipt.json"},
+        "render_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "nonce_store_path": {"const": "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3"},
+        "nonce_store_mode": {"const": "0600"},
+        "nonce_rows_after_execution": {"const": 2},
+        "consumed_nonce_attempts": {"const": 2},
+        "failed_post_nonce_attempts": {"const": 1},
+        "failed_attempt_cleanup_verified": {"const": true},
+        "successful_attempts": {"const": 1},
+        "segment_count": {"const": 3},
+        "segment_audio_sha256": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/sha256"}
+        },
+        "all_segments_natural_eos": {"const": true},
+        "assembly": {
+          "type": "object",
+          "required": ["audio_sha256", "duration_seconds", "sample_rate_hz", "channels", "sample_width_bytes", "non_silent", "gap_seconds"],
+          "properties": {
+            "audio_sha256": {"$ref": "#/$defs/sha256"},
+            "duration_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 30},
+            "sample_rate_hz": {"const": 24000},
+            "channels": {"const": 1},
+            "sample_width_bytes": {"const": 2},
+            "non_silent": {"const": true},
+            "gap_seconds": {"const": [1.0, 1.0]}
+          },
+          "additionalProperties": false
+        },
+        "playback_authorized": {"const": false},
+        "memory_authorized": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "runtime_effects": {
+      "const": {
+        "read_real_key": true,
+        "generated_real_mac": true,
+        "created_output_root": true,
+        "created_nonce_store": true,
+        "consumed_nonce": true,
+        "imported_executor": true,
+        "called_executor": true,
+        "loaded_model": true,
+        "executed_onnx": true,
+        "rendered_audio": true,
+        "played_audio": false,
+        "recorded_audio": false,
+        "wrote_cache": false,
+        "wrote_memory": false
+      }
+    },
+    "next_gate": {"const": "separate_playback_authorization_or_render_review"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

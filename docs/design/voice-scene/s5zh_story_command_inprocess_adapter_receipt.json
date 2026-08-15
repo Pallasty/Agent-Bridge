@@ -1,0 +1,115 @@
+{
+  "schema": "agent_bridge.story_command_inprocess_adapter.v1",
+  "status": "python_inprocess_adapter_verified",
+  "request": {
+    "source_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures/story_s1.md",
+    "start": {"kind": "chapter", "chapter": 2},
+    "dry_run": true
+  },
+  "registration_contract_sha256": "a66876b79ff8675e4c0798670f8569cd31af78c14d7913d3d11c5513c448b12a",
+  "adapter": {
+    "script_path": "/Data/CascadeProjects/agent-bridge/scripts/story_command_inprocess_adapter.py",
+    "script_sha256": "a822ef513f3cf2ef2b4cb590312ede57e66bbefe20ba9ca58f7ec0b1d2320bf6",
+    "adapter": "python_direct_function_call",
+    "same_process": true,
+    "used_shell": false,
+    "spawned_subprocess": false,
+    "registered_mcp_tool": false
+  },
+  "preflight": {
+    "schema": "agent_bridge.story_command_integration_preflight.v1",
+    "status": "story_command_integration_preflight_reviewable",
+    "command": {
+      "raw": "/story /Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures/story_s1.md chapter 2",
+      "source_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures/story_s1.md",
+      "start": {"kind": "chapter", "chapter": 2},
+      "chapter_number": 2,
+      "dry_run": true
+    },
+    "provenance": {
+      "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566",
+      "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
+      "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+      "model_inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+      "continuity_receipt_status": "owner_accepted"
+    },
+    "selection": {
+      "selected_segments": 3,
+      "excluded_earlier_segments": 4,
+      "excluded_later_segments": 0,
+      "assembly_gap_seconds": [1.0, 1.0],
+      "preceding_scene_gap_seconds": 2.2
+    },
+    "render_requests": [
+      {
+        "segment_index": 0,
+        "event_id": "event_75676e738dacbfa37b90.narration",
+        "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+        "text": "苏岚回答。",
+        "qwen_speaker": "Vivian",
+        "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+        "language": "Chinese",
+        "frame_cap": 100,
+        "voice_profile_version": 2,
+        "cache_key": "cf77113811bd2477b2f848a7c78cf5d641e1e8c1834b6132b9f565f112700a2a"
+      },
+      {
+        "segment_index": 1,
+        "event_id": "event_75676e738dacbfa37b90.dialogue",
+        "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+        "text": "我听见钟声了。",
+        "qwen_speaker": "Serena",
+        "style_instruction": "温暖而警觉，语速自然，避免过度戏剧化。",
+        "language": "Chinese",
+        "frame_cap": 100,
+        "voice_profile_version": 2,
+        "cache_key": "cfdca9f57fb8a22979d40ca50e8391cadd69cca0074844ad22c522942e2d7ca0"
+      },
+      {
+        "segment_index": 2,
+        "event_id": "event_ef9cc37b3f50ca6583d7",
+        "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+        "text": "苏岚打开了旧木门。",
+        "qwen_speaker": "Vivian",
+        "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。",
+        "language": "Chinese",
+        "frame_cap": 100,
+        "voice_profile_version": 2,
+        "cache_key": "8bc3f607cd52a34760241771a5e8142a2799f1a59cdc6074f7cd3b30629be1d9"
+      }
+    ],
+    "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb",
+    "execution_authorized": false,
+    "runtime_effects": {
+      "registered_story_command": false,
+      "loaded_model": false,
+      "executed_onnx": false,
+      "rendered_audio": false,
+      "played_audio": false,
+      "wrote_memory": false,
+      "wrote_cache": false
+    },
+    "next_gate": "story_command_static_registration_contract"
+  },
+  "adapter_receipt_sha256": "62f3335d3787b4c4bac1146bf2c18f4601c7d8486bb80f8f3580599aa8fac629",
+  "runtime_effects": {
+    "modified_rust_registry": false,
+    "registered_story_command": false,
+    "spawned_subprocess": false,
+    "used_shell": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "claims": {
+    "python_same_process_direct_call": true,
+    "shell_or_subprocess_required": false,
+    "rust_inprocess_adapter_proven": false,
+    "mcp_tool_registered": false,
+    "production_story_command_ready": false
+  },
+  "next_gate": "rust_inprocess_story_preflight_design"
+}

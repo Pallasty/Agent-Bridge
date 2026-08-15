@@ -1,0 +1,74 @@
+{
+  "schema": "agent_bridge.story_render_artifact_identity_and_python_package.v1",
+  "status": "source_and_isolated_package_tests_accepted_runtime_closed",
+  "baseline": {
+    "commit": "d9d4d92ddb8fe740936482c932eadeb813a165dd",
+    "s637_receipt": {
+      "path": "docs/design/voice-scene/s637_story_render_real_worker_adapter_implementation.json",
+      "sha256": "7a532f03ac9901daab565524e3e12ee58676e861b2bc97a7f36b4bbdbf1b06cb"
+    }
+  },
+  "source_evidence": [
+    {
+      "path": "scripts/story_render_artifact_package.py",
+      "sha256": "f8a967cbb5786cba6931a639ee60b353f19b7c49700dba03ac554dc3a946f3dc"
+    },
+    {
+      "path": "tests/test_story_render_artifact_package.py",
+      "sha256": "3e3b0d5bcc4d3b3a728b6c9b5bd3af1f350a49fac587576428bbd72710fae87e"
+    }
+  ],
+  "package_contract": {
+    "fixed_allowlist": true,
+    "guardian_source_identity_bound": true,
+    "worker_transitive_source_identity_bound": true,
+    "python_executable_copied_and_hash_bound": true,
+    "manifest_canonical_package_id": true,
+    "owner_uid_required": true,
+    "package_root_mode": "0500",
+    "regular_file_modes": ["0400", "0500"],
+    "single_link_regular_files_required": true,
+    "nofollow_stable_reads": true,
+    "descriptor_stable_python_and_worker_launch": true,
+    "unmanifested_files_rejected": true,
+    "network_resolution": false,
+    "control_plane_dependency_closure": "cpython_standard_library_only",
+    "inference_dependency_closure": "blocked_missing_offline_wheelhouse",
+    "isolated_real_worker_result": "custody_rejected"
+  },
+  "blockers": {
+    "B1_REAL_WORKER_ENTRYPOINT": "closed",
+    "B2_GUARDIAN_PRODUCT_ENTRYPOINT": "open",
+    "B3_EXECUTABLE_IDENTITY_TOCTOU": "closed_for_isolated_package_descriptor_launch",
+    "B4_IMMUTABLE_PACKAGE_AND_PYTHON": "control_package_closed_inference_dependency_closure_open",
+    "B5_SECURE_OUTPUT_ROOT": "open",
+    "B6_OWNER_AUTHORIZATION_BROKER": "open",
+    "B7_RENDER_MCP_SURFACE": "open",
+    "B8_DEPLOYED_BINARY_AND_INSTALL_TRUST": "open"
+  },
+  "authority": {
+    "installed_key_read": false,
+    "model_load": false,
+    "render_output": false,
+    "mcp_registration": false,
+    "runtime_enablement": false,
+    "deployment": false,
+    "playback": false
+  },
+  "claims": {
+    "source_identity_manifest_implemented": true,
+    "isolated_owner_custody_verified": true,
+    "descriptor_stable_control_launch_verified": true,
+    "real_inference_python_ready": false,
+    "real_render_executable": false,
+    "runtime_adoption_ready": false
+  },
+  "next_gate": {
+    "id": "S639",
+    "name": "story_render_guardian_product_entrypoint",
+    "authority": "source_only_synthetic_process_tests",
+    "runtime_enablement": "not_authorized",
+    "parallel_blocker": "offline_inference_wheelhouse_remains_required_before_any_real_render"
+  },
+  "receipt_sha256": "bbe8bc3b706621f6bbf91ea17d0611b881740a8e1ab4dd46270eb84f72631d83"
+}

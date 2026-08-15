@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-MMC-EXECUTION-PREFLIGHT-D87R-V1",
+  "baseline_commit": "acb729396975331501e9efdd2f5b85542342f002",
+  "source_pins": {
+    "FH_L8_D60_MINIMAL_MMC_BOOT_PLAN_D87_ZH.md": "b9e1d5cbaaf1bbb4903eb8354c501afd59416e762f6bb972d19b315d147a0934",
+    "fh_l8_d60_minimal_mmc_boot_plan_d87_contract.json": "b1a4b800a1d8ed14116e8f36ff19964fec034bc2a452520dbbbfd61521881b72",
+    "fh_l8_d60_minimal_mmc_boot_plan_d87_result.json": "2d22fb6834d4505293bb6fb78ff00b905d2f715158eee401b5d63912bd94eb22"
+  },
+  "target_identity": {
+    "kernel_device": "/dev/mmcblk0",
+    "stable_device": "/dev/disk/by-id/mmc-SL64G_0x6ae35823",
+    "serial": "0x6ae35823",
+    "name": "SL64G",
+    "transport": "mmc",
+    "type": "SD",
+    "bytes": 63864569856,
+    "partition_table": "dos",
+    "existing_partition": "/dev/mmcblk0p1",
+    "existing_fstype": "f2fs",
+    "existing_uuid": "17a6b72c-efcc-4445-b447-385e96a109a2"
+  },
+  "safety_policy": {
+    "minimum_backup_target_free_after_image_bytes": 20000000000,
+    "backup_required_bytes": 83864569856,
+    "require_full_device_image": true,
+    "require_sha256_digest": true,
+    "require_restore_sample": true,
+    "require_stable_identity_double_check": true
+  },
+  "observed_snapshot": {
+    "candidate_unmounted": true,
+    "candidate_read_only": false,
+    "stable_identity_matches": true,
+    "backup_targets": {
+      "/": {"source": "/dev/nvme0n1p3", "available_bytes": 74859655168},
+      "/Data": {"source": "/dev/nvme0n1p7", "available_bytes": 30753005568},
+      "/home": {"source": "/dev/nvme0n1p5", "available_bytes": 2125541376}
+    },
+    "uefi_booted": true,
+    "current_boot_entry": "0002",
+    "fallback_boot_entry": "0002 Ubuntu on nvme0n1p1",
+    "fallback_boot_entry_present": true,
+    "firmware_sd_bootability_proven": false,
+    "existing_mmc_data_disposable": false,
+    "boot_payload_manifest_complete": false,
+    "backup_image_present": false,
+    "backup_image_sha256_present": false,
+    "backup_restore_sample_passed": false
+  },
+  "authority": {
+    "preflight_observation_only": true,
+    "backup_write_authorized": false,
+    "partition_authorized": false,
+    "format_authorized": false,
+    "payload_install_authorized": false,
+    "bootloader_change_authorized": false,
+    "firmware_change_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

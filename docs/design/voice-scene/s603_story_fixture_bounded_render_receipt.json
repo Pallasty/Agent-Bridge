@@ -1,0 +1,19 @@
+{
+  "schema": "agent_bridge.story_fixture_bounded_render.v1",
+  "status": "story_fixture_bounded_render_owner_accepted",
+  "authorization": {"render": true, "play_once": true, "record": false, "write_memory": false},
+  "preflight": {"receipt": "docs/design/voice-scene/s602_story_fixture_mcp_preflight_receipt.json", "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb", "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566", "chapter": 2, "selected_segments": 3},
+  "model": {"name": "Qwen3-TTS-12Hz-1.7B-CustomVoice", "variant": "community_cpu_int4_onnx", "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75", "provider_policy": "cpu_only_gpu_hidden", "offline": true},
+  "segments": [
+    {"index": 0, "text": "苏岚回答。", "speaker": "Vivian", "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。", "cache_key": "cf77113811bd2477b2f848a7c78cf5d641e1e8c1834b6132b9f565f112700a2a", "generated_codec_frames": 16, "frame_cap": 100, "natural_eos": true, "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s603-story-fixture-chapter2-20260801/00-vivian.wav", "audio_sha256": "94c56d143ad196df5a078c2c4919c9112e674b5d04dd7b63a8dbacef2ea40c88", "duration_seconds": 1.28, "sample_rate_hz": 24000, "channels": 1},
+    {"index": 1, "text": "我听见钟声了。", "speaker": "Serena", "style_instruction": "温暖而警觉，语速自然，避免过度戏剧化。", "cache_key": "cfdca9f57fb8a22979d40ca50e8391cadd69cca0074844ad22c522942e2d7ca0", "generated_codec_frames": 18, "frame_cap": 100, "natural_eos": true, "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s603-story-fixture-chapter2-20260801/01-serena.wav", "audio_sha256": "1a638f1cfc33902eb41e051b57beda1a3b7de41b73d94b3fe8636ef3cf2d0cba", "duration_seconds": 1.44, "sample_rate_hz": 24000, "channels": 1},
+    {"index": 2, "text": "苏岚打开了旧木门。", "speaker": "Vivian", "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。", "cache_key": "8bc3f607cd52a34760241771a5e8142a2799f1a59cdc6074f7cd3b30629be1d9", "generated_codec_frames": 27, "frame_cap": 100, "natural_eos": true, "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s603-story-fixture-chapter2-20260801/02-vivian.wav", "audio_sha256": "41ccb934d6d112cef0d587004b20441dec19f57aea8a01184849e8584a703997", "duration_seconds": 2.16, "sample_rate_hz": 24000, "channels": 1}
+  ],
+  "assembly": {"audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s603-story-fixture-chapter2-20260801/chapter-2.wav", "audio_sha256": "03daa0068fd82b023e03e14dcc2fa2b7f19e55f96e38e44b37c6bb45c1dbb6bd", "codec": "pcm_s16le", "sample_rate_hz": 24000, "channels": 1, "sample_width_bytes": 2, "frames": 165120, "duration_seconds": 6.88, "gap_seconds": [1.0, 1.0], "mean_volume_db": -22.2, "max_volume_db": -5.8, "non_silent": true},
+  "playback": {"backend": "pw-play", "authorized": true, "attempts": 1, "exit_code": 0},
+  "owner_feedback": {"accepted": true, "natural": true, "clear": true, "speaker_distinction": true, "intervals": "accepted", "verbatim_zh": "自然清晰，如果硬要挑毛病，调音可以让语音1kHz附近频段适当调高增益，让语音更清晰。不过这是之后美化的事情，当前阶段已近高很不错了，自然度、区分度、清晰度都已经非常不错。"},
+  "post_processing": {"applied": false, "deferred_candidate": "modest_gain_near_1khz_for_presence", "stage": "later_aesthetic_tuning", "required_for_acceptance": false},
+  "runtime_effects": {"loaded_model": true, "executed_onnx": true, "rendered_audio": true, "played_audio": true, "recorded_audio": false, "wrote_cache": false, "wrote_memory": false},
+  "claims": {"bounded_fixture_scope_enforced": true, "all_segments_natural_eos": true, "machine_audio_gate_passed": true, "owner_audibility_verified": true, "owner_acceptance_verified": true, "story_command_preflight_remains_non_actuating": true, "story_command_render_executor_enabled": false, "production_story_render_admitted": false},
+  "next_gate": "story_bounded_render_execution_contract"
+}

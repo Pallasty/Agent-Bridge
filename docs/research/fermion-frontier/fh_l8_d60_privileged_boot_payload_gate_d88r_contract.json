@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-PRIVILEGED-BOOT-PAYLOAD-GATE-D88R-V1",
+  "baseline_commit": "bd74f48efbfeb331db8e9042c2632383796471db",
+  "source_pins": {
+    "FH_L8_D60_OFFLINE_BOOT_PAYLOAD_GATE_D88_ZH.md": "b0d7a67e4bdc605232f52a26c50cf4b0c4f99b9461f085e32f032b4137135927",
+    "fh_l8_d60_offline_boot_payload_gate_d88_contract.json": "f0545eaafd8ea2b98a15a6ba21f4de601d9bf645b2a7bb699f4efabd60d5c89c",
+    "fh_l8_d60_offline_boot_payload_gate_d88_result.json": "03e87a79c8de67fa9c7047ab215893ea6a64d40762c733af39ffc3b4af99005c",
+    "fh_l8_d60_offline_boot_payload_d88_manifest.json": "4cfb834fc9ad3ad30604eb0a62fa12d55c13a8f31098318aa3536cbf8fddd523"
+  },
+  "receipt": "fh_l8_d60_privileged_boot_payload_d88r_receipt.json",
+  "expected": {
+    "kernel_release": "7.0.0-29-generic",
+    "builder_package": "mmdebstrap",
+    "builder_version": "1.5.7-3",
+    "mmc_uuid": "17a6b72c-efcc-4445-b447-385e96a109a2"
+  },
+  "authority": {
+    "receipt_verification_only": true,
+    "additional_package_install_authorized": false,
+    "rootfs_build_authorized": false,
+    "mmc_mount_authorized": false,
+    "mmc_write_authorized": false,
+    "bootloader_change_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

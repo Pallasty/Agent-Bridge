@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_complete_sentence_audition_receipt.schema.json",
+  "title": "Agent-Bridge complete sentence audition receipt",
+  "type": "object",
+  "required": [
+    "schema", "status", "request", "generation", "audio", "asr",
+    "playback", "owner_feedback", "claims", "next_gate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_complete_sentence_audition_receipt.v1"
+    },
+    "status": {"const": "complete_sentence_owner_accepted"},
+    "request": {"type": "object"},
+    "generation": {
+      "type": "object",
+      "properties": {
+        "stopped_before_frame_cap": {"const": true},
+        "natural_eos_observed": {"const": true},
+        "tokenizer_fix_mistral_regex": {"const": true}
+      }
+    },
+    "audio": {"type": "object"},
+    "asr": {
+      "type": "object",
+      "properties": {
+        "full_requested_text_recovered": {"const": true}
+      }
+    },
+    "playback": {
+      "type": "object",
+      "properties": {
+        "authorized": {"const": true},
+        "completed": {"const": true}
+      }
+    },
+    "owner_feedback": {
+      "type": "object",
+      "properties": {
+        "complete": {"const": true},
+        "clear": {"const": true},
+        "natural": {"const": true}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "properties": {
+        "owner_acceptance_recorded": {"const": true},
+        "story_renderer_integrated": {"const": false},
+        "mi50_verified": {"const": false},
+        "production_admitted": {"const": false}
+      }
+    },
+    "next_gate": {"const": "story_voice_mapping_contract"}
+  }
+}

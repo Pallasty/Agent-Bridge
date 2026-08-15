@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_rust_registration_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "evidence", "hardening_probes", "blockers", "proposed_surface", "hardening_contract", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_rust_registration_review.v1"},
+    "status": {"const": "rust_story_registration_review_complete"},
+    "decision": {
+      "type": "object",
+      "required": ["selected", "registration_implementation_admitted", "rejected_options"],
+      "properties": {
+        "selected": {"const": "harden_native_adapter_before_registration"},
+        "registration_implementation_admitted": {"const": false},
+        "rejected_options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["s5zm_full_parity_verified", "current_registry_collision", "prior_registry_provenance_drift", "story_module_exported", "registry_source_path", "registry_source_sha256", "prior_registry_source_sha256", "lib_source_path", "lib_source_sha256", "story_module_path", "story_module_sha256", "s5zm_receipt_path", "s5zm_receipt_sha256"],
+      "properties": {
+        "s5zm_full_parity_verified": {"const": true},
+        "current_registry_collision": {"const": false},
+        "prior_registry_provenance_drift": {"const": true},
+        "story_module_exported": {"const": false},
+        "registry_source_path": {"type": "string", "minLength": 1},
+        "registry_source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "prior_registry_source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "lib_source_path": {"type": "string", "minLength": 1},
+        "lib_source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "story_module_path": {"type": "string", "minLength": 1},
+        "story_module_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "s5zm_receipt_path": {"type": "string", "minLength": 1},
+        "s5zm_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "hardening_probes": {
+      "type": "object",
+      "properties": {
+        "bounded_source_admission": {"const": false},
+        "configured_evidence_bundle_resolver": {"const": false},
+        "async_cancellation_contract": {"const": false}
+      },
+      "required": ["bounded_source_admission", "configured_evidence_bundle_resolver", "async_cancellation_contract"],
+      "additionalProperties": false
+    },
+    "blockers": {
+      "const": ["bounded_source_admission_missing", "configured_evidence_bundle_resolver_missing", "async_cancellation_contract_missing"]
+    },
+    "proposed_surface": {
+      "const": {"tool_name": "story_command_preflight", "tier": "Niche", "default_exposed": false, "codex_essential_exposed": false, "codex_voice_exposed": false, "activation_env": "AB_STORY_COMMAND_PREFLIGHT_ENABLE", "activation_env_required_value": "1"}
+    },
+    "hardening_contract": {"type": "object", "required": ["source_admission", "evidence_resolution", "cancellation", "tool_failure"], "additionalProperties": {"type": "string", "minLength": 1}},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {
+      "type": "object",
+      "required": ["modified_rust_registry", "registered_story_command", "loaded_model", "executed_onnx", "rendered_audio", "played_audio", "wrote_cache", "wrote_memory"],
+      "additionalProperties": {"const": false}
+    },
+    "next_gate": {"const": "rust_story_preflight_adapter_hardening"}
+  }
+}

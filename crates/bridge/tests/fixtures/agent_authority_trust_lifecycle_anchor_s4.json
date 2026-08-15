@@ -1,0 +1,70 @@
+{
+   "accepted_algorithm" : "ed25519",
+   "accepted_event_schema" : "agent_bridge.authority_trust_lifecycle_event.s4.v0",
+   "anchor_id" : "fixture:agent-authority-trust-lifecycle-anchor-s4",
+   "fixture_key_note" : "All signers use public Ed25519 keys from RFC 8032 section 7.1 test vectors. Published test seeds are used only by the temporary fixture generator.",
+   "genesis_digest" : "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "minimum_registry_generation" : 9,
+   "private_key_present" : false,
+   "production_trust_root" : false,
+   "required_signer_role" : "lifecycle_authority",
+   "root_id" : "root:owner-offline-fixture:v1",
+   "root_rotation_proven" : false,
+   "schema" : "agent_bridge.agent_authority_trust_lifecycle_anchor.s4.v0",
+   "signers" : [
+      {
+         "algorithm" : "ed25519",
+         "public_key_base64" : "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+         "revoked" : false,
+         "role" : "lifecycle_authority",
+         "signer_id" : "signer:rfc8032-lifecycle-authority:v1"
+      },
+      {
+         "algorithm" : "ed25519",
+         "public_key_base64" : "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+         "revoked" : false,
+         "role" : "audit_only",
+         "signer_id" : "signer:rfc8032-audit-only:v1"
+      },
+      {
+         "algorithm" : "ed25519",
+         "public_key_base64" : "/FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU=",
+         "revoked" : true,
+         "role" : "lifecycle_authority",
+         "signer_id" : "signer:rfc8032-revoked-authority:v1"
+      }
+   ],
+   "source" : {
+      "files" : [
+         {
+            "id" : "s3_verifier",
+            "path" : "crates/bridge/examples/agent_authority_signed_trust_root_s3.rs",
+            "sha256" : "b845f23afddb48e0b5a60f90fc6317e79f0e8495914e4634281a315c3e1d0d19"
+         },
+         {
+            "id" : "s3_trust_registry",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_trust_registry_s3.json",
+            "sha256" : "1e26edf7a5c71ac972d5c1c7e2496d8c1baa772d9571db995cfac04fe6c3d573"
+         },
+         {
+            "id" : "s3_signed_receipts",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_signed_receipts_s3.json",
+            "sha256" : "1a15620e6dc16166d71b4458d5207eacf30579b8f631c48f85ac62fba2456d8d"
+         },
+         {
+            "id" : "s3_design",
+            "path" : "docs/design/AGENT_AUTHORITY_SIGNED_TRUST_ROOT_S3_2026_07_16.md",
+            "sha256" : "2ad2bb8d8e1bb64db80344c898754f600cfccb82cc29944146221754e61a2839"
+         },
+         {
+            "id" : "s3_result",
+            "path" : "docs/reports/goal-c-u/2026-07-16-agent-authority-signed-trust-root-s3-result.md",
+            "sha256" : "fd6fe75e56ffddc64f209e3ad822186a03f618084e858892cfc15bd6cc7539fd"
+         }
+      ],
+      "latest_master_commit" : "c9c50917687c7715b031a6bfe8dd7801bfd737ee",
+      "s3_result_commit" : "149bafbc3a04126ea28f05a85c3e30d2748aceed",
+      "s4_lineage_merge_commit" : "72ba3dabd2569e651e05a90dfc1c898fa366c24e"
+   },
+   "trusted_root_epoch" : 4
+}

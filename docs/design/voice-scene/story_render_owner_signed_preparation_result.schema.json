@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_owner_signed_preparation_result.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "authorization", "preparation", "execution_authorized", "runtime_effects", "grant_references_discarded_after_preparation"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_render_owner_signed_preparation_result.v1"},
+    "status": {"const": "story_render_owner_signed_preparation_verified"},
+    "decision": {"const": "owner_signed_preparation_accepted_executor_blocked"},
+    "authorization": {
+      "type": "object",
+      "required": ["owner_authorized", "key_id", "ttl_seconds", "issued_at", "expires_at", "signed_fields_sha256", "envelope_sha256", "request_sha256", "real_mac_generated", "key_material_disclosed", "mac_disclosed", "nonce_disclosed", "envelope_persisted"],
+      "properties": {
+        "owner_authorized": {"const": true},
+        "key_id": {"const": "story-render-owner-v1"},
+        "ttl_seconds": {"const": 300},
+        "issued_at": {"type": "string", "minLength": 1},
+        "expires_at": {"type": "string", "minLength": 1},
+        "signed_fields_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "envelope_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "real_mac_generated": {"const": true},
+        "key_material_disclosed": {"const": false},
+        "mac_disclosed": {"const": false},
+        "nonce_disclosed": {"const": false},
+        "envelope_persisted": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "preparation": {
+      "type": "object",
+      "required": ["s613_entrypoint", "s613_invoked", "accepted", "authority_verifier_accepts", "real_key_load_count", "borrowed_loaded_context_count", "loaded_key_buffer_cleared", "nonce_store_path", "nonce_store_absent", "output_directory", "output_directory_absent", "model_verifier_constructed", "model_verifier_invoked"],
+      "properties": {
+        "s613_entrypoint": {"const": "prepare_installed_secure_bounded_render"},
+        "s613_invoked": {"const": true},
+        "accepted": {"const": true},
+        "authority_verifier_accepts": {"const": true},
+        "real_key_load_count": {"const": 1},
+        "borrowed_loaded_context_count": {"const": 1},
+        "loaded_key_buffer_cleared": {"const": true},
+        "nonce_store_path": {"const": "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3"},
+        "nonce_store_absent": {"const": true},
+        "output_directory": {"const": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s616-owner-signed-preparation"},
+        "output_directory_absent": {"const": true},
+        "model_verifier_constructed": {"const": true},
+        "model_verifier_invoked": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "execution_authorized": {"const": false},
+    "runtime_effects": {
+      "type": "object",
+      "required": ["read_real_key", "generated_real_mac", "created_nonce_store", "consumed_nonce", "imported_executor", "called_executor", "loaded_model", "executed_onnx", "rendered_audio", "played_audio", "recorded_audio", "wrote_memory"],
+      "properties": {
+        "read_real_key": {"const": true},
+        "generated_real_mac": {"const": true},
+        "created_nonce_store": {"const": false},
+        "consumed_nonce": {"const": false},
+        "imported_executor": {"const": false},
+        "called_executor": {"const": false},
+        "loaded_model": {"const": false},
+        "executed_onnx": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "recorded_audio": {"const": false},
+        "wrote_memory": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "grant_references_discarded_after_preparation": {"const": true}
+  },
+  "additionalProperties": false
+}

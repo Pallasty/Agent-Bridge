@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_installed_key_composition_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "boundaries", "blockers", "implementation_present", "installation_authorized", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_installed_key_composition_review.v1"},
+    "status": {"const": "story_executor_installed_key_composition_reviewable"},
+    "decision": {"const": "installed_key_only_public_preparation_accepted_installation_blocked"},
+    "evidence": {"type": "object"},
+    "boundaries": {"type": "object", "minProperties": 20, "additionalProperties": {"const": true}},
+    "blockers": {"const": ["secure_configuration_not_installed", "executor_invocation_not_authorized"]},
+    "implementation_present": {"const": true},
+    "installation_authorized": {"const": false},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 12, "additionalProperties": {"const": false}},
+    "review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"installed_key_public_composition_implemented": true, "caller_supplied_key_public_interface_absent": true, "mutable_key_buffer_best_effort_cleared_before_non_secret_preparation": true, "complete_python_key_zeroization_claimed": false, "secure_configuration_installed": false, "installed_key_loaded": false, "executor_invoked": false}},
+    "next_gate": {"const": "owner_authorized_story_executor_secure_configuration_installation"}
+  },
+  "additionalProperties": false
+}

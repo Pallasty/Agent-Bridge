@@ -1,0 +1,117 @@
+{
+  "schema": "agent_bridge.story_render_guardian_synthetic_prototype.v1",
+  "status": "story_render_guardian_synthetic_prototype_verified",
+  "decision": "dormant_single_failure_custody_proven_runtime_integration_blocked",
+  "reviewed_at": "2026-08-02",
+  "evidence": {
+    "s632_review": {
+      "path": "docs/design/voice-scene/s632_story_render_descendant_custody_review.json",
+      "sha256": "2a17180309c83efeba5282b7998803427585b59ea3301b34998285c138a84415",
+      "decision_sha256": "5c902205f35709c4ea4a6ebd588c608e046c3282509f772a48532793c0498227"
+    },
+    "source_snapshot": [
+      {
+        "path": "crates/bridge/src/story_render_guardian_synthetic.rs",
+        "sha256": "33d778a44a7e5906406567a92ca1ed0e41662f8b955b24c2c53d4239e359e724"
+      },
+      {
+        "path": "crates/bridge/tests/story_render_guardian_synthetic_s633.rs",
+        "sha256": "d101acbcaf5a347b7e355dd289823df6b2e7e9aba399069c2f7d2853953bf9f8"
+      }
+    ],
+    "verification": {
+      "command": "CARGO_TARGET_DIR=/tmp/agent-bridge-s633-target cargo test -p ab-bridge --test story_render_guardian_synthetic_s633 -- --test-threads=1",
+      "passed": 8,
+      "failed": 0,
+      "test_threads": 1
+    }
+  },
+  "protocol": {
+    "magic": "ABG1",
+    "version": 1,
+    "maximum_body_bytes": 64,
+    "length_prefix": "u32_big_endian",
+    "frames": ["bound", "start", "cancel", "terminal", "failure"],
+    "unknown_or_trailing_fields": "reject",
+    "pid_binding": "worker_pid_equals_worker_pgid"
+  },
+  "startup_gate": {
+    "bootstrap_parent_death_sigkill": true,
+    "bootstrap_creates_session": true,
+    "worker_identity_recorded_before_payload": true,
+    "payload_before_host_acknowledgement": false,
+    "payload_inherits_custody_descriptors": false
+  },
+  "custody": {
+    "lock_identity": "shared_open_file_description",
+    "host_retains_fallback_descriptor": true,
+    "guardian_retains_cleanup_descriptor": true,
+    "explicit_unlock_allowed": false,
+    "release_condition": "last_descriptor_close_after_cleanup_proven",
+    "cleanup_unproven_policy": "retain_or_leak_descriptor_for_manual_recovery"
+  },
+  "single_failure_proofs": {
+    "payload_start_gate_precedes_execution": true,
+    "payload_custody_fd_isolation": true,
+    "host_exit_eof_cleanup_precedes_lock_recovery": true,
+    "guardian_exit_host_fallback_precedes_lock_recovery": true,
+    "worker_exit_with_live_descendant_rejected": true,
+    "malformed_and_oversized_frames_rejected": true,
+    "term_ignoring_group_killed_and_reaped": true,
+    "current_supervisor_remains_unwired": true
+  },
+  "test_effects": {
+    "repository_owned_processes_spawned": true,
+    "temporary_lock_files_created": true,
+    "temporary_marker_files_created": true,
+    "term_ignoring_descendant_spawned": true,
+    "all_fixture_processes_reaped_or_proven_not_live": true,
+    "temporary_roots_removed": true
+  },
+  "authority": {
+    "supervisor_integration_authorized": false,
+    "real_worker_execution_authorized": false,
+    "runtime_enablement_authorized": false,
+    "mcp_registration_authorized": false,
+    "deployment_authorized": false,
+    "cgroup_mutation_authorized": false,
+    "systemd_unit_creation_authorized": false,
+    "authority_key_read_authorized": false
+  },
+  "runtime_effects": {
+    "current_supervisor_modified": false,
+    "bridge_lib_registry_modified": false,
+    "mcp_registry_modified": false,
+    "mcp_tool_registered": false,
+    "persistent_lock_created": false,
+    "configuration_modified": false,
+    "authority_key_read": false,
+    "nonce_consumed": false,
+    "real_worker_executed": false,
+    "model_loaded": false,
+    "audio_rendered": false,
+    "audio_played": false,
+    "memory_written": false,
+    "binary_deployed": false
+  },
+  "claims": {
+    "guardian_protocol_implemented": true,
+    "synthetic_single_failure_custody_proven": true,
+    "current_supervisor_modified": false,
+    "runtime_integrated": false,
+    "mcp_registered": false,
+    "deployed": false
+  },
+  "nonclaims": [
+    "simultaneous_host_and_guardian_loss",
+    "adversarial_process_group_escape",
+    "cgroup_or_systemd_custody",
+    "uninterruptible_kernel_sleep",
+    "kernel_panic_or_power_loss",
+    "cross_host_custody",
+    "real_story_worker_compatibility",
+    "runtime_or_mcp_adoption"
+  ],
+  "receipt_sha256": "fc1488bf4194d32f7c45aef2b50a02c0318f631721fbfe542490e28aa9154dc1",
+  "next_gate": "story_render_guardian_supervisor_integration_review"
+}

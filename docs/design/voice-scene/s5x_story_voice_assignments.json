@@ -1,0 +1,14 @@
+{
+  "speaker_3c9aef950848fbb970ea": {
+    "qwen_speaker": "Vivian",
+    "style_instruction": "温柔、清晰、克制地叙述，不替角色夸张表演。"
+  },
+  "speaker_e6003d6d0222150b5ab3": {
+    "qwen_speaker": "Dylan",
+    "style_instruction": "青年声线，冷静而坚定，紧张时仍保持清楚吐字。"
+  },
+  "speaker_54151648be8fd67718fc": {
+    "qwen_speaker": "Serena",
+    "style_instruction": "温暖而警觉，语速自然，避免过度戏剧化。"
+  }
+}

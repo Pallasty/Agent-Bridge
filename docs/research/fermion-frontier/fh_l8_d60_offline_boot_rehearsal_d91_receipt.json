@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "receipt_id": "FH-L8-D60-OFFLINE-BOOT-REHEARSAL-D91-20260810",
+  "tools": {
+    "qemu": "10.2.1",
+    "ovmf": "2025.11-3ubuntu7",
+    "grub_file_efi_check": true
+  },
+  "virtual_artifacts": {
+    "rootfs_image": {"path": "/Data/CascadeProjects/.fh-l8-staging/d91/rootfs.ext4", "bytes": 1073741824, "sha256": "965b3f9ca0b41ced7db699c676d2b2d16f58adf091d79cc3000f07e9dd04f407"},
+    "direct_kernel_serial_log": {"path": "/Data/CascadeProjects/.fh-l8-staging/d91/serial.log", "bytes": 42262, "sha256": "7a1c7b5ae1359951c42a7be06eb78fd7f8143093513baae6399cec44f539811b"},
+    "uefi_serial_log": {"path": "/Data/CascadeProjects/.fh-l8-staging/d91/uefi-serial.log", "bytes": 924, "sha256": "25382f2ce06a913fba47e31a0496534b3b6af75bb88bc145ea3443f02ffbd97e"},
+    "ovmf_vars": {"path": "/Data/CascadeProjects/.fh-l8-staging/d91/OVMF_VARS_4M.fd", "bytes": 540672, "sha256": "4a77cda91259277dc82951bc86607c4a212dceb22b2b7f0ffbb54e1f5c916408"},
+    "efi_loader": {"path": "/Data/CascadeProjects/.fh-l8-staging/d91/esp/EFI/BOOT/BOOTX64.EFI", "sha256": "a554e73e33f708147177eae9e0337def0af26d8388bd5b7b66ad7242ce31e65b"}
+  },
+  "observations": {
+    "direct_kernel_boot_pass": true,
+    "direct_kernel_reached_systemd_basic": true,
+    "uefi_loader_format_valid": true,
+    "uefi_grub_kernel_chain_pass": false,
+    "uefi_grub_terminal_observed": true,
+    "uefi_attempt_count": 3,
+    "mmc_touched": false,
+    "host_rebooted": false
+  },
+  "failure_class": "GRUB_VIRTUAL_DEVICE_MAPPING_OR_EMBEDDED_CONFIG_REHEARSAL_BLOCKED"
+}

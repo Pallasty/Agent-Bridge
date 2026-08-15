@@ -1,0 +1,25 @@
+{
+  "status": "VERIFIED_D92_EXTERNAL_MEDIA_INTAKE_BLOCKED",
+  "disposable_media_intake_pass": false,
+  "backup_target_intake_pass": false,
+  "required_evidence_complete": false,
+  "current_mmc_unmounted": false,
+  "external_execution_admitted": false,
+  "blockers": [
+    "CURRENT_MMC_DESKTOP_MOUNT_PRESENT_OWNER_MUST_UNMOUNT",
+    "NO_OWNER_SUPPLIED_DISPOSABLE_64GB_MEDIA",
+    "NO_SAFE_BACKUP_TARGET_WITH_IMAGE_PLUS_20GB_RESERVE",
+    "FIRMWARE_SD_BOOT_PROOF_MISSING"
+  ],
+  "unmount_authorized": false,
+  "backup_write_authorized": false,
+  "partition_authorized": false,
+  "format_authorized": false,
+  "firmware_change_authorized": false,
+  "reboot_authorized": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "NO_GO_D92_OWNER_MEDIA_AND_BOOT_EVIDENCE_REQUIRED",
+  "next_gate": "OWNER_SUPPLY_DISPOSABLE_MEDIA_OR_SAFE_BACKUP_AND_UNMOUNT_CURRENT_MMC"
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "agent_bridge.story_source_origin_adoption.v1",
+  "status": "story_source_origin_adopted",
+  "decision": {"source_adopted": true, "configuration_installed": false, "deployment_dry_run_admitted": false},
+  "remotes": {"adopted_source_tip": "682cce5a48547bc7285b9d087dd452568e0974e3", "gitlab_master_observed": "682cce5a48547bc7285b9d087dd452568e0974e3", "github_master_observed": "682cce5a48547bc7285b9d087dd452568e0974e3", "all_equal": true},
+  "configuration": {"fragment_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/story_fixture_pilot.machine.env", "fragment_sha256": "d9af0905ab5acc17ecff8439bd91b71ec1bc0e60ac3916e19f657a9d461921d5", "fixture_pilot_only": true, "installed": false},
+  "execution_authorized": false,
+  "runtime_effects": {"modified_machine_env": false, "built_release_binary": false, "deployed_binary": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false},
+  "next_gate": "story_fixture_configuration_installation_review"
+}

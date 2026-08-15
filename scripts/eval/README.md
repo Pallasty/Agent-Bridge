@@ -204,6 +204,31 @@ corpus-freeze, or runtime authority. See
 `docs/design/ENGRAM_G0_REAL_FAILURE_INTAKE_2026_07_17.md` and run
 `scripts/check-engram-g0-failure-intake.sh`.
 
+`engram_ab_specificity_signal_audit.py` is a narrow read-only successor for the
+observed Agent-Bridge remote-session specificity failure. It verifies an
+immutable SQLite snapshot and emits aggregate target topology only. Trusted
+cluster admission requires at least two crystallized `cofires` /
+`co_referenced` neighbors or two consolidated coactivation neighbors; raw
+`evolved` and one-shot coactivation rows never qualify. The 2026-07-27 current
+snapshot failed that graph gate. The companion `recall_eval` A/B instead
+identified the existing read-side coactivation multiplier as net-negative:
+turning the already shipped rerank off recovered the target from scoped rank 10
+to rank 1 and improved the 15-case scoped-local aggregate. A fresh MCP negative
+control then rejected and rolled back the global disable because generic SSH
+promoted the same target to rank 3. The default-off successor
+`AGENT_BRIDGE_REMOTE_SESSION_SPECIFICITY_V0=1` therefore activates only for
+semantic calls in an explicitly approved Agent-Bridge scope: strict
+remote-agent-session steering intent bypasses the harmful read-side rerank,
+while other queries suppress that steering family. On fresh frozen-snapshot
+clones it restored the target from scoped rank 10 to rank 1, retained the
+steering family for all six related controls, removed it from all six unrelated
+controls, improved the 15-case scoped MRR from 0.236 to 0.296, and preserved
+18/18 default-off response texts byte-for-byte against the installed baseline.
+This is source-candidate evidence only until integration, deployment, reconnect,
+and live-consumer acceptance are separately recorded. See
+`docs/design/ENGRAM_AB_SPECIFICITY_SIGNAL_AUDIT_V0_2026_07_27.md` and
+`docs/reports/goal-c-u/2026-07-27-engram-ab-specificity-scout-result.md`.
+
 `engram_g1_corpus_design.py` validates the aggregate-only G1 grouped-corpus
 preregistration opened by a positive real G0 receipt. It fixes episode-level
 FIT/development/sealed splits, provenance and role separation, a specificity

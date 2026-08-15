@@ -1,0 +1,28 @@
+{
+  "schema": "agent_bridge.story_bounded_render_execution_contract.v1",
+  "status": "story_bounded_render_execution_contract_reviewable",
+  "evidence": {
+    "contract_builder_path": "/Data/CascadeProjects/agent-bridge/scripts/story_bounded_render_execution_contract.py",
+    "contract_builder_sha256": "bfb48be8dd9ca628b16b9537c89ed89cb6fecf9a054aa4d8ea45819861505dda",
+    "preflight_receipt_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s602_story_fixture_mcp_preflight_receipt.json",
+    "preflight_receipt_sha256": "2584a0d3152a4d2a06a80e790dada67144b31ad95b4e2787c99f7c1579cf9a32",
+    "accepted_render_receipt_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s603_story_fixture_bounded_render_receipt.json",
+    "accepted_render_receipt_sha256": "db9988eb3874c0638b8ee40ffb91c30ab6e5d7f53321bd11c2fc65b45ee6a971",
+    "trusted_runner_path": "/Data/CascadeProjects/agent-bridge/scripts/story_voice_existing_onnx_trusted_runner.py",
+    "trusted_runner_sha256": "886f174ee5e9ab20ba4cbfeefc0e95f0dccc4a4cc902d3199aef4fd8c55a97d3",
+    "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb",
+    "source_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566",
+    "model_inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "chapter": 2,
+    "selected_segments": 3,
+    "accepted_assembly_sha256": "03daa0068fd82b023e03e14dcc2fa2b7f19e55f96e38e44b37c6bb45c1dbb6bd"
+  },
+  "bounds": {"max_segments_per_grant": 3, "max_codec_frames_per_segment": 100, "max_assembled_duration_seconds": 30.0, "sample_rate_hz": 24000, "channels": 1, "allowed_speakers": ["Serena", "Vivian"], "output_root": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime", "existing_output_overwrite_allowed": false, "network_allowed": false, "gpu_allowed": false},
+  "authority": {"render": {"grant_required": true, "grant_present": false, "single_use": true, "bound_fields": ["contract_sha256", "preflight_sha256", "output_directory"]}, "playback": {"grant_required": true, "grant_present": false, "single_use": true, "requires_machine_gate": true, "bound_fields": ["render_receipt_sha256", "audio_sha256"]}, "record": {"supported": false, "grant_present": false}, "memory_write": {"supported": false, "grant_present": false}},
+  "state_machine": ["preflight_reviewed", "render_grant_required", "bounded_render", "machine_audio_gate", "playback_grant_required", "single_playback", "owner_feedback"],
+  "execution_authorized": false,
+  "runtime_effects": {"created_output_directory": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_cache": false, "wrote_memory": false},
+  "contract_sha256": "24edc82e885c7f8e5a934019e78530f0d70a482e15ec04c52824395fef1e0fe8",
+  "claims": {"preflight_and_acceptance_hash_bound": true, "render_and_playback_authority_separated": true, "recording_unsupported": true, "memory_write_unsupported": true, "static_contract_ready": true, "executor_implemented": false, "runtime_execution_admitted": false},
+  "next_gate": "story_bounded_render_executor_implementation_review"
+}

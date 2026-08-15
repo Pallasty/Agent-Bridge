@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story_voice_mapping.schema.json",
+  "title": "Agent-Bridge story voice mapping",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "source_sha256", "backend", "model",
+    "mapping_sha256", "roles", "pending_auditions",
+    "chapter_render_ready", "fallback_policy", "runtime_effects"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_voice_mapping.v1"},
+    "status": {
+      "enum": ["mapping_reviewable_auditions_pending", "mapping_render_ready"]
+    },
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "backend": {"const": "qwen3_tts_existing_onnx_cpu_int4"},
+    "model": {"const": "Qwen3-TTS-12Hz-1.7B-CustomVoice"},
+    "mapping_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "roles": {"type": "array", "minItems": 1},
+    "pending_auditions": {
+      "type": "array", "items": {"type": "string"}, "uniqueItems": true
+    },
+    "chapter_render_ready": {"type": "boolean"},
+    "fallback_policy": {"type": "object"},
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "loaded_model", "executed_onnx", "rendered_audio", "played_audio",
+        "wrote_story_plan", "used_gpu"
+      ],
+      "properties": {
+        "loaded_model": {"const": false},
+        "executed_onnx": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "wrote_story_plan": {"const": false},
+        "used_gpu": {"const": false}
+      }
+    }
+  }
+}

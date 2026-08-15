@@ -1,0 +1,37 @@
+{
+  "schema": "agent_bridge.qwen3_tts.fake_q8_burnin_bound_authorization.v1",
+  "status": "READY_FOR_ONE_NEW_ONE_SHOT_FAKE_Q8_SMOKE",
+  "control": {
+    "policy_schema": "agent_bridge.qwen3_tts.control_logit_stability_policy.v1",
+    "policy_path": "scripts/eval/fixtures/qwen3_tts_control_logit_stability_policy_v1.json",
+    "receipt_path_hint": "/private/tmp/ab-qwen3-control-burnin.nO88V7/result.json",
+    "receipt_sha256": "b49daac8b537395820de038a41fde828b951f2af214aaf7d0dfe154f444f7f57",
+    "status": "CONTROL_STABILITY_ENVELOPE_CAPTURED",
+    "measured_count": 6,
+    "all_paths": "BIT_EXACT",
+    "canonical_codes_sha256": "ea117b54d9181162a585af5a99f935ff385377adbac359272834863ca6d7e951"
+  },
+  "trial": {
+    "trial_id": "qwen3-tts-q2-fs-v1-burnin-gate-proj-zh-short-neutral-serena-001",
+    "claim_path": "/Users/pallasting/.local/state/agent-bridge/qwen3-evaluation-ledger/qwen3-tts-q2-fs-v1-burnin-gate-proj-zh-short-neutral-serena-001.claim.json",
+    "result_path": "/Users/pallasting/.local/state/agent-bridge/qwen3-evaluation-ledger/qwen3-tts-q2-fs-v1-burnin-gate-proj-zh-short-neutral-serena-001.result.json",
+    "one_shot_claim_o_excl": true,
+    "claim_is_never_automatically_deleted": true,
+    "processes": 1,
+    "modules": 1,
+    "cases": 1,
+    "fake_trials": 1,
+    "target": "talker.model.layers.6.mlp.gate_proj.weight",
+    "case_id": "zh-short-neutral-serena"
+  },
+  "authorization": {
+    "allows_exactly_one_module_one_case_fake_q8_smoke": true,
+    "allows_weight_mutation": false,
+    "allows_quantized_weight_writing": false,
+    "allows_runtime_candidate_generation": false,
+    "allows_worker_socket_use": false,
+    "allows_audio_decode_write_or_playback": false,
+    "allows_runtime_wiring_fallback_deployment_or_promotion": false
+  },
+  "not_authorized": ["model_write", "candidate_pack", "runtime_wiring", "worker_replacement", "deployment", "additional_trials"]
+}

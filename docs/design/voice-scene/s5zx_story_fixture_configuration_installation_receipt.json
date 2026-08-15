@@ -1,0 +1,10 @@
+{
+  "schema": "agent_bridge.story_fixture_configuration_installation.v1",
+  "status": "story_fixture_configuration_installed_security_blocked",
+  "decision": {"configuration_installed": true, "runtime_adoption_admitted": false, "deployment_dry_run_admitted": false},
+  "installation": {"machine_env_path": "/home/pallasting/.config/agent-bridge/machine.env", "machine_env_sha256": "520dd17c52097b94141a089fe42c56facbd12637f40a523bf5cc1a315a1f51c3", "backup_path": "/home/pallasting/.config/agent-bridge/machine.env.bak-s5zx-9291d52f", "backup_sha256": "9291d52fc155e1bbd9b4eb826d755fd8dfdfe52dbf7d324768a8563c4bb55cf0", "fragment_exact_match": true, "story_keys": 12, "reported_mode": "777", "reported_owner": "root:root", "filesystem": "fuseblk"},
+  "probe": {"standard_profile_story_visible": false, "all_profile_story_visible": true, "persistent_mcp_processes_before": 7, "persistent_mcp_processes_after": 7},
+  "blockers": ["machine_env_permissions_not_enforceable_on_fuseblk"],
+  "runtime_effects": {"modified_machine_env": true, "deployed_binary": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false},
+  "next_gate": "secure_machine_env_relocation_review"
+}

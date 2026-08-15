@@ -1,0 +1,13 @@
+{
+  "schema": "agent_bridge.story_executor_posix_runtime_binding_review.v1",
+  "status": "story_executor_posix_runtime_binding_reviewable",
+  "decision": "posix_binding_and_fd_key_loader_accepted_installation_blocked",
+  "evidence": {"s608_contract_file_sha256": "dcd2143dcc4944ac7911bc6c5a85f381db7bc1816ef844d1f80a5727acad150d", "s608_contract_sha256": "ff70faa056e95c45745ad463744979a369e6a7abf2ff3858a7ecdddd1a47130b", "s611_contract_file_sha256": "a6a74db9de4cf8050a4126a9519e5e7a0ae48093ad9cf32ada5dcb1962c1d06f", "s611_contract_sha256": "e1d2d47c1cb070b6f726fd6ba024539c21ab4f85d98db63816eb1c8ec7f6314d", "binding_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_posix_runtime_binding.py", "binding_sha256": "e2fd3d719a9b0996500c7447f1df3d4726db0bca6f3edb9336200aa8aa481208", "binding_test_path": "/Data/CascadeProjects/agent-bridge/tests/test_story_executor_posix_runtime_binding.py", "binding_test_sha256": "80883c37bbc775516e4056171157ad948b42970db9dbdca7801d67c10d1ee755", "test_count": 5, "verifier_sha256": "f01520fbc1342a58b1c0c3d9731180dcd0d585c1fae508fd5fe1db922a542c37", "composition_sha256": "07917e64688b5def10f732b42055bed6c1221370f735300547645c6f5d9c75af"},
+  "boundaries": {"s608_nonce_binding_is_posix": true, "s609_verifier_nonce_binding_is_posix": true, "legacy_fuse_absent_from_active_sources": true, "s611_contract_digest_checked": true, "parent_components_opened_no_follow": true, "key_opened_no_follow_close_on_exec": true, "same_fd_identity_checked": true, "mode_owner_and_nlink_checked": true, "closed_key_schema_and_revocation_checked": true, "key_buffer_cleared": true, "secret_generation_and_environment_fallback_absent": true, "database_creation_absent": true, "executor_and_model_runtime_absent": true, "cli_absent": true},
+  "blockers": ["secure_configuration_not_installed", "installed_key_not_composed_into_preparation", "executor_invocation_not_authorized"],
+  "implementation_present": true, "installation_authorized": false, "execution_authorized": false,
+  "runtime_effects": {"created_runtime_directory": false, "created_key_bundle": false, "generated_key": false, "created_nonce_store": false, "loaded_installed_key": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
+  "review_sha256": "6efd39968018f0f5f3bd5c343a40d7927a5ac624f6254a5faaa7b7bb812ec82f",
+  "claims": {"posix_nonce_binding_implemented": true, "fd_authority_key_loader_implemented": true, "legacy_fuse_active_binding_removed": true, "secure_configuration_installed": false, "installed_key_loaded": false, "executor_invoked": false},
+  "next_gate": "story_executor_installed_key_composition_implementation_review"
+}

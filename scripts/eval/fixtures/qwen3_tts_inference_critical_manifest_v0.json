@@ -1,0 +1,80 @@
+{
+  "schema": "agent_bridge.qwen3_tts.inference_critical_manifest.v0",
+  "status": "FROZEN_LOCAL_RUNTIME_ONLY",
+  "packages": {
+    "python": "3.12.13",
+    "torch": "2.13.0",
+    "qwen_tts": "0.1.1",
+    "transformers": "4.57.3"
+  },
+  "runtime_files": [
+    {
+      "relative_path": "inference/qwen3_tts_model.py",
+      "sha256": "e1da450732857c1f5fe3e36ebab85db2f6dc6a48caaff6973f463384e30275e4"
+    },
+    {
+      "relative_path": "inference/qwen3_tts_tokenizer.py",
+      "sha256": "ac2d855022a1bd21d33ab7b267ec952eef71f81d3f8d969a306139ff1a929515"
+    },
+    {
+      "relative_path": "core/models/modeling_qwen3_tts.py",
+      "sha256": "25c42656bcf810f06ef6bc1839bd7083f3c8cfedac3a147c4060b4262b1c96a0"
+    },
+    {
+      "relative_path": "core/models/processing_qwen3_tts.py",
+      "sha256": "61472203188e46eda68d740c25f0f228ece24a61ecf942e57d6e49e78b4d6bcd"
+    },
+    {
+      "relative_path": "core/models/configuration_qwen3_tts.py",
+      "sha256": "f52867f14fde06a416dd14864d503ce6d13d0a08d5f5da30191e1c80c13f5d18"
+    },
+    {
+      "relative_path": "core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py",
+      "sha256": "844e8dd8c0182ef9c6463c874631c22ef3c5a4fd1899dd657016164cc5379628"
+    }
+  ],
+  "model_files": [
+    {
+      "relative_path": "config.json",
+      "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9"
+    },
+    {
+      "relative_path": "generation_config.json",
+      "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa"
+    },
+    {
+      "relative_path": "tokenizer_config.json",
+      "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670"
+    },
+    {
+      "relative_path": "vocab.json",
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    {
+      "relative_path": "merges.txt",
+      "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+    },
+    {
+      "relative_path": "preprocessor_config.json",
+      "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119"
+    }
+  ],
+  "model_contract": {
+    "talker_layers": 28,
+    "talker_hidden_size": 2048,
+    "codebooks": 16,
+    "codec_eos_token_id": 2150,
+    "sample_rate": 24000
+  },
+  "execution_boundary": {
+    "local_snapshot_required": true,
+    "device": "mps",
+    "runtime_dtype": "float16",
+    "network_download_allowed": false,
+    "audio_decode_allowed": false,
+    "audio_write_allowed": false,
+    "weight_mutation_allowed": false,
+    "candidate_generation_allowed": false,
+    "runtime_wiring_or_promotion_allowed": false
+  }
+}

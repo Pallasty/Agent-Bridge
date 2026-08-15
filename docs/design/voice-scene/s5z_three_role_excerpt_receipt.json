@@ -1,0 +1,115 @@
+{
+  "schema": "agent_bridge.story_three_role_excerpt.v1",
+  "status": "owner_voice_accepted_transition_tuning_pending",
+  "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
+  "render_plan_sha256": "cbe5ee587cc24e2b7b480a4bd231595c8744ca030e29725a670caa8db0bad9ae",
+  "model": {
+    "name": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "variant": "community_cpu_int4_onnx",
+    "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "provider_policy": "cpu_only_gpu_hidden"
+  },
+  "segments": [
+    {
+      "index": 0,
+      "role": "旁白",
+      "speaker": "Vivian",
+      "text": "雨声渐近，旧钟楼里只剩一线昏黄的灯光。",
+      "generated_codec_frames": 96,
+      "natural_eos": true,
+      "audio_sha256": "f23561260f14d18ac391a15eb608712dfe01091267cdf2f2704f8020a8d28c6d",
+      "duration_seconds": 7.68,
+      "asr_transcript": "雨生渐静旧钟楼里只剩一线昏黄的灯光",
+      "asr_exact": false
+    },
+    {
+      "index": 1,
+      "role": "林默",
+      "speaker": "Dylan",
+      "text": "我们得马上离开。",
+      "generated_codec_frames": 15,
+      "natural_eos": true,
+      "audio_sha256": "8f4737565917ab0741e35cd258445d67a5159c8814e6d6d8cf3d3cc141bc7351",
+      "duration_seconds": 1.2,
+      "asr_transcript": "我们得马上离开",
+      "asr_exact": true
+    },
+    {
+      "index": 2,
+      "role": "苏岚",
+      "speaker": "Serena",
+      "text": "我听见钟声了。",
+      "generated_codec_frames": 18,
+      "natural_eos": true,
+      "audio_sha256": "1a638f1cfc33902eb41e051b57beda1a3b7de41b73d94b3fe8636ef3cf2d0cba",
+      "duration_seconds": 1.44,
+      "asr_transcript": "我听见钟声了",
+      "asr_exact": true
+    },
+    {
+      "index": 3,
+      "role": "旁白",
+      "speaker": "Vivian",
+      "text": "两人同时回头，尘封的钟摆动了起来。",
+      "generated_codec_frames": 60,
+      "natural_eos": true,
+      "audio_sha256": "616d9fbe15e45bcf00dd3c0c5e753e9634b1a475abd93745788d87c3bda3c0cb",
+      "duration_seconds": 4.8,
+      "asr_transcript": "两人同时回头尘风的钟摆动了起来",
+      "asr_exact": false
+    }
+  ],
+  "assembly": {
+    "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5z-three-role-excerpt-20260731/three-role-excerpt.wav",
+    "audio_sha256": "28b9496897327c654eaf0634f4c75d76d48be78a8d94f9c87589606f0d043ef3",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "segment_count": 4,
+    "gap_seconds": 0.8,
+    "duration_seconds": 17.52,
+    "rms": 0.09513512010170408,
+    "peak": 0.597808837890625,
+    "finite": true,
+    "non_silent": true
+  },
+  "combined_asr": {
+    "engine": "sherpa-onnx-sense-voice-int8-2024-07-17",
+    "transcript": "雨声渐静旧钟楼里只剩一线昏黄的灯光我们得马上离开我听见钟声了两人同时回头尘封的钟摆动了起来",
+    "all_segments_present": true,
+    "verbatim_exact": false,
+    "observed_substitution": "渐近 -> 渐静"
+  },
+  "fail_closed_evidence": {
+    "rejected_text": "等等，我听见钟声了。",
+    "generated_codec_frames": 100,
+    "frame_cap": 100,
+    "wav_written": false,
+    "resolution": "retained meaning with previously accepted bounded text"
+  },
+  "playback": {
+    "authorized": true,
+    "completed": true,
+    "backend": "pw-play"
+  },
+  "owner_feedback": {
+    "natural": true,
+    "clear_and_identifiable": true,
+    "fixed_gap_accepted": false,
+    "gap_feedback": "间隔取决于段落，当前来说感觉短了点。",
+    "verbatim_zh": "声音自然，清晰可辨识，间隔取决于段落，当前来说感觉短了点。"
+  },
+  "claims": {
+    "mapping_and_acceptance_bound": true,
+    "all_segments_natural_eos": true,
+    "wav_machine_gate_passed": true,
+    "all_story_content_present_in_asr": true,
+    "verbatim_asr_verified": false,
+    "playback_completed": true,
+    "owner_voice_quality_accepted": true,
+    "owner_transition_pacing_accepted": false,
+    "owner_accepted": false,
+    "chapter_pipeline_admitted": false
+  },
+  "next_gate": "paragraph_aware_dynamic_pause_policy"
+}

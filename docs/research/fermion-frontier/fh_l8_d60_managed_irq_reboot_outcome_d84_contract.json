@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-MANAGED-IRQ-REBOOT-OUTCOME-D84-V1",
+  "baseline_commit": "9d1b83d0b71f10f1bad6d4d1f5087fae5ab3963e",
+  "source_pins": {
+    "FH_L8_D60_MANAGED_IRQ_BOOT_PLAN_ZH.md": "9761909a1b932584614aac79e5b8e03be8d57a8e7332b0aa100ac8aef4f0b7bb",
+    "fh_l8_d60_isolation_transaction_d82r_contract.json": "1ebafbbb43795d6b4416dbe6d8add5366f73bd68cfe780f85b45d04e5e1a880c",
+    "fh_l8_d60_isolation_transaction_d82r_result.json": "290b1ec2434785432f9edaf07384e83b80c59ddcc8b8f23a1355134ddb21c123",
+    "fh_l8_d60_runtime_rule_precommit_d83_contract.json": "1397d8e37e0ec1726ec358901909024e6079c7bb7bca58201082c561fabea433",
+    "fh_l8_d60_runtime_rule_precommit_d83_result.json": "3dc24d7b21b65d1e982d6b9226cae0c93bc94f00d584ea5dfd372de056eafa47"
+  },
+  "reboot_acceptance_rule": {
+    "required_cmdline_token": "isolcpus=managed_irq,15",
+    "target_irq": 175,
+    "target_irq_action": "nvme0q15",
+    "target_cpu": 15,
+    "effective_affinity_must_exclude_target": true,
+    "configured_affinity_must_exclude_target": true
+  },
+  "selected_successor_boot_candidate": {
+    "required_cmdline_tokens": ["irqaffinity=0-14", "isolcpus=managed_irq,15"],
+    "authorized_by_pinned_boot_plan": true,
+    "executed_in_this_unit": false
+  },
+  "observed_snapshot": {
+    "kernel_release": "7.0.0-29-generic",
+    "cmdline_token_present": true,
+    "target_irq_action": "nvme0q15",
+    "nvme_queue_count": 16,
+    "configured_affinity_list": "15",
+    "effective_affinity_list": "15",
+    "target_cpu_thread_siblings_list": "15",
+    "target_cpu_online": true,
+    "transaction_state_absent": true,
+    "target_cgroup_absent": true,
+    "noninteractive_host_admin_available": false
+  },
+  "authority": {
+    "observation_only": true,
+    "host_mutations_executed": 0,
+    "timing_measurements_executed": 0,
+    "scientific_kernel_calls_executed": 0,
+    "runtime_lock_precommitted": false,
+    "measurement_authorized": false,
+    "numeric_runtime_seconds_proven": false,
+    "full53_execution_authorized": false
+  }
+}

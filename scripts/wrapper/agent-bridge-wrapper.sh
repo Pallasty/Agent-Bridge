@@ -230,6 +230,10 @@ machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}
 
 # Always-on flags
 export AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-all}"
+# Deploys install this adapter from the same repository revision as
+# agent-bridge.real. A caller may still override it explicitly for an
+# alternate checkout or test fixture.
+export AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT="${AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT:-$HOME/.local/share/ab-tts/audio_embody.py}"
 
 # v22 Phase 2.4 — α-α SVD warm-start projection defaults.
 # When AB_SUBSTRATE is opted in (manually or by future wrapper change),

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_source_configuration_adoption.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "source", "scope", "environment", "evidence_files", "blockers", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_source_configuration_adoption.v1"},
+    "status": {"const": "story_fixture_configuration_ready_source_pending"},
+    "decision": {"const": {"configuration_adoptable": true, "source_adopted": false, "deployment_dry_run_admitted": false}},
+    "source": {"type": "object", "required": ["source_commit", "origin_master_commit", "source_commit_in_origin_master"], "properties": {"source_commit": {"const": "26334149d2fc685501289b16ca5552b59a72c56a"}, "origin_master_commit": {"const": "9b198da9571d8a6b2975161ce1e87b50ee6a35eb"}, "source_commit_in_origin_master": {"const": false}}, "additionalProperties": false},
+    "scope": {"type": "object", "required": ["fixture_pilot_only", "general_novel_library_admitted", "source_root", "max_source_bytes"], "properties": {"fixture_pilot_only": {"const": true}, "general_novel_library_admitted": {"const": false}, "source_root": {"type": "string", "minLength": 1}, "max_source_bytes": {"const": 1048576}}, "additionalProperties": false},
+    "environment": {"type": "object", "minProperties": 12, "maxProperties": 12, "additionalProperties": {"type": "string", "minLength": 1}},
+    "evidence_files": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "object", "required": ["role", "path", "sha256", "sha256_verified"], "properties": {"role": {"type": "string"}, "path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "sha256_verified": {"const": true}}, "additionalProperties": false}},
+    "blockers": {"const": ["source_commit_not_in_origin_master"]},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 10, "additionalProperties": {"const": false}},
+    "next_gate": {"const": "story_source_origin_adoption"}
+  }
+}

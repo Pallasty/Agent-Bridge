@@ -1,5 +1,14 @@
 # Fermion frontier research takeover
 
+D84 records the post-reboot outcome of the managed-IRQ boot candidate: the command-line token is
+present, but NVMe IRQ175 remains exclusively affined to CPU15. The D82 isolation predicate and D83
+runtime lock therefore remain closed. See `FH_L8_D60_MANAGED_IRQ_REBOOT_OUTCOME_D84_ZH.md`.
+
+The D60 runtime-rule lane now has a fail-closed D83 precommit packet. It freezes the D82 empirical
+sampling/timeout policy but requires a fresh post-boot D82R isolation receipt and same-scope
+environment recapture. Neither is currently admitted, so runtime lock, measurement and full53
+authority remain closed. See `FH_L8_D60_RUNTIME_RULE_PRECOMMIT_D83_ZH.md`.
+
 Current independent-reference successor: `FH-L8-INDEPENDENT-REFERENCE-S0` closes the fixed
 uniform-supremum and ordinary-light-cone architectures and selects the state-specific per-step exact
 defect ledger. See `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`.
@@ -223,6 +232,28 @@ CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 
 49,844,224 cgroup bytes and 3.351 seconds, versus D54R's 46,612,480 bytes and 3.265 seconds. This
 host-level spread reinforces the existing boundary: both sets are empirical observations, not
 allocator/timing upper bounds, full-53 extrapolations or resource authority.
+
+D60 subsequently restricted runtime closure to either a proved static per-operation upper bound or
+a precommitted measurement-population/margin/timeout rule. D81 froze the latter rule form, all five
+operation populations and the capture-host identity, but correctly blocked on owner numeric policy
+and concurrent-load isolation. D82 now closes the owner-input portion: five classes each require
+459 fresh confirmatory samples, with 99% per-class coverage/confidence and a 95% family-wise lower
+bound; scalar margins, posthoc exclusions, retries and deadline extensions are forbidden. The claim
+remains an empirical admission envelope, not deterministic worst-case seconds.
+
+D82 also makes CPU isolation machine-checkable. The exact target is an isolated cgroup-v2 service
+partition on the no-SMT CPU15, with effective, exclusive-effective and process-affinity sets all
+equal to CPU15, root isolated membership and zero enumerable IRQ-affinity conflicts. Live preflight
+finds that root cpuset propagation and all target-service predicates are absent, so the decision is
+fail-closed and no measurement is authorized. Host-admin provisioning plus a fresh in-service D82
+receipt is the next gate; the old D81 session cgroup identity cannot be reused after that move.
+
+D82R supplies the reversible host transaction for that gate. It persists original root-cpuset and
+per-IRQ state before mutation, supports plan/apply/verify/run/rollback, automatically rolls back a
+partial apply and refuses to overwrite populated cgroups or externally drifted IRQ affinity. Nine
+simulation tests pass. The live apply invocation stopped before mutation because the current EUID
+lacks a non-interactive host-admin credential; no state file or target cgroup exists and D83 remains
+closed.
 
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative

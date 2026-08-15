@@ -16,10 +16,13 @@
 
 use ab_core::{Error, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::net::IpAddr;
 use std::time::Duration;
 
 const API_BASE: &str = "https://api.cloudflare.com/client/v4";
 const USER_AGENT: &str = "agent-bridge-mcp";
+const KITESURF_RESPONSE_MAX_BYTES: usize = 12 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct CloudflareClient {
@@ -57,6 +60,22 @@ pub struct R2Bucket {
     pub creation_date: String,
     pub location: Option<String>,
     pub storage_class: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KitesurfSnapshotRequest {
+    pub url: String,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub wait_until: String,
+    pub timeout_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KitesurfSnapshot {
+    pub source_url: String,
+    pub screenshot_base64: String,
+    pub browser_ms_used: Option<u64>,
 }
 
 impl CloudflareClient {
@@ -166,6 +185,203 @@ impl CloudflareClient {
             .map(|a| a.iter().map(parse_r2_bucket).collect())
             .unwrap_or_default())
     }
+
+    /// Capture a stateless, read-only screenshot through Cloudflare
+    /// Browser Run's Kitesurf beta. Authentication state, cookies, custom
+    /// headers and arbitrary script injection are intentionally absent from
+    /// this first integration slice.
+    pub async fn kitesurf_snapshot(
+        &self,
+        request: &KitesurfSnapshotRequest,
+    ) -> Result<KitesurfSnapshot> {
+        let target = validate_kitesurf_target(&request.url)?;
+        let acct = self.account_id()?;
+        if acct.is_empty()
+            || !acct
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err(Error::Backend(
+                "CLOUDFLARE_ACCOUNT_ID contains unsupported characters".into(),
+            ));
+        }
+        let endpoint =
+            format!("{API_BASE}/accounts/{acct}/browser-run/screenshot?browser=kitesurf");
+        let payload = json!({
+            "url": target.as_str(),
+            "viewport": {
+                "width": request.viewport_width.clamp(320, 3840),
+                "height": request.viewport_height.clamp(240, 2160)
+            },
+            "gotoOptions": {
+                "waitUntil": normalized_wait_until(&request.wait_until),
+                "timeout": request.timeout_ms.clamp(1_000, 45_000)
+            }
+        });
+
+        let mut response = self
+            .auth_headers(self.http.post(endpoint).json(&payload))
+            .header("Accept", "image/png")
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await
+            .map_err(|e| Error::Backend(format!("cloudflare kitesurf screenshot send: {e}")))?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let browser_ms_used = response
+            .headers()
+            .get("X-Browser-Ms-Used")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        if response.content_length().unwrap_or(0) > KITESURF_RESPONSE_MAX_BYTES as u64 {
+            return Err(Error::Backend(format!(
+                "cloudflare kitesurf screenshot response exceeds {} bytes",
+                KITESURF_RESPONSE_MAX_BYTES
+            )));
+        }
+        let mut body = Vec::with_capacity(
+            response
+                .content_length()
+                .unwrap_or(0)
+                .min(KITESURF_RESPONSE_MAX_BYTES as u64) as usize,
+        );
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| Error::Backend(format!("cloudflare kitesurf screenshot body: {e}")))?
+        {
+            if body.len().saturating_add(chunk.len()) > KITESURF_RESPONSE_MAX_BYTES {
+                return Err(Error::Backend(format!(
+                    "cloudflare kitesurf screenshot response exceeds {} bytes",
+                    KITESURF_RESPONSE_MAX_BYTES
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            let message = serde_json::from_slice::<serde_json::Value>(&body)
+                .ok()
+                .map(|value| cloudflare_error_message(&value).to_string())
+                .unwrap_or_else(|| "request failed without an error message".to_string());
+            return Err(Error::Backend(format!(
+                "cloudflare kitesurf screenshot http {status}: {message}"
+            )));
+        }
+        parse_kitesurf_screenshot(
+            target.as_str(),
+            browser_ms_used,
+            content_type.as_deref(),
+            &body,
+        )
+    }
+}
+
+fn normalized_wait_until(value: &str) -> &'static str {
+    match value {
+        "load" => "load",
+        "networkidle0" => "networkidle0",
+        "networkidle2" => "networkidle2",
+        _ => "domcontentloaded",
+    }
+}
+
+fn validate_kitesurf_target(raw: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(raw)
+        .map_err(|e| Error::InvalidArgument(format!("invalid Kitesurf target URL: {e}")))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(Error::InvalidArgument(
+            "Kitesurf target URL must use http or https".into(),
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(Error::InvalidArgument(
+            "Kitesurf target URL must not contain credentials".into(),
+        ));
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| Error::InvalidArgument("Kitesurf target URL has no host".into()))?;
+    let lowered = host.trim_end_matches('.').to_ascii_lowercase();
+    if lowered == "localhost"
+        || lowered.ends_with(".localhost")
+        || lowered.ends_with(".local")
+        || lowered.ends_with(".internal")
+    {
+        return Err(Error::InvalidArgument(
+            "Kitesurf target must be a public web host".into(),
+        ));
+    }
+    let ip_literal = lowered
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(&lowered);
+    if let Ok(ip) = ip_literal.parse::<IpAddr>() {
+        let public = match ip {
+            IpAddr::V4(v4) => {
+                !(v4.is_private()
+                    || v4.is_loopback()
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_multicast()
+                    || v4.octets()[0] == 0)
+            }
+            IpAddr::V6(v6) => {
+                !(v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_multicast()
+                    || v6.is_unique_local()
+                    || v6.is_unicast_link_local())
+            }
+        };
+        if !public {
+            return Err(Error::InvalidArgument(
+                "Kitesurf target must not use a private or local IP address".into(),
+            ));
+        }
+    }
+    Ok(url)
+}
+
+fn cloudflare_error_message(value: &serde_json::Value) -> &str {
+    value
+        .get("errors")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|errors| errors.first())
+        .and_then(|error| error.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("request failed without an error message")
+}
+
+fn parse_kitesurf_screenshot(
+    source_url: &str,
+    browser_ms_used: Option<u64>,
+    content_type: Option<&str>,
+    body: &[u8],
+) -> Result<KitesurfSnapshot> {
+    if content_type
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        != Some("image/png")
+    {
+        return Err(Error::Backend(format!(
+            "cloudflare kitesurf screenshot returned unsupported content type: {}",
+            content_type.unwrap_or("missing")
+        )));
+    }
+    if !body.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(Error::Backend(
+            "cloudflare kitesurf screenshot returned invalid PNG data".into(),
+        ));
+    }
+    Ok(KitesurfSnapshot {
+        source_url: source_url.to_string(),
+        screenshot_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, body),
+        browser_ms_used,
+    })
 }
 
 fn parse_zone(v: &serde_json::Value) -> ZoneSummary {
@@ -329,5 +545,73 @@ mod tests {
         let b = parse_r2_bucket(&v);
         assert_eq!(b.name, "mybucket");
         assert!(b.location.is_none());
+    }
+
+    #[test]
+    fn kitesurf_target_accepts_public_http_and_https() {
+        assert_eq!(
+            validate_kitesurf_target("https://example.com/path")
+                .unwrap()
+                .as_str(),
+            "https://example.com/path"
+        );
+        assert!(validate_kitesurf_target("http://example.com").is_ok());
+    }
+
+    #[test]
+    fn kitesurf_target_rejects_credentials_local_hosts_and_non_web_schemes() {
+        for target in [
+            "file:///etc/passwd",
+            "https://user:secret@example.com",
+            "http://localhost:8080",
+            "http://service.internal",
+            "http://127.0.0.1",
+            "http://10.0.0.8",
+            "http://[::1]",
+            "http://[fe80::1]",
+        ] {
+            assert!(
+                validate_kitesurf_target(target).is_err(),
+                "target should be rejected: {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn kitesurf_screenshot_parser_requires_png_evidence() {
+        let png = b"\x89PNG\r\n\x1a\npayload";
+        let snapshot =
+            parse_kitesurf_screenshot("https://example.com/", Some(321), Some("image/png"), png)
+                .expect("valid screenshot");
+        assert_eq!(snapshot.browser_ms_used, Some(321));
+        assert_eq!(
+            base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                snapshot.screenshot_base64
+            )
+            .unwrap(),
+            png
+        );
+        assert!(parse_kitesurf_screenshot(
+            "https://example.com/",
+            None,
+            Some("application/json"),
+            png
+        )
+        .is_err());
+        assert!(parse_kitesurf_screenshot(
+            "https://example.com/",
+            None,
+            Some("image/png"),
+            b"not png"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn kitesurf_wait_until_fails_to_safe_default() {
+        assert_eq!(normalized_wait_until("load"), "load");
+        assert_eq!(normalized_wait_until("networkidle0"), "networkidle0");
+        assert_eq!(normalized_wait_until("unexpected"), "domcontentloaded");
     }
 }

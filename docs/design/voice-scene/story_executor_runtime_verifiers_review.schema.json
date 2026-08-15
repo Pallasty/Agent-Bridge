@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_runtime_verifiers_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "boundaries", "blockers", "implementation_present", "configuration_installed", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_runtime_verifiers_review.v1"},
+    "status": {"const": "story_executor_runtime_verifiers_reviewable"},
+    "decision": {"const": "verifier_source_accepted_runtime_configuration_blocked"},
+    "evidence": {"type": "object"},
+    "boundaries": {"const": {"constant_time_mac_comparison": true, "domain_separated_canonical_message": true, "executor_view_exactly_bound": true, "all_model_files_stream_hashed": true, "model_symlinks_rejected": true, "nonce_path_fixed": true, "secret_loading_absent": true, "executor_import_absent": true, "model_runtime_import_absent": true, "nonce_database_creation_absent": true, "cli_entrypoint_absent": true}},
+    "blockers": {"const": ["secure_authority_key_not_installed", "nonce_store_parent_not_installed", "executor_composition_entrypoint_not_implemented"]},
+    "implementation_present": {"const": true}, "configuration_installed": {"const": false}, "execution_authorized": {"const": false},
+    "runtime_effects": {"const": {"loaded_secret": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false}},
+    "review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"authority_verifier_implemented": true, "model_bundle_verifier_implemented": true, "fixed_nonce_path_adapter_implemented": true, "secure_configuration_installed": false, "executor_composed": false, "real_model_executed": false}},
+    "next_gate": {"const": "story_executor_secure_runtime_composition_implementation_review"}
+  },
+  "additionalProperties": false
+}

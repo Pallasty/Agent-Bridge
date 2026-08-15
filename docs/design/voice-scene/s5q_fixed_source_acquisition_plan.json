@@ -1,0 +1,153 @@
+{
+  "schema": "agent_bridge.voice_fixed_source_acquisition_plan.v1",
+  "status": "offline_plan_ready",
+  "official_model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "revision": "6c3e96b6a2c593ce3e546ee699a5d944de81850e",
+  "revision_immutable": true,
+  "destination": "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e",
+  "current_onnx_snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "small_files": [
+    {
+      "path": ".gitattributes",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "README.md",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "config.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "generation_config.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "merges.txt",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "preprocessor_config.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "vocab.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "speech_tokenizer/config.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "speech_tokenizer/configuration.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    },
+    {
+      "path": "speech_tokenizer/preprocessor_config.json",
+      "expected_sha256": null,
+      "hash_state": "pending_fixed_revision_offline_acquisition"
+    }
+  ],
+  "weights": {
+    "authorized": false,
+    "download_command_emitted": false,
+    "files": [
+      {
+        "path": "model.safetensors",
+        "expected_bytes": 3833402552
+      },
+      {
+        "path": "speech_tokenizer/model.safetensors",
+        "expected_bytes": 682293092
+      }
+    ],
+    "total_bytes": 4515695644
+  },
+  "commands": {
+    "small_files_only_argv": [
+      "hf",
+      "download",
+      "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+      "--revision",
+      "6c3e96b6a2c593ce3e546ee699a5d944de81850e",
+      "--include",
+      ".gitattributes",
+      "--include",
+      "README.md",
+      "--include",
+      "config.json",
+      "--include",
+      "generation_config.json",
+      "--include",
+      "merges.txt",
+      "--include",
+      "preprocessor_config.json",
+      "--include",
+      "tokenizer_config.json",
+      "--include",
+      "vocab.json",
+      "--include",
+      "speech_tokenizer/config.json",
+      "--include",
+      "speech_tokenizer/configuration.json",
+      "--include",
+      "speech_tokenizer/preprocessor_config.json",
+      "--local-dir",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e"
+    ],
+    "post_download_hash_argv": [
+      "sha256sum",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/.gitattributes",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/README.md",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/config.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/generation_config.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/merges.txt",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/preprocessor_config.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/tokenizer_config.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/vocab.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/speech_tokenizer/config.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/speech_tokenizer/configuration.json",
+      "/4TNVMe2/aiot_weights/qwen3_tts/original/Qwen3-TTS-12Hz-1.7B-CustomVoice/6c3e96b6a2c593ce3e546ee699a5d944de81850e/speech_tokenizer/preprocessor_config.json"
+    ],
+    "weight_download_command": null
+  },
+  "disk_preflight": {
+    "available_bytes": 1677395083264,
+    "minimum_workspace_reserve_bytes": 137438953472,
+    "reserve_policy": "planning_floor_not_an_export_size_estimate",
+    "passes": true
+  },
+  "blockers": [
+    "fixed_revision_sha256_ledger_pending_offline_acquisition",
+    "small_files_not_downloaded",
+    "fixed_revision_weights_not_authorized",
+    "fixed_source_reexport_not_executed",
+    "parity_not_reverified"
+  ],
+  "runtime_effects": {
+    "network_requests": false,
+    "created_destination": false,
+    "downloaded_small_files": false,
+    "downloaded_weights": false,
+    "executed_converter": false,
+    "executed_onnx_graphs": false,
+    "replaced_current_snapshot": false,
+    "used_gpu": false,
+    "played_audio": false
+  }
+}

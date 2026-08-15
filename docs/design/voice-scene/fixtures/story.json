@@ -1,0 +1,88 @@
+{
+  "schema": "agent_bridge.voice_scene.v0",
+  "scene": {
+    "scene_id": "scene_story_fixture",
+    "mode": "story",
+    "source_id": "source_story_fixture",
+    "canonical_branch_id": "branch_canonical",
+    "policy_profile": "story_s0_static"
+  },
+  "sources": [
+    {
+      "source_id": "source_story_fixture",
+      "kind": "novel",
+      "uri": "fixture://story.txt",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "version": "fixture-v1",
+      "consent_status": "not_applicable"
+    }
+  ],
+  "speakers": [
+    {
+      "speaker_id": "character_lin",
+      "kind": "character",
+      "display_name": "林默",
+      "aliases": ["林默"],
+      "identity_status": "source_grounded"
+    }
+  ],
+  "voice_profiles": [
+    {
+      "voice_profile_id": "voice_lin_v1",
+      "speaker_id": "character_lin",
+      "version": 1,
+      "backend": "unassigned",
+      "model": "unassigned",
+      "voice": "unassigned",
+      "language": "zh",
+      "audition_status": "needs_review"
+    }
+  ],
+  "branches": [
+    {
+      "branch_id": "branch_canonical",
+      "kind": "canonical",
+      "parent_branch_id": null,
+      "fork_event_id": null
+    }
+  ],
+  "timeline": [
+    {
+      "event_id": "event_story_0001",
+      "sequence": 1,
+      "idempotency_key": "story-fixture:1",
+      "branch_id": "branch_canonical",
+      "event_type": "utterance",
+      "source_ref": {
+        "source_id": "source_story_fixture",
+        "locator": "chapter=1;paragraph=1"
+      },
+      "utterance": {
+        "speaker_id": "character_lin",
+        "text": "夜色沉了下来。",
+        "language": "zh",
+        "origin": "source"
+      }
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim_story_0001",
+      "kind": "source_truth",
+      "text": "夜色沉了下来。",
+      "branch_id": "branch_canonical",
+      "evidence_refs": ["event_story_0001"],
+      "derived_from_claim_ids": [],
+      "confidence": 1.0,
+      "counter_evidence_refs": []
+    }
+  ],
+  "runtime_boundary": {
+    "emits_audio": false,
+    "records_audio": false,
+    "writes_memory": false,
+    "writes_forum": false,
+    "mutates_runtime": false,
+    "downloads_models": false
+  }
+}

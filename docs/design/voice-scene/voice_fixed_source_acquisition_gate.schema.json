@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_fixed_source_acquisition_gate.schema.json",
+  "title": "Agent-Bridge fixed-source voice acquisition gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "official_model_id",
+    "official_revision",
+    "source",
+    "current_onnx_snapshot",
+    "weight_payload_fixed_revision_equivalent",
+    "packaging_exact_fixed_revision",
+    "conversion_ready",
+    "weights",
+    "small_files",
+    "missing_files",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_fixed_source_acquisition_gate.v1"
+    },
+    "status": {
+      "enum": [
+        "blocked",
+        "weight_payload_fixed_revision_verified_packaging_divergent"
+      ]
+    },
+    "official_model_id": {
+      "const": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    },
+    "official_revision": {
+      "const": "6c3e96b6a2c593ce3e546ee699a5d944de81850e"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "declared_revision",
+        "declared_revision_immutable",
+        "snapshot",
+        "isolated_from_current_onnx"
+      ],
+      "properties": {
+        "provider": {"const": "modelscope"},
+        "declared_revision": {"const": "master"},
+        "declared_revision_immutable": {"const": false},
+        "snapshot": {"type": "string", "minLength": 1},
+        "isolated_from_current_onnx": {"type": "boolean"}
+      }
+    },
+    "current_onnx_snapshot": {"type": "string", "minLength": 1},
+    "weight_payload_fixed_revision_equivalent": {"type": "boolean"},
+    "packaging_exact_fixed_revision": {"const": false},
+    "conversion_ready": {"const": false},
+    "weights": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "expected_bytes",
+          "actual_bytes",
+          "expected_sha256",
+          "actual_sha256",
+          "matches_official_fixed_revision",
+          "safetensors"
+        ],
+        "properties": {
+          "path": {"type": "string"},
+          "expected_bytes": {"type": "integer", "minimum": 1},
+          "actual_bytes": {"type": "integer", "minimum": 1},
+          "expected_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "actual_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "matches_official_fixed_revision": {"type": "boolean"},
+          "safetensors": {"type": "object"}
+        }
+      }
+    },
+    "small_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "missing_files": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hashed_weight_files",
+        "parsed_safetensors_headers",
+        "downloaded_files",
+        "created_model_files",
+        "executed_converter",
+        "executed_model",
+        "replaced_current_snapshot",
+        "used_gpu",
+        "played_audio"
+      ],
+      "properties": {
+        "hashed_weight_files": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "parsed_safetensors_headers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "downloaded_files": {"const": false},
+        "created_model_files": {"const": false},
+        "executed_converter": {"const": false},
+        "executed_model": {"const": false},
+        "replaced_current_snapshot": {"const": false},
+        "used_gpu": {"const": false},
+        "played_audio": {"const": false}
+      }
+    }
+  }
+}
