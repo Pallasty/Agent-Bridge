@@ -80,6 +80,121 @@ fn attach_verified_prompt_binding(failure: &mut RunFailure, prompt_binding: Valu
     }
 }
 
+fn lowercase_sha256(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_str).is_some_and(|value| {
+        value.len() == 64
+            && value
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+    })
+}
+
+fn validate_prompt_binding(binding: Option<&Value>, violations: &mut Vec<&'static str>) {
+    let Some(binding) = binding.filter(|value| value.is_object()) else {
+        violations.push("prompt_binding_missing");
+        return;
+    };
+    if binding.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.modelscope_abot_prompt_binding.v0")
+    {
+        violations.push("prompt_binding_schema_mismatch");
+    }
+    if binding.get("readback_observed").and_then(Value::as_bool) != Some(true) {
+        violations.push("prompt_readback_not_observed");
+    }
+    if binding.get("exact_match").and_then(Value::as_bool) != Some(true) {
+        violations.push("prompt_exact_match_not_verified");
+    }
+    if binding.get("raw_prompt_recorded").and_then(Value::as_bool) != Some(false) {
+        violations.push("raw_prompt_recording_boundary_violated");
+    }
+    let observed = binding.get("observed_sha256");
+    let expected = binding.get("expected_sha256");
+    if !lowercase_sha256(observed) || !lowercase_sha256(expected) {
+        violations.push("prompt_sha256_invalid");
+    } else if observed != expected {
+        violations.push("prompt_sha256_mismatch");
+    }
+}
+
+fn validate_abot_receipt(document: &Value) -> Value {
+    let schema = document.get("schema").and_then(Value::as_str);
+    let (document_kind, binding) = match schema {
+        Some("agent_bridge.modelscope_abot_run_once_receipt.v1") => {
+            let mut violations = Vec::new();
+            if document.get("status").and_then(Value::as_str) != Some("completed") {
+                violations.push("run_status_not_completed");
+            }
+            if document.get("lifecycle_closed").and_then(Value::as_bool) != Some(true) {
+                violations.push("runtime_lifecycle_not_closed");
+            }
+            let binding = document.get("binding");
+            if binding
+                .and_then(|value| value.get("status"))
+                .and_then(Value::as_str)
+                != Some("submission_bound_output_unverified")
+            {
+                violations.push("binding_status_mismatch");
+            }
+            if binding
+                .and_then(|value| value.get("world_semantics_verified"))
+                .and_then(Value::as_bool)
+                != Some(false)
+            {
+                violations.push("world_semantics_claim_exceeds_evidence");
+            }
+            validate_prompt_binding(
+                binding.and_then(|value| value.get("prompt_submission")),
+                &mut violations,
+            );
+            let run_prompt_sha256 = document.get("prompt_sha256");
+            let bound_prompt_sha256 = binding
+                .and_then(|value| value.get("prompt_submission"))
+                .and_then(|value| value.get("expected_sha256"));
+            if !lowercase_sha256(run_prompt_sha256) {
+                violations.push("run_prompt_sha256_invalid");
+            } else if run_prompt_sha256 != bound_prompt_sha256 {
+                violations.push("run_prompt_sha256_mismatch");
+            }
+            return validation_projection("success_receipt", violations);
+        }
+        Some("agent_bridge.modelscope_abot_prompt_binding_failure.v0") => {
+            ("prompt_binding_failure", document.get("prompt_binding"))
+        }
+        Some("agent_bridge.modelscope_abot_downstream_failure.v0") => {
+            ("downstream_failure", document.get("prompt_binding"))
+        }
+        Some("agent_bridge.modelscope_abot_failure_diagnostics.v1") => {
+            ("downstream_failure", document.get("prompt_binding"))
+        }
+        _ => {
+            return validation_projection("unknown", vec!["unsupported_document_schema"]);
+        }
+    };
+    let mut violations = Vec::new();
+    validate_prompt_binding(binding, &mut violations);
+    validation_projection(document_kind, violations)
+}
+
+fn validation_projection(document_kind: &str, violations: Vec<&'static str>) -> Value {
+    let accepted = violations.is_empty();
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_validation.v0",
+        "status": if accepted { "accepted" } else { "rejected" },
+        "document_kind": document_kind,
+        "violations": violations,
+        "claims": {
+            "prompt_submission_bound": accepted,
+            "world_semantics_verified": false,
+        },
+        "runtime_effects": {
+            "network_request_sent": false,
+            "browser_opened": false,
+            "task_state_written": false,
+        },
+    })
+}
+
 impl From<String> for RunFailure {
     fn from(message: String) -> Self {
         Self::new(message)
@@ -1571,6 +1686,41 @@ impl McpTool for ModelScopeAbotProviderStatusTool {
 
 pub struct ModelScopeAbotTaskStatusTool;
 
+pub struct ModelScopeAbotReceiptValidateTool;
+
+#[async_trait]
+impl McpTool for ModelScopeAbotReceiptValidateTool {
+    fn name(&self) -> &'static str {
+        "modelscope_abot_receipt_validate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Validate a ModelScope ABot success receipt or failure diagnostic locally. Read-only and offline: it never opens a browser, contacts the provider, or changes task state.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["document"],
+                "properties": {
+                    "document": {
+                        "type": "object",
+                        "description": "Structured run receipt or failure diagnostics. Do not include a raw prompt."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(document) = args.get("document") else {
+            return Ok(ToolResult::error("missing 'document'"));
+        };
+        Ok(ToolResult::structured_json(&validate_abot_receipt(
+            document,
+        )))
+    }
+}
+
 #[async_trait]
 impl McpTool for ModelScopeAbotTaskStatusTool {
     fn name(&self) -> &'static str {
@@ -1640,6 +1790,83 @@ mod tests {
         assert_eq!(request.observe_ms, 10_000);
         assert_eq!(request.prompt_sha256.len(), 64);
         assert!(!request.prompt_sha256.contains("sandstone"));
+    }
+
+    fn verified_binding() -> Value {
+        let request = RunRequest::parse(&valid_args()).expect("valid request");
+        prompt_binding_evidence(&json!(request.prompt), &request)
+    }
+
+    #[test]
+    fn receipt_validator_accepts_bounded_success_claim() {
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v1",
+            "status": "completed",
+            "lifecycle_closed": true,
+            "prompt_sha256": verified_binding()["expected_sha256"],
+            "binding": {
+                "status": "submission_bound_output_unverified",
+                "prompt_submission": verified_binding(),
+                "world_semantics_verified": false,
+            }
+        }));
+        assert_eq!(result["status"], "accepted");
+        assert_eq!(result["document_kind"], "success_receipt");
+        assert_eq!(result["claims"]["prompt_submission_bound"], true);
+        assert_eq!(result["claims"]["world_semantics_verified"], false);
+        assert_eq!(result["runtime_effects"]["network_request_sent"], false);
+    }
+
+    #[test]
+    fn receipt_validator_accepts_downstream_failure_binding() {
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        }));
+        assert_eq!(result["status"], "accepted");
+        assert_eq!(result["document_kind"], "downstream_failure");
+        assert_eq!(result["violations"], json!([]));
+    }
+
+    #[test]
+    fn receipt_validator_rejects_hash_drift_and_semantic_overclaim() {
+        let mut binding = verified_binding();
+        binding["observed_sha256"] = json!("0".repeat(64));
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v1",
+            "status": "completed",
+            "lifecycle_closed": true,
+            "prompt_sha256": verified_binding()["expected_sha256"],
+            "binding": {
+                "status": "submission_bound_output_unverified",
+                "prompt_submission": binding,
+                "world_semantics_verified": true,
+            }
+        }));
+        assert_eq!(result["status"], "rejected");
+        let violations = result["violations"].as_array().expect("violations");
+        assert!(violations.contains(&json!("prompt_sha256_mismatch")));
+        assert!(violations.contains(&json!("world_semantics_claim_exceeds_evidence")));
+    }
+
+    #[test]
+    fn receipt_validator_rejects_unbound_or_unknown_documents() {
+        let unbound = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        }));
+        assert_eq!(unbound["status"], "rejected");
+        assert_eq!(unbound["violations"], json!(["prompt_binding_missing"]));
+
+        let unknown = validate_abot_receipt(&json!({
+            "schema": "example.unknown.v0",
+            "prompt_binding": verified_binding(),
+        }));
+        assert_eq!(unknown["document_kind"], "unknown");
+        assert_eq!(
+            unknown["violations"],
+            json!(["unsupported_document_schema"])
+        );
     }
 
     #[test]
