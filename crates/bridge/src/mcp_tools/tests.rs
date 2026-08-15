@@ -10068,6 +10068,18 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         .expect("modelscope_abot_provider_status schema");
     assert!(provider.description.contains("Read-only"));
     assert!(provider.description.contains("no network probe"));
+    let preview = abot_tools
+        .iter()
+        .find(|schema| schema.name == "modelscope_abot_attempt_preview")
+        .expect("modelscope_abot_attempt_preview schema");
+    assert!(preview.description.contains("Read-only"));
+    assert!(preview.description.contains("never accepts owner confirmation"));
+    assert!(preview.input_schema["properties"]
+        .get("owner_confirmed")
+        .is_none());
+    assert!(preview.input_schema["properties"]
+        .get("embodiment_lease_id")
+        .is_none());
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));
@@ -10082,6 +10094,9 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
     assert!(standard_tools
         .iter()
         .all(|schema| schema.name != "modelscope_abot_provider_status"));
+    assert!(standard_tools
+        .iter()
+        .all(|schema| schema.name != "modelscope_abot_attempt_preview"));
 }
 
 #[test]

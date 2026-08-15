@@ -89,6 +89,10 @@ impl RunRequest {
         if args.get("owner_confirmed").and_then(Value::as_bool) != Some(true) {
             return Err("owner_confirmed=true is required for live ModelScope execution".into());
         }
+        Self::parse_inputs(args)
+    }
+
+    fn parse_inputs(args: &Value) -> std::result::Result<Self, String> {
         let prompt = args
             .get("prompt")
             .and_then(Value::as_str)
@@ -114,6 +118,57 @@ impl RunRequest {
             prompt_sha256,
             observe_ms,
         })
+    }
+}
+
+fn attempt_task_state(task: &TaskRequest, record: Option<&Value>) -> Value {
+    let Some(record) = record else {
+        return json!({
+            "state": "new_request",
+            "idempotency_match": Value::Null,
+            "requires_new_request_id": false,
+            "external_execution_required": true,
+        });
+    };
+    if record.get("request_digest").and_then(Value::as_str) != Some(task.request_digest.as_str()) {
+        return json!({
+            "state": "idempotency_conflict",
+            "idempotency_match": false,
+            "requires_new_request_id": true,
+            "external_execution_required": false,
+        });
+    }
+    match record.get("status").and_then(Value::as_str) {
+        Some("completed") => json!({
+            "state": "completed_replay_available",
+            "idempotency_match": true,
+            "requires_new_request_id": false,
+            "external_execution_required": false,
+        }),
+        Some("failed") => json!({
+            "state": "failed_requires_new_request_id",
+            "idempotency_match": true,
+            "requires_new_request_id": true,
+            "external_execution_required": false,
+        }),
+        Some("running") if is_interrupted_running(record) => json!({
+            "state": "interrupted_requires_new_request_id",
+            "idempotency_match": true,
+            "requires_new_request_id": true,
+            "external_execution_required": false,
+        }),
+        Some("running") => json!({
+            "state": "task_in_progress",
+            "idempotency_match": true,
+            "requires_new_request_id": false,
+            "external_execution_required": false,
+        }),
+        Some(_) | None => json!({
+            "state": "task_record_invalid",
+            "idempotency_match": true,
+            "requires_new_request_id": true,
+            "external_execution_required": false,
+        }),
     }
 }
 
@@ -953,6 +1008,118 @@ pub struct ModelScopeAbotProviderStatusTool {
     hub: Hub,
 }
 
+pub struct ModelScopeAbotAttemptPreviewTool {
+    hub: Hub,
+}
+
+impl ModelScopeAbotAttemptPreviewTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ModelScopeAbotAttemptPreviewTool {
+    fn name(&self) -> &'static str {
+        "modelscope_abot_attempt_preview"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Preview one exact ModelScope ABot request identity and its current admission blockers. Read-only: never accepts owner confirmation, acquires a lease, writes a task, opens a browser, probes the network, or executes the provider.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["prompt", "request_id"],
+                "properties": {
+                    "prompt": {"type": "string", "minLength": 1, "maxLength": MAX_PROMPT_CHARS},
+                    "observe_ms": {"type": "integer", "minimum": MIN_OBSERVE_MS, "maximum": MAX_OBSERVE_MS, "default": DEFAULT_OBSERVE_MS},
+                    "embodiment_intent_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "request_id": {"type": "string", "minLength": 1, "maxLength": MAX_REQUEST_ID_CHARS}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let request = match RunRequest::parse_inputs(&args) {
+            Ok(request) => request,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let task = match TaskRequest::parse(&args, &request) {
+            Ok(Some(task)) => task,
+            Ok(None) => return Ok(ToolResult::error("missing non-empty 'request_id'")),
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let existing = match read_task(&task_path(&task.task_id)) {
+            Ok(record) => record,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let task_state = attempt_task_state(&task, existing.as_ref());
+        let provider_tasks = match read_provider_tasks() {
+            Ok(scan) => scan,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let recovery = provider_recovery_state(&provider_tasks.records, now_unix_ms());
+        let replay = task_state["state"].as_str() == Some("completed_replay_available");
+        let new_request = task_state["state"].as_str() == Some("new_request");
+        let mut blockers = Vec::new();
+        if !runtime_enabled() {
+            blockers.push("runtime_opt_in_missing");
+        }
+        if self.hub.browser.is_none() {
+            blockers.push("browser_backend_missing");
+        }
+        if self.hub.security.check(Cap::Browser).is_err() {
+            blockers.push("browser_capability_denied");
+        }
+        if !new_request && !replay {
+            blockers.push(
+                task_state["state"]
+                    .as_str()
+                    .unwrap_or("task_record_invalid"),
+            );
+        }
+        if new_request {
+            if provider_tasks.invalid_records > 0 {
+                blockers.push("task_history_invalid");
+            }
+            if recovery["cooldown"]["active"].as_bool() == Some(true) {
+                blockers.push("provider_cooldown_active");
+            }
+        }
+        Ok(ToolResult::structured_json(&json!({
+            "schema": "agent_bridge.modelscope_abot_attempt_preview.v0",
+            "provider_id": PROVIDER_ID,
+            "read_only": true,
+            "prompt_persisted": false,
+            "task_record_written": false,
+            "lease_acquired": false,
+            "browser_opened": false,
+            "network_probe_performed": false,
+            "external_execution_started": false,
+            "persistent_runtime_admitted": false,
+            "request": {
+                "request_id": task.request_id,
+                "task_id": task.task_id,
+                "request_digest": task.request_digest,
+                "prompt_sha256": request.prompt_sha256,
+                "observe_ms": request.observe_ms,
+                "embodiment_intent_bound": args.get("embodiment_intent_id").and_then(Value::as_str).is_some(),
+            },
+            "existing_task": task_state,
+            "provider_recovery": recovery,
+            "execution_preflight": {
+                "ready_for_authorized_call": blockers.is_empty(),
+                "blockers": blockers,
+                "requires_owner_confirmed_true": true,
+                "requires_active_body_write_lease": true,
+                "preview_grants_authority": false,
+            },
+        })))
+    }
+}
+
 impl ModelScopeAbotProviderStatusTool {
     pub fn new(hub: Hub) -> Self {
         Self { hub }
@@ -1198,6 +1365,65 @@ mod tests {
             classify_failure("Studio lifecycle did not close"),
             "provider_lifecycle"
         );
+    }
+
+    #[test]
+    fn attempt_preview_uses_execution_identity_without_owner_authority() {
+        let args = json!({
+            "prompt": "A sunlit sandstone temple",
+            "observe_ms": 10_000,
+            "request_id": "gate8c-preview-001",
+            "embodiment_intent_id": "intent-preview-001",
+        });
+        let request = RunRequest::parse_inputs(&args).expect("preview request inputs");
+        assert!(RunRequest::parse(&args)
+            .unwrap_err()
+            .contains("owner_confirmed"));
+        let task = TaskRequest::parse(&args, &request)
+            .expect("task request")
+            .expect("request id present");
+        assert_eq!(attempt_task_state(&task, None)["state"], "new_request");
+        assert_eq!(
+            attempt_task_state(&task, None)["external_execution_required"],
+            true
+        );
+        assert_eq!(request.prompt_sha256.len(), 64);
+        assert_eq!(task.request_digest.len(), 64);
+    }
+
+    #[test]
+    fn attempt_preview_distinguishes_replay_conflict_and_terminal_states() {
+        let mut args = valid_args();
+        args["request_id"] = json!("gate8c-preview-002");
+        let request = RunRequest::parse(&args).expect("run request");
+        let task = TaskRequest::parse(&args, &request)
+            .expect("task request")
+            .expect("request id present");
+        let running = running_task_record(&task, &request, &LeaseId::from_raw("lease-test"));
+        let completed = completed_task_record(running.clone(), json!({"receipt": true}));
+        assert_eq!(
+            attempt_task_state(&task, Some(&completed))["state"],
+            "completed_replay_available"
+        );
+
+        let failed = failed_task_record(running.clone(), "positive FPS missing");
+        assert_eq!(
+            attempt_task_state(&task, Some(&failed))["state"],
+            "failed_requires_new_request_id"
+        );
+
+        let mut interrupted = running.clone();
+        interrupted["process_instance_id"] = json!("mcp-prior-process");
+        assert_eq!(
+            attempt_task_state(&task, Some(&interrupted))["state"],
+            "interrupted_requires_new_request_id"
+        );
+
+        let mut conflict = running;
+        conflict["request_digest"] = json!("different");
+        let conflict = attempt_task_state(&task, Some(&conflict));
+        assert_eq!(conflict["state"], "idempotency_conflict");
+        assert_eq!(conflict["requires_new_request_id"], true);
     }
 
     fn terminal_record(
