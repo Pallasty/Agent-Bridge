@@ -113,12 +113,51 @@ pub(super) fn media_context_from_app_control(
 /// it cannot add control capabilities or fabricate a selection result.
 pub(super) fn mobile_projection_app_control_evidence(payload: &Value) -> Value {
     json!({
-        "action": "playlist_current",
+        "action": payload.get("action").cloned().unwrap_or(Value::Null),
         "read_only": true,
-        "verdict": "verified",
+        "verdict": payload.get("verdict").cloned().unwrap_or(Value::Null),
         "player": payload.get("player").cloned().unwrap_or(Value::Null),
-        "selection": payload.get("selection").cloned().unwrap_or(Value::Null)
+        "players": payload.get("players").cloned().unwrap_or(Value::Null),
+        "selection": payload.get("selection").cloned().unwrap_or(Value::Null),
+        "error": payload.get("error").cloned().unwrap_or(Value::Null)
     })
+}
+
+/// Map only target-selection failures into an honest projection replacement.
+/// Other app-control failures remain errors and must not mutate the projection.
+pub(super) fn mobile_projection_media_unavailable(payload: &Value) -> Option<Value> {
+    if payload.get("schema").and_then(Value::as_str) != Some("agent_bridge.app_control.v0")
+        || payload.get("action").and_then(Value::as_str) != Some("playlist_current")
+        || payload.get("verdict").and_then(Value::as_str) != Some("error")
+    {
+        return None;
+    }
+    let code = payload
+        .get("error")
+        .and_then(|value| value.get("code"))
+        .and_then(Value::as_str)?;
+    let (body, status) = match code {
+        "no_mpris_player" => (
+            "No active media player is available.",
+            "Start a player to sync media",
+        ),
+        "ambiguous_player" => (
+            "More than one media player is available.",
+            "Choose a player and sync again",
+        ),
+        "player_selection_incomplete" => (
+            "Media player state could not be observed completely.",
+            "Retry or choose a player explicitly",
+        ),
+        _ => return None,
+    };
+    Some(json!({
+        "code": code,
+        "title": "Media unavailable",
+        "body": body,
+        "status": status,
+        "media_context": Value::Null,
+    }))
 }
 
 fn format_media_clock(seconds: Option<f64>) -> String {
@@ -1784,6 +1823,51 @@ fn mobile_projection_registry(
     REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
+#[cfg(test)]
+pub(super) fn mobile_projection_test_seed_state(
+    session_id: &str,
+    now: i64,
+    frame: crate::mobile_projection::ProjectionFrame,
+) {
+    let state = Arc::new(MobileProjectionRuntimeState {
+        session_id: session_id.into(),
+        serial: "test-device".into(),
+        endpoint: "http://127.0.0.1:1".into(),
+        started_at: now,
+        expires_at: now + 60,
+        frame: std::sync::RwLock::new(frame),
+        pulls: std::sync::atomic::AtomicU64::new(1),
+        last_served_revision: std::sync::atomic::AtomicU64::new(4),
+        last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(now as u64),
+        text_submissions: std::sync::atomic::AtomicU64::new(0),
+        latest_text_observation: std::sync::RwLock::new(None),
+        stop_requested: std::sync::atomic::AtomicBool::new(false),
+        ended: std::sync::atomic::AtomicBool::new(false),
+    });
+    mobile_projection_registry()
+        .lock()
+        .unwrap()
+        .insert(session_id.into(), state);
+}
+
+#[cfg(test)]
+pub(super) fn mobile_projection_test_frame(
+    session_id: &str,
+) -> Option<crate::mobile_projection::ProjectionFrame> {
+    let registry = mobile_projection_registry().lock().unwrap();
+    let state = registry.get(session_id)?;
+    let frame = state.frame.read().unwrap().clone();
+    Some(frame)
+}
+
+#[cfg(test)]
+pub(super) fn mobile_projection_test_remove_state(session_id: &str) {
+    mobile_projection_registry()
+        .lock()
+        .unwrap()
+        .remove(session_id);
+}
+
 pub(super) fn mobile_projection_phase(
     pulls: u64,
     last_pull_unix_seconds: u64,
@@ -2368,15 +2452,55 @@ impl McpTool for MobileProjectionSyncMediaTool {
         let read_result = AppControlTool::new(self.hub.clone())
             .execute(read_args, ctx)
             .await?;
-        if read_result.is_error {
-            return Ok(read_result);
-        }
         let Some(payload) = read_result.content.iter().find_map(|block| match block {
             ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
             _ => None,
         }) else {
             return Ok(ToolResult::error("app_control returned no JSON payload"));
         };
+        if read_result.is_error {
+            let Some(unavailable) = mobile_projection_media_unavailable(&payload) else {
+                return Ok(read_result);
+            };
+            let update_args = json!({
+                "session_id": session_id,
+                "title": unavailable["title"],
+                "body": unavailable["body"],
+                "status": unavailable["status"],
+                "media_context": Value::Null,
+            });
+            let update_result = MobileProjectionUpdateTool::new(self.hub.clone())
+                .execute(update_args, ctx)
+                .await?;
+            if update_result.is_error {
+                return Ok(update_result);
+            }
+            let update_payload = update_result
+                .content
+                .iter()
+                .find_map(|block| match block {
+                    ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
+                    _ => None,
+                })
+                .unwrap_or_else(|| json!({"status": "updated"}));
+            return Ok(ToolResult::json_text(&json!({
+                "schema": "agent_bridge.mobile_projection_sync_media.v0",
+                "status": "media_unavailable",
+                "verdict": "verified",
+                "recover": "replan",
+                "session_id": session_id,
+                "media_context": Value::Null,
+                "unavailable": unavailable,
+                "app_control": mobile_projection_app_control_evidence(&payload),
+                "projection_update": update_payload,
+                "authority": {
+                    "attention": false,
+                    "memory": false,
+                    "sensor": false,
+                    "actuation": false
+                }
+            })));
+        }
         let observed_at = now;
         let context = match media_context_from_app_control(&payload, observed_at) {
             Ok(value) => value,

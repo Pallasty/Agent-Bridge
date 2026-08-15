@@ -7572,7 +7572,7 @@ impl McpTool for AppControlTool {
                     },
                     "player": {
                         "type": "string",
-                        "description": "Optional exact or unique-substring MPRIS player selector. Omit to select the first discovered player."
+                        "description": "Optional exact or unique-substring MPRIS player selector. With multiple players and no selector, only one uniquely Playing instance is selected; ambiguity fails closed."
                     },
                     "volume": {
                         "type": "number", "minimum": 0.0, "maximum": 1.0,

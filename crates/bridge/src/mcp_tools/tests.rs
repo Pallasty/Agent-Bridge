@@ -1785,12 +1785,14 @@ fn mobile_projection_sync_media_preserves_player_selection_evidence() {
         "action": "playlist_current",
         "player": "rhythmbox",
         "selection": {
-            "policy": "first_verified_playlist_current",
-            "attempts": [{
+            "policy": "unique_playing_player",
+            "observations": [{
                 "player": "chromium.instance",
-                "status": "observation_failed",
-                "error": {"code": "active_playlist_getter_failed"}
-            }]
+                "status": "observed",
+                "playback_status": "Paused"
+            }],
+            "playing_players": ["rhythmbox"],
+            "selected_player": "rhythmbox"
         }
     });
     let evidence = mobile_projection_app_control_evidence(&payload);
@@ -1800,12 +1802,138 @@ fn mobile_projection_sync_media_preserves_player_selection_evidence() {
     assert_eq!(evidence["player"], "rhythmbox");
     assert_eq!(
         evidence["selection"]["policy"],
-        "first_verified_playlist_current"
+        "unique_playing_player"
     );
     assert_eq!(
-        evidence["selection"]["attempts"][0]["player"],
+        evidence["selection"]["observations"][0]["player"],
         "chromium.instance"
     );
+}
+
+#[test]
+fn mobile_projection_sync_media_maps_selection_failures_to_stale_safe_replacement() {
+    for (code, expected_status) in [
+        ("no_mpris_player", "Start a player to sync media"),
+        ("ambiguous_player", "Choose a player and sync again"),
+        (
+            "player_selection_incomplete",
+            "Retry or choose a player explicitly",
+        ),
+    ] {
+        let payload = json!({
+            "schema": "agent_bridge.app_control.v0",
+            "status": "target_unavailable",
+            "verdict": "error",
+            "action": "playlist_current",
+            "players": ["one", "two"],
+            "selection": {"policy": "unique_playing_player"},
+            "error": {"code": code}
+        });
+        let unavailable = mobile_projection_media_unavailable(&payload).unwrap();
+        assert_eq!(unavailable["code"], code);
+        assert_eq!(unavailable["title"], "Media unavailable");
+        assert_eq!(unavailable["status"], expected_status);
+        assert!(unavailable["media_context"].is_null());
+        let evidence = mobile_projection_app_control_evidence(&payload);
+        assert_eq!(evidence["verdict"], "error");
+        assert_eq!(evidence["error"]["code"], code);
+    }
+
+    for payload in [
+        json!({"schema":"agent_bridge.app_control.v0","verdict":"error","action":"playlist_current","error":{"code":"timeout"}}),
+        json!({"schema":"agent_bridge.app_control.v0","verdict":"verified","action":"playlist_current","error":{"code":"ambiguous_player"}}),
+        json!({"schema":"agent_bridge.app_control.v0","verdict":"error","action":"state_get","error":{"code":"ambiguous_player"}}),
+    ] {
+        assert!(mobile_projection_media_unavailable(&payload).is_none());
+    }
+}
+
+#[tokio::test]
+async fn mobile_projection_sync_media_clears_stale_frame_on_player_ambiguity() {
+    let unique = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let temp_dir = std::env::temp_dir().join(format!("ab-mobile-media-unavailable-{unique}"));
+    let scripts_dir = temp_dir.join("scripts");
+    tokio::fs::create_dir_all(&scripts_dir).await.expect("mkdir");
+    tokio::fs::write(
+        scripts_dir.join("app_control.py"),
+        r#"import json
+print(json.dumps({
+  "schema": "agent_bridge.app_control.v0",
+  "status": "target_unavailable",
+  "verdict": "error",
+  "recover": "replan",
+  "domain": "media",
+  "action": "playlist_current",
+  "players": ["one", "two"],
+  "selection": {
+    "policy": "unique_playing_player",
+    "observations": [
+      {"player": "one", "status": "observed", "playback_status": "Paused"},
+      {"player": "two", "status": "observed", "playback_status": "Stopped"}
+    ],
+    "playing_players": []
+  },
+  "error": {"code": "ambiguous_player", "selector": None}
+}))
+raise SystemExit(2)
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let session_id = format!("media-unavailable-{unique}");
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let old_context = crate::mobile_projection::MediaContext {
+        schema: crate::mobile_projection::MEDIA_CONTEXT_SCHEMA.into(),
+        player: Some("stale-player".into()),
+        title: Some("Stale track".into()),
+        metadata_available: true,
+        observed_at_unix_seconds: now - 30,
+        ..Default::default()
+    };
+    let frame = crate::mobile_projection::ProjectionFrame::new(
+        &session_id,
+        4,
+        now + 60,
+        "Old media",
+        "Stale track",
+    )
+    .unwrap()
+    .with_media_context(Some(old_context))
+    .unwrap();
+    mobile_projection_test_seed_state(&session_id, now, frame);
+
+    let tool = MobileProjectionSyncMediaTool::new(Hub::builder().build());
+    let result = tool
+        .execute(
+            json!({"session_id": session_id, "cwd": temp_dir}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("sync result");
+    assert!(!result.is_error);
+    let payload = result_text_as_json(&result);
+    assert_eq!(payload["status"], "media_unavailable");
+    assert_eq!(payload["verdict"], "verified");
+    assert_eq!(payload["unavailable"]["code"], "ambiguous_player");
+    assert_eq!(payload["app_control"]["verdict"], "error");
+    let updated = mobile_projection_test_frame(&session_id).expect("updated frame");
+    assert_eq!(updated.revision, 5);
+    assert_eq!(updated.title, "Media unavailable");
+    assert!(updated.body.contains("More than one"));
+    assert!(updated.media_context.is_none());
+    mobile_projection_test_remove_state(&session_id);
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[test]
