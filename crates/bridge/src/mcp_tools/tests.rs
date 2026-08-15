@@ -10116,6 +10116,10 @@ fn system_control_plan_blocks_poweroff_without_confirm() {
     assert_eq!(status.argv, vec!["status", "summary"]);
     assert!(status.read_only);
 
+    let audio_status = system_control_plan("audio", "status", false, 40, None).unwrap();
+    assert_eq!(audio_status.argv, vec!["audio", "status"]);
+    assert!(audio_status.read_only);
+
     let snapshot = system_control_plan("status", "snapshot", false, 40, None).unwrap();
     assert_eq!(snapshot.argv, vec!["status", "snapshot"]);
     assert!(snapshot.read_only);
@@ -10201,6 +10205,10 @@ fn registry_exposes_system_control_to_codex_essential() {
 
     assert!(tool.description.contains("allowlisted"));
     assert!(tool.description.contains("audited"));
+    assert!(tool.input_schema["properties"]["action"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("audio status"));
     assert!(tool.input_schema["properties"].get("domain").is_some());
     assert!(tool.input_schema["properties"].get("action").is_some());
     assert!(tool.input_schema["properties"].get("confirm").is_some());

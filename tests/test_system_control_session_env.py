@@ -97,6 +97,44 @@ class SystemControlSessionEnvTests(unittest.TestCase):
                 "mic_muted": "no",
             })
 
+    def test_audio_status_returns_typed_default_device_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            self._write_executable(
+                fake_bin / "pactl",
+                """
+                #!/bin/sh
+                case "$*" in
+                    'get-sink-volume @DEFAULT_SINK@') printf '%s\n' 'Volume: front-left: 27525 / 42% / -22.75 dB' ;;
+                    'get-sink-mute @DEFAULT_SINK@') printf '%s\n' 'Mute: yes' ;;
+                    'get-source-mute @DEFAULT_SOURCE@') printf '%s\n' 'Mute: no' ;;
+                    *) exit 2 ;;
+                esac
+                """,
+            )
+            env = {
+                "HOME": str(root),
+                "PATH": f"{fake_bin}:/usr/bin:/bin",
+                "AB_SYSTEM_CONTROL_AUDIT_DIR": str(root / "audit"),
+            }
+            proc = subprocess.run(
+                ["bash", str(SCRIPT), "audio", "status"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(json.loads(proc.stdout), {
+                "schema": "agent_bridge.system_control.audio_status.v0",
+                "read_only": True,
+                "backend": "pactl",
+                "volume_percent": 42,
+                "muted": True,
+                "mic_muted": False,
+            })
+
 
 if __name__ == "__main__":
     unittest.main()

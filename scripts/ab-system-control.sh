@@ -302,6 +302,16 @@ macos_audio_action() {
     command -v osascript >/dev/null 2>&1 || { unsupported_action "audio.${1:-}" "osascript not found"; return; }
     local current next
     case "${1:-}" in
+        status)
+            local muted
+            current="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)" || return 1
+            muted="$(osascript -e 'output muted of (get volume settings)' 2>/dev/null)" || return 1
+            jq -n \
+                --argjson volume_percent "$current" \
+                --argjson muted "$muted" \
+                '{schema:"agent_bridge.system_control.audio_status.v0", read_only:true, backend:"osascript", volume_percent:$volume_percent, muted:$muted, mic_muted:null}'
+            return
+            ;;
         up)
             current="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null || printf 0)"
             case "$current" in ''|*[!0-9]*) current=0 ;; esac
@@ -328,7 +338,7 @@ macos_audio_action() {
             unsupported_action "audio.micmute" "macOS microphone mute has no built-in shell equivalent"
             return
             ;;
-        *) echo "usage: ab-system-control audio up|down|mute|micmute" >&2; return 2 ;;
+        *) echo "usage: ab-system-control audio status|up|down|mute|micmute" >&2; return 2 ;;
     esac
     local rc=$?
     if [ "$rc" -eq 0 ]; then
@@ -346,6 +356,24 @@ audio_action() {
         return
     fi
     case "${1:-}" in
+        status)
+            local volume_text sink_mute_text source_mute_text volume_percent muted mic_muted
+            volume_text="$(pactl get-sink-volume @DEFAULT_SINK@)" || return 1
+            sink_mute_text="$(pactl get-sink-mute @DEFAULT_SINK@)" || return 1
+            source_mute_text="$(pactl get-source-mute @DEFAULT_SOURCE@)" || return 1
+            volume_percent="$(printf '%s\n' "$volume_text" | sed -n 's/.* \([0-9][0-9]*\)% .*/\1/p' | head -1)"
+            [ -n "$volume_percent" ] || { echo "unable to parse default sink volume" >&2; return 1; }
+            muted=false
+            mic_muted=false
+            printf '%s\n' "$sink_mute_text" | grep -Eqi '^Mute:[[:space:]]*yes' && muted=true
+            printf '%s\n' "$source_mute_text" | grep -Eqi '^Mute:[[:space:]]*yes' && mic_muted=true
+            jq -n \
+                --argjson volume_percent "$volume_percent" \
+                --argjson muted "$muted" \
+                --argjson mic_muted "$mic_muted" \
+                '{schema:"agent_bridge.system_control.audio_status.v0", read_only:true, backend:"pactl", volume_percent:$volume_percent, muted:$muted, mic_muted:$mic_muted}'
+            return
+            ;;
         up)
             pactl set-sink-volume @DEFAULT_SINK@ +5% &&
             pactl set-sink-mute @DEFAULT_SINK@ 0
@@ -360,7 +388,7 @@ audio_action() {
         micmute)
             pactl set-source-mute @DEFAULT_SOURCE@ toggle
             ;;
-        *) echo "usage: ab-system-control audio up|down|mute|micmute" >&2; return 2 ;;
+        *) echo "usage: ab-system-control audio status|up|down|mute|micmute" >&2; return 2 ;;
     esac
     local rc=$?
     if [ "$rc" -eq 0 ]; then

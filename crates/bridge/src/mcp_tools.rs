@@ -1237,6 +1237,10 @@ fn system_control_plan(
             argv.extend([domain.to_string(), action.to_string()]);
             ("low", false)
         }
+        "audio" if action == "status" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", true)
+        }
         "audio" if matches!(action, "up" | "down" | "mute" | "micmute") => {
             argv.extend([domain.to_string(), action.to_string()]);
             ("low", false)
@@ -1405,7 +1409,7 @@ impl McpTool for SystemControlTool {
         ToolSchema {
             name: self.name().into(),
             description: "LLM-safe local Sway/system control wrapper. Calls the \
-                 allowlisted `ab-system-control` actions for display, audio, \
+                 allowlisted `ab-system-control` actions for display, audio observation/control, \
                  brightness, screenshot, WiFi, desktop doctor/heal/watchdog/repair, status summary/snapshot/record/history/diagnose/report, event timeline/diagnosis, lid, power button, and audit-tail; \
                  it never accepts arbitrary shell commands. Each action is audited \
                  by the local script. High-risk power off, desktop heal, desktop watchdog, and desktop repair require confirm=true."
@@ -1420,7 +1424,7 @@ impl McpTool for SystemControlTool {
                     },
                     "action": {
                         "type": "string",
-                        "description": "Allowed actions: display off|on; audio up|down|mute|micmute; brightness up|down; screenshot full|region; wifi networks|actions|reconnect|toggle|nmtui; desktop doctor|heal|watchdog|repair; events tail|diagnose; status summary|snapshot|record|history|diagnose|report; lid off|on; power press|off; audit tail."
+                        "description": "Allowed actions: display off|on; audio status|up|down|mute|micmute; brightness up|down; screenshot full|region; wifi networks|actions|reconnect|toggle|nmtui; desktop doctor|heal|watchdog|repair; events tail|diagnose; status summary|snapshot|record|history|diagnose|report; lid off|on; power press|off; audit tail."
                     },
                     "confirm": {
                         "type": "boolean",
@@ -1565,6 +1569,7 @@ impl McpTool for SystemControlTool {
         let (stdout, stdout_truncated) = lossy_truncate(&stdout_bytes);
         let (stderr, stderr_truncated) = lossy_truncate(&stderr_bytes);
 
+        let parsed_result = serde_json::from_str::<Value>(&stdout).ok();
         Ok(ToolResult::json_text(&json!({
             "schema": "agent_bridge.system_control.mcp_result.v0",
             "domain": domain,
@@ -1575,6 +1580,7 @@ impl McpTool for SystemControlTool {
             "argv": plan.argv,
             "exit_code": exit_code,
             "stdout": stdout,
+            "result": parsed_result,
             "stderr": stderr,
             "duration_ms": duration_ms,
             "truncated": stdout_truncated || stderr_truncated,
