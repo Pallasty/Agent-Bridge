@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Mutex;
@@ -18,7 +18,7 @@ const MAX_REQUEST_BYTES: usize = 6_000;
 const MAX_FRAME_BYTES: usize = 16_384;
 const MAX_TEXT_OBSERVATION_BYTES: usize = 4_096;
 const CLOCK_SKEW_SECONDS: i64 = 30;
-pub const TEXT_OBSERVATION_SCHEMA: &str = "agent_bridge.mobile_text_observation.v0";
+pub const TEXT_OBSERVATION_SCHEMA: &str = "agent_bridge.mobile_text_observation.v1";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MobileTextObservation {
@@ -26,6 +26,7 @@ pub struct MobileTextObservation {
     pub session_id: String,
     pub captured_at_unix_seconds: i64,
     pub locale: String,
+    pub submission_id: String,
     pub text: String,
     pub payload_sha256: String,
     pub retention_policy: String,
@@ -48,6 +49,7 @@ impl MobileTextObservation {
             || self.text.chars().count() > 1_000
             || self.locale.is_empty()
             || self.locale.len() > 35
+            || !is_lower_hex(&self.submission_id, 32)
             || (self.captured_at_unix_seconds - now).abs() > CLOCK_SKEW_SECONDS
         {
             bail!("invalid mobile text observation boundary");
@@ -69,6 +71,17 @@ pub enum ProjectionEvent {
         peer: SocketAddr,
         observation: MobileTextObservation,
     },
+    TextSubmissionDeduplicated {
+        peer: SocketAddr,
+        submission_id: String,
+        payload_sha256: String,
+    },
+}
+
+#[derive(Default)]
+struct TextSubmissionState {
+    seen_nonces: HashSet<String>,
+    accepted_submissions: HashMap<String, String>,
 }
 
 /// Read-only media state that may be rendered by a mobile projection node.
@@ -195,7 +208,7 @@ pub struct ProjectionSession {
     token: [u8; 32],
     session_id: String,
     expires_at: i64,
-    seen_text_nonces: Mutex<HashSet<String>>,
+    text_submission_state: Mutex<TextSubmissionState>,
 }
 
 impl ProjectionSession {
@@ -221,7 +234,7 @@ impl ProjectionSession {
             token: decode_lower_hex_32(token_hex)?,
             session_id: session_id.to_owned(),
             expires_at,
-            seen_text_nonces: Mutex::new(HashSet::new()),
+            text_submission_state: Mutex::new(TextSubmissionState::default()),
         })
     }
 
@@ -259,13 +272,22 @@ impl ProjectionSession {
             &self.session_id,
             self.expires_at,
             frame,
-            &self.seen_text_nonces,
+            &self.text_submission_state,
         )?;
         Ok(Some(match event {
             ProjectionEvent::FramePulled { .. } => ProjectionEvent::FramePulled { peer },
             ProjectionEvent::TextSubmitted { observation, .. } => {
                 ProjectionEvent::TextSubmitted { peer, observation }
             }
+            ProjectionEvent::TextSubmissionDeduplicated {
+                submission_id,
+                payload_sha256,
+                ..
+            } => ProjectionEvent::TextSubmissionDeduplicated {
+                peer,
+                submission_id,
+                payload_sha256,
+            },
         }))
     }
 }
@@ -276,7 +298,7 @@ fn serve_stream(
     session_id: &str,
     expires_at: i64,
     frame: &ProjectionFrame,
-    seen_text_nonces: &Mutex<HashSet<String>>,
+    text_submission_state: &Mutex<TextSubmissionState>,
 ) -> Result<ProjectionEvent> {
     let mut request = Vec::new();
     BufReader::new(&mut *stream)
@@ -337,19 +359,41 @@ fn serve_stream(
         let observation: MobileTextObservation =
             serde_json::from_slice(&payload).context("invalid mobile text observation payload")?;
         observation.validate(session_id, now)?;
-        let mut nonces = seen_text_nonces.lock().unwrap();
-        if !nonces.insert(fields[3].to_owned()) {
-            bail!("replayed mobile text observation");
-        }
         let digest = &observation.payload_sha256;
+        let mut state = text_submission_state.lock().unwrap();
+        let duplicate = match state.accepted_submissions.get(&observation.submission_id) {
+            Some(accepted_digest)
+                if constant_time_eq(accepted_digest.as_bytes(), digest.as_bytes()) =>
+            {
+                true
+            }
+            Some(_) => bail!("mobile text submission id payload mismatch"),
+            None => false,
+        };
+        if !state.seen_nonces.insert(fields[3].to_owned()) && !duplicate {
+            bail!("replayed mobile text observation nonce");
+        }
+        if !duplicate {
+            state
+                .accepted_submissions
+                .insert(observation.submission_id.clone(), digest.clone());
+        }
         let response_canonical =
             format!("ABT1R\n{session_id}\n{timestamp}\n{}\n{digest}", fields[3]);
         let mac = hex(&hmac_sha256(token, response_canonical.as_bytes()));
         writeln!(stream, "ACCEPTED {digest} {mac}")?;
         stream.flush()?;
-        return Ok(ProjectionEvent::TextSubmitted {
-            peer: stream.peer_addr()?,
-            observation,
+        return Ok(if duplicate {
+            ProjectionEvent::TextSubmissionDeduplicated {
+                peer: stream.peer_addr()?,
+                submission_id: observation.submission_id,
+                payload_sha256: observation.payload_sha256,
+            }
+        } else {
+            ProjectionEvent::TextSubmitted {
+                peer: stream.peer_addr()?,
+                observation,
+            }
         });
     }
 
@@ -554,7 +598,7 @@ mod tests {
                 session,
                 expires,
                 &frame_for_server,
-                &Mutex::new(HashSet::new()),
+                &Mutex::new(TextSubmissionState::default()),
             )
             .unwrap();
         });
@@ -592,6 +636,7 @@ mod tests {
             session_id: session_id.into(),
             captured_at_unix_seconds: timestamp,
             locale: "en-US".into(),
+            submission_id: "abcdef0123456789abcdef0123456789".into(),
             text: text.into(),
             payload_sha256: digest.clone(),
             retention_policy: "ephemeral_session_only".into(),
@@ -612,7 +657,7 @@ mod tests {
         let request = format!("ABT1 {session_id} {timestamp} {nonce} {payload} {mac}\n");
         let first_request = request.clone();
         let frame = ProjectionFrame::new(session_id, 1, timestamp + 60, "AB", "Ready").unwrap();
-        let seen = Mutex::new(HashSet::new());
+        let seen = Mutex::new(TextSubmissionState::default());
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -642,16 +687,26 @@ mod tests {
                 observation
             }
         );
-        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert_eq!(seen.lock().unwrap().seen_nonces.len(), 1);
+        assert_eq!(seen.lock().unwrap().accepted_submissions.len(), 1);
 
+        let replay_nonce = "fedcba9876543210fedcba9876543210";
+        let replay_canonical =
+            format!("ABT1\n{session_id}\n{timestamp}\n{replay_nonce}\n{payload}");
+        let replay_mac = hex(&hmac_sha256(&token, replay_canonical.as_bytes()));
+        let replay_request =
+            format!("ABT1 {session_id} {timestamp} {replay_nonce} {payload} {replay_mac}\n");
         let replay_listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let replay_address = replay_listener.local_addr().unwrap();
         let replay_client = thread::spawn(move || {
             let mut stream = TcpStream::connect(replay_address).unwrap();
-            stream.write_all(request.as_bytes()).unwrap();
+            stream.write_all(replay_request.as_bytes()).unwrap();
+            let mut response = String::new();
+            BufReader::new(stream).read_line(&mut response).unwrap();
+            response
         });
         let (mut replay_stream, _) = replay_listener.accept().unwrap();
-        let replay_error = serve_stream(
+        let replay_event = serve_stream(
             &mut replay_stream,
             &token,
             session_id,
@@ -659,9 +714,18 @@ mod tests {
             &frame,
             &seen,
         )
-        .unwrap_err()
-        .to_string();
-        replay_client.join().unwrap();
-        assert!(replay_error.contains("replayed mobile text observation"));
+        .unwrap();
+        let replay_response = replay_client.join().unwrap();
+        assert!(replay_response.starts_with(&format!("ACCEPTED {digest} ")));
+        assert_eq!(
+            replay_event,
+            ProjectionEvent::TextSubmissionDeduplicated {
+                peer: replay_stream.peer_addr().unwrap(),
+                submission_id: "abcdef0123456789abcdef0123456789".into(),
+                payload_sha256: digest,
+            }
+        );
+        assert_eq!(seen.lock().unwrap().seen_nonces.len(), 2);
+        assert_eq!(seen.lock().unwrap().accepted_submissions.len(), 1);
     }
 }

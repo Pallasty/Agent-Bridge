@@ -10080,6 +10080,12 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
     assert!(preview.input_schema["properties"]
         .get("embodiment_lease_id")
         .is_none());
+    let validator = abot_tools
+        .iter()
+        .find(|schema| schema.name == "modelscope_abot_receipt_validate")
+        .expect("modelscope_abot_receipt_validate schema");
+    assert!(validator.description.contains("Read-only and offline"));
+    assert!(validator.input_schema["properties"].get("document").is_some());
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));

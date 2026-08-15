@@ -1,10 +1,13 @@
 package dev.agentbridge.companion;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
+import android.speech.RecognizerIntent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -19,11 +22,13 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Locale;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
 public final class ProjectionActivity extends Activity {
+    private static final int DICTATE_DRAFT_REQUEST = 2401;
     private static final String HOST = "projection_host";
     private static final String PORT = "projection_port";
     private static final String TOKEN = "projection_token";
@@ -40,6 +45,7 @@ public final class ProjectionActivity extends Activity {
     private Button primary;
     private EditText textInput;
     private TextView textSubmitState;
+    private Button textSubmitButton;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -107,15 +113,56 @@ public final class ProjectionActivity extends Activity {
         textInput.setHint("Type a message (maximum 1000 characters)");
         textInput.setMaxLines(6);
         panel.addView(textInput);
-        Button submit = button("Submit text"); panel.addView(submit);
+        panel.addView(text("Dictation opens Android's visible system speech recognizer. Agent-Bridge receives no audio. Review and edit the draft before submitting.", 14, Typeface.NORMAL));
+        Button dictate = button("Dictate draft"); panel.addView(dictate);
+        textSubmitButton = button("Submit text"); panel.addView(textSubmitButton);
         textSubmitState = text("Nothing submitted", 14, Typeface.ITALIC); panel.addView(textSubmitState);
-        submit.setOnClickListener(new View.OnClickListener() {
+        dictate.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) { beginDictation(); }
+        });
+        textSubmitButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) { submitTextObservation(); }
         });
         primary = button("Disconnect"); panel.addView(primary);
         primary.setOnClickListener(new View.OnClickListener() { public void onClick(View view) { disconnect("Disconnected by you"); } });
         setContentView(scroll(panel));
         poll();
+    }
+
+    private void beginDictation() {
+        if (!connected || textInput == null) return;
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate a draft to review before submitting");
+        try {
+            textSubmitState.setText("Opening Android system dictation…");
+            startActivityForResult(intent, DICTATE_DRAFT_REQUEST);
+        } catch (ActivityNotFoundException error) {
+            textSubmitState.setText("System dictation is unavailable; type your draft instead");
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != DICTATE_DRAFT_REQUEST || !connected || textInput == null) return;
+        if (resultCode != RESULT_OK || data == null) {
+            textSubmitState.setText("Dictation cancelled; existing draft preserved");
+            return;
+        }
+        ArrayList<String> candidates =
+                data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+        String transcript = VoiceDraftPolicy.firstTranscript(candidates);
+        if (transcript.isEmpty()) {
+            textSubmitState.setText("No dictation result; existing draft preserved");
+            return;
+        }
+        String draft = VoiceDraftPolicy.mergeDraft(textInput.getText().toString(), transcript);
+        textInput.setText(draft);
+        textInput.setSelection(draft.length());
+        textSubmitState.setText("Draft updated locally; review it, then tap Submit text");
     }
 
     private void submitTextObservation() {
@@ -126,17 +173,18 @@ public final class ProjectionActivity extends Activity {
             textSubmitState.setText("Enter 1–1000 characters before submitting");
             return;
         }
+        byte[] submissionIdBytes = new byte[16]; random.nextBytes(submissionIdBytes);
+        final String submissionId = Hex.encode(submissionIdBytes);
+        TextObservationProtocol.validateSubmissionId(submissionId);
+        textSubmitButton.setEnabled(false);
         textSubmitState.setText("Submitting…");
         new Thread(new Runnable() { public void run() {
             try {
-                final long now = System.currentTimeMillis() / 1000L;
-                byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
-                final String nonce = Hex.encode(nonceBytes);
                 final String digest = TextObservationProtocol.payloadDigest(submitted);
                 JSONObject payload = new JSONObject();
                 payload.put("schema", TextObservationProtocol.SCHEMA);
                 payload.put("session_id", sessionId);
-                payload.put("captured_at_unix_seconds", now);
+                payload.put("submission_id", submissionId);
                 payload.put("locale", Locale.getDefault().toLanguageTag());
                 payload.put("text", submitted);
                 payload.put("payload_sha256", digest);
@@ -145,26 +193,42 @@ public final class ProjectionActivity extends Activity {
                 payload.put("attention_authority", false);
                 payload.put("memory_authority", false);
                 payload.put("actuation_authority", false);
-                String request = TextObservationProtocol.request(
-                        token, sessionId, now, nonce, payload.toString());
-                Socket socket = new Socket();
-                try {
-                    socket.connect(new InetSocketAddress(host, port), 2000);
-                    socket.setSoTimeout(2000);
-                    BufferedWriter writer = new BufferedWriter(
-                            new OutputStreamWriter(socket.getOutputStream(), "UTF-8"));
-                    writer.write(request); writer.write("\n"); writer.flush();
-                    String response = new BufferedReader(
-                            new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
-                    if (response == null) throw new IllegalArgumentException("empty acknowledgement");
-                    TextObservationProtocol.verifyAck(token, sessionId, now, nonce, digest, response);
-                } finally { socket.close(); }
+                Exception lastError = null;
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    final long now = System.currentTimeMillis() / 1000L;
+                    payload.put("captured_at_unix_seconds", now);
+                    byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
+                    final String nonce = Hex.encode(nonceBytes);
+                    String request = TextObservationProtocol.request(
+                            token, sessionId, now, nonce, payload.toString());
+                    Socket socket = new Socket();
+                    try {
+                        socket.connect(new InetSocketAddress(host, port), 2000);
+                        socket.setSoTimeout(2000);
+                        BufferedWriter writer = new BufferedWriter(
+                                new OutputStreamWriter(socket.getOutputStream(), "UTF-8"));
+                        writer.write(request); writer.write("\n"); writer.flush();
+                        String response = new BufferedReader(
+                                new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
+                        if (response == null)
+                            throw new IllegalArgumentException("empty acknowledgement");
+                        TextObservationProtocol.verifyAck(
+                                token, sessionId, now, nonce, digest, response);
+                        lastError = null;
+                        break;
+                    } catch (Exception error) {
+                        lastError = error;
+                    } finally { socket.close(); }
+                }
+                if (lastError != null) throw lastError;
                 handler.post(new Runnable() { public void run() {
                     textInput.setText("");
+                    textSubmitButton.setEnabled(true);
                     textSubmitState.setText("Accepted by this temporary Agent-Bridge session");
                 } });
             } catch (final Exception error) {
                 handler.post(new Runnable() { public void run() {
+                    textSubmitButton.setEnabled(true);
                     textSubmitState.setText("Not accepted; text remains on this device");
                 } });
             }

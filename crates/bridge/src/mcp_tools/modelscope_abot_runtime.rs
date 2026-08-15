@@ -21,6 +21,7 @@ const STUDIO_PROMPT_SELECTOR: &str = "textarea";
 const STUDIO_READY_TIMEOUT_MS: u64 = 45_000;
 const STUDIO_START_TIMEOUT_MS: u64 = 20_000;
 const MAX_PROVIDER_TASK_SCAN: usize = 256;
+const MAX_FAILURE_DIAGNOSTIC_FRAMES: usize = 16;
 const PROVIDER_COOLDOWN_STEPS_MS: &[u64] = &[5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -32,6 +33,178 @@ struct RunRequest {
     prompt: String,
     prompt_sha256: String,
     observe_ms: u64,
+}
+
+#[derive(Debug)]
+struct RunFailure {
+    message: String,
+    diagnostics: Option<Value>,
+}
+
+impl RunFailure {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            diagnostics: None,
+        }
+    }
+
+    fn with_diagnostics(message: impl Into<String>, diagnostics: Value) -> Self {
+        Self {
+            message: message.into(),
+            diagnostics: Some(diagnostics),
+        }
+    }
+}
+
+fn attach_verified_prompt_binding(failure: &mut RunFailure, prompt_binding: Value) {
+    match failure.diagnostics.take() {
+        Some(mut diagnostics) if diagnostics.is_object() => {
+            diagnostics["prompt_binding"] = prompt_binding;
+            failure.diagnostics = Some(diagnostics);
+        }
+        Some(diagnostics) => {
+            failure.diagnostics = Some(json!({
+                "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+                "prompt_binding": prompt_binding,
+                "downstream_diagnostics": diagnostics,
+            }));
+        }
+        None => {
+            failure.diagnostics = Some(json!({
+                "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+                "prompt_binding": prompt_binding,
+                "downstream_diagnostics": Value::Null,
+            }));
+        }
+    }
+}
+
+fn lowercase_sha256(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_str).is_some_and(|value| {
+        value.len() == 64
+            && value
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+    })
+}
+
+fn validate_prompt_binding(binding: Option<&Value>, violations: &mut Vec<&'static str>) {
+    let Some(binding) = binding.filter(|value| value.is_object()) else {
+        violations.push("prompt_binding_missing");
+        return;
+    };
+    if binding.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.modelscope_abot_prompt_binding.v0")
+    {
+        violations.push("prompt_binding_schema_mismatch");
+    }
+    if binding.get("readback_observed").and_then(Value::as_bool) != Some(true) {
+        violations.push("prompt_readback_not_observed");
+    }
+    if binding.get("exact_match").and_then(Value::as_bool) != Some(true) {
+        violations.push("prompt_exact_match_not_verified");
+    }
+    if binding.get("raw_prompt_recorded").and_then(Value::as_bool) != Some(false) {
+        violations.push("raw_prompt_recording_boundary_violated");
+    }
+    let observed = binding.get("observed_sha256");
+    let expected = binding.get("expected_sha256");
+    if !lowercase_sha256(observed) || !lowercase_sha256(expected) {
+        violations.push("prompt_sha256_invalid");
+    } else if observed != expected {
+        violations.push("prompt_sha256_mismatch");
+    }
+}
+
+fn validate_abot_receipt(document: &Value) -> Value {
+    let schema = document.get("schema").and_then(Value::as_str);
+    let (document_kind, binding) = match schema {
+        Some("agent_bridge.modelscope_abot_run_once_receipt.v1") => {
+            let mut violations = Vec::new();
+            if document.get("status").and_then(Value::as_str) != Some("completed") {
+                violations.push("run_status_not_completed");
+            }
+            if document.get("lifecycle_closed").and_then(Value::as_bool) != Some(true) {
+                violations.push("runtime_lifecycle_not_closed");
+            }
+            let binding = document.get("binding");
+            if binding
+                .and_then(|value| value.get("status"))
+                .and_then(Value::as_str)
+                != Some("submission_bound_output_unverified")
+            {
+                violations.push("binding_status_mismatch");
+            }
+            if binding
+                .and_then(|value| value.get("world_semantics_verified"))
+                .and_then(Value::as_bool)
+                != Some(false)
+            {
+                violations.push("world_semantics_claim_exceeds_evidence");
+            }
+            validate_prompt_binding(
+                binding.and_then(|value| value.get("prompt_submission")),
+                &mut violations,
+            );
+            let run_prompt_sha256 = document.get("prompt_sha256");
+            let bound_prompt_sha256 = binding
+                .and_then(|value| value.get("prompt_submission"))
+                .and_then(|value| value.get("expected_sha256"));
+            if !lowercase_sha256(run_prompt_sha256) {
+                violations.push("run_prompt_sha256_invalid");
+            } else if run_prompt_sha256 != bound_prompt_sha256 {
+                violations.push("run_prompt_sha256_mismatch");
+            }
+            return validation_projection("success_receipt", violations);
+        }
+        Some("agent_bridge.modelscope_abot_prompt_binding_failure.v0") => {
+            ("prompt_binding_failure", document.get("prompt_binding"))
+        }
+        Some("agent_bridge.modelscope_abot_downstream_failure.v0") => {
+            ("downstream_failure", document.get("prompt_binding"))
+        }
+        Some("agent_bridge.modelscope_abot_failure_diagnostics.v1") => {
+            ("downstream_failure", document.get("prompt_binding"))
+        }
+        _ => {
+            return validation_projection("unknown", vec!["unsupported_document_schema"]);
+        }
+    };
+    let mut violations = Vec::new();
+    validate_prompt_binding(binding, &mut violations);
+    validation_projection(document_kind, violations)
+}
+
+fn validation_projection(document_kind: &str, violations: Vec<&'static str>) -> Value {
+    let accepted = violations.is_empty();
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_validation.v0",
+        "status": if accepted { "accepted" } else { "rejected" },
+        "document_kind": document_kind,
+        "violations": violations,
+        "claims": {
+            "prompt_submission_bound": accepted,
+            "world_semantics_verified": false,
+        },
+        "runtime_effects": {
+            "network_request_sent": false,
+            "browser_opened": false,
+            "task_state_written": false,
+        },
+    })
+}
+
+impl From<String> for RunFailure {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for RunFailure {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +371,30 @@ fn strings_in(value: &Value, out: &mut Vec<String>) {
         Value::Object(map) => map.values().for_each(|value| strings_in(value, out)),
         _ => {}
     }
+}
+
+fn eval_string(value: &Value) -> Option<&str> {
+    match value {
+        Value::String(text) => Some(text),
+        Value::Array(values) => values.iter().find_map(eval_string),
+        Value::Object(map) => map.values().find_map(eval_string),
+        _ => None,
+    }
+}
+
+fn prompt_binding_evidence(value: &Value, request: &RunRequest) -> Value {
+    let observed = eval_string(value);
+    let observed_sha256 = observed.map(|text| format!("{:x}", Sha256::digest(text.as_bytes())));
+    json!({
+        "schema": "agent_bridge.modelscope_abot_prompt_binding.v0",
+        "selector": STUDIO_PROMPT_SELECTOR,
+        "readback_observed": observed.is_some(),
+        "exact_match": observed == Some(request.prompt.as_str()),
+        "observed_chars": observed.map(|text| text.chars().count()),
+        "observed_sha256": observed_sha256,
+        "expected_sha256": request.prompt_sha256,
+        "raw_prompt_recorded": false,
+    })
 }
 
 fn frame_values(value: &Value) -> Vec<Value> {
@@ -483,7 +680,9 @@ fn running_task_record(task: &TaskRequest, request: &RunRequest, lease_id: &Leas
 }
 
 fn classify_failure(error: &str) -> &'static str {
-    if error.contains("positive FPS") {
+    if error.contains("prompt binding") {
+        "prompt_binding"
+    } else if error.contains("positive FPS") || error.contains("candidate runtime frame") {
         "provider_timeout"
     } else if error.contains("stop action") || error.contains("lifecycle did not close") {
         "provider_lifecycle"
@@ -506,12 +705,217 @@ fn completed_task_record(mut record: Value, receipt: Value) -> Value {
     record
 }
 
-fn failed_task_record(mut record: Value, error: &str) -> Value {
+fn failed_task_record(mut record: Value, error: &str, diagnostics: Option<Value>) -> Value {
     record["status"] = json!("failed");
     record["failure_class"] = json!(classify_failure(error));
     record["error"] = json!(error);
+    record["diagnostics"] = diagnostics.unwrap_or(Value::Null);
     record["updated_at_unix_ms"] = json!(now_unix_ms());
     record
+}
+
+fn frame_host(url: &str) -> Option<String> {
+    let (_, remainder) = url.split_once("://")?;
+    let authority = remainder.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = if host_port.starts_with('[') {
+        host_port
+            .split_once(']')
+            .map(|(host, _)| format!("{host}]"))
+    } else {
+        Some(host_port.split(':').next()?.to_string())
+    }?;
+    (!host.is_empty()).then_some(host)
+}
+
+fn is_ignored_presentation_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "youtu.be"
+        || host == "youtube.com"
+        || host.ends_with(".youtube.com")
+        || host == "youtube-nocookie.com"
+        || host.ends_with(".youtube-nocookie.com")
+}
+
+fn is_candidate_runtime_frame(frame: &Value) -> bool {
+    if frame.get("parent_id").and_then(Value::as_str).is_none() {
+        return false;
+    }
+    !frame
+        .get("url")
+        .and_then(Value::as_str)
+        .and_then(frame_host)
+        .is_some_and(|host| is_ignored_presentation_host(&host))
+}
+
+fn child_frame_counts(frames: &[Value]) -> (usize, usize) {
+    let total = frames
+        .iter()
+        .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
+        .count();
+    let candidates = frames
+        .iter()
+        .filter(|frame| is_candidate_runtime_frame(frame))
+        .count();
+    (total, candidates)
+}
+
+fn diagnostic_status_signals(text: &str) -> Value {
+    let lower = text.to_lowercase();
+    json!({
+        "fps_token_present": lower.contains("fps"),
+        "queue_signal_present": lower.contains("queue") || lower.contains("排队"),
+        "loading_signal_present": lower.contains("loading") || lower.contains("加载") || lower.contains("分配"),
+        "error_signal_present": lower.contains("error") || lower.contains("failed") || lower.contains("失败") || lower.contains("错误"),
+    })
+}
+
+fn redacted_error(kind: &str, error: &str) -> Value {
+    json!({
+        "kind": kind,
+        "message_sha256": format!("{:x}", Sha256::digest(error.as_bytes())),
+    })
+}
+
+fn write_private_artifact(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+async fn capture_failure_diagnostics(
+    browser: &dyn BrowserBackend,
+    page: &PageId,
+    observed_child_frame_count: usize,
+    observed_candidate_frame_count: usize,
+    start_control_present_after_click: bool,
+    stop_control_present_after_click: bool,
+) -> Value {
+    let captured_at_unix_ms = now_unix_ms();
+    let mut frame_diagnostics = Vec::new();
+    let mut frame_list_error = None;
+    match browser.list_frames(page).await {
+        Ok(frames) => {
+            for frame in frame_values(&frames)
+                .into_iter()
+                .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
+                .take(MAX_FAILURE_DIAGNOSTIC_FRAMES)
+            {
+                let frame_id = frame.get("frame_id").and_then(Value::as_str);
+                let host = frame
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .and_then(frame_host);
+                let candidate_runtime_frame = is_candidate_runtime_frame(&frame);
+                let body_diagnostic = match if candidate_runtime_frame {
+                    Some(
+                        browser
+                            .eval_in_frame(
+                                page,
+                                frame_id,
+                                None,
+                                "document.body ? document.body.innerText : ''",
+                            )
+                            .await,
+                    )
+                } else {
+                    None
+                } {
+                    None => Value::Null,
+                    Some(Ok(value)) => {
+                        let mut strings = Vec::new();
+                        strings_in(&value, &mut strings);
+                        let text = strings.join("\n");
+                        json!({
+                            "text_chars": text.chars().count(),
+                            "text_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+                            "status_signals": diagnostic_status_signals(&text),
+                            "read_error": Value::Null,
+                        })
+                    }
+                    Some(Err(error)) => json!({
+                        "text_chars": Value::Null,
+                        "text_sha256": Value::Null,
+                        "status_signals": Value::Null,
+                        "read_error": redacted_error("frame_eval_failed", &error.to_string()),
+                    }),
+                };
+                frame_diagnostics.push(json!({
+                    "host": host,
+                    "role": if candidate_runtime_frame { "runtime_candidate" } else { "ignored_presentation" },
+                    "body": body_diagnostic,
+                }));
+            }
+        }
+        Err(error) => {
+            frame_list_error = Some(redacted_error("frame_list_failed", &error.to_string()))
+        }
+    }
+
+    let artifact_dir = cache_dir();
+    let screenshot = match browser.screenshot(page).await {
+        Ok(bytes) => {
+            let path = artifact_dir.join(format!("abot-failure-{captured_at_unix_ms}.png"));
+            match std::fs::create_dir_all(&artifact_dir)
+                .and_then(|_| write_private_artifact(&path, bytes.as_ref()))
+            {
+                Ok(()) => json!({
+                    "path": path,
+                    "sha256": format!("{:x}", Sha256::digest(bytes.as_ref())),
+                    "bytes": bytes.len(),
+                    "content_type": "image/png",
+                }),
+                Err(error) => {
+                    json!({"capture_error": format!("write failure screenshot: {error}")})
+                }
+            }
+        }
+        Err(error) => json!({"capture_error": format!("capture failure screenshot: {error}")}),
+    };
+
+    let main_page = match browser.extract_text(page).await {
+        Ok(text) => json!({
+            "text_chars": text.chars().count(),
+            "text_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+            "status_signals": diagnostic_status_signals(&text),
+            "read_error": Value::Null,
+        }),
+        Err(error) => json!({
+            "text_chars": Value::Null,
+            "text_sha256": Value::Null,
+            "status_signals": Value::Null,
+            "read_error": redacted_error("main_page_text_failed", &error.to_string()),
+        }),
+    };
+
+    json!({
+        "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1",
+        "captured_at_unix_ms": captured_at_unix_ms,
+        "privacy": {
+            "raw_text_recorded": false,
+            "prompt_recorded": false,
+            "frame_urls_recorded": false,
+            "credentials_recorded": false,
+            "screenshot_may_contain_submitted_prompt": true,
+        },
+        "controls": {
+            "start_present_after_click": start_control_present_after_click,
+            "stop_present_after_click": stop_control_present_after_click,
+        },
+        "observed_child_frame_count": observed_child_frame_count,
+        "observed_candidate_runtime_frame_count": observed_candidate_frame_count,
+        "recorded_frame_count": frame_diagnostics.len(),
+        "frames_truncated": observed_child_frame_count > MAX_FAILURE_DIAGNOSTIC_FRAMES,
+        "frame_list_error": frame_list_error,
+        "main_page": main_page,
+        "frames": frame_diagnostics,
+        "screenshot": screenshot,
+    })
 }
 
 fn inspect_existing_task(
@@ -637,13 +1041,14 @@ async fn stop_session(browser: &dyn BrowserBackend, page: &PageId) -> bool {
 async fn run_once(
     browser: Arc<dyn BrowserBackend>,
     request: RunRequest,
-) -> std::result::Result<Value, String> {
+) -> std::result::Result<Value, RunFailure> {
     let page = browser
         .navigate(BASE_URL)
         .await
         .map_err(|error| format!("navigate Studio: {error}"))?;
     let mut started = false;
-    let run_result = async {
+    let mut verified_prompt_binding = None;
+    let run_result: std::result::Result<Value, RunFailure> = async {
         let ready = browser
             .wait_for(
                 &page,
@@ -654,14 +1059,38 @@ async fn run_once(
             .await
             .map_err(|error| format!("wait Studio load: {error}"))?;
         if ready.matched != "selector" {
-            return Err(format!(
+            return Err(RunFailure::new(format!(
                 "Studio prompt did not become ready within {STUDIO_READY_TIMEOUT_MS}ms"
-            ));
+            )));
         }
         browser
             .fill_form(&page, STUDIO_PROMPT_SELECTOR, &request.prompt)
             .await
             .map_err(|error| format!("fill prompt: {error}"))?;
+        let prompt_readback = browser
+            .eval(
+                &page,
+                "(() => { const el = document.querySelector('textarea'); return el && 'value' in el ? String(el.value) : null; })()",
+            )
+            .await
+            .map_err(|error| format!("read prompt binding: {error}"))?;
+        let prompt_binding = prompt_binding_evidence(&prompt_readback, &request);
+        if prompt_binding["exact_match"] != true {
+            return Err(RunFailure::with_diagnostics(
+                "Studio prompt binding readback did not exactly match the authorized request",
+                json!({
+                    "schema": "agent_bridge.modelscope_abot_prompt_binding_failure.v0",
+                    "prompt_binding": prompt_binding,
+                }),
+            ));
+        }
+        verified_prompt_binding = Some(prompt_binding.clone());
+        let frames_before_start = browser
+            .list_frames(&page)
+            .await
+            .map_err(|error| format!("list Studio frames before start: {error}"))?;
+        let (child_frame_count_before_start, candidate_frame_count_before_start) =
+            child_frame_counts(&frame_values(&frames_before_start));
         let start_selector = wait_for_text_selector(
             browser.as_ref(),
             &page,
@@ -678,21 +1107,38 @@ async fn run_once(
             .wait_for(&page, None, None, 3_000)
             .await
             .map_err(|error| format!("wait GPU allocation: {error}"))?;
+        let start_control_present_after_click = selector_for_text(
+            browser.as_ref(),
+            &page,
+            "唤醒你的世界",
+        )
+        .await
+        .is_ok();
+        let stop_control_present_after_click = selector_for_text(
+            browser.as_ref(),
+            &page,
+            "封存你的世界",
+        )
+        .await
+        .is_ok();
 
         let deadline = Instant::now() + Duration::from_millis(request.observe_ms);
         let mut max_fps = 0.0_f64;
-        let mut observed_frame_count = 0_usize;
+        let mut observed_child_frame_count = 0_usize;
+        let mut observed_candidate_frame_count = 0_usize;
         while Instant::now() < deadline {
             let frames = browser
                 .list_frames(&page)
                 .await
                 .map_err(|error| format!("list Studio frames: {error}"))?;
             let frame_values = frame_values(&frames);
-            observed_frame_count = observed_frame_count.max(frame_values.len().saturating_sub(1));
+            let (child_count, candidate_count) = child_frame_counts(&frame_values);
+            observed_child_frame_count = observed_child_frame_count.max(child_count);
+            observed_candidate_frame_count =
+                observed_candidate_frame_count.max(candidate_count);
             for frame in frame_values {
                 let frame_id = frame.get("frame_id").and_then(Value::as_str);
-                let parent_id = frame.get("parent_id").and_then(Value::as_str);
-                if parent_id.is_none() {
+                if !is_candidate_runtime_frame(&frame) {
                     continue;
                 }
                 let value = browser
@@ -715,7 +1161,24 @@ async fn run_once(
             let _ = browser.wait_for(&page, None, None, 1_000).await;
         }
         if max_fps <= 0.0 {
-            return Err("Studio stream did not report positive FPS before deadline".into());
+            let diagnostics = capture_failure_diagnostics(
+                browser.as_ref(),
+                &page,
+                observed_child_frame_count,
+                observed_candidate_frame_count,
+                start_control_present_after_click,
+                stop_control_present_after_click,
+            )
+            .await;
+            let message = if observed_candidate_frame_count == 0 {
+                "Studio did not expose a candidate runtime frame before deadline"
+            } else {
+                "Studio candidate runtime frame did not report positive FPS before deadline"
+            };
+            return Err(RunFailure::with_diagnostics(
+                message,
+                diagnostics,
+            ));
         }
 
         let screenshot = browser
@@ -742,19 +1205,18 @@ async fn run_once(
             .list_frames(&page)
             .await
             .map_err(|error| format!("verify Studio stop: {error}"))?;
-        let iframe_count_after_stop = frame_values(&frames_after_stop)
-            .iter()
-            .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
-            .count();
-        if iframe_count_after_stop != 0 {
-            return Err(format!(
-                "Studio lifecycle did not close: {iframe_count_after_stop} iframe(s) remain"
-            ));
+        let frames_after_stop = frame_values(&frames_after_stop);
+        let (iframe_count_after_stop, candidate_iframe_count_after_stop) =
+            child_frame_counts(&frames_after_stop);
+        if candidate_iframe_count_after_stop != 0 {
+            return Err(RunFailure::new(format!(
+                "Studio lifecycle did not close: {candidate_iframe_count_after_stop} candidate runtime iframe(s) remain"
+            )));
         }
         started = false;
 
         let receipt = json!({
-            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v0",
+            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v1",
             "provider_id": PROVIDER_ID,
             "run_id": run_id,
             "observed_at_unix_ms": observed_at_unix_ms,
@@ -765,11 +1227,28 @@ async fn run_once(
                 "persistent_runtime_authorized": false,
             },
             "observations": {
-                "gpu_session_observed": observed_frame_count > 0,
+                "gpu_session_observed": observed_candidate_frame_count > 0,
                 "stream_observed": true,
                 "max_observed_fps": max_fps,
+                "child_frame_count_observed": observed_child_frame_count,
+                "candidate_runtime_frame_count_observed": observed_candidate_frame_count,
+                "start_control_present_after_click": start_control_present_after_click,
+                "stop_control_present_after_click": stop_control_present_after_click,
                 "stop_observed": true,
                 "post_stop_iframe_count": iframe_count_after_stop,
+                "post_stop_candidate_runtime_iframe_count": candidate_iframe_count_after_stop,
+            },
+            "binding": {
+                "status": "submission_bound_output_unverified",
+                "prompt_submission": prompt_binding,
+                "output_freshness": {
+                    "child_frame_count_before_start": child_frame_count_before_start,
+                    "candidate_runtime_frame_count_before_start": candidate_frame_count_before_start,
+                    "fresh_candidate_runtime_frame_observed": observed_candidate_frame_count > candidate_frame_count_before_start,
+                    "positive_fps_observed": max_fps > 0.0,
+                },
+                "world_semantics_verified": false,
+                "semantic_verification_reason": "provider exposes no machine-verifiable prompt-to-world identity or semantic attestation",
             },
             "artifact": {
                 "path": screenshot_path,
@@ -807,10 +1286,15 @@ async fn run_once(
         true
     };
     let close_observed = browser.close(&page).await.is_ok();
-    run_result.map_err(|error| {
-        format!(
-            "{error}; cleanup_stop_observed={cleanup_stop_observed}; close_observed={close_observed}"
-        )
+    run_result.map_err(|mut failure| {
+        if let Some(prompt_binding) = verified_prompt_binding {
+            attach_verified_prompt_binding(&mut failure, prompt_binding);
+        }
+        failure.message = format!(
+            "{}; cleanup_stop_observed={cleanup_stop_observed}; close_observed={close_observed}",
+            failure.message
+        );
+        failure
     })
 }
 
@@ -833,7 +1317,7 @@ impl McpTool for ModelScopeAbotRunOnceTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Run one bounded ABot-World Studio browser session, capture evidence, stop it, and return a receipt. Requires Browser capability, a body-write lease, owner confirmation, and AB_MODELSCOPE_ABOT_RUNTIME_ENABLE=1; never creates a persistent runtime.".into(),
+            description: "Run one bounded ABot-World Studio session. Exact private prompt readback proves submission; the receipt leaves world semantics unverified. Requires Browser, body lease, owner confirmation, and runtime opt-in; never creates a persistent runtime.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["prompt", "owner_confirmed", "embodiment_lease_id"],
@@ -977,9 +1461,11 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 .await;
                 Ok(ToolResult::structured_json(&receipt))
             }
-            Err(error) => {
+            Err(failure) => {
+                let error = failure.message;
+                let diagnostics = failure.diagnostics;
                 if let (Some(task), Some(record)) = (task.as_ref(), task_record.take()) {
-                    let failed = failed_task_record(record, &error);
+                    let failed = failed_task_record(record, &error, diagnostics.clone());
                     if let Err(persist_error) =
                         atomic_write_json(&task_path(&task.task_id), &failed)
                     {
@@ -995,7 +1481,11 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                     intent_id,
                     None,
                     false,
-                    json!({"error": error, "embodiment_lease_id": lease_id}),
+                    json!({
+                        "error": error,
+                        "diagnostics": diagnostics,
+                        "embodiment_lease_id": lease_id,
+                    }),
                 )
                 .await;
                 Ok(ToolResult::error(error))
@@ -1196,6 +1686,41 @@ impl McpTool for ModelScopeAbotProviderStatusTool {
 
 pub struct ModelScopeAbotTaskStatusTool;
 
+pub struct ModelScopeAbotReceiptValidateTool;
+
+#[async_trait]
+impl McpTool for ModelScopeAbotReceiptValidateTool {
+    fn name(&self) -> &'static str {
+        "modelscope_abot_receipt_validate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Validate a ModelScope ABot success receipt or failure diagnostic locally. Read-only and offline: it never opens a browser, contacts the provider, or changes task state.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["document"],
+                "properties": {
+                    "document": {
+                        "type": "object",
+                        "description": "Structured run receipt or failure diagnostics. Do not include a raw prompt."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(document) = args.get("document") else {
+            return Ok(ToolResult::error("missing 'document'"));
+        };
+        Ok(ToolResult::structured_json(&validate_abot_receipt(
+            document,
+        )))
+    }
+}
+
 #[async_trait]
 impl McpTool for ModelScopeAbotTaskStatusTool {
     fn name(&self) -> &'static str {
@@ -1265,6 +1790,83 @@ mod tests {
         assert_eq!(request.observe_ms, 10_000);
         assert_eq!(request.prompt_sha256.len(), 64);
         assert!(!request.prompt_sha256.contains("sandstone"));
+    }
+
+    fn verified_binding() -> Value {
+        let request = RunRequest::parse(&valid_args()).expect("valid request");
+        prompt_binding_evidence(&json!(request.prompt), &request)
+    }
+
+    #[test]
+    fn receipt_validator_accepts_bounded_success_claim() {
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v1",
+            "status": "completed",
+            "lifecycle_closed": true,
+            "prompt_sha256": verified_binding()["expected_sha256"],
+            "binding": {
+                "status": "submission_bound_output_unverified",
+                "prompt_submission": verified_binding(),
+                "world_semantics_verified": false,
+            }
+        }));
+        assert_eq!(result["status"], "accepted");
+        assert_eq!(result["document_kind"], "success_receipt");
+        assert_eq!(result["claims"]["prompt_submission_bound"], true);
+        assert_eq!(result["claims"]["world_semantics_verified"], false);
+        assert_eq!(result["runtime_effects"]["network_request_sent"], false);
+    }
+
+    #[test]
+    fn receipt_validator_accepts_downstream_failure_binding() {
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        }));
+        assert_eq!(result["status"], "accepted");
+        assert_eq!(result["document_kind"], "downstream_failure");
+        assert_eq!(result["violations"], json!([]));
+    }
+
+    #[test]
+    fn receipt_validator_rejects_hash_drift_and_semantic_overclaim() {
+        let mut binding = verified_binding();
+        binding["observed_sha256"] = json!("0".repeat(64));
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v1",
+            "status": "completed",
+            "lifecycle_closed": true,
+            "prompt_sha256": verified_binding()["expected_sha256"],
+            "binding": {
+                "status": "submission_bound_output_unverified",
+                "prompt_submission": binding,
+                "world_semantics_verified": true,
+            }
+        }));
+        assert_eq!(result["status"], "rejected");
+        let violations = result["violations"].as_array().expect("violations");
+        assert!(violations.contains(&json!("prompt_sha256_mismatch")));
+        assert!(violations.contains(&json!("world_semantics_claim_exceeds_evidence")));
+    }
+
+    #[test]
+    fn receipt_validator_rejects_unbound_or_unknown_documents() {
+        let unbound = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        }));
+        assert_eq!(unbound["status"], "rejected");
+        assert_eq!(unbound["violations"], json!(["prompt_binding_missing"]));
+
+        let unknown = validate_abot_receipt(&json!({
+            "schema": "example.unknown.v0",
+            "prompt_binding": verified_binding(),
+        }));
+        assert_eq!(unknown["document_kind"], "unknown");
+        assert_eq!(
+            unknown["violations"],
+            json!(["unsupported_document_schema"])
+        );
     }
 
     #[test]
@@ -1406,7 +2008,7 @@ mod tests {
             "completed_replay_available"
         );
 
-        let failed = failed_task_record(running.clone(), "positive FPS missing");
+        let failed = failed_task_record(running.clone(), "positive FPS missing", None);
         assert_eq!(
             attempt_task_state(&task, Some(&failed))["state"],
             "failed_requires_new_request_id"
@@ -1582,6 +2184,118 @@ mod tests {
             2
         );
         assert!(frame_values(&json!([{"kind": "main"}])).is_empty());
+    }
+
+    #[test]
+    fn prompt_binding_evidence_is_hash_bound_without_raw_prompt() {
+        let request = RunRequest::parse(&valid_args()).expect("valid request");
+        let matching = prompt_binding_evidence(&json!(request.prompt), &request);
+        assert_eq!(matching["readback_observed"], true);
+        assert_eq!(matching["exact_match"], true);
+        assert_eq!(matching["observed_sha256"], request.prompt_sha256);
+        assert_eq!(matching["expected_sha256"], request.prompt_sha256);
+        assert_eq!(matching["raw_prompt_recorded"], false);
+        assert!(!matching.to_string().contains("sandstone"));
+
+        let mismatch = prompt_binding_evidence(&json!("different prompt"), &request);
+        assert_eq!(mismatch["exact_match"], false);
+        assert_ne!(mismatch["observed_sha256"], request.prompt_sha256);
+        assert_eq!(
+            classify_failure("Studio prompt binding readback did not exactly match"),
+            "prompt_binding"
+        );
+    }
+
+    #[test]
+    fn verified_prompt_binding_survives_all_downstream_failure_shapes() {
+        let request = RunRequest::parse(&valid_args()).expect("valid request");
+        let binding = prompt_binding_evidence(&json!(request.prompt), &request);
+
+        let mut timeout = RunFailure::with_diagnostics(
+            "candidate runtime frame missing",
+            json!({"schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"}),
+        );
+        attach_verified_prompt_binding(&mut timeout, binding.clone());
+        let timeout_diagnostics = timeout.diagnostics.expect("timeout diagnostics");
+        assert_eq!(timeout_diagnostics["prompt_binding"]["exact_match"], true);
+        assert_eq!(
+            timeout_diagnostics["schema"],
+            "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        );
+
+        let mut lifecycle = RunFailure::new("Studio stop action failed");
+        attach_verified_prompt_binding(&mut lifecycle, binding);
+        let lifecycle_diagnostics = lifecycle.diagnostics.expect("lifecycle diagnostics");
+        assert_eq!(
+            lifecycle_diagnostics["schema"],
+            "agent_bridge.modelscope_abot_downstream_failure.v0"
+        );
+        assert_eq!(
+            lifecycle_diagnostics["prompt_binding"]["observed_sha256"],
+            request.prompt_sha256
+        );
+        assert_eq!(lifecycle_diagnostics["downstream_diagnostics"], Value::Null);
+        assert!(!lifecycle_diagnostics.to_string().contains("sandstone"));
+    }
+
+    #[test]
+    fn failure_diagnostics_redact_frame_content_and_urls() {
+        assert_eq!(
+            frame_host("https://user:secret@example.com:443/path?token=x").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(frame_host("not-a-url"), None);
+
+        let text = "排队 loading then ERROR at 0 FPS; private provider detail";
+        let signals = diagnostic_status_signals(text);
+        assert_eq!(signals["fps_token_present"], true);
+        assert_eq!(signals["queue_signal_present"], true);
+        assert_eq!(signals["loading_signal_present"], true);
+        assert_eq!(signals["error_signal_present"], true);
+        assert!(!signals.to_string().contains("private provider detail"));
+
+        let browser_error = "secret at https://example.com/?token=private";
+        let redacted = redacted_error("frame_eval_failed", browser_error);
+        assert_eq!(redacted["kind"], "frame_eval_failed");
+        assert_eq!(redacted["message_sha256"].as_str().unwrap().len(), 64);
+        assert!(!redacted.to_string().contains("private"));
+
+        let failed = failed_task_record(
+            json!({"status": "running"}),
+            "positive FPS missing",
+            Some(json!({"schema": "diagnostics-test"})),
+        );
+        assert_eq!(failed["diagnostics"]["schema"], "diagnostics-test");
+    }
+
+    #[test]
+    fn frame_admission_excludes_presentation_media_consistently() {
+        let main = json!({
+            "frame_id": "main",
+            "url": BASE_URL,
+            "parent_id": Value::Null,
+        });
+        let youtube = json!({
+            "frame_id": "video",
+            "url": "https://www.youtube.com/embed/example?token=private",
+            "parent_id": "main",
+        });
+        let runtime = json!({
+            "frame_id": "runtime",
+            "url": "https://runtime.example/session/opaque",
+            "parent_id": "main",
+        });
+        let frames = vec![main.clone(), youtube.clone(), runtime.clone()];
+
+        assert!(!is_candidate_runtime_frame(&main));
+        assert!(!is_candidate_runtime_frame(&youtube));
+        assert!(is_candidate_runtime_frame(&runtime));
+        assert_eq!(child_frame_counts(&frames), (2, 1));
+        assert!(is_ignored_presentation_host("YOUTUBE.COM."));
+        assert_eq!(
+            classify_failure("Studio did not expose a candidate runtime frame before deadline"),
+            "provider_timeout"
+        );
     }
 
     #[test]

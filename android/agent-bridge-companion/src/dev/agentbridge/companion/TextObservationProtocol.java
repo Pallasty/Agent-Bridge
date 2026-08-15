@@ -7,7 +7,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 final class TextObservationProtocol {
-    static final String SCHEMA = "agent_bridge.mobile_text_observation.v0";
+    static final String SCHEMA = "agent_bridge.mobile_text_observation.v1";
     static final String RETENTION = "ephemeral_session_only";
     static final int MAX_TEXT_CHARS = 1000;
     static final int MAX_PAYLOAD_BYTES = 4096;
@@ -18,6 +18,11 @@ final class TextObservationProtocol {
             throw new IllegalArgumentException("text must contain 1..1000 characters");
         try { return Hex.encode(MessageDigest.getInstance("SHA-256").digest(text.getBytes(UTF_8))); }
         catch (GeneralSecurityException error) { throw new IllegalStateException(error); }
+    }
+
+    static void validateSubmissionId(String submissionId) {
+        if (!isLowerHex(submissionId, 32))
+            throw new IllegalArgumentException("invalid submission id");
     }
 
     static String request(String tokenHex, String sessionId, long unixSeconds, String nonce,

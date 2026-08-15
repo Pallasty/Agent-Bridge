@@ -2375,6 +2375,9 @@ impl McpTool for MobileProjectionStartTool {
                                     .text_submissions
                                     .fetch_add(1, Ordering::Relaxed);
                             }
+                            crate::mobile_projection::ProjectionEvent::TextSubmissionDeduplicated {
+                                ..
+                            } => {}
                         }
                     }
                 }

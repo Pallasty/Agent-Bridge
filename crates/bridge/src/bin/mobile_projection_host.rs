@@ -48,9 +48,17 @@ fn main() -> Result<()> {
                 eprintln!("served read-only frame to {peer}")
             }
             Ok(Some(ProjectionEvent::TextSubmitted { peer, observation })) => eprintln!(
-                "accepted ephemeral text observation from {peer} digest={} chars={}",
+                "accepted ephemeral text observation from {peer} submission_id={} digest={} chars={}",
+                observation.submission_id,
                 observation.payload_sha256,
                 observation.text.chars().count()
+            ),
+            Ok(Some(ProjectionEvent::TextSubmissionDeduplicated {
+                peer,
+                submission_id,
+                payload_sha256,
+            })) => eprintln!(
+                "deduplicated ephemeral text observation from {peer} submission_id={submission_id} digest={payload_sha256}"
             ),
             Ok(None) => {}
             Err(error) => eprintln!("rejected projection pull: {error:#}"),

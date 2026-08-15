@@ -1,6 +1,7 @@
 package dev.agentbridge.companion;
 
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.Base64;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -37,8 +38,11 @@ public final class ProtocolTest {
         ProjectionProtocol.validateSession(now, now + 600L);
         String text = "手机主动提交给 AB";
         String digest = TextObservationProtocol.payloadDigest(text);
+        String submissionId = "abcdef0123456789abcdef0123456789";
+        TextObservationProtocol.validateSubmissionId(submissionId);
         String textPayloadJson = "{\"schema\":\"" + TextObservationProtocol.SCHEMA
-                + "\",\"text\":\"" + text + "\",\"payload_sha256\":\"" + digest + "\"}";
+                + "\",\"submission_id\":\"" + submissionId + "\",\"text\":\"" + text
+                + "\",\"payload_sha256\":\"" + digest + "\"}";
         String textPayload = Base64.getEncoder().withoutPadding().encodeToString(
                 textPayloadJson.getBytes(Charset.forName("UTF-8")));
         String textRequest = TextObservationProtocol.request(
@@ -55,6 +59,18 @@ public final class ProtocolTest {
         try { TextObservationProtocol.payloadDigest(repeat("x", 1001)); }
         catch (IllegalArgumentException expected) { rejected = true; }
         check(rejected);
+        rejected = false;
+        try { TextObservationProtocol.validateSubmissionId("not-hex"); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
+        ArrayList<String> transcripts = new ArrayList<String>();
+        transcripts.add("  voice draft  ");
+        check(VoiceDraftPolicy.firstTranscript(transcripts).equals("voice draft"));
+        check(VoiceDraftPolicy.firstTranscript(null).isEmpty());
+        check(VoiceDraftPolicy.mergeDraft("", "voice draft").equals("voice draft"));
+        check(VoiceDraftPolicy.mergeDraft("typed draft", "voice draft")
+                .equals("typed draft\nvoice draft"));
+        check(VoiceDraftPolicy.mergeDraft("typed draft", "  ").equals("typed draft"));
         System.out.println("android companion protocol tests: PASS");
     }
 
