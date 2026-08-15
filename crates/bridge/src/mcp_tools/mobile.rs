@@ -2076,6 +2076,22 @@ pub(super) fn mobile_projection_write_rejection(
     }
 }
 
+pub(super) fn mobile_projection_start_pending_receipt(
+    auto_connect: bool,
+) -> (&'static str, &'static str) {
+    if auto_connect {
+        (
+            "awaiting_authenticated_pull",
+            "Test-only auto-connect was requested; use mobile_projection_wait to verify an authenticated device pull.",
+        )
+    } else {
+        (
+            "awaiting_device_consent",
+            "The device holder must review the source/session/expiry and press Allow and connect.",
+        )
+    }
+}
+
 pub(super) fn mobile_projection_wait_outcome(
     pulls: u64,
     last_served_revision: u64,
@@ -2374,8 +2390,9 @@ impl McpTool for MobileProjectionStartTool {
             )));
         }
 
+        let (pending_status, next) = mobile_projection_start_pending_receipt(auto_connect);
         Ok(ToolResult::json_text(&json!({
-            "status": "awaiting_device_consent",
+            "status": pending_status,
             "serial": serial,
             "session_id": session_id,
             "endpoint": endpoint.to_string(),
@@ -2385,6 +2402,7 @@ impl McpTool for MobileProjectionStartTool {
             "token_exposed": false,
             "companion_service_started": false,
             "auto_connect": auto_connect,
+            "display_confirmation_required": !auto_connect,
             "replaced_prior_projection_activity": true,
             "replaced_prior_listener_count": replaced_listener_count,
             "authority": {
@@ -2393,7 +2411,7 @@ impl McpTool for MobileProjectionStartTool {
                 "sensor": false,
                 "actuation": false
             },
-            "next": "The device holder must review the source/session/expiry and press Allow and connect."
+            "next": next
         })))
     }
 }

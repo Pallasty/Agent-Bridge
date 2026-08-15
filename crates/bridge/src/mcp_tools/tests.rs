@@ -1646,6 +1646,21 @@ fn mobile_projection_writes_reject_terminal_sessions() {
 }
 
 #[test]
+fn mobile_projection_start_receipt_matches_confirmation_mode() {
+    let (status, next) = mobile_projection_start_pending_receipt(false);
+    assert_eq!(status, "awaiting_device_consent");
+    assert!(next.contains("device holder"));
+    assert!(next.contains("Allow and connect"));
+
+    let (status, next) = mobile_projection_start_pending_receipt(true);
+    assert_eq!(status, "awaiting_authenticated_pull");
+    assert!(next.contains("Test-only auto-connect"));
+    assert!(next.contains("mobile_projection_wait"));
+    assert!(!next.contains("must review"));
+    assert!(!next.contains("press Allow"));
+}
+
+#[test]
 fn mobile_projection_media_presentation_handles_missing_fields() {
     let context = crate::mobile_projection::MediaContext::new(1234);
     let (title, body, status) = media_projection_presentation(&context);
