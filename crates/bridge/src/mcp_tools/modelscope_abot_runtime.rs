@@ -57,6 +57,29 @@ impl RunFailure {
     }
 }
 
+fn attach_verified_prompt_binding(failure: &mut RunFailure, prompt_binding: Value) {
+    match failure.diagnostics.take() {
+        Some(mut diagnostics) if diagnostics.is_object() => {
+            diagnostics["prompt_binding"] = prompt_binding;
+            failure.diagnostics = Some(diagnostics);
+        }
+        Some(diagnostics) => {
+            failure.diagnostics = Some(json!({
+                "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+                "prompt_binding": prompt_binding,
+                "downstream_diagnostics": diagnostics,
+            }));
+        }
+        None => {
+            failure.diagnostics = Some(json!({
+                "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+                "prompt_binding": prompt_binding,
+                "downstream_diagnostics": Value::Null,
+            }));
+        }
+    }
+}
+
 impl From<String> for RunFailure {
     fn from(message: String) -> Self {
         Self::new(message)
@@ -909,6 +932,7 @@ async fn run_once(
         .await
         .map_err(|error| format!("navigate Studio: {error}"))?;
     let mut started = false;
+    let mut verified_prompt_binding = None;
     let run_result: std::result::Result<Value, RunFailure> = async {
         let ready = browser
             .wait_for(
@@ -945,6 +969,7 @@ async fn run_once(
                 }),
             ));
         }
+        verified_prompt_binding = Some(prompt_binding.clone());
         let frames_before_start = browser
             .list_frames(&page)
             .await
@@ -1147,6 +1172,9 @@ async fn run_once(
     };
     let close_observed = browser.close(&page).await.is_ok();
     run_result.map_err(|mut failure| {
+        if let Some(prompt_binding) = verified_prompt_binding {
+            attach_verified_prompt_binding(&mut failure, prompt_binding);
+        }
         failure.message = format!(
             "{}; cleanup_stop_observed={cleanup_stop_observed}; close_observed={close_observed}",
             failure.message
@@ -1949,6 +1977,38 @@ mod tests {
             classify_failure("Studio prompt binding readback did not exactly match"),
             "prompt_binding"
         );
+    }
+
+    #[test]
+    fn verified_prompt_binding_survives_all_downstream_failure_shapes() {
+        let request = RunRequest::parse(&valid_args()).expect("valid request");
+        let binding = prompt_binding_evidence(&json!(request.prompt), &request);
+
+        let mut timeout = RunFailure::with_diagnostics(
+            "candidate runtime frame missing",
+            json!({"schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"}),
+        );
+        attach_verified_prompt_binding(&mut timeout, binding.clone());
+        let timeout_diagnostics = timeout.diagnostics.expect("timeout diagnostics");
+        assert_eq!(timeout_diagnostics["prompt_binding"]["exact_match"], true);
+        assert_eq!(
+            timeout_diagnostics["schema"],
+            "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        );
+
+        let mut lifecycle = RunFailure::new("Studio stop action failed");
+        attach_verified_prompt_binding(&mut lifecycle, binding);
+        let lifecycle_diagnostics = lifecycle.diagnostics.expect("lifecycle diagnostics");
+        assert_eq!(
+            lifecycle_diagnostics["schema"],
+            "agent_bridge.modelscope_abot_downstream_failure.v0"
+        );
+        assert_eq!(
+            lifecycle_diagnostics["prompt_binding"]["observed_sha256"],
+            request.prompt_sha256
+        );
+        assert_eq!(lifecycle_diagnostics["downstream_diagnostics"], Value::Null);
+        assert!(!lifecycle_diagnostics.to_string().contains("sandstone"));
     }
 
     #[test]
