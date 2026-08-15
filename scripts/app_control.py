@@ -36,12 +36,24 @@ METADATA_FORMAT = "{{mpris:trackid}}\t{{xesam:artist}}\t{{xesam:title}}"
 MPRIS_PLAYLIST_PATH = "/org/mpris/MediaPlayer2"
 
 
-def hydrate_session_bus(env: MutableMapping[str, str] | None = None) -> dict[str, str]:
+def hydrate_session_bus(
+    env: MutableMapping[str, str] | None = None,
+    *,
+    runtime_dir: Path | None = None,
+) -> dict[str, str]:
+    """Restore a trusted, live session bus for protocol adapters.
+
+    Long-lived MCP processes can retain a non-empty Unix bus address after the
+    corresponding socket has disappeared.  Treat that address as stale instead
+    of letting every MPRIS operation fail behind an apparently configured bus.
+    Non-path transports remain untouched because they cannot be validated with
+    local filesystem ownership checks.
+    """
     target = os.environ if env is None else env
     if not sys.platform.startswith("linux"):
         return {}
     uid = os.getuid()
-    runtime = Path(target.get("XDG_RUNTIME_DIR", f"/run/user/{uid}"))
+    runtime = runtime_dir or Path(target.get("XDG_RUNTIME_DIR", f"/run/user/{uid}"))
     try:
         if not runtime.is_dir() or runtime.stat().st_uid != uid:
             return {}
@@ -56,7 +68,15 @@ def hydrate_session_bus(env: MutableMapping[str, str] | None = None) -> dict[str
         valid_bus = bus.is_socket() and bus.stat().st_uid == uid
     except OSError:
         valid_bus = False
-    if valid_bus and not target.get("DBUS_SESSION_BUS_ADDRESS"):
+    existing_address = target.get("DBUS_SESSION_BUS_ADDRESS", "")
+    existing_valid = bool(existing_address)
+    if existing_address.startswith("unix:path="):
+        existing_path = Path(existing_address.removeprefix("unix:path=").split(",", 1)[0])
+        try:
+            existing_valid = existing_path.is_socket() and existing_path.stat().st_uid == uid
+        except OSError:
+            existing_valid = False
+    if valid_bus and not existing_valid:
         address = f"unix:path={bus}"
         target["DBUS_SESSION_BUS_ADDRESS"] = address
         restored["DBUS_SESSION_BUS_ADDRESS"] = address

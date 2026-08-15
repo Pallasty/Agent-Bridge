@@ -1,5 +1,7 @@
 import importlib.util
 import pathlib
+import socket
+import tempfile
 import unittest
 
 
@@ -16,6 +18,41 @@ def load_module():
 
 
 class AppControlTests(unittest.TestCase):
+    def test_session_bus_hydration_replaces_stale_unix_socket(self):
+        mod = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp)
+            bus = socket.socket(socket.AF_UNIX)
+            try:
+                bus.bind(str(runtime / "bus"))
+                env = {
+                    "XDG_RUNTIME_DIR": str(runtime),
+                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/999999/stale-bus",
+                }
+                restored = mod.hydrate_session_bus(env, runtime_dir=runtime)
+            finally:
+                bus.close()
+        expected = f"unix:path={runtime / 'bus'}"
+        self.assertEqual(env["DBUS_SESSION_BUS_ADDRESS"], expected)
+        self.assertEqual(restored["DBUS_SESSION_BUS_ADDRESS"], expected)
+
+    def test_session_bus_hydration_preserves_unverifiable_transport(self):
+        mod = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp)
+            bus = socket.socket(socket.AF_UNIX)
+            try:
+                bus.bind(str(runtime / "bus"))
+                env = {
+                    "XDG_RUNTIME_DIR": str(runtime),
+                    "DBUS_SESSION_BUS_ADDRESS": "tcp:host=127.0.0.1,port=1234",
+                }
+                restored = mod.hydrate_session_bus(env, runtime_dir=runtime)
+            finally:
+                bus.close()
+        self.assertEqual(env["DBUS_SESSION_BUS_ADDRESS"], "tcp:host=127.0.0.1,port=1234")
+        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", restored)
+
     def test_player_selection_is_exact_then_unique_substring(self):
         mod = load_module()
         players = ["rhythmbox", "spotify.instance42"]

@@ -52,6 +52,12 @@ The MCP schema exposes no arbitrary bus name, object path, DBus method, shell
 command, or coordinates. `dry_run=true` performs discovery and reads the
 selected player's state without dispatching.
 
+Before discovery, the adapter validates inherited `unix:path=` session-bus
+addresses against a socket owned by the current UID. A stale path is replaced
+with the current trusted runtime bus; non-path transports are preserved rather
+than guessed. This keeps long-lived MCP sessions from losing protocol control
+after the desktop session bus is replaced.
+
 ## Evidence boundary
 
 A successful command exit is dispatch evidence only. The transaction reports
