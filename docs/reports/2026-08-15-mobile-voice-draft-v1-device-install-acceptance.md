@@ -43,4 +43,3 @@ background service, or submit any text.
 The exact signed V1 APK is installed and its on-device digest/certificate match
 the qualified build and the historical package signer. The UI gate is real and
 fail-closed; projection remains a separate explicit-consent gate.
-

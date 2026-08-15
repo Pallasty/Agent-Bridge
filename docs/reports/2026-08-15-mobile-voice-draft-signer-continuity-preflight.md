@@ -44,4 +44,3 @@ retain the installed package's signer. The install/replace gate therefore
 remains closed. A future install gate requires the exact debug/test keystore
 or an explicitly authorized replacement-key decision, followed by a fresh
 signed APK digest and certificate comparison before any device write.
-

@@ -47,4 +47,3 @@ The Companion process was force-stopped after evidence capture because the UI
 did not visibly leave the content panel after the attempted disconnect input.
 The projection host was then terminated before TTL expiry. Final device state:
 launcher focused, no Companion PID, and no Companion service.
-

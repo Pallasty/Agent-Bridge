@@ -49,4 +49,3 @@ The installed package retained `lastUpdateTime=2026-08-15 21:52:16`, remained
 stopped, and had no Companion service or projection session. The next gate is a
 separately authorized replacement install of this exact APK digest followed by
 a real duplicate/retry acceptance run.
-

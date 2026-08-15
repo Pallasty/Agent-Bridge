@@ -44,4 +44,3 @@ different nonces and were both recorded.
 This is a source-and-test qualification only. No APK was built, signed,
 installed, launched, or admitted on the device. A later APK build and device
 replacement require their own authorization and evidence.
-
