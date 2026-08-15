@@ -11,6 +11,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/ab-system-control.sh"
+SETUP_SCRIPT = ROOT / "scripts/setup-sway-workstation.sh"
 
 
 class SystemControlSessionEnvTests(unittest.TestCase):
@@ -134,6 +135,11 @@ class SystemControlSessionEnvTests(unittest.TestCase):
                 "muted": True,
                 "mic_muted": False,
             })
+
+    def test_sway_installer_preserves_audio_status_contract(self):
+        setup = SETUP_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("agent_bridge.system_control.audio_status.v0", setup)
+        self.assertIn("audio status|up|down|mute|micmute", setup)
 
 
 if __name__ == "__main__":
