@@ -19,6 +19,9 @@ class SystemControlSessionEnvTests(unittest.TestCase):
         path.write_text(textwrap.dedent(body), encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
+    def _force_linux(self, fake_bin: pathlib.Path) -> None:
+        self._write_executable(fake_bin / "uname", "#!/bin/sh\nprintf '%s\\n' Linux\n")
+
     def test_status_hydrates_validated_graphical_session_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -26,6 +29,7 @@ class SystemControlSessionEnvTests(unittest.TestCase):
             fake_bin = root / "bin"
             runtime.mkdir()
             fake_bin.mkdir()
+            self._force_linux(fake_bin)
 
             sockets = []
             for name in ("bus", "sway.sock", "wayland-test"):
@@ -103,6 +107,7 @@ class SystemControlSessionEnvTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             fake_bin = root / "bin"
             fake_bin.mkdir()
+            self._force_linux(fake_bin)
             self._write_executable(
                 fake_bin / "pactl",
                 """
