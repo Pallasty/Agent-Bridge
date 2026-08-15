@@ -235,6 +235,30 @@ fn strings_in(value: &Value, out: &mut Vec<String>) {
     }
 }
 
+fn eval_string(value: &Value) -> Option<&str> {
+    match value {
+        Value::String(text) => Some(text),
+        Value::Array(values) => values.iter().find_map(eval_string),
+        Value::Object(map) => map.values().find_map(eval_string),
+        _ => None,
+    }
+}
+
+fn prompt_binding_evidence(value: &Value, request: &RunRequest) -> Value {
+    let observed = eval_string(value);
+    let observed_sha256 = observed.map(|text| format!("{:x}", Sha256::digest(text.as_bytes())));
+    json!({
+        "schema": "agent_bridge.modelscope_abot_prompt_binding.v0",
+        "selector": STUDIO_PROMPT_SELECTOR,
+        "readback_observed": observed.is_some(),
+        "exact_match": observed == Some(request.prompt.as_str()),
+        "observed_chars": observed.map(|text| text.chars().count()),
+        "observed_sha256": observed_sha256,
+        "expected_sha256": request.prompt_sha256,
+        "raw_prompt_recorded": false,
+    })
+}
+
 fn frame_values(value: &Value) -> Vec<Value> {
     value
         .get("frames")
@@ -518,7 +542,9 @@ fn running_task_record(task: &TaskRequest, request: &RunRequest, lease_id: &Leas
 }
 
 fn classify_failure(error: &str) -> &'static str {
-    if error.contains("positive FPS") || error.contains("candidate runtime frame") {
+    if error.contains("prompt binding") {
+        "prompt_binding"
+    } else if error.contains("positive FPS") || error.contains("candidate runtime frame") {
         "provider_timeout"
     } else if error.contains("stop action") || error.contains("lifecycle did not close") {
         "provider_lifecycle"
@@ -902,6 +928,29 @@ async fn run_once(
             .fill_form(&page, STUDIO_PROMPT_SELECTOR, &request.prompt)
             .await
             .map_err(|error| format!("fill prompt: {error}"))?;
+        let prompt_readback = browser
+            .eval(
+                &page,
+                "(() => { const el = document.querySelector('textarea'); return el && 'value' in el ? String(el.value) : null; })()",
+            )
+            .await
+            .map_err(|error| format!("read prompt binding: {error}"))?;
+        let prompt_binding = prompt_binding_evidence(&prompt_readback, &request);
+        if prompt_binding["exact_match"] != true {
+            return Err(RunFailure::with_diagnostics(
+                "Studio prompt binding readback did not exactly match the authorized request",
+                json!({
+                    "schema": "agent_bridge.modelscope_abot_prompt_binding_failure.v0",
+                    "prompt_binding": prompt_binding,
+                }),
+            ));
+        }
+        let frames_before_start = browser
+            .list_frames(&page)
+            .await
+            .map_err(|error| format!("list Studio frames before start: {error}"))?;
+        let (child_frame_count_before_start, candidate_frame_count_before_start) =
+            child_frame_counts(&frame_values(&frames_before_start));
         let start_selector = wait_for_text_selector(
             browser.as_ref(),
             &page,
@@ -1027,7 +1076,7 @@ async fn run_once(
         started = false;
 
         let receipt = json!({
-            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v0",
+            "schema": "agent_bridge.modelscope_abot_run_once_receipt.v1",
             "provider_id": PROVIDER_ID,
             "run_id": run_id,
             "observed_at_unix_ms": observed_at_unix_ms,
@@ -1048,6 +1097,18 @@ async fn run_once(
                 "stop_observed": true,
                 "post_stop_iframe_count": iframe_count_after_stop,
                 "post_stop_candidate_runtime_iframe_count": candidate_iframe_count_after_stop,
+            },
+            "binding": {
+                "status": "submission_bound_output_unverified",
+                "prompt_submission": prompt_binding,
+                "output_freshness": {
+                    "child_frame_count_before_start": child_frame_count_before_start,
+                    "candidate_runtime_frame_count_before_start": candidate_frame_count_before_start,
+                    "fresh_candidate_runtime_frame_observed": observed_candidate_frame_count > candidate_frame_count_before_start,
+                    "positive_fps_observed": max_fps > 0.0,
+                },
+                "world_semantics_verified": false,
+                "semantic_verification_reason": "provider exposes no machine-verifiable prompt-to-world identity or semantic attestation",
             },
             "artifact": {
                 "path": screenshot_path,
@@ -1113,7 +1174,7 @@ impl McpTool for ModelScopeAbotRunOnceTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Run one bounded ABot-World Studio browser session, capture evidence, stop it, and return a receipt. Requires Browser capability, a body-write lease, owner confirmation, and AB_MODELSCOPE_ABOT_RUNTIME_ENABLE=1; never creates a persistent runtime.".into(),
+            description: "Run one bounded ABot-World Studio session. Exact private prompt readback proves submission; the receipt leaves world semantics unverified. Requires Browser, body lease, owner confirmation, and runtime opt-in; never creates a persistent runtime.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["prompt", "owner_confirmed", "embodiment_lease_id"],
@@ -1868,6 +1929,26 @@ mod tests {
             2
         );
         assert!(frame_values(&json!([{"kind": "main"}])).is_empty());
+    }
+
+    #[test]
+    fn prompt_binding_evidence_is_hash_bound_without_raw_prompt() {
+        let request = RunRequest::parse(&valid_args()).expect("valid request");
+        let matching = prompt_binding_evidence(&json!(request.prompt), &request);
+        assert_eq!(matching["readback_observed"], true);
+        assert_eq!(matching["exact_match"], true);
+        assert_eq!(matching["observed_sha256"], request.prompt_sha256);
+        assert_eq!(matching["expected_sha256"], request.prompt_sha256);
+        assert_eq!(matching["raw_prompt_recorded"], false);
+        assert!(!matching.to_string().contains("sandstone"));
+
+        let mismatch = prompt_binding_evidence(&json!("different prompt"), &request);
+        assert_eq!(mismatch["exact_match"], false);
+        assert_ne!(mismatch["observed_sha256"], request.prompt_sha256);
+        assert_eq!(
+            classify_failure("Studio prompt binding readback did not exactly match"),
+            "prompt_binding"
+        );
     }
 
     #[test]
