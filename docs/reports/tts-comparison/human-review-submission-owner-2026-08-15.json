@@ -1,0 +1,34 @@
+{
+  "schema": "agent_bridge.omnivoice_human_review_submission.v0",
+  "synthetic": false,
+  "reviewer": "project owner",
+  "reviewed_at": "2026-08-15T09:15:46-07:00",
+  "playback_device": "wired headphones via PipeWire Headphones sink at 40% volume",
+  "scores": {
+    "basic": {
+      "english_A": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "english_B": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "chinese_A": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "chinese_B": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 4, "overall": 5}
+    },
+    "expanded": {
+      "numbers_A": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "numbers_B": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "mixed_A": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "mixed_B": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "operational_A": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5},
+      "operational_B": {"intelligibility": 5, "naturalness": 5, "pronunciation": 5, "artifacts": 5, "overall": 5}
+    }
+  },
+  "clone_review": {
+    "speaker_identity_similarity": 5,
+    "naturalness": 5,
+    "confidence": "high",
+    "notes": "Reference and candidate were played sequentially through the same wired-headphone sink."
+  },
+  "long_chinese_review": {
+    "key_phrase_pronounced_correctly": true,
+    "notes": "The phrase 清晰稳定地朗读 was replayed and confirmed correct."
+  },
+  "notes": "Blind A/B samples were played without opening private answer keys. Initial mpv playback was inaudible; the review used paplay explicitly bound to the PipeWire Headphones sink."
+}
