@@ -81,3 +81,23 @@ observation body.
 - APK install, replacement, launch, or uninstall: not authorized;
 - runtime deployment or MCP restart: not authorized;
 - merge or remote push: not authorized.
+
+## Runtime preflight
+
+The 2026-08-15 preregistration check found the active Codex MCP process on the
+`codex-modelscope-abot` Essential toolset. It exposed read-only
+`mobile_projection_status` and `mobile_projection_wait`, but not
+`mobile_projection_start` or `mobile_projection_stop`. The installed binary at
+that check was `9202a75ec431`.
+
+The repository already defines the bounded `codex-mobile-projection` toolset
+with start, status, wait, update, and stop. Running the trial therefore requires
+an independently authorized, temporary configuration switch followed by a
+fresh MCP connection and live tool-list verification. Merely reconnecting the
+current process without changing its startup environment is insufficient.
+
+After the trial, restore the prior toolset and reconnect again. That restoration
+is both the least-authority cleanup and the proof that the old session-local
+observation body is no longer retrievable from the ended MCP process. Treat the
+profile change, phone connection, projection session, APK mutation, and runtime
+deployment as distinct gates.
