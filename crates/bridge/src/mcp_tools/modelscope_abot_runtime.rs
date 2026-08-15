@@ -21,6 +21,7 @@ const STUDIO_PROMPT_SELECTOR: &str = "textarea";
 const STUDIO_READY_TIMEOUT_MS: u64 = 45_000;
 const STUDIO_START_TIMEOUT_MS: u64 = 20_000;
 const MAX_PROVIDER_TASK_SCAN: usize = 256;
+const MAX_FAILURE_DIAGNOSTIC_FRAMES: usize = 16;
 const PROVIDER_COOLDOWN_STEPS_MS: &[u64] = &[5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -32,6 +33,40 @@ struct RunRequest {
     prompt: String,
     prompt_sha256: String,
     observe_ms: u64,
+}
+
+#[derive(Debug)]
+struct RunFailure {
+    message: String,
+    diagnostics: Option<Value>,
+}
+
+impl RunFailure {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            diagnostics: None,
+        }
+    }
+
+    fn with_diagnostics(message: impl Into<String>, diagnostics: Value) -> Self {
+        Self {
+            message: message.into(),
+            diagnostics: Some(diagnostics),
+        }
+    }
+}
+
+impl From<String> for RunFailure {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for RunFailure {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -506,12 +541,153 @@ fn completed_task_record(mut record: Value, receipt: Value) -> Value {
     record
 }
 
-fn failed_task_record(mut record: Value, error: &str) -> Value {
+fn failed_task_record(mut record: Value, error: &str, diagnostics: Option<Value>) -> Value {
     record["status"] = json!("failed");
     record["failure_class"] = json!(classify_failure(error));
     record["error"] = json!(error);
+    record["diagnostics"] = diagnostics.unwrap_or(Value::Null);
     record["updated_at_unix_ms"] = json!(now_unix_ms());
     record
+}
+
+fn frame_host(url: &str) -> Option<String> {
+    let (_, remainder) = url.split_once("://")?;
+    let authority = remainder.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = if host_port.starts_with('[') {
+        host_port
+            .split_once(']')
+            .map(|(host, _)| format!("{host}]"))
+    } else {
+        Some(host_port.split(':').next()?.to_string())
+    }?;
+    (!host.is_empty()).then_some(host)
+}
+
+fn diagnostic_status_signals(text: &str) -> Value {
+    let lower = text.to_lowercase();
+    json!({
+        "fps_token_present": lower.contains("fps"),
+        "queue_signal_present": lower.contains("queue") || lower.contains("排队"),
+        "loading_signal_present": lower.contains("loading") || lower.contains("加载") || lower.contains("分配"),
+        "error_signal_present": lower.contains("error") || lower.contains("failed") || lower.contains("失败") || lower.contains("错误"),
+    })
+}
+
+fn redacted_error(kind: &str, error: &str) -> Value {
+    json!({
+        "kind": kind,
+        "message_sha256": format!("{:x}", Sha256::digest(error.as_bytes())),
+    })
+}
+
+fn write_private_artifact(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+async fn capture_failure_diagnostics(
+    browser: &dyn BrowserBackend,
+    page: &PageId,
+    observed_frame_count: usize,
+) -> Value {
+    let captured_at_unix_ms = now_unix_ms();
+    let mut frame_diagnostics = Vec::new();
+    let mut frame_list_error = None;
+    match browser.list_frames(page).await {
+        Ok(frames) => {
+            for frame in frame_values(&frames)
+                .into_iter()
+                .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
+                .take(MAX_FAILURE_DIAGNOSTIC_FRAMES)
+            {
+                let frame_id = frame.get("frame_id").and_then(Value::as_str);
+                let host = frame
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .and_then(frame_host);
+                let body = browser
+                    .eval_in_frame(
+                        page,
+                        frame_id,
+                        None,
+                        "document.body ? document.body.innerText : ''",
+                    )
+                    .await;
+                let body_diagnostic = match body {
+                    Ok(value) => {
+                        let mut strings = Vec::new();
+                        strings_in(&value, &mut strings);
+                        let text = strings.join("\n");
+                        json!({
+                            "text_chars": text.chars().count(),
+                            "text_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+                            "status_signals": diagnostic_status_signals(&text),
+                            "read_error": Value::Null,
+                        })
+                    }
+                    Err(error) => json!({
+                        "text_chars": Value::Null,
+                        "text_sha256": Value::Null,
+                        "status_signals": Value::Null,
+                        "read_error": redacted_error("frame_eval_failed", &error.to_string()),
+                    }),
+                };
+                frame_diagnostics.push(json!({
+                    "host": host,
+                    "body": body_diagnostic,
+                }));
+            }
+        }
+        Err(error) => {
+            frame_list_error = Some(redacted_error("frame_list_failed", &error.to_string()))
+        }
+    }
+
+    let artifact_dir = cache_dir();
+    let screenshot = match browser.screenshot(page).await {
+        Ok(bytes) => {
+            let path = artifact_dir.join(format!("abot-failure-{captured_at_unix_ms}.png"));
+            match std::fs::create_dir_all(&artifact_dir)
+                .and_then(|_| write_private_artifact(&path, bytes.as_ref()))
+            {
+                Ok(()) => json!({
+                    "path": path,
+                    "sha256": format!("{:x}", Sha256::digest(bytes.as_ref())),
+                    "bytes": bytes.len(),
+                    "content_type": "image/png",
+                }),
+                Err(error) => {
+                    json!({"capture_error": format!("write failure screenshot: {error}")})
+                }
+            }
+        }
+        Err(error) => json!({"capture_error": format!("capture failure screenshot: {error}")}),
+    };
+
+    json!({
+        "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v0",
+        "captured_at_unix_ms": captured_at_unix_ms,
+        "privacy": {
+            "raw_text_recorded": false,
+            "prompt_recorded": false,
+            "frame_urls_recorded": false,
+            "credentials_recorded": false,
+            "screenshot_may_contain_submitted_prompt": true,
+        },
+        "observed_child_frame_count": observed_frame_count,
+        "recorded_frame_count": frame_diagnostics.len(),
+        "frames_truncated": observed_frame_count > MAX_FAILURE_DIAGNOSTIC_FRAMES,
+        "frame_list_error": frame_list_error,
+        "frames": frame_diagnostics,
+        "screenshot": screenshot,
+    })
 }
 
 fn inspect_existing_task(
@@ -637,13 +813,13 @@ async fn stop_session(browser: &dyn BrowserBackend, page: &PageId) -> bool {
 async fn run_once(
     browser: Arc<dyn BrowserBackend>,
     request: RunRequest,
-) -> std::result::Result<Value, String> {
+) -> std::result::Result<Value, RunFailure> {
     let page = browser
         .navigate(BASE_URL)
         .await
         .map_err(|error| format!("navigate Studio: {error}"))?;
     let mut started = false;
-    let run_result = async {
+    let run_result: std::result::Result<Value, RunFailure> = async {
         let ready = browser
             .wait_for(
                 &page,
@@ -654,9 +830,9 @@ async fn run_once(
             .await
             .map_err(|error| format!("wait Studio load: {error}"))?;
         if ready.matched != "selector" {
-            return Err(format!(
+            return Err(RunFailure::new(format!(
                 "Studio prompt did not become ready within {STUDIO_READY_TIMEOUT_MS}ms"
-            ));
+            )));
         }
         browser
             .fill_form(&page, STUDIO_PROMPT_SELECTOR, &request.prompt)
@@ -715,7 +891,12 @@ async fn run_once(
             let _ = browser.wait_for(&page, None, None, 1_000).await;
         }
         if max_fps <= 0.0 {
-            return Err("Studio stream did not report positive FPS before deadline".into());
+            let diagnostics =
+                capture_failure_diagnostics(browser.as_ref(), &page, observed_frame_count).await;
+            return Err(RunFailure::with_diagnostics(
+                "Studio stream did not report positive FPS before deadline",
+                diagnostics,
+            ));
         }
 
         let screenshot = browser
@@ -747,9 +928,9 @@ async fn run_once(
             .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
             .count();
         if iframe_count_after_stop != 0 {
-            return Err(format!(
+            return Err(RunFailure::new(format!(
                 "Studio lifecycle did not close: {iframe_count_after_stop} iframe(s) remain"
-            ));
+            )));
         }
         started = false;
 
@@ -807,10 +988,12 @@ async fn run_once(
         true
     };
     let close_observed = browser.close(&page).await.is_ok();
-    run_result.map_err(|error| {
-        format!(
-            "{error}; cleanup_stop_observed={cleanup_stop_observed}; close_observed={close_observed}"
-        )
+    run_result.map_err(|mut failure| {
+        failure.message = format!(
+            "{}; cleanup_stop_observed={cleanup_stop_observed}; close_observed={close_observed}",
+            failure.message
+        );
+        failure
     })
 }
 
@@ -977,9 +1160,11 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 .await;
                 Ok(ToolResult::structured_json(&receipt))
             }
-            Err(error) => {
+            Err(failure) => {
+                let error = failure.message;
+                let diagnostics = failure.diagnostics;
                 if let (Some(task), Some(record)) = (task.as_ref(), task_record.take()) {
-                    let failed = failed_task_record(record, &error);
+                    let failed = failed_task_record(record, &error, diagnostics.clone());
                     if let Err(persist_error) =
                         atomic_write_json(&task_path(&task.task_id), &failed)
                     {
@@ -995,7 +1180,11 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                     intent_id,
                     None,
                     false,
-                    json!({"error": error, "embodiment_lease_id": lease_id}),
+                    json!({
+                        "error": error,
+                        "diagnostics": diagnostics,
+                        "embodiment_lease_id": lease_id,
+                    }),
                 )
                 .await;
                 Ok(ToolResult::error(error))
@@ -1406,7 +1595,7 @@ mod tests {
             "completed_replay_available"
         );
 
-        let failed = failed_task_record(running.clone(), "positive FPS missing");
+        let failed = failed_task_record(running.clone(), "positive FPS missing", None);
         assert_eq!(
             attempt_task_state(&task, Some(&failed))["state"],
             "failed_requires_new_request_id"
@@ -1582,6 +1771,36 @@ mod tests {
             2
         );
         assert!(frame_values(&json!([{"kind": "main"}])).is_empty());
+    }
+
+    #[test]
+    fn failure_diagnostics_redact_frame_content_and_urls() {
+        assert_eq!(
+            frame_host("https://user:secret@example.com:443/path?token=x").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(frame_host("not-a-url"), None);
+
+        let text = "排队 loading then ERROR at 0 FPS; private provider detail";
+        let signals = diagnostic_status_signals(text);
+        assert_eq!(signals["fps_token_present"], true);
+        assert_eq!(signals["queue_signal_present"], true);
+        assert_eq!(signals["loading_signal_present"], true);
+        assert_eq!(signals["error_signal_present"], true);
+        assert!(!signals.to_string().contains("private provider detail"));
+
+        let browser_error = "secret at https://example.com/?token=private";
+        let redacted = redacted_error("frame_eval_failed", browser_error);
+        assert_eq!(redacted["kind"], "frame_eval_failed");
+        assert_eq!(redacted["message_sha256"].as_str().unwrap().len(), 64);
+        assert!(!redacted.to_string().contains("private"));
+
+        let failed = failed_task_record(
+            json!({"status": "running"}),
+            "positive FPS missing",
+            Some(json!({"schema": "diagnostics-test"})),
+        );
+        assert_eq!(failed["diagnostics"]["schema"], "diagnostics-test");
     }
 
     #[test]
