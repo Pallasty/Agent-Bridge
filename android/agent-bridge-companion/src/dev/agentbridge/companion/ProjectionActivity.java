@@ -1,10 +1,13 @@
 package dev.agentbridge.companion;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
+import android.speech.RecognizerIntent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -19,11 +22,13 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Locale;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
 public final class ProjectionActivity extends Activity {
+    private static final int DICTATE_DRAFT_REQUEST = 2401;
     private static final String HOST = "projection_host";
     private static final String PORT = "projection_port";
     private static final String TOKEN = "projection_token";
@@ -107,8 +112,13 @@ public final class ProjectionActivity extends Activity {
         textInput.setHint("Type a message (maximum 1000 characters)");
         textInput.setMaxLines(6);
         panel.addView(textInput);
+        panel.addView(text("Dictation opens Android's visible system speech recognizer. Agent-Bridge receives no audio. Review and edit the draft before submitting.", 14, Typeface.NORMAL));
+        Button dictate = button("Dictate draft"); panel.addView(dictate);
         Button submit = button("Submit text"); panel.addView(submit);
         textSubmitState = text("Nothing submitted", 14, Typeface.ITALIC); panel.addView(textSubmitState);
+        dictate.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) { beginDictation(); }
+        });
         submit.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) { submitTextObservation(); }
         });
@@ -116,6 +126,42 @@ public final class ProjectionActivity extends Activity {
         primary.setOnClickListener(new View.OnClickListener() { public void onClick(View view) { disconnect("Disconnected by you"); } });
         setContentView(scroll(panel));
         poll();
+    }
+
+    private void beginDictation() {
+        if (!connected || textInput == null) return;
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate a draft to review before submitting");
+        try {
+            textSubmitState.setText("Opening Android system dictation…");
+            startActivityForResult(intent, DICTATE_DRAFT_REQUEST);
+        } catch (ActivityNotFoundException error) {
+            textSubmitState.setText("System dictation is unavailable; type your draft instead");
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != DICTATE_DRAFT_REQUEST || !connected || textInput == null) return;
+        if (resultCode != RESULT_OK || data == null) {
+            textSubmitState.setText("Dictation cancelled; existing draft preserved");
+            return;
+        }
+        ArrayList<String> candidates =
+                data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+        String transcript = VoiceDraftPolicy.firstTranscript(candidates);
+        if (transcript.isEmpty()) {
+            textSubmitState.setText("No dictation result; existing draft preserved");
+            return;
+        }
+        String draft = VoiceDraftPolicy.mergeDraft(textInput.getText().toString(), transcript);
+        textInput.setText(draft);
+        textInput.setSelection(draft.length());
+        textSubmitState.setText("Draft updated locally; review it, then tap Submit text");
     }
 
     private void submitTextObservation() {

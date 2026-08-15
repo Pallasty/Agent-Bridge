@@ -43,6 +43,15 @@ in-memory in the current MCP process/session record only. It is not written to
 memory, interpreted as an instruction, or used to authorize an action. There is
 no background capture, clipboard read, microphone access, or automatic submit.
 
+The source-only voice-draft addition adds a **Dictate draft** button beside that
+field. It opens Android's visible system speech-recognition Activity and places
+the chosen transcript in the editable field; an existing draft is preserved and
+the transcript is appended. The companion does not request `RECORD_AUDIO`, read
+or transmit raw audio, or submit the transcript automatically. Cancellation,
+missing recognizer support, and empty results leave the draft unchanged. The
+holder must still review the draft and press **Submit text** to create the
+existing authenticated, ephemeral, zero-authority text observation.
+
 ## Build
 
 Set `ANDROID_SDK_ROOT` to an Android SDK containing API 35 and build-tools,
