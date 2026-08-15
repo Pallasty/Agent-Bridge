@@ -518,7 +518,7 @@ fn running_task_record(task: &TaskRequest, request: &RunRequest, lease_id: &Leas
 }
 
 fn classify_failure(error: &str) -> &'static str {
-    if error.contains("positive FPS") {
+    if error.contains("positive FPS") || error.contains("candidate runtime frame") {
         "provider_timeout"
     } else if error.contains("stop action") || error.contains("lifecycle did not close") {
         "provider_lifecycle"
@@ -564,6 +564,38 @@ fn frame_host(url: &str) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+fn is_ignored_presentation_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "youtu.be"
+        || host == "youtube.com"
+        || host.ends_with(".youtube.com")
+        || host == "youtube-nocookie.com"
+        || host.ends_with(".youtube-nocookie.com")
+}
+
+fn is_candidate_runtime_frame(frame: &Value) -> bool {
+    if frame.get("parent_id").and_then(Value::as_str).is_none() {
+        return false;
+    }
+    !frame
+        .get("url")
+        .and_then(Value::as_str)
+        .and_then(frame_host)
+        .is_some_and(|host| is_ignored_presentation_host(&host))
+}
+
+fn child_frame_counts(frames: &[Value]) -> (usize, usize) {
+    let total = frames
+        .iter()
+        .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
+        .count();
+    let candidates = frames
+        .iter()
+        .filter(|frame| is_candidate_runtime_frame(frame))
+        .count();
+    (total, candidates)
+}
+
 fn diagnostic_status_signals(text: &str) -> Value {
     let lower = text.to_lowercase();
     json!({
@@ -595,7 +627,10 @@ fn write_private_artifact(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 async fn capture_failure_diagnostics(
     browser: &dyn BrowserBackend,
     page: &PageId,
-    observed_frame_count: usize,
+    observed_child_frame_count: usize,
+    observed_candidate_frame_count: usize,
+    start_control_present_after_click: bool,
+    stop_control_present_after_click: bool,
 ) -> Value {
     let captured_at_unix_ms = now_unix_ms();
     let mut frame_diagnostics = Vec::new();
@@ -612,16 +647,23 @@ async fn capture_failure_diagnostics(
                     .get("url")
                     .and_then(Value::as_str)
                     .and_then(frame_host);
-                let body = browser
-                    .eval_in_frame(
-                        page,
-                        frame_id,
-                        None,
-                        "document.body ? document.body.innerText : ''",
+                let candidate_runtime_frame = is_candidate_runtime_frame(&frame);
+                let body_diagnostic = match if candidate_runtime_frame {
+                    Some(
+                        browser
+                            .eval_in_frame(
+                                page,
+                                frame_id,
+                                None,
+                                "document.body ? document.body.innerText : ''",
+                            )
+                            .await,
                     )
-                    .await;
-                let body_diagnostic = match body {
-                    Ok(value) => {
+                } else {
+                    None
+                } {
+                    None => Value::Null,
+                    Some(Ok(value)) => {
                         let mut strings = Vec::new();
                         strings_in(&value, &mut strings);
                         let text = strings.join("\n");
@@ -632,7 +674,7 @@ async fn capture_failure_diagnostics(
                             "read_error": Value::Null,
                         })
                     }
-                    Err(error) => json!({
+                    Some(Err(error)) => json!({
                         "text_chars": Value::Null,
                         "text_sha256": Value::Null,
                         "status_signals": Value::Null,
@@ -641,6 +683,7 @@ async fn capture_failure_diagnostics(
                 };
                 frame_diagnostics.push(json!({
                     "host": host,
+                    "role": if candidate_runtime_frame { "runtime_candidate" } else { "ignored_presentation" },
                     "body": body_diagnostic,
                 }));
             }
@@ -671,8 +714,23 @@ async fn capture_failure_diagnostics(
         Err(error) => json!({"capture_error": format!("capture failure screenshot: {error}")}),
     };
 
+    let main_page = match browser.extract_text(page).await {
+        Ok(text) => json!({
+            "text_chars": text.chars().count(),
+            "text_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+            "status_signals": diagnostic_status_signals(&text),
+            "read_error": Value::Null,
+        }),
+        Err(error) => json!({
+            "text_chars": Value::Null,
+            "text_sha256": Value::Null,
+            "status_signals": Value::Null,
+            "read_error": redacted_error("main_page_text_failed", &error.to_string()),
+        }),
+    };
+
     json!({
-        "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v0",
+        "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1",
         "captured_at_unix_ms": captured_at_unix_ms,
         "privacy": {
             "raw_text_recorded": false,
@@ -681,10 +739,16 @@ async fn capture_failure_diagnostics(
             "credentials_recorded": false,
             "screenshot_may_contain_submitted_prompt": true,
         },
-        "observed_child_frame_count": observed_frame_count,
+        "controls": {
+            "start_present_after_click": start_control_present_after_click,
+            "stop_present_after_click": stop_control_present_after_click,
+        },
+        "observed_child_frame_count": observed_child_frame_count,
+        "observed_candidate_runtime_frame_count": observed_candidate_frame_count,
         "recorded_frame_count": frame_diagnostics.len(),
-        "frames_truncated": observed_frame_count > MAX_FAILURE_DIAGNOSTIC_FRAMES,
+        "frames_truncated": observed_child_frame_count > MAX_FAILURE_DIAGNOSTIC_FRAMES,
         "frame_list_error": frame_list_error,
+        "main_page": main_page,
         "frames": frame_diagnostics,
         "screenshot": screenshot,
     })
@@ -854,21 +918,38 @@ async fn run_once(
             .wait_for(&page, None, None, 3_000)
             .await
             .map_err(|error| format!("wait GPU allocation: {error}"))?;
+        let start_control_present_after_click = selector_for_text(
+            browser.as_ref(),
+            &page,
+            "唤醒你的世界",
+        )
+        .await
+        .is_ok();
+        let stop_control_present_after_click = selector_for_text(
+            browser.as_ref(),
+            &page,
+            "封存你的世界",
+        )
+        .await
+        .is_ok();
 
         let deadline = Instant::now() + Duration::from_millis(request.observe_ms);
         let mut max_fps = 0.0_f64;
-        let mut observed_frame_count = 0_usize;
+        let mut observed_child_frame_count = 0_usize;
+        let mut observed_candidate_frame_count = 0_usize;
         while Instant::now() < deadline {
             let frames = browser
                 .list_frames(&page)
                 .await
                 .map_err(|error| format!("list Studio frames: {error}"))?;
             let frame_values = frame_values(&frames);
-            observed_frame_count = observed_frame_count.max(frame_values.len().saturating_sub(1));
+            let (child_count, candidate_count) = child_frame_counts(&frame_values);
+            observed_child_frame_count = observed_child_frame_count.max(child_count);
+            observed_candidate_frame_count =
+                observed_candidate_frame_count.max(candidate_count);
             for frame in frame_values {
                 let frame_id = frame.get("frame_id").and_then(Value::as_str);
-                let parent_id = frame.get("parent_id").and_then(Value::as_str);
-                if parent_id.is_none() {
+                if !is_candidate_runtime_frame(&frame) {
                     continue;
                 }
                 let value = browser
@@ -891,10 +972,22 @@ async fn run_once(
             let _ = browser.wait_for(&page, None, None, 1_000).await;
         }
         if max_fps <= 0.0 {
-            let diagnostics =
-                capture_failure_diagnostics(browser.as_ref(), &page, observed_frame_count).await;
+            let diagnostics = capture_failure_diagnostics(
+                browser.as_ref(),
+                &page,
+                observed_child_frame_count,
+                observed_candidate_frame_count,
+                start_control_present_after_click,
+                stop_control_present_after_click,
+            )
+            .await;
+            let message = if observed_candidate_frame_count == 0 {
+                "Studio did not expose a candidate runtime frame before deadline"
+            } else {
+                "Studio candidate runtime frame did not report positive FPS before deadline"
+            };
             return Err(RunFailure::with_diagnostics(
-                "Studio stream did not report positive FPS before deadline",
+                message,
                 diagnostics,
             ));
         }
@@ -923,13 +1016,12 @@ async fn run_once(
             .list_frames(&page)
             .await
             .map_err(|error| format!("verify Studio stop: {error}"))?;
-        let iframe_count_after_stop = frame_values(&frames_after_stop)
-            .iter()
-            .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
-            .count();
-        if iframe_count_after_stop != 0 {
+        let frames_after_stop = frame_values(&frames_after_stop);
+        let (iframe_count_after_stop, candidate_iframe_count_after_stop) =
+            child_frame_counts(&frames_after_stop);
+        if candidate_iframe_count_after_stop != 0 {
             return Err(RunFailure::new(format!(
-                "Studio lifecycle did not close: {iframe_count_after_stop} iframe(s) remain"
+                "Studio lifecycle did not close: {candidate_iframe_count_after_stop} candidate runtime iframe(s) remain"
             )));
         }
         started = false;
@@ -946,11 +1038,16 @@ async fn run_once(
                 "persistent_runtime_authorized": false,
             },
             "observations": {
-                "gpu_session_observed": observed_frame_count > 0,
+                "gpu_session_observed": observed_candidate_frame_count > 0,
                 "stream_observed": true,
                 "max_observed_fps": max_fps,
+                "child_frame_count_observed": observed_child_frame_count,
+                "candidate_runtime_frame_count_observed": observed_candidate_frame_count,
+                "start_control_present_after_click": start_control_present_after_click,
+                "stop_control_present_after_click": stop_control_present_after_click,
                 "stop_observed": true,
                 "post_stop_iframe_count": iframe_count_after_stop,
+                "post_stop_candidate_runtime_iframe_count": candidate_iframe_count_after_stop,
             },
             "artifact": {
                 "path": screenshot_path,
@@ -1801,6 +1898,36 @@ mod tests {
             Some(json!({"schema": "diagnostics-test"})),
         );
         assert_eq!(failed["diagnostics"]["schema"], "diagnostics-test");
+    }
+
+    #[test]
+    fn frame_admission_excludes_presentation_media_consistently() {
+        let main = json!({
+            "frame_id": "main",
+            "url": BASE_URL,
+            "parent_id": Value::Null,
+        });
+        let youtube = json!({
+            "frame_id": "video",
+            "url": "https://www.youtube.com/embed/example?token=private",
+            "parent_id": "main",
+        });
+        let runtime = json!({
+            "frame_id": "runtime",
+            "url": "https://runtime.example/session/opaque",
+            "parent_id": "main",
+        });
+        let frames = vec![main.clone(), youtube.clone(), runtime.clone()];
+
+        assert!(!is_candidate_runtime_frame(&main));
+        assert!(!is_candidate_runtime_frame(&youtube));
+        assert!(is_candidate_runtime_frame(&runtime));
+        assert_eq!(child_frame_counts(&frames), (2, 1));
+        assert!(is_ignored_presentation_host("YOUTUBE.COM."));
+        assert_eq!(
+            classify_failure("Studio did not expose a candidate runtime frame before deadline"),
+            "provider_timeout"
+        );
     }
 
     #[test]
