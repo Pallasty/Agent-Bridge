@@ -28369,6 +28369,88 @@ fn session_finalize_schema_advertises_outcome_gated_optin() {
         json!(false),
         "the gated WRITE path must be opt-in (default false)"
     );
+    assert!(
+        props.get("completed_work_memory_keys").is_some(),
+        "session_finalize must advertise explicit scratch-lane closure"
+    );
+}
+
+#[tokio::test]
+async fn session_finalize_explicitly_closes_only_work_memory_and_dry_run_previews() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let scratch = mk_mem_scoped(
+        "completed_scratch_lane",
+        WORK_MEMORY_KIND,
+        "next: obsolete after final acceptance",
+        &["work_memory", "source:precompact"],
+        Some("project:/tmp/finalize-closure"),
+    );
+    let durable = mk_mem_scoped(
+        "durable_decision",
+        "decision",
+        "must survive the narrow closure affordance",
+        &[],
+        Some("project:/tmp/finalize-closure"),
+    );
+    store.memory_save(&scratch).await.expect("save scratch");
+    store.memory_save(&durable).await.expect("save durable");
+
+    let preview = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({
+                "skip_decay": true,
+                "dry_run": true,
+                "completed_work_memory_keys": [scratch.key, durable.key, "missing_lane"],
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("preview finalize");
+    let preview = result_text_as_json(&preview);
+    assert_eq!(
+        preview["work_memory_closure"]["would_clear_keys"],
+        json!(["completed_scratch_lane"])
+    );
+    assert_eq!(preview["work_memory_closure"]["cleared_count"], 0);
+    assert_eq!(
+        preview["work_memory_closure"]["rejected"][0]["reason"],
+        "not_work_memory"
+    );
+    assert!(store
+        .memory_get("completed_scratch_lane")
+        .await
+        .expect("get after preview")
+        .is_some());
+
+    let applied = SessionFinalizeTool::new(hub)
+        .execute(
+            json!({
+                "skip_decay": true,
+                "completed_work_memory_keys": ["completed_scratch_lane", "durable_decision"],
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("apply finalize");
+    let applied = result_text_as_json(&applied);
+    assert_eq!(applied["work_memory_closure"]["cleared_count"], 1);
+    assert_eq!(
+        applied["work_memory_closure"]["cleared_keys"],
+        json!(["completed_scratch_lane"])
+    );
+    assert!(store
+        .memory_get("completed_scratch_lane")
+        .await
+        .expect("get cleared")
+        .is_none());
+    assert!(store
+        .memory_get("durable_decision")
+        .await
+        .expect("get durable")
+        .is_some());
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[tokio::test]
@@ -28387,6 +28469,10 @@ async fn session_finalize_default_off_omits_gated_block_and_writes_nothing() {
     assert!(
         res.get("outcome_gated_consolidation").is_none(),
         "default call must not include the gated block"
+    );
+    assert!(
+        res.get("work_memory_closure").is_none(),
+        "omitting completed keys must preserve the default response shape"
     );
     // The read-only pointer field exists (Null here: small graph, not suggesting).
     assert!(res["follow_up"].get("outcome_gated_apply").is_some());

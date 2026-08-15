@@ -38214,6 +38214,11 @@ impl McpTool for SessionFinalizeTool {
                             Distinct from AGENT.md (stable identity) and session_handoff (factual progress log). \
                             Suggested 3-section structure: State / Direction / Notes-to-future-me."
                     },
+                    "completed_work_memory_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Explicit work_memory keys whose tasks completed in this session. Each key is type-checked before deletion; missing keys and non-work_memory rows are reported, never guessed. dry_run previews without deleting. Omit to leave scratch lanes unchanged."
+                    },
                     "apply_outcome_gated": {
                         "type": "boolean",
                         "default": false,
@@ -38277,6 +38282,37 @@ impl McpTool for SessionFinalizeTool {
             .get("skip_decay")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+
+        // Explicitly close scratch lanes that the caller has finished.  This is
+        // intentionally key-addressed instead of scope- or recency-based: several
+        // sessions can be active in one project, so a clean finalize must never
+        // erase a sibling session's interruption point.  Kind-check every target
+        // before deletion so this narrow lifecycle affordance cannot become a
+        // generic memory-delete surface.
+        let completed_work_memory_keys = json_string_array(&args, "completed_work_memory_keys");
+        let mut work_memory_cleared = Vec::new();
+        let mut work_memory_would_clear = Vec::new();
+        let mut work_memory_missing = Vec::new();
+        let mut work_memory_rejected = Vec::new();
+        for key in &completed_work_memory_keys {
+            match store.memory_get(key).await? {
+                Some(row) if row.kind == WORK_MEMORY_KIND => {
+                    if dry_run {
+                        work_memory_would_clear.push(key.clone());
+                    } else if store.memory_delete(key).await? {
+                        work_memory_cleared.push(key.clone());
+                    } else {
+                        work_memory_missing.push(key.clone());
+                    }
+                }
+                Some(row) => work_memory_rejected.push(json!({
+                    "key": key,
+                    "reason": "not_work_memory",
+                    "actual_kind": row.kind,
+                })),
+                None => work_memory_missing.push(key.clone()),
+            }
+        }
 
         // Stage 5b: optional delegation to the Stage 5 outcome-gated WRITE
         // executor. Runs BEFORE the decay/compact maintenance passes below, on
@@ -38551,6 +38587,16 @@ impl McpTool for SessionFinalizeTool {
         // default (apply_outcome_gated=false) response shape is unchanged.
         if apply_outcome_gated {
             payload["outcome_gated_consolidation"] = outcome_gated_consolidation;
+        }
+        if !completed_work_memory_keys.is_empty() {
+            payload["work_memory_closure"] = json!({
+                "requested_count": completed_work_memory_keys.len(),
+                "cleared_count": work_memory_cleared.len(),
+                "cleared_keys": work_memory_cleared,
+                "would_clear_keys": work_memory_would_clear,
+                "missing_keys": work_memory_missing,
+                "rejected": work_memory_rejected,
+            });
         }
         Ok(ToolResult::json_text(&payload))
     }
@@ -39376,7 +39422,12 @@ impl McpTool for SessionLifecycleStepTool {
                     "decay_half_life_days": { "type": "number" },
                     "decay_archive_threshold": { "type": "number" },
                     "skip_decay": { "type": "boolean" },
-                    "export_path": { "type": "string" }
+                    "export_path": { "type": "string" },
+                    "completed_work_memory_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "For finalize|end only: explicit completed work_memory keys to type-check and clear."
+                    }
                 },
                 "required": ["step"]
             }),
@@ -39416,6 +39467,7 @@ impl McpTool for SessionLifecycleStepTool {
                     "decay_archive_threshold",
                     "skip_decay",
                     "export_path",
+                    "completed_work_memory_keys",
                 ] {
                     if let Some(v) = args.get(k) {
                         sub[k] = v.clone();
