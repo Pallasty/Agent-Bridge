@@ -1,0 +1,46 @@
+{
+  "schema": "agent_bridge.mobile_text_real_dogfood_scorecard.v1",
+  "trial_id": "mobile-text-real-dogfood-v1-20260816",
+  "preregistered": true,
+  "workflow": {
+    "real_task": true,
+    "task_reference": "active Agent-Bridge mobile acceptance device-readiness handoff",
+    "needed_fact_declared_before_submit": true
+  },
+  "baseline": {
+    "desktop_surface_switches": 1,
+    "desktop_text_or_copy_actions": 1
+  },
+  "trial": {
+    "desktop_surface_switches": 0,
+    "desktop_text_or_copy_actions": 0,
+    "foreground_user_confirmed": true,
+    "background_capture": false,
+    "implicit_control": false,
+    "unique_observations_accepted": 1,
+    "deduplicated_retries": 0,
+    "consumed_via_exact_session_status": true,
+    "affected_real_decision": true,
+    "full_text_persisted_outside_mcp_process": false
+  },
+  "authority": {
+    "phone_connection_separately_authorized": true,
+    "apk_mutation_performed": false,
+    "apk_mutation_separately_authorized": false,
+    "runtime_deployment_performed": false,
+    "runtime_deployment_separately_authorized": false,
+    "merge_or_push_performed": false,
+    "merge_or_push_separately_authorized": false
+  },
+  "cleanup": {
+    "projection_stopped": true,
+    "fresh_mcp_cannot_retrieve_session": true
+  },
+  "evidence": {
+    "baseline_reference": "preregistered fallback in docs/MOBILE-TEXT-REAL-DOGFOOD-V1.md",
+    "acceptance_reference": "session mcp-1786835693-2eaecf0c493c accepted one foreground submission",
+    "consumption_reference": "exact-session mobile_projection_status at submission_count 1",
+    "decision_reference": "device-idle fact confirmed continuation readiness without granting action authority",
+    "cleanup_reference": "fresh codex-modelscope-abot MCP returned session not found"
+  }
+}
