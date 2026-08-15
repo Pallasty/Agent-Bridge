@@ -3,6 +3,7 @@ import pathlib
 import socket
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -29,7 +30,8 @@ class AppControlTests(unittest.TestCase):
                     "XDG_RUNTIME_DIR": str(runtime),
                     "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/999999/stale-bus",
                 }
-                restored = mod.hydrate_session_bus(env, runtime_dir=runtime)
+                with mock.patch.object(mod.sys, "platform", "linux"):
+                    restored = mod.hydrate_session_bus(env, runtime_dir=runtime)
             finally:
                 bus.close()
         expected = f"unix:path={runtime / 'bus'}"
@@ -47,7 +49,8 @@ class AppControlTests(unittest.TestCase):
                     "XDG_RUNTIME_DIR": str(runtime),
                     "DBUS_SESSION_BUS_ADDRESS": "tcp:host=127.0.0.1,port=1234",
                 }
-                restored = mod.hydrate_session_bus(env, runtime_dir=runtime)
+                with mock.patch.object(mod.sys, "platform", "linux"):
+                    restored = mod.hydrate_session_bus(env, runtime_dir=runtime)
             finally:
                 bus.close()
         self.assertEqual(env["DBUS_SESSION_BUS_ADDRESS"], "tcp:host=127.0.0.1,port=1234")
