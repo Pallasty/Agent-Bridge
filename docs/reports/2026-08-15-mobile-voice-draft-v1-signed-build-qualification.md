@@ -38,8 +38,9 @@ does not authorize or record an APK install, replace, launch, or projection.
 
 ## Device boundary
 
-The device package was not written. No companion PID, companion service, or
-projection session was started; the installed package remains the prior
-version-2 package. The next gate is a separately authorized install/replace
-and live acceptance using this exact signed artifact digest.
-
+The device package was not written. Before the build, the device had no
+companion PID, service, or projection session. The final post-build wireless
+ADB probe returned zero devices, so the prior package state could not be
+re-read after the build; this is recorded as an unavailable observation, not
+as live-device acceptance. The next gate is a separately authorized
+install/replace and live acceptance using this exact signed artifact digest.
