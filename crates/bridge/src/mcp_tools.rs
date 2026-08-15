@@ -77,7 +77,9 @@ use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
 mod kitesurf;
 use kitesurf::CloudflareKitesurfSnapshotTool;
 mod modelscope_abot_runtime;
-use modelscope_abot_runtime::{ModelScopeAbotRunOnceTool, ModelScopeAbotTaskStatusTool};
+use modelscope_abot_runtime::{
+    ModelScopeAbotProviderStatusTool, ModelScopeAbotRunOnceTool, ModelScopeAbotTaskStatusTool,
+};
 #[cfg(feature = "embodiment-runtime-p4")]
 mod embodiment_runtime;
 #[cfg(all(feature = "embodiment-runtime-p4", test))]
@@ -44711,6 +44713,7 @@ const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
 /// lifecycle internally, so raw browser_* controls remain outside this surface.
 const CODEX_MODELSCOPE_ABOT_EXTRAS: &[&str] = &[
     "embodiment_lease",
+    "modelscope_abot_provider_status",
     "modelscope_abot_run_once",
     "modelscope_abot_task_status",
 ];
@@ -49429,6 +49432,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(ModelScopeAbotRunOnceTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(ModelScopeAbotProviderStatusTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

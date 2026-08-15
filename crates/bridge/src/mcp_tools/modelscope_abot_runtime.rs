@@ -20,6 +20,8 @@ const TASK_SCHEMA: &str = "agent_bridge.modelscope_abot_task.v0";
 const STUDIO_PROMPT_SELECTOR: &str = "textarea";
 const STUDIO_READY_TIMEOUT_MS: u64 = 45_000;
 const STUDIO_START_TIMEOUT_MS: u64 = 20_000;
+const MAX_PROVIDER_TASK_SCAN: usize = 256;
+const PROVIDER_COOLDOWN_STEPS_MS: &[u64] = &[5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static TASK_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -229,6 +231,176 @@ fn read_task(path: &Path) -> std::result::Result<Option<Value>, String> {
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(|error| format!("parse task record {}: {error}", path.display()))
+}
+
+#[derive(Default)]
+struct ProviderTaskScan {
+    records: Vec<Value>,
+    invalid_records: usize,
+    omitted_records: usize,
+}
+
+fn valid_provider_health_record(record: &Value) -> bool {
+    record.get("schema").and_then(Value::as_str) == Some(TASK_SCHEMA)
+        && record.get("provider_id").and_then(Value::as_str) == Some(PROVIDER_ID)
+        && record
+            .get("task_id")
+            .and_then(Value::as_str)
+            .is_some_and(|task_id| task_id.starts_with("abot-task-"))
+        && record
+            .get("updated_at_unix_ms")
+            .and_then(Value::as_u64)
+            .is_some_and(|timestamp| timestamp > 0)
+        && matches!(
+            record.get("status").and_then(Value::as_str),
+            Some("running" | "completed" | "failed")
+        )
+}
+
+fn read_provider_tasks() -> std::result::Result<ProviderTaskScan, String> {
+    let entries = match fs::read_dir(task_dir()) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ProviderTaskScan::default())
+        }
+        Err(error) => return Err(format!("read provider task directory: {error}")),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read provider task entry: {error}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_file() => metadata,
+            _ => continue,
+        };
+        paths.push((metadata.modified().unwrap_or(UNIX_EPOCH), path));
+    }
+    paths.sort_by(|left, right| right.0.cmp(&left.0));
+    let omitted_records = paths.len().saturating_sub(MAX_PROVIDER_TASK_SCAN);
+    paths.truncate(MAX_PROVIDER_TASK_SCAN);
+
+    let mut scan = ProviderTaskScan {
+        omitted_records,
+        ..ProviderTaskScan::default()
+    };
+    for (_, path) in paths {
+        match read_task(&path) {
+            Ok(Some(record)) if valid_provider_health_record(&record) => scan.records.push(record),
+            _ => scan.invalid_records += 1,
+        }
+    }
+    Ok(scan)
+}
+
+fn task_updated_at(record: &Value) -> u64 {
+    record
+        .get("updated_at_unix_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn is_provider_failure(record: &Value) -> bool {
+    let provider_failure = record.get("status").and_then(Value::as_str) == Some("failed")
+        && matches!(
+            record.get("failure_class").and_then(Value::as_str),
+            Some("provider_timeout" | "provider_lifecycle")
+        );
+    provider_failure || is_interrupted_running(record)
+}
+
+fn is_interrupted_running(record: &Value) -> bool {
+    record.get("status").and_then(Value::as_str) == Some("running")
+        && record.get("process_instance_id").and_then(Value::as_str) != Some(process_instance_id())
+}
+
+fn cooldown_duration_ms(failure_count: usize) -> u64 {
+    if failure_count == 0 {
+        return 0;
+    }
+    PROVIDER_COOLDOWN_STEPS_MS[failure_count
+        .saturating_sub(1)
+        .min(PROVIDER_COOLDOWN_STEPS_MS.len() - 1)]
+}
+
+fn provider_recovery_state(records: &[Value], now_ms: u64) -> Value {
+    let mut ordered = records.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|record| std::cmp::Reverse(task_updated_at(record)));
+    let last_success_at = ordered
+        .iter()
+        .find(|record| record.get("status").and_then(Value::as_str) == Some("completed"))
+        .map(|record| task_updated_at(record));
+    let provider_failures = ordered
+        .iter()
+        .copied()
+        .filter(|record| {
+            is_provider_failure(record)
+                && last_success_at
+                    .map(|success_at| task_updated_at(record) > success_at)
+                    .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    let failure_count = provider_failures.len();
+    let latest_failure = provider_failures.first().copied();
+    let cooldown_ms = cooldown_duration_ms(failure_count);
+    let retry_not_before_unix_ms = latest_failure
+        .map(task_updated_at)
+        .unwrap_or_default()
+        .saturating_add(cooldown_ms);
+    let cooldown_active = failure_count > 0 && now_ms < retry_not_before_unix_ms;
+    let remaining_ms = if cooldown_active {
+        retry_not_before_unix_ms.saturating_sub(now_ms)
+    } else {
+        0
+    };
+    let latest_terminal_task = ordered
+        .iter()
+        .find(|record| {
+            matches!(
+                record.get("status").and_then(Value::as_str),
+                Some("completed" | "failed")
+            ) || is_interrupted_running(record)
+        })
+        .map(|record| {
+            let interrupted = is_interrupted_running(record);
+            json!({
+                "task_id": record.get("task_id").and_then(Value::as_str),
+                "status": if interrupted { Some("interrupted") } else { record.get("status").and_then(Value::as_str) },
+                "failure_class": if interrupted { Some("interrupted_after_restart") } else { record.get("failure_class").and_then(Value::as_str) },
+                "updated_at_unix_ms": task_updated_at(record),
+            })
+        });
+
+    json!({
+        "consecutive_provider_failures": failure_count,
+        "last_success_at_unix_ms": last_success_at,
+        "latest_terminal_task": latest_terminal_task,
+        "cooldown": {
+            "active": cooldown_active,
+            "duration_ms": cooldown_ms,
+            "remaining_ms": remaining_ms,
+            "retry_not_before_unix_ms": if failure_count > 0 { Some(retry_not_before_unix_ms) } else { None },
+            "policy_ms": PROVIDER_COOLDOWN_STEPS_MS,
+            "reason": if cooldown_active { Some("recent_provider_failure") } else { None },
+        },
+    })
+}
+
+fn provider_cooldown_error(recovery: &Value) -> Option<String> {
+    if recovery["cooldown"]["active"].as_bool() != Some(true) {
+        return None;
+    }
+    let retry_at = recovery["cooldown"]["retry_not_before_unix_ms"]
+        .as_u64()
+        .unwrap_or_default();
+    let remaining = recovery["cooldown"]["remaining_ms"]
+        .as_u64()
+        .unwrap_or_default();
+    Some(format!(
+        "provider_cooldown: ModelScope ABot recently failed; retry after unix_ms={retry_at} (remaining_ms={remaining}); no external execution was started"
+    ))
 }
 
 fn running_task_record(task: &TaskRequest, request: &RunRequest, lease_id: &LeaseId) -> Value {
@@ -662,6 +834,24 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 Err(error) => return Ok(ToolResult::error(error)),
             }
         }
+        let provider_tasks = match read_provider_tasks() {
+            Ok(scan) => scan,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "provider recovery preflight unavailable: {error}"
+                )))
+            }
+        };
+        if provider_tasks.invalid_records > 0 {
+            return Ok(ToolResult::error(format!(
+                "provider recovery preflight unavailable: {} invalid task record(s); no external execution was started",
+                provider_tasks.invalid_records
+            )));
+        }
+        let recovery = provider_recovery_state(&provider_tasks.records, now_unix_ms());
+        if let Some(error) = provider_cooldown_error(&recovery) {
+            return Ok(ToolResult::error(error));
+        }
         let lock = SESSION_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
         let _guard = match lock.try_lock() {
             Ok(guard) => guard,
@@ -756,6 +946,84 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 Ok(ToolResult::error(error))
             }
         }
+    }
+}
+
+pub struct ModelScopeAbotProviderStatusTool {
+    hub: Hub,
+}
+
+impl ModelScopeAbotProviderStatusTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ModelScopeAbotProviderStatusTool {
+    fn name(&self) -> &'static str {
+        "modelscope_abot_provider_status"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Project local ModelScope ABot recovery readiness from durable task records. Read-only: performs no network probe, browser action, retry, lease acquisition, or runtime enablement.".into(),
+            input_schema: json!({"type": "object", "properties": {}}),
+        }
+    }
+
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let scan = match read_provider_tasks() {
+            Ok(scan) => scan,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let recovery = provider_recovery_state(&scan.records, now_unix_ms());
+        let runtime_opted_in = runtime_enabled();
+        let browser_configured = self.hub.browser.is_some();
+        let browser_capability_allowed = self.hub.security.check(Cap::Browser).is_ok();
+        let cooldown_active = recovery["cooldown"]["active"].as_bool() == Some(true);
+        let mut blockers = Vec::new();
+        if !runtime_opted_in {
+            blockers.push("runtime_opt_in_missing");
+        }
+        if !browser_configured {
+            blockers.push("browser_backend_missing");
+        }
+        if !browser_capability_allowed {
+            blockers.push("browser_capability_denied");
+        }
+        if cooldown_active {
+            blockers.push("provider_cooldown_active");
+        }
+        if scan.invalid_records > 0 {
+            blockers.push("task_history_invalid");
+        }
+        Ok(ToolResult::structured_json(&json!({
+            "schema": "agent_bridge.modelscope_abot_provider_status.v0",
+            "provider_id": PROVIDER_ID,
+            "read_only": true,
+            "network_probe_performed": false,
+            "external_execution_started": false,
+            "persistent_runtime_admitted": false,
+            "task_scan": {
+                "records_considered": scan.records.len(),
+                "invalid_records": scan.invalid_records,
+                "omitted_records": scan.omitted_records,
+                "limit": MAX_PROVIDER_TASK_SCAN,
+            },
+            "recovery": recovery,
+            "runtime": {
+                "opted_in": runtime_opted_in,
+                "browser_configured": browser_configured,
+                "browser_capability_allowed": browser_capability_allowed,
+            },
+            "execution_preflight": {
+                "eligible": blockers.is_empty(),
+                "blockers": blockers,
+                "owner_confirmation_and_body_lease_still_required_per_call": true,
+            },
+        })))
     }
 }
 
@@ -932,6 +1200,102 @@ mod tests {
         );
     }
 
+    fn terminal_record(
+        task_id: &str,
+        status: &str,
+        failure_class: Option<&str>,
+        updated_at_unix_ms: u64,
+    ) -> Value {
+        json!({
+            "schema": TASK_SCHEMA,
+            "provider_id": PROVIDER_ID,
+            "task_id": task_id,
+            "status": status,
+            "failure_class": failure_class,
+            "updated_at_unix_ms": updated_at_unix_ms,
+        })
+    }
+
+    #[test]
+    fn provider_recovery_applies_bounded_cooldown_without_network_work() {
+        let records = vec![
+            terminal_record("newer", "failed", Some("provider_timeout"), 2_000),
+            terminal_record("older", "failed", Some("provider_lifecycle"), 1_000),
+            terminal_record("local", "failed", Some("browser_backend"), 3_000),
+        ];
+        let recovery = provider_recovery_state(&records, 2_500);
+        assert_eq!(recovery["consecutive_provider_failures"], 2);
+        assert_eq!(recovery["cooldown"]["active"], true);
+        assert_eq!(recovery["cooldown"]["duration_ms"], 15 * 60_000);
+        assert_eq!(
+            recovery["cooldown"]["retry_not_before_unix_ms"],
+            2_000 + 15 * 60_000
+        );
+        let error = provider_cooldown_error(&recovery).expect("active cooldown");
+        assert!(error.contains("no external execution was started"));
+
+        let elapsed = provider_recovery_state(&records, 2_000 + 15 * 60_000);
+        assert_eq!(elapsed["cooldown"]["active"], false);
+        assert!(provider_cooldown_error(&elapsed).is_none());
+    }
+
+    #[test]
+    fn provider_success_resets_failure_streak() {
+        let records = vec![
+            terminal_record("failed", "failed", Some("provider_timeout"), 1_000),
+            terminal_record("success", "completed", None, 2_000),
+        ];
+        let recovery = provider_recovery_state(&records, 2_500);
+        assert_eq!(recovery["consecutive_provider_failures"], 0);
+        assert_eq!(recovery["last_success_at_unix_ms"], 2_000);
+        assert_eq!(recovery["cooldown"]["active"], false);
+        assert_eq!(
+            recovery["cooldown"]["retry_not_before_unix_ms"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn provider_health_record_validation_rejects_incomplete_history() {
+        let valid = terminal_record(
+            "abot-task-0123456789abcdef01234567",
+            "failed",
+            Some("provider_timeout"),
+            1_000,
+        );
+        assert!(valid_provider_health_record(&valid));
+
+        let mut missing_time = valid.clone();
+        missing_time
+            .as_object_mut()
+            .expect("record object")
+            .remove("updated_at_unix_ms");
+        assert!(!valid_provider_health_record(&missing_time));
+
+        let mut unknown_status = valid;
+        unknown_status["status"] = json!("queued");
+        assert!(!valid_provider_health_record(&unknown_status));
+    }
+
+    #[test]
+    fn interrupted_prior_process_enters_recovery_cooldown() {
+        let mut running = terminal_record(
+            "abot-task-0123456789abcdef01234567",
+            "running",
+            None,
+            10_000,
+        );
+        running["process_instance_id"] = json!("mcp-prior-process");
+        let recovery = provider_recovery_state(&[running], 10_500);
+        assert_eq!(recovery["consecutive_provider_failures"], 1);
+        assert_eq!(recovery["cooldown"]["active"], true);
+        assert_eq!(recovery["latest_terminal_task"]["status"], "interrupted");
+        assert_eq!(
+            recovery["latest_terminal_task"]["failure_class"],
+            "interrupted_after_restart"
+        );
+    }
+
     #[test]
     fn task_record_atomic_roundtrip_preserves_digest() {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -1013,5 +1377,10 @@ mod tests {
         let status = ModelScopeAbotTaskStatusTool;
         assert_eq!(status.name(), "modelscope_abot_task_status");
         assert!(status.schema().description.contains("never resumed"));
+
+        let provider = ModelScopeAbotProviderStatusTool::new(Hub::builder().build());
+        assert_eq!(provider.name(), "modelscope_abot_provider_status");
+        assert!(provider.schema().description.contains("Read-only"));
+        assert!(provider.schema().description.contains("no network probe"));
     }
 }

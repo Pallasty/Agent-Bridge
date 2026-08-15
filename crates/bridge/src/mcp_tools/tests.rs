@@ -10062,6 +10062,12 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         .find(|schema| schema.name == "modelscope_abot_task_status")
         .expect("modelscope_abot_task_status schema");
     assert!(status.description.contains("never resumed"));
+    let provider = abot_tools
+        .iter()
+        .find(|schema| schema.name == "modelscope_abot_provider_status")
+        .expect("modelscope_abot_provider_status schema");
+    assert!(provider.description.contains("Read-only"));
+    assert!(provider.description.contains("no network probe"));
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));
@@ -10073,6 +10079,9 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
     assert!(standard_tools
         .iter()
         .all(|schema| schema.name != "modelscope_abot_task_status"));
+    assert!(standard_tools
+        .iter()
+        .all(|schema| schema.name != "modelscope_abot_provider_status"));
 }
 
 #[test]
