@@ -22,6 +22,56 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(mod.select_player(players, "RHYTHMBOX"), ("rhythmbox", None))
         self.assertEqual(mod.select_player(players, "spotify"), ("spotify.instance42", None))
         self.assertEqual(mod.select_player(players, "missing"), (None, "player_not_found"))
+        self.assertEqual(mod.select_player(players, None), (None, "ambiguous_player"))
+
+    def test_unspecified_multiplayer_selects_only_unique_playing_player(self):
+        mod = load_module()
+        statuses = {"chromium.instance": "Paused", "rhythmbox": "Playing"}
+        def fake_run(argv, env, timeout=2.0):
+            return 0, statuses[argv[2]], ""
+        old_run = mod.run
+        try:
+            mod.run = fake_run
+            player, error, selection = mod.select_player_for_action(
+                list(statuses), None, {}
+            )
+        finally:
+            mod.run = old_run
+        self.assertEqual((player, error), ("rhythmbox", None))
+        self.assertEqual(selection["policy"], "unique_playing_player")
+        self.assertEqual(selection["playing_players"], ["rhythmbox"])
+
+    def test_unspecified_multiplayer_fails_closed_without_unique_playing_player(self):
+        mod = load_module()
+        for statuses in (
+            {"one": "Paused", "two": "Stopped"},
+            {"one": "Playing", "two": "Playing"},
+        ):
+            with self.subTest(statuses=statuses):
+                old_run = mod.run
+                try:
+                    mod.run = lambda argv, env, timeout=2.0: (0, statuses[argv[2]], "")
+                    player, error, _ = mod.select_player_for_action(list(statuses), None, {})
+                finally:
+                    mod.run = old_run
+                self.assertIsNone(player)
+                self.assertEqual(error, "ambiguous_player")
+
+    def test_unspecified_multiplayer_fails_closed_on_incomplete_status_observation(self):
+        mod = load_module()
+        def fake_run(argv, env, timeout=2.0):
+            if argv[2] == "one":
+                return 0, "Playing", ""
+            return 1, "", "D-Bus unavailable"
+        old_run = mod.run
+        try:
+            mod.run = fake_run
+            player, error, selection = mod.select_player_for_action(["one", "two"], None, {})
+        finally:
+            mod.run = old_run
+        self.assertIsNone(player)
+        self.assertEqual(error, "player_selection_incomplete")
+        self.assertEqual(selection["observations"][1]["status"], "observation_failed")
 
     def test_track_actions_require_identity_change(self):
         mod = load_module()
@@ -232,13 +282,13 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(payload["status"], "observation_failed")
         self.assertEqual(payload["error"]["code"], "active_playlist_observation_failed")
 
-    def test_playlist_current_probes_next_player_after_read_only_getter_failure(self):
+    def test_playlist_current_uses_unique_playing_player(self):
         mod = load_module()
         old_run, old_which = mod.run, mod.shutil.which
         def fake_run(argv, env, timeout=2.0):
             if argv == ["playerctl", "-l"]: return 0, "chromium.instance\nrhythmbox", ""
-            if argv[0] == "gdbus" and "chromium.instance" in " ".join(argv): return 1, "", "Get failed"
-            if argv == ["playerctl", "-p", "rhythmbox", "status"]: return 0, "Paused", ""
+            if argv == ["playerctl", "-p", "chromium.instance", "status"]: return 0, "Paused", ""
+            if argv == ["playerctl", "-p", "rhythmbox", "status"]: return 0, "Playing", ""
             if argv[:4] == ["playerctl", "-p", "rhythmbox", "metadata"]: return 0, "/track\tArtist\tTitle", ""
             if argv == ["playerctl", "-p", "rhythmbox", "volume"]: return 0, "1.0", ""
             if argv == ["playerctl", "-p", "rhythmbox", "position"]: return 0, "2.0", ""
@@ -253,9 +303,9 @@ class AppControlTests(unittest.TestCase):
             mod.run, mod.shutil.which = old_run, old_which
         self.assertEqual(payload["verdict"], "verified")
         self.assertEqual(payload["player"], "rhythmbox")
-        self.assertEqual(payload["selection"]["attempts"][0]["status"], "observation_failed")
+        self.assertEqual(payload["selection"]["policy"], "unique_playing_player")
 
-    def test_control_action_does_not_probe_multiple_players(self):
+    def test_control_action_does_not_dispatch_when_multiple_players_are_paused(self):
         mod = load_module()
         old_run, old_which = mod.run, mod.shutil.which
         calls = []
@@ -273,8 +323,8 @@ class AppControlTests(unittest.TestCase):
             payload = mod.execute("pause", None, True, 0.2)
         finally:
             mod.run, mod.shutil.which = old_run, old_which
-        self.assertEqual(payload["verdict"], "verified")
-        self.assertEqual(payload["player"], "chromium.instance")
+        self.assertEqual(payload["verdict"], "error")
+        self.assertEqual(payload["error"]["code"], "ambiguous_player")
         self.assertFalse(any(call[0] == "playerctl" and call[-1] == "pause" for call in calls))
 
     def test_actions_fail_closed_when_no_mpris_player_exists(self):

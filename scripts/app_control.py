@@ -86,13 +86,62 @@ def select_player(players: list[str], selector: str | None) -> tuple[str | None,
     if not players:
         return None, "no_mpris_player"
     if not selector:
-        return players[0], None
+        return (players[0], None) if len(players) == 1 else (None, "ambiguous_player")
     folded = selector.casefold()
     exact = [player for player in players if player.casefold() == folded]
     matches = exact or [player for player in players if folded in player.casefold()]
     if len(matches) == 1:
         return matches[0], None
     return None, "player_not_found" if not matches else "ambiguous_player"
+
+
+def select_player_for_action(
+    players: list[str], selector: str | None, env: dict[str, str]
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    """Select one player without depending on MPRIS enumeration order.
+
+    Explicit selectors retain the exact-then-unique-substring contract.  With no
+    selector, a single discovered player is safe.  Multiple players require a
+    complete status observation and exactly one Playing instance; otherwise the
+    caller must disambiguate explicitly.
+    """
+    if selector or len(players) <= 1:
+        player, error = select_player(players, selector)
+        return player, error, {
+            "policy": "explicit_selector" if selector else "single_discovered_player",
+            "selector": selector,
+        }
+
+    observations: list[dict[str, Any]] = []
+    playing: list[str] = []
+    incomplete = False
+    for candidate in players:
+        rc, out, err = run(["playerctl", "-p", candidate, "status"], env)
+        if rc != 0:
+            incomplete = True
+            observations.append({
+                "player": candidate,
+                "status": "observation_failed",
+                "rc": rc,
+                "message": err or out,
+            })
+            continue
+        playback_status = out.strip()
+        observations.append({"player": candidate, "status": "observed", "playback_status": playback_status})
+        if playback_status.casefold() == "playing":
+            playing.append(candidate)
+
+    selection = {
+        "policy": "unique_playing_player",
+        "selector": None,
+        "observations": observations,
+        "playing_players": playing,
+    }
+    if incomplete:
+        return None, "player_selection_incomplete", selection
+    if len(playing) == 1:
+        return playing[0], None, selection
+    return None, "ambiguous_player", selection
 
 
 def playlist_call(player: str, method: str, args: list[str], env: dict[str, str]) -> tuple[int, str, str]:
@@ -263,44 +312,28 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "route": route_summary(bool(players)), "session_env_restored": sorted(restored),
             "duration_ms": round((time.monotonic() - started) * 1000),
         }
-    # Read-only playlist observation may probe each discovered player when no
-    # selector was supplied. Some MPRIS clients advertise the interface but
-    # fail the ActivePlaylist getter; do not let that unrelated client shadow
-    # a healthy player. Control actions remain strictly single-target.
-    if action == "playlist_current" and not player_selector and len(players) > 1:
-        attempts = []
-        for candidate in players:
-            active_playlist, active_error = current_playlist(candidate, env)
-            if active_error:
-                attempts.append({"player": candidate, "status": "observation_failed", "error": active_error})
-                continue
-            after, observe_error = observe(candidate, env)
-            if after is None:
-                attempts.append({"player": candidate, "status": "observation_failed", "error": observe_error or {"code": "observation_failed"}})
-                continue
-            return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": candidate, "active_playlist": active_playlist, "track_summary": after, "selection": {"policy": "first_verified_playlist_current", "attempts": attempts}, "route": route_summary(True), "verification": {"status": "verified", "predicate": "active_playlist_observed", "observation_error": observe_error}}
-        return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "players": players, "selection": {"policy": "first_verified_playlist_current", "attempts": attempts}, "route": route_summary(bool(players)), "error": {"code": "all_players_observation_failed", "message": "no discovered MPRIS player completed playlist_current"}}
-
-    player, select_error = select_player(players, player_selector)
+    player, select_error, selection = select_player_for_action(players, player_selector, env)
     if select_error:
         return {
             "schema": SCHEMA, "status": "target_unavailable", "verdict": "error", "recover": "replan",
-            "domain": "media", "action": action, "players": players, "route": route_summary(False),
+            "domain": "media", "action": action, "players": players, "selection": selection,
+            "route": route_summary(False),
             "error": {"code": select_error, "selector": player_selector},
         }
     assert player is not None
+    selection["selected_player"] = player
     if action == "playlist_current":
         active_playlist, active_error = current_playlist(player, env)
         if active_error:
             return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": active_error}
         after, observe_error = observe(player, env)
-        return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": player, "active_playlist": active_playlist, "track_summary": after, "route": route_summary(True), "verification": {"status": "verified", "predicate": "active_playlist_observed", "observation_error": observe_error}}
+        return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": player, "selection": selection, "active_playlist": active_playlist, "track_summary": after, "route": route_summary(True), "verification": {"status": "verified", "predicate": "active_playlist_observed", "observation_error": observe_error}}
     if action in ("playlist_list", "playlist_activate"):
         playlists, playlist_error = list_playlists(player, env)
         if playlist_error:
             return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": playlist_error}
         if action == "playlist_list":
-            return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": player, "playlists": playlists, "route": route_summary(True), "verification": {"status": "verified", "predicate": "playlist_catalog_observed"}}
+            return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": player, "selection": selection, "playlists": playlists, "route": route_summary(True), "verification": {"status": "verified", "predicate": "playlist_catalog_observed"}}
         if not playlist_id:
             return {"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "missing_playlist_id", "message": "playlist_activate requires exact playlist object path"}}
         if playlist_id not in {item["id"] for item in playlists}:
@@ -343,7 +376,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
         elif verified and preserve_nonplaying:
             preservation_verified = activation_status != "Playing"
         verified = verified and preservation_verified
-        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "before": before, "active_playlist": active_playlist, "after": after, "playback_preservation": {"required": preserve_nonplaying, "before_status": before.get("playback_status"), "after_activation_status": activation_status, "status": "verified" if preservation_verified else "unmet", "pause_dispatch": pause_dispatch}, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
+        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "selection": selection, "playlist_id": playlist_id, "route": route_summary(True), "before": before, "active_playlist": active_playlist, "after": after, "playback_preservation": {"required": preserve_nonplaying, "before_status": before.get("playback_status"), "after_activation_status": activation_status, "status": "verified" if preservation_verified else "unmet", "pause_dispatch": pause_dispatch}, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
     before, error = observe(player, env)
     if error or before is None:
         return {
@@ -360,14 +393,14 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             }
         return {
             "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
-            "domain": "media", "action": action, "read_only": True, "player": player,
+            "domain": "media", "action": action, "read_only": True, "player": player, "selection": selection,
             "route": route_summary(True), "before": before,
             "verification": {"status": "verified", "predicate": "volume_observed"},
         }
     if action == "state_get":
         return {
             "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
-            "domain": "media", "action": action, "read_only": True, "player": player,
+            "domain": "media", "action": action, "read_only": True, "player": player, "selection": selection,
             "route": route_summary(True), "before": before,
             "verification": {"status": "verified", "predicate": "player_state_observed"},
         }
@@ -381,7 +414,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             }
         return {
             "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
-            "domain": "media", "action": action, "read_only": True, "player": player,
+            "domain": "media", "action": action, "read_only": True, "player": player, "selection": selection,
             "route": route_summary(True), "before": before,
             "verification": {"status": "verified", "predicate": "media_position_observed"},
         }
@@ -396,7 +429,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
         planned_argv = ["playerctl", "-p", player, "volume", f"{planned_level:.3f}"] if planned_level is not None else ["playerctl", "-p", player, action]
         return {
             "schema": SCHEMA, "status": "planned", "verdict": "verified", "recover": "proceed",
-            "domain": "media", "action": action, "read_only": True, "player": player,
+            "domain": "media", "action": action, "read_only": True, "player": player, "selection": selection,
             "route": route_summary(True), "before": before,
             "dispatch": {"status": "not_dispatched_dry_run", "argv": planned_argv},
             "verification": {"status": "not_run", "reason": "dry_run"},
@@ -442,7 +475,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
     return {
         "schema": SCHEMA, "status": "verified" if verified else "unmet",
         "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan",
-        "domain": "media", "action": action, "read_only": False, "player": player,
+        "domain": "media", "action": action, "read_only": False, "player": player, "selection": selection,
         "route": route_summary(True), "before": before, "dispatch": dispatch, "after": after,
         "verification": {"status": "verified" if verified else "unmet", "predicate": predicate,
                          "polls": polls, "observation_error": observation_error},
