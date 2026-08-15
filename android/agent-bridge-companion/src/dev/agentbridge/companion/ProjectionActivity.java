@@ -45,6 +45,7 @@ public final class ProjectionActivity extends Activity {
     private Button primary;
     private EditText textInput;
     private TextView textSubmitState;
+    private Button textSubmitButton;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -114,12 +115,12 @@ public final class ProjectionActivity extends Activity {
         panel.addView(textInput);
         panel.addView(text("Dictation opens Android's visible system speech recognizer. Agent-Bridge receives no audio. Review and edit the draft before submitting.", 14, Typeface.NORMAL));
         Button dictate = button("Dictate draft"); panel.addView(dictate);
-        Button submit = button("Submit text"); panel.addView(submit);
+        textSubmitButton = button("Submit text"); panel.addView(textSubmitButton);
         textSubmitState = text("Nothing submitted", 14, Typeface.ITALIC); panel.addView(textSubmitState);
         dictate.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) { beginDictation(); }
         });
-        submit.setOnClickListener(new View.OnClickListener() {
+        textSubmitButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) { submitTextObservation(); }
         });
         primary = button("Disconnect"); panel.addView(primary);
@@ -172,17 +173,18 @@ public final class ProjectionActivity extends Activity {
             textSubmitState.setText("Enter 1–1000 characters before submitting");
             return;
         }
+        byte[] submissionIdBytes = new byte[16]; random.nextBytes(submissionIdBytes);
+        final String submissionId = Hex.encode(submissionIdBytes);
+        TextObservationProtocol.validateSubmissionId(submissionId);
+        textSubmitButton.setEnabled(false);
         textSubmitState.setText("Submitting…");
         new Thread(new Runnable() { public void run() {
             try {
-                final long now = System.currentTimeMillis() / 1000L;
-                byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
-                final String nonce = Hex.encode(nonceBytes);
                 final String digest = TextObservationProtocol.payloadDigest(submitted);
                 JSONObject payload = new JSONObject();
                 payload.put("schema", TextObservationProtocol.SCHEMA);
                 payload.put("session_id", sessionId);
-                payload.put("captured_at_unix_seconds", now);
+                payload.put("submission_id", submissionId);
                 payload.put("locale", Locale.getDefault().toLanguageTag());
                 payload.put("text", submitted);
                 payload.put("payload_sha256", digest);
@@ -191,26 +193,42 @@ public final class ProjectionActivity extends Activity {
                 payload.put("attention_authority", false);
                 payload.put("memory_authority", false);
                 payload.put("actuation_authority", false);
-                String request = TextObservationProtocol.request(
-                        token, sessionId, now, nonce, payload.toString());
-                Socket socket = new Socket();
-                try {
-                    socket.connect(new InetSocketAddress(host, port), 2000);
-                    socket.setSoTimeout(2000);
-                    BufferedWriter writer = new BufferedWriter(
-                            new OutputStreamWriter(socket.getOutputStream(), "UTF-8"));
-                    writer.write(request); writer.write("\n"); writer.flush();
-                    String response = new BufferedReader(
-                            new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
-                    if (response == null) throw new IllegalArgumentException("empty acknowledgement");
-                    TextObservationProtocol.verifyAck(token, sessionId, now, nonce, digest, response);
-                } finally { socket.close(); }
+                Exception lastError = null;
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    final long now = System.currentTimeMillis() / 1000L;
+                    payload.put("captured_at_unix_seconds", now);
+                    byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
+                    final String nonce = Hex.encode(nonceBytes);
+                    String request = TextObservationProtocol.request(
+                            token, sessionId, now, nonce, payload.toString());
+                    Socket socket = new Socket();
+                    try {
+                        socket.connect(new InetSocketAddress(host, port), 2000);
+                        socket.setSoTimeout(2000);
+                        BufferedWriter writer = new BufferedWriter(
+                                new OutputStreamWriter(socket.getOutputStream(), "UTF-8"));
+                        writer.write(request); writer.write("\n"); writer.flush();
+                        String response = new BufferedReader(
+                                new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
+                        if (response == null)
+                            throw new IllegalArgumentException("empty acknowledgement");
+                        TextObservationProtocol.verifyAck(
+                                token, sessionId, now, nonce, digest, response);
+                        lastError = null;
+                        break;
+                    } catch (Exception error) {
+                        lastError = error;
+                    } finally { socket.close(); }
+                }
+                if (lastError != null) throw lastError;
                 handler.post(new Runnable() { public void run() {
                     textInput.setText("");
+                    textSubmitButton.setEnabled(true);
                     textSubmitState.setText("Accepted by this temporary Agent-Bridge session");
                 } });
             } catch (final Exception error) {
                 handler.post(new Runnable() { public void run() {
+                    textSubmitButton.setEnabled(true);
                     textSubmitState.setText("Not accepted; text remains on this device");
                 } });
             }
