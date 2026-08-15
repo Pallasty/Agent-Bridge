@@ -1652,7 +1652,7 @@ fn mobile_projection_media_presentation_handles_missing_fields() {
     assert_eq!(title, "媒体状态 · 已同步");
     assert!(body.contains("未播放曲目"));
     assert!(body.contains("未选择播放列表"));
-    assert!(body.contains("未知状态 · ??:?? / ??:??"));
+    assert!(body.contains("未知状态 · 时间未知"));
     assert_eq!(status, "未知状态");
 }
 
@@ -1774,6 +1774,36 @@ fn mobile_projection_sync_media_maps_only_verified_playlist_current_payload() {
         json!({"schema":"agent_bridge.app_control.v0","verdict":"error","action":"playlist_current"}),
     ] {
         assert!(media_context_from_app_control(&bad, 1234).is_err());
+    }
+}
+
+#[test]
+fn mobile_projection_sync_media_treats_nonpositive_duration_as_unknown() {
+    for duration in [json!(0.0), json!(-1.0), Value::Null] {
+        let payload = json!({
+            "schema": "agent_bridge.app_control.v0",
+            "verdict": "verified",
+            "action": "playlist_current",
+            "active_playlist": {"active": false, "id": null, "name": null},
+            "track_summary": {
+                "player": "rhythmbox",
+                "playback_status": "Playing",
+                "track_id": "/radio/1",
+                "artist": null,
+                "title": "Live radio",
+                "position_seconds": 15.0,
+                "duration_seconds": duration,
+                "metadata_available": true
+            }
+        });
+        let context = media_context_from_app_control(&payload, 1234).unwrap();
+        assert_eq!(context.position_seconds, Some(15.0));
+        assert_eq!(context.duration_seconds, None);
+        let (_, body, status) = media_projection_presentation(&context);
+        assert_eq!(status, "播放中");
+        assert!(body.contains("播放中 · 00:15\n"));
+        assert!(!body.contains("/ 00:00"));
+        assert!(!body.contains("??:??"));
     }
 }
 

@@ -100,7 +100,10 @@ pub(super) fn media_context_from_app_control(
         .and_then(Value::as_str)
         .map(str::to_owned);
     context.position_seconds = track.get("position_seconds").and_then(Value::as_f64);
-    context.duration_seconds = track.get("duration_seconds").and_then(Value::as_f64);
+    context.duration_seconds = track
+        .get("duration_seconds")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value > 0.0);
     context.metadata_available = track
         .get("metadata_available")
         .and_then(Value::as_bool)
@@ -168,6 +171,21 @@ fn format_media_clock(seconds: Option<f64>) -> String {
     format!("{:02}:{:02}", total / 60, total % 60)
 }
 
+fn format_media_progress(position_seconds: Option<f64>, duration_seconds: Option<f64>) -> String {
+    let position = position_seconds.filter(|value| value.is_finite() && *value >= 0.0);
+    let duration = duration_seconds.filter(|value| value.is_finite() && *value > 0.0);
+    match (position, duration) {
+        (Some(position), Some(duration)) => format!(
+            "{} / {}",
+            format_media_clock(Some(position)),
+            format_media_clock(Some(duration))
+        ),
+        (Some(position), None) => format_media_clock(Some(position)),
+        (None, Some(duration)) => format!("时长 {}", format_media_clock(Some(duration))),
+        (None, None) => "时间未知".into(),
+    }
+}
+
 fn truncate_display(value: &str, max_chars: usize, fallback: &str) -> String {
     if value.is_empty() {
         return fallback.into();
@@ -204,12 +222,11 @@ pub(super) fn media_projection_presentation(
     );
     let status = display_playback_status(context.playback_status.as_deref());
     let body = format!(
-        "{} · {}\n{} · {} / {}\n播放列表：{}",
+        "{} · {}\n{} · {}\n播放列表：{}",
         artist,
         title,
         status,
-        format_media_clock(context.position_seconds),
-        format_media_clock(context.duration_seconds),
+        format_media_progress(context.position_seconds, context.duration_seconds),
         playlist,
     );
     ("媒体状态 · 已同步".into(), body, status)
