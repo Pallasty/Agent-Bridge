@@ -868,6 +868,107 @@ def synth_qwen3(text, voice, speed, instruct=None, qwen_python=None, qwen_model=
     return wav, info
 
 
+def synth_omnivoice(text, voice, speed, instruct=None, omnivoice_python=None,
+                    omnivoice_manifest=None):
+    """Run the default-off OmniVoice ONNX candidate through its pinned adapter."""
+    enabled = os.environ.get("AB_OMNIVOICE_TTS_ENABLED", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None, {"detail": "OmniVoice backend is disabled; set AB_OMNIVOICE_TTS_ENABLED=1"}
+    if voice and voice.lower() not in {"auto", "default", "omnivoice"}:
+        return None, {"detail": "OmniVoice pilot does not support named speakers; use --voice auto"}
+    if instruct:
+        return None, {"detail": "OmniVoice pilot does not support style instructions"}
+    omnivoice_python = (omnivoice_python or
+                        os.environ.get("AB_OMNIVOICE_TTS_PYTHON", "").strip())
+    if not omnivoice_python or not os.path.exists(omnivoice_python):
+        return None, {"detail": "OmniVoice runtime not configured; set AB_OMNIVOICE_TTS_PYTHON"}
+    adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "omnivoice_tts_synth.py")
+    fd, wav = tempfile.mkstemp(prefix="ab_voice_omnivoice_", suffix=".wav")
+    os.close(fd)
+    os.unlink(wav)
+    cmd = [omnivoice_python, adapter, "--text", text, "--output", wav]
+    if omnivoice_manifest:
+        cmd.extend(["--manifest", omnivoice_manifest])
+    try:
+        timeout_s = float(os.environ.get("AB_OMNIVOICE_TTS_TIMEOUT_SECS", "300"))
+    except ValueError:
+        timeout_s = 300.0
+    timeout_s = max(30.0, min(timeout_s, 900.0))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return None, {"detail": f"OmniVoice timed out after {timeout_s:g}s"}
+    try:
+        info = json.loads((proc.stdout or "").strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError):
+        info = {"detail": f"OmniVoice produced no JSON receipt: {(proc.stderr or '')[:200]}"}
+    if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
+        if os.path.exists(wav):
+            os.unlink(wav)
+        return None, {"detail": info.get("detail", f"OmniVoice rc={proc.returncode}")}
+    info["wpm"] = int(max(90, min(2.0, max(0.5, speed)) * 175))
+    return wav, info
+
+
+def synth_tts_canary(text, voice, speed, instruct=None, subject=None, request_id=None,
+                     policy_path=None, qwen_python=None, qwen_model=None,
+                     qwen_worker=None, omnivoice_python=None, omnivoice_manifest=None):
+    """Select Qwen/OmniVoice through the review-bound, default-off canary gate."""
+    from tts_canary_router import decide
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    policy_path = policy_path or os.environ.get("AB_TTS_CANARY_POLICY", "").strip()
+    if not policy_path:
+        policy_path = os.path.join(root, "config", "omnivoice-canary.json")
+    try:
+        with open(policy_path, encoding="utf-8") as handle:
+            policy = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, {"detail": f"TTS canary policy unavailable: {str(exc)[:300]}"}
+    runtime_enabled = os.environ.get("AB_TTS_CANARY_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    language = "Chinese" if _contains_cjk(text) else "English"
+    decision = decide(policy, root=os.path.abspath(root),
+                      runtime_enabled=runtime_enabled, subject=subject or "",
+                      request_id=request_id or "", language=language, speaker=voice,
+                      instruction=instruct, reference_clone=False)
+    if decision["selected_backend"] == policy["candidate_backend"]:
+        wav, info = synth_omnivoice(text, "auto", speed, None,
+                                    omnivoice_python, omnivoice_manifest)
+        executed_backend = policy["candidate_backend"]
+        fallback_used = False
+        candidate_error = None
+        if wav is None and policy.get("fallback_to_control_on_candidate_error") is True:
+            candidate_error = info.get("detail", "OmniVoice candidate failed")
+            control_voice = policy.get("control_speaker", "Serena")
+            wav, info = synth_qwen3(text, control_voice, speed, instruct,
+                                    qwen_python, qwen_model, qwen_worker)
+            executed_backend = policy["control_backend"]
+            fallback_used = True
+    else:
+        control_voice = (policy.get("control_speaker", "Serena")
+                         if not voice or voice.lower() in {"auto", "default", "omnivoice"}
+                         else voice)
+        wav, info = synth_qwen3(text, control_voice, speed, instruct,
+                                qwen_python, qwen_model, qwen_worker)
+        executed_backend = policy["control_backend"]
+        fallback_used = False
+        candidate_error = None
+    info = dict(info)
+    info.update({"canary_selected_backend": executed_backend,
+                 "canary_assigned_backend": decision["selected_backend"],
+                 "canary_executed_backend": executed_backend,
+                 "canary_candidate_selected": decision["candidate_selected"],
+                 "canary_fallback_used": fallback_used,
+                 "canary_candidate_error": candidate_error,
+                 "canary_bucket": decision["bucket"],
+                 "canary_reasons": decision["reasons"],
+                 "canary_review_decision_sha256": decision["review_decision_sha256"]})
+    return wav, info
+
+
 def synth_sherpa_worker(text, voice, speed, sherpa_worker):
     """Render through an explicit AB Worker v1 Sherpa socket, with no fallback."""
     fd, wav = tempfile.mkstemp(prefix="ab_voice_sherpa_", suffix=".wav")
@@ -889,7 +990,6 @@ def synth_sherpa_worker(text, voice, speed, sherpa_worker):
     if not info.get("ok") or not os.path.exists(wav):
         return None, {"detail": info.get("detail", "Sherpa worker did not write WAV")}
     return wav, info
-
 
 def synth_qwen3_rust(text, voice, speed, instruct=None, binary=None,
                      model_dir=None, model_profile=None):
@@ -1085,11 +1185,14 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
     return out
 
 
-def run_speech_synth_file(text, voice, speed, synth_backend="say", synth_bin=None, qwen_instruct=None,
+def run_speech_synth_file(text, voice, speed, synth_backend="say", synth_bin=None,
+                          qwen_instruct=None,
                           qwen_python=None, qwen_model=None, qwen_worker=None,
                           sherpa_worker=None,
                           qwen_rust_bin=None, qwen_rust_model_dir=None,
-                          qwen_rust_profile=None, stt_model=None):
+                          qwen_rust_profile=None, omnivoice_python=None,
+                          omnivoice_manifest=None, canary_subject=None,
+                          canary_request_id=None, canary_policy=None, stt_model=None):
     """macOS speech embodiment: selected synth -> STT-on-the-synth-file falsifier. No bus
     `.monitor` loopback exists on macOS, so this channel honestly verifies the
     SYNTHESIZED FILE is intelligible, NOT that it played. The STT word_overlap is THE
@@ -1121,18 +1224,42 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", synth_bin=Non
         wav, info = synth_qwen3_rust(text, voice, speed, qwen_instruct,
                                      qwen_rust_bin, qwen_rust_model_dir,
                                      qwen_rust_profile)
+    elif synth_backend == "omnivoice":
+        wav, info = synth_omnivoice(text, voice, speed, qwen_instruct,
+                                    omnivoice_python, omnivoice_manifest)
+    elif synth_backend == "canary":
+        wav, info = synth_tts_canary(
+            text, voice, speed, qwen_instruct, canary_subject, canary_request_id,
+            canary_policy, qwen_python, qwen_model, qwen_worker,
+            omnivoice_python, omnivoice_manifest)
     else:
         wav, info = synth_say(text, voice, speed)
     if wav is None:
         out.update(status="error", verify_status="error", detail=info.get("detail", f"{synth_backend} synth failed"))
         return out
     out["voice"] = info.get("voice", voice)
-    for field in ("model", "device", "dtype", "instruct_applied", "runtime",
-                  "model_profile", "model_revision", "integrity_verified",
-                  "binary", "binary_sha256"):
-        if field in info:
-            prefix = "qwen" if synth_backend in {"qwen3", "qwen3-rust"} else "sherpa"
-            out[f"{prefix}_{field}"] = info[field]
+    executed_backend = info.get("canary_executed_backend")
+    if synth_backend in {"qwen3", "qwen3-rust"} or (
+            synth_backend == "canary" and executed_backend == "qwen3"):
+        for field in ("model", "device", "dtype", "instruct_applied", "runtime",
+                      "model_profile", "model_revision", "integrity_verified",
+                      "binary", "binary_sha256"):
+            if field in info:
+                out[f"qwen_{field}"] = info[field]
+    if synth_backend == "omnivoice" or (
+            synth_backend == "canary" and executed_backend == "omnivoice"):
+        for field in ("manifest", "manifest_status", "hashes_verified", "steps",
+                      "language", "runtime", "rtf"):
+            if field in info:
+                out[f"omnivoice_{field}"] = info[field]
+    if synth_backend == "canary":
+        for field in ("canary_selected_backend", "canary_candidate_selected",
+                      "canary_assigned_backend", "canary_executed_backend",
+                      "canary_fallback_used", "canary_candidate_error",
+                      "canary_bucket", "canary_reasons",
+                      "canary_review_decision_sha256"):
+            if field in info:
+                out[field] = info[field]
     for field in ("protocol", "engine", "capabilities", "speakers"):
         if field in info:
             out[f"worker_{field}"] = info[field]
@@ -1359,9 +1486,9 @@ def main():
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
     ap.add_argument("--output-file", default=None, help="render mode: durable WAV output path")
-    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"], default="kokoro",
+    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust", "omnivoice", "canary"], default="kokoro",
                     help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | sherpa = Chinese multi-speaker VITS | say = macOS native | "
-                         "qwen3 = explicit Python CustomVoice | qwen3-rust = default-off local Rust gate; macOS uses synth_file STT verification)")
+                         "qwen3 = explicit Python CustomVoice | qwen3-rust = default-off local Rust gate | omnivoice = default-off ONNX pilot | canary = review-bound Qwen/OmniVoice selector; macOS uses synth_file STT verification)")
     ap.add_argument("--qwen-instruct", default=None, help="Qwen3 CustomVoice natural-language style instruction")
     ap.add_argument("--qwen-python", default=None, help="explicit isolated Python that has qwen-tts installed")
     ap.add_argument("--qwen-model", default=None, help="Qwen3 model id or local directory; defaults to 1.7B CustomVoice")
@@ -1370,6 +1497,11 @@ def main():
     ap.add_argument("--qwen-rust-bin", default=None, help="qwen3-rust: explicit local qwen-tts executable")
     ap.add_argument("--qwen-rust-model-dir", default=None, help="qwen3-rust: explicit complete local model directory")
     ap.add_argument("--qwen-rust-profile", default=None, help="qwen3-rust: pinned integrity profile, e.g. 1.7b-customvoice")
+    ap.add_argument("--omnivoice-python", default=None, help="omnivoice: explicit isolated Python with ONNX dependencies")
+    ap.add_argument("--omnivoice-manifest", default=None, help="omnivoice: pinned composition manifest")
+    ap.add_argument("--canary-subject", default=None, help="canary: allowlisted subject identifier")
+    ap.add_argument("--canary-request-id", default=None, help="canary: stable per-request identifier used for bucketing")
+    ap.add_argument("--canary-policy", default=None, help="canary: explicit policy path; defaults to checked-in disabled policy")
     ap.add_argument("--check-intelligibility", action="store_true",
                     help="speech mode: also transcribe the bus capture (whisper.cpp) and check words came back")
     ap.add_argument("--stt-bin", default=None, help="whisper.cpp CLI path (or env AB_TTS_STT_BIN)")
@@ -1441,6 +1573,11 @@ def main():
                                         qwen_rust_bin=a.qwen_rust_bin,
                                         qwen_rust_model_dir=a.qwen_rust_model_dir,
                                         qwen_rust_profile=a.qwen_rust_profile,
+                                        omnivoice_python=a.omnivoice_python,
+                                        omnivoice_manifest=a.omnivoice_manifest,
+                                        canary_subject=a.canary_subject,
+                                        canary_request_id=a.canary_request_id,
+                                        canary_policy=a.canary_policy,
                                         stt_model=a.stt_model)
         else:
             res = run_speech(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,

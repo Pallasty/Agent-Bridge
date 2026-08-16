@@ -1,0 +1,102 @@
+{
+  "schema": "agent_bridge.omnivoice_human_review_gate.v0",
+  "status": "canary_eligible",
+  "canary_eligible": true,
+  "production_default_change_allowed": false,
+  "synthetic": false,
+  "reviewer": "project owner",
+  "reviewed_at": "2026-08-15T09:15:46-07:00",
+  "blockers": [],
+  "comparisons": [
+    {
+      "packet": "basic",
+      "case": "english",
+      "candidate": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      },
+      "qwen": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      }
+    },
+    {
+      "packet": "basic",
+      "case": "chinese",
+      "candidate": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 4,
+        "overall": 5
+      },
+      "qwen": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      }
+    },
+    {
+      "packet": "expanded",
+      "case": "numbers",
+      "candidate": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      },
+      "qwen": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      }
+    },
+    {
+      "packet": "expanded",
+      "case": "mixed",
+      "candidate": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      },
+      "qwen": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      }
+    },
+    {
+      "packet": "expanded",
+      "case": "operational",
+      "candidate": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      },
+      "qwen": {
+        "intelligibility": 5,
+        "naturalness": 5,
+        "pronunciation": 5,
+        "artifacts": 5,
+        "overall": 5
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "agent_bridge.omnivoice_canary_policy.v0",
+  "enabled": true,
+  "canary_percent": 10,
+  "allowlisted_subjects": ["owner-local-pilot"],
+  "salt": "agent-bridge-omnivoice-canary-v0",
+  "candidate_backend": "omnivoice",
+  "control_backend": "qwen3",
+  "control_speaker": "Serena",
+  "fallback_to_control_on_candidate_error": true,
+  "eligible_languages": ["chinese", "english"],
+  "review_decision": "docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json",
+  "review_decision_sha256": "a950ef140a4237e74884a3f4e87833a8759a1d1ba48d8027e73c0d90bb2282d3"
+}

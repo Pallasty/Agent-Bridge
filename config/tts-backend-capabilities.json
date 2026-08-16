@@ -1,0 +1,22 @@
+{
+  "schema": "agent_bridge.tts_backend_capabilities.v0",
+  "backends": {
+    "qwen3_custom_voice": {
+      "languages": ["auto", "chinese", "english", "french", "german", "italian", "japanese", "korean", "portuguese", "russian", "spanish"],
+      "verified_languages": ["chinese", "english"],
+      "named_speakers": ["aiden", "dylan", "eric", "ono_anna", "ryan", "serena", "sohee", "uncle_fu", "vivian"],
+      "natural_language_instruction": true,
+      "reference_voice_clone": false,
+      "production_default": true
+    },
+    "omnivoice_onnx_candidate": {
+      "languages": ["chinese", "english"],
+      "verified_languages": ["chinese", "english"],
+      "named_speakers": [],
+      "natural_language_instruction": false,
+      "reference_voice_clone": true,
+      "clone_identity_human_approved": false,
+      "production_default": false
+    }
+  }
+}

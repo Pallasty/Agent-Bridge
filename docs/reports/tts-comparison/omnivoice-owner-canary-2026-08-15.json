@@ -1,0 +1,44 @@
+{
+  "schema": "agent_bridge.omnivoice_owner_canary_receipt.v0",
+  "executed_at": "2026-08-15",
+  "text": "你好。",
+  "subject": "owner-local-pilot",
+  "request_id": "owner-canary-9",
+  "policy": {
+    "canary_percent": 10,
+    "bucket": 552,
+    "review_decision_sha256": "a950ef140a4237e74884a3f4e87833a8759a1d1ba48d8027e73c0d90bb2282d3",
+    "production_default_change_allowed": false
+  },
+  "routing": {
+    "assigned_backend": "omnivoice",
+    "executed_backend": "omnivoice",
+    "candidate_selected": true,
+    "fallback_used": false,
+    "candidate_error": null,
+    "reasons": []
+  },
+  "candidate": {
+    "runtime": "onnxruntime",
+    "manifest": "/Data/Models/onnx-controls/OmniVoice-staged-quantization/recommended-fp16-embeddings.json",
+    "manifest_status": "recommended_candidate_bilingual_and_clone_smoke_passed",
+    "hashes_verified": true,
+    "steps": 32,
+    "language": "chinese",
+    "rtf": 22.71779623999464
+  },
+  "audio": {
+    "duration_seconds": 1.2,
+    "sample_rate": 24000,
+    "frames": 28800,
+    "rms": 9401.87
+  },
+  "verification": {
+    "synthesis_completed": true,
+    "provenance_attribution_regression_fixed": true,
+    "candidate_failure_control_fallback_tested": true,
+    "stt_status": "unavailable",
+    "stt_detail": "whisper CLI not found",
+    "physical_playback_claimed": false
+  }
+}
