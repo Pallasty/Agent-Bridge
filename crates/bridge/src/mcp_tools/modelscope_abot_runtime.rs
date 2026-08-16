@@ -274,6 +274,58 @@ fn audit_abot_receipts(documents: &[Value]) -> Value {
     })
 }
 
+fn verify_audit_evidence_binding(expected: &Value, actual: &Value) -> Value {
+    let mut violations = Vec::<&'static str>::new();
+    let Some(expected_object) = expected.as_object() else {
+        return json!({
+            "schema": "agent_bridge.modelscope_abot_receipt_audit_evidence_verification.v0",
+            "status": "mismatch",
+            "violations": ["evidence_binding_not_object"],
+            "claims": {"audit_evidence_bound": false},
+        });
+    };
+
+    if expected_object.len() != 4
+        || !["schema", "canonicalization", "documents", "batch_sha256"]
+            .iter()
+            .all(|key| expected_object.contains_key(*key))
+    {
+        violations.push("evidence_binding_shape_mismatch");
+    }
+    if expected.get("schema") != actual.get("schema") {
+        violations.push("evidence_schema_mismatch");
+    }
+    if expected.get("canonicalization") != actual.get("canonicalization") {
+        violations.push("canonicalization_mismatch");
+    }
+
+    match (
+        expected.get("documents").and_then(Value::as_array),
+        actual.get("documents").and_then(Value::as_array),
+    ) {
+        (Some(expected_documents), Some(actual_documents)) => {
+            if expected_documents.len() != actual_documents.len() {
+                violations.push("document_count_mismatch");
+            }
+            if expected_documents != actual_documents {
+                violations.push("document_manifest_mismatch");
+            }
+        }
+        _ => violations.push("document_manifest_invalid"),
+    }
+    if expected.get("batch_sha256") != actual.get("batch_sha256") {
+        violations.push("batch_sha256_mismatch");
+    }
+
+    let verified = violations.is_empty();
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_evidence_verification.v0",
+        "status": if verified { "verified" } else { "mismatch" },
+        "violations": violations,
+        "claims": {"audit_evidence_bound": verified},
+    })
+}
+
 fn validation_projection(document_kind: &str, violations: Vec<&'static str>) -> Value {
     let accepted = violations.is_empty();
     json!({
@@ -1797,7 +1849,7 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Audit a bounded set of ModelScope ABot receipts locally. Read-only and offline: it aggregates binding violations without reading task state, opening a browser, or contacting the provider.".into(),
+            description: "Audit ModelScope ABot receipts and optionally verify a prior evidence binding. Read-only and offline: no task-state read, browser action, or provider request.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["documents"],
@@ -1808,6 +1860,10 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                         "maxItems": MAX_RECEIPT_AUDIT_DOCUMENTS,
                         "items": {"type": "object"},
                         "description": "Structured receipts or failure diagnostics. Raw prompt fields are rejected."
+                    },
+                    "evidence_binding": {
+                        "type": "object",
+                        "description": "Optional prior Gate 8O evidence binding to verify against these ordered documents."
                     }
                 }
             }),
@@ -1823,7 +1879,12 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                 "documents must contain 1..={MAX_RECEIPT_AUDIT_DOCUMENTS} items"
             )));
         }
-        Ok(ToolResult::structured_json(&audit_abot_receipts(documents)))
+        let mut audit = audit_abot_receipts(documents);
+        if let Some(expected) = args.get("evidence_binding") {
+            let verification = verify_audit_evidence_binding(expected, &audit["evidence_binding"]);
+            audit["evidence_verification"] = verification;
+        }
+        Ok(ToolResult::structured_json(&audit))
     }
 }
 
@@ -2116,6 +2177,84 @@ mod tests {
             original["evidence_binding"]["canonicalization"],
             "rfc8785.jcs.v1"
         );
+    }
+
+    #[test]
+    fn receipt_audit_evidence_verification_accepts_exact_binding() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let verification =
+            verify_audit_evidence_binding(&audit["evidence_binding"], &audit["evidence_binding"]);
+
+        assert_eq!(verification["status"], "verified");
+        assert_eq!(verification["violations"], json!([]));
+        assert_eq!(verification["claims"]["audit_evidence_bound"], true);
+        assert!(verification.get("world_semantics_verified").is_none());
+    }
+
+    #[test]
+    fn receipt_audit_evidence_verification_rejects_tampered_batch_digest() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let mut expected = audit["evidence_binding"].clone();
+        expected["batch_sha256"] = json!("0".repeat(64));
+        let verification = verify_audit_evidence_binding(&expected, &audit["evidence_binding"]);
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(verification["violations"], json!(["batch_sha256_mismatch"]));
+        assert_eq!(verification["claims"]["audit_evidence_bound"], false);
+    }
+
+    #[test]
+    fn receipt_audit_evidence_verification_rejects_document_order_drift() {
+        let first = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let second = json!({"schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"});
+        let original = audit_abot_receipts(&[first.clone(), second.clone()]);
+        let reordered = audit_abot_receipts(&[second, first]);
+        let verification = verify_audit_evidence_binding(
+            &original["evidence_binding"],
+            &reordered["evidence_binding"],
+        );
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(
+            verification["violations"],
+            json!(["document_manifest_mismatch", "batch_sha256_mismatch"])
+        );
+    }
+
+    #[test]
+    fn receipt_audit_evidence_verification_rejects_malformed_binding() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let verification = verify_audit_evidence_binding(
+            &json!({"schema": "unexpected", "documents": "not-an-array"}),
+            &audit["evidence_binding"],
+        );
+
+        assert_eq!(verification["status"], "mismatch");
+        let violations = verification["violations"].as_array().expect("violations");
+        assert!(violations.contains(&json!("evidence_binding_shape_mismatch")));
+        assert!(violations.contains(&json!("evidence_schema_mismatch")));
+        assert!(violations.contains(&json!("canonicalization_mismatch")));
+        assert!(violations.contains(&json!("document_manifest_invalid")));
+        assert!(violations.contains(&json!("batch_sha256_mismatch")));
     }
 
     #[test]
