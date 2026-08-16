@@ -10109,6 +10109,9 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         audit.input_schema["properties"]["emit_chain_checkpoint"]["default"],
         false
     );
+    assert!(audit.input_schema["properties"]
+        .get("expected_successor_checkpoint")
+        .is_some());
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));

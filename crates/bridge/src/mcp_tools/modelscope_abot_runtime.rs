@@ -613,6 +613,57 @@ fn checkpoint_total_for_output(
     }
 }
 
+fn verify_audit_chain_checkpoint_transition(
+    history_verification: &Value,
+    expected_successor: &Value,
+    actual_successor: Option<&Value>,
+) -> Value {
+    let mut violations = Vec::<Value>::new();
+    if history_verification.get("status").and_then(Value::as_str) != Some("verified") {
+        violations.push(json!("source_transition_not_verified"));
+    }
+
+    let (_, expected_violations) = verify_audit_chain_checkpoint(expected_successor);
+    for violation in expected_violations {
+        let code = violation
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or("chain_checkpoint_invalid")
+            .strip_prefix("chain_checkpoint_")
+            .unwrap_or("invalid");
+        violations.push(json!(format!("expected_successor_{code}")));
+    }
+
+    if let Some(actual_successor) = actual_successor {
+        for (field, code) in [
+            ("schema", "successor_schema_mismatch"),
+            ("canonicalization", "successor_canonicalization_mismatch"),
+            ("chain_sha256", "successor_chain_sha256_mismatch"),
+            ("total_link_count", "successor_total_link_count_mismatch"),
+            ("claims", "successor_claims_mismatch"),
+        ] {
+            if expected_successor.get(field) != actual_successor.get(field) {
+                violations.push(json!(code));
+            }
+        }
+    } else if violations.is_empty() {
+        violations.push(json!("successor_checkpoint_unavailable"));
+    }
+
+    let verified = violations.is_empty();
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_transition_verification.v0",
+        "status": if verified { "verified" } else { "mismatch" },
+        "violations": violations,
+        "claims": {
+            "checkpoint_transition_verified": verified,
+            "historical_source_documents_verified": false,
+            "external_custody_verified": false,
+            "world_semantics_verified": false,
+        },
+    })
+}
+
 fn verify_audit_chain_binding(expected: &Value, actual: &Value) -> Value {
     let mut violations = Vec::<&'static str>::new();
     let Some(expected_object) = expected.as_object() else {
@@ -2183,7 +2234,7 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Audit ModelScope ABot receipts; verify evidence, a chain link, bounded history, or checkpoint-anchored suffix. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
+            description: "Audit ModelScope ABot receipts; verify evidence, chain history, checkpoint suffix, or expected successor checkpoint. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["documents"],
@@ -2223,6 +2274,10 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                         "type": "boolean",
                         "default": false,
                         "description": "Opt in to a new checkpoint output after successful genesis or chain-history verification. False preserves the pre-8S response shape."
+                    },
+                    "expected_successor_checkpoint": {
+                        "type": "object",
+                        "description": "Optional Gate 8T successor checkpoint to verify exactly after a valid checkpoint-anchored suffix transition. Requires chain_checkpoint and chain_history."
                     }
                 }
             }),
@@ -2255,6 +2310,14 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
         if chain_checkpoint.is_some() && chain_history.is_none() {
             return Ok(ToolResult::error(
                 "chain_checkpoint requires non-empty chain_history",
+            ));
+        }
+        let expected_successor_checkpoint = args.get("expected_successor_checkpoint");
+        if expected_successor_checkpoint.is_some()
+            && (chain_checkpoint.is_none() || chain_history.is_none())
+        {
+            return Ok(ToolResult::error(
+                "expected_successor_checkpoint requires chain_checkpoint and non-empty chain_history",
             ));
         }
         let emit_chain_checkpoint = match args.get("emit_chain_checkpoint") {
@@ -2294,15 +2357,31 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
             audit["chain_history_verification"] = verification.clone();
         }
         let checkpoint_total = checkpoint_total_for_output(
-            emit_chain_checkpoint,
+            emit_chain_checkpoint || expected_successor_checkpoint.is_some(),
             history_verification.as_ref(),
             chain_history.is_some(),
             chain_history.is_none() && previous_chain_sha256.is_none(),
         );
-        if let (Some(total_link_count), Some(chain_sha256)) =
+        let successor_checkpoint = if let (Some(total_link_count), Some(chain_sha256)) =
             (checkpoint_total, chain_binding["chain_sha256"].as_str())
         {
-            audit["chain_checkpoint"] = audit_chain_checkpoint(chain_sha256, total_link_count);
+            Some(audit_chain_checkpoint(chain_sha256, total_link_count))
+        } else {
+            None
+        };
+        if let (Some(expected), Some(verification)) =
+            (expected_successor_checkpoint, history_verification.as_ref())
+        {
+            audit["checkpoint_transition_verification"] = verify_audit_chain_checkpoint_transition(
+                verification,
+                expected,
+                successor_checkpoint.as_ref(),
+            );
+        }
+        if emit_chain_checkpoint {
+            if let Some(checkpoint) = successor_checkpoint {
+                audit["chain_checkpoint"] = checkpoint;
+            }
         }
         audit["chain_binding"] = chain_binding;
         Ok(ToolResult::structured_json(&audit))
@@ -3047,6 +3126,152 @@ mod tests {
 
         assert_eq!(payload["chain_history_verification"]["status"], "mismatch");
         assert!(payload.get("chain_checkpoint").is_none());
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_transition_verifies_exact_successor() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let successor = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let verification = verify_audit_chain_checkpoint_transition(
+            &history_verification,
+            &successor,
+            Some(&successor),
+        );
+
+        assert_eq!(verification["status"], "verified");
+        assert_eq!(verification["violations"], json!([]));
+        assert_eq!(
+            verification["claims"]["checkpoint_transition_verified"],
+            true
+        );
+        assert_eq!(
+            verification["claims"]["historical_source_documents_verified"],
+            false
+        );
+        assert_eq!(verification["claims"]["external_custody_verified"], false);
+        assert_eq!(verification["claims"]["world_semantics_verified"], false);
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_transition_rejects_self_valid_wrong_successor() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let actual = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let expected = audit_chain_checkpoint(&"f".repeat(64), 3);
+        let verification = verify_audit_chain_checkpoint_transition(
+            &history_verification,
+            &expected,
+            Some(&actual),
+        );
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(
+            verification["violations"],
+            json!(["successor_chain_sha256_mismatch"])
+        );
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_transition_rejects_tampered_expected_digest() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let actual = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let mut expected = actual.clone();
+        expected["checkpoint_sha256"] = json!("0".repeat(64));
+        let verification = verify_audit_chain_checkpoint_transition(
+            &history_verification,
+            &expected,
+            Some(&actual),
+        );
+
+        assert_eq!(verification["status"], "mismatch");
+        assert!(verification["violations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("expected_successor_sha256_mismatch")));
+        assert_eq!(verification["violations"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_transition_rejects_unverified_source() {
+        let expected = audit_chain_checkpoint(&"a".repeat(64), 3);
+        let history_verification = json!({"status": "mismatch"});
+        let verification =
+            verify_audit_chain_checkpoint_transition(&history_verification, &expected, None);
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(
+            verification["violations"],
+            json!(["source_transition_not_verified"])
+        );
+    }
+
+    #[tokio::test]
+    async fn receipt_audit_tool_verifies_expected_successor_without_emitting_it() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(std::slice::from_ref(&document));
+        let first = audit_chain_binding(&audit["evidence_binding"], None);
+        let second =
+            audit_chain_binding(&audit["evidence_binding"], first["chain_sha256"].as_str());
+        let current =
+            audit_chain_binding(&audit["evidence_binding"], second["chain_sha256"].as_str());
+        let source = audit_chain_checkpoint(first["chain_sha256"].as_str().unwrap(), 1);
+        let expected = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let result = ModelScopeAbotReceiptAuditTool
+            .execute(
+                json!({
+                    "documents": [document],
+                    "chain_checkpoint": source,
+                    "chain_history": [second],
+                    "expected_successor_checkpoint": expected,
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+        let payload = result.structured_content.unwrap();
+
+        assert_eq!(
+            payload["checkpoint_transition_verification"]["status"],
+            "verified"
+        );
+        assert!(payload.get("chain_checkpoint").is_none());
+        assert_eq!(
+            payload["runtime_effects"],
+            json!({
+                "network_request_sent": false,
+                "browser_opened": false,
+                "task_state_read": false,
+                "task_state_written": false,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn receipt_audit_tool_requires_source_for_expected_successor() {
+        let result = ModelScopeAbotReceiptAuditTool
+            .execute(
+                json!({
+                    "documents": [{}],
+                    "expected_successor_checkpoint": {},
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.is_error);
     }
 
     #[test]
