@@ -10,8 +10,10 @@ switches, or desktop text/copy actions than the preregistered fallback?
 
 This unit extends the existing Mobile Text V1 value test. It does not add a new
 capture path or grant control. The input body remains session-local; only
-metadata, evidence references, counts, classifications, and hashes may enter a
-scorecard or diagnostic ledger.
+metadata, opaque evidence references, counts, classifications, and hashes may
+enter a scorecard or diagnostic ledger. Reference fields use bounded,
+whitespace-free `task:`, `receipt:`, and `ledger:` identifiers. The input
+reference is stricter: it must be exactly a `sha256:` digest.
 
 ## Closed loop
 
@@ -50,8 +52,9 @@ and must never recommend automatic retry.
 
 - Evaluation is deterministic and read-only apart from the operator separately
   storing the supplied metadata record.
-- Unknown fields are rejected, preventing input text from being smuggled into
-  the scorecard.
+- Unknown fields and free-form reference strings are rejected. This blocks
+  accidental body retention; the scorecard still relies on the operator's
+  `full_text_persisted=false` attestation for storage outside this evaluator.
 - No phone connection, projection start/stop, APK mutation, MCP configuration,
   runtime deployment, merge, or push is performed by the evaluator.
 - Each of those operations remains a separate owner gate.

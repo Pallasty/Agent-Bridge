@@ -31,6 +31,16 @@ FAILURE_CLASSES = {
     "provider_timeout",
     "provider_lifecycle",
 }
+DIAGNOSIS_STAGES = {
+    "preregistration",
+    "input",
+    "consumption",
+    "context",
+    "decision",
+    "cleanup",
+}
+REFERENCE_PATTERN = re.compile(r"([a-z][a-z0-9+.-]*):([A-Za-z0-9._~/#?=&%-]{1,127})")
+IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 TOP_LEVEL_KEYS = {
     "schema",
     "trial_id",
@@ -102,12 +112,30 @@ def _require_bool(value: Any, label: str) -> None:
         raise InvalidRecord(f"{label} must be boolean")
 
 
+def _require_identifier(value: Any, label: str) -> None:
+    if not isinstance(value, str) or not IDENTIFIER_PATTERN.fullmatch(value):
+        raise InvalidRecord(f"{label} must be a compact identifier")
+
+
+def _require_reference(
+    value: Any,
+    label: str,
+    *,
+    schemes: set[str],
+    allow_empty: bool = False,
+) -> None:
+    if allow_empty and value == "":
+        return
+    match = REFERENCE_PATTERN.fullmatch(value) if isinstance(value, str) else None
+    if match is None or match.group(1) not in schemes:
+        raise InvalidRecord(f"{label} must be an opaque metadata reference")
+
+
 def validate(record: Any) -> dict[str, Any]:
     root = _exact_keys(record, TOP_LEVEL_KEYS, "record")
     if root["schema"] != SCHEMA:
         raise InvalidRecord(f"schema must be {SCHEMA}")
-    if not isinstance(root["trial_id"], str) or not root["trial_id"].strip():
-        raise InvalidRecord("trial_id must be a non-empty string")
+    _require_identifier(root["trial_id"], "trial_id")
     _require_bool(root["preregistered"], "preregistered")
 
     task = _exact_keys(root["task"], TASK_KEYS, "task")
@@ -119,8 +147,7 @@ def validate(record: Any) -> dict[str, Any]:
 
     for key in ("real_task", "needed_context_declared_before_input"):
         _require_bool(task[key], f"task.{key}")
-    if not isinstance(task["task_reference"], str) or not task["task_reference"].strip():
-        raise InvalidRecord("task.task_reference must be a non-empty string")
+    _require_reference(task["task_reference"], "task.task_reference", schemes={"task"})
     for label, metrics in (("baseline", baseline), ("trial", trial)):
         for key in METRIC_KEYS:
             if not _is_count(metrics[key]):
@@ -130,23 +157,38 @@ def validate(record: Any) -> dict[str, Any]:
             continue
         _require_bool(trial[key], f"trial.{key}")
     if not _is_count(trial["unique_input_accepted"]):
-        raise InvalidRecord("trial.unique_input_accepted must be a non-negative integer")
-    if trial["upstream_failure_class"] not in {"none", "provider_timeout", "provider_lifecycle"}:
+        raise InvalidRecord(
+            "trial.unique_input_accepted must be a non-negative integer"
+        )
+    if trial["upstream_failure_class"] not in {
+        "none",
+        "provider_timeout",
+        "provider_lifecycle",
+    }:
         raise InvalidRecord("trial.upstream_failure_class is not recognized")
     for key, value in safety.items():
         _require_bool(value, f"safety.{key}")
     if diagnosis["failure_class"] not in FAILURE_CLASSES:
         raise InvalidRecord("diagnosis.failure_class is not recognized")
-    if not isinstance(diagnosis["stage"], str) or not diagnosis["stage"].strip():
-        raise InvalidRecord("diagnosis.stage must be a non-empty string")
+    if diagnosis["stage"] not in DIAGNOSIS_STAGES:
+        raise InvalidRecord("diagnosis.stage is not recognized")
     for key in ("persisted", "retry_recommended"):
         _require_bool(diagnosis[key], f"diagnosis.{key}")
-    for key in ("persistence_reference", "evidence_digest_sha256"):
-        if not isinstance(diagnosis[key], str):
-            raise InvalidRecord(f"diagnosis.{key} must be a string")
+    _require_reference(
+        diagnosis["persistence_reference"],
+        "diagnosis.persistence_reference",
+        schemes={"ledger"},
+        allow_empty=True,
+    )
+    if not isinstance(diagnosis["evidence_digest_sha256"], str):
+        raise InvalidRecord("diagnosis.evidence_digest_sha256 must be a string")
     for key, value in evidence.items():
-        if not isinstance(value, str) or not value.strip():
-            raise InvalidRecord(f"evidence.{key} must be a non-empty reference")
+        schemes = {"sha256"} if key == "input_reference" else {"receipt"}
+        _require_reference(value, f"evidence.{key}", schemes=schemes)
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", evidence["input_reference"]):
+        raise InvalidRecord(
+            "evidence.input_reference must contain only a SHA-256 digest"
+        )
     return root
 
 
@@ -154,21 +196,35 @@ def _classify(record: dict[str, Any]) -> tuple[str, str]:
     task, trial, safety = record["task"], record["trial"], record["safety"]
     if safety["ungranted_phone_or_runtime_action"]:
         return "FAIL_SAFETY", "authority_crossed"
-    if safety["background_capture"] or safety["implicit_control"] or safety["full_text_persisted"]:
+    if (
+        safety["background_capture"]
+        or safety["implicit_control"]
+        or safety["full_text_persisted"]
+    ):
         return "FAIL_SAFETY", "unsafe_capture_or_retention"
+    if (
+        not record["preregistered"]
+        or not task["real_task"]
+        or not task["needed_context_declared_before_input"]
+    ):
+        return "INCOMPLETE", "evidence_missing"
     if trial["upstream_failure_class"] != "none":
         return "INCOMPLETE", trial["upstream_failure_class"]
-    if not record["preregistered"] or not task["real_task"] or not task["needed_context_declared_before_input"]:
-        return "INCOMPLETE", "evidence_missing"
     if not trial["foreground_user_confirmed"]:
         return "INCOMPLETE", "evidence_missing"
-    if trial["unique_input_accepted"] != 1 or not trial["consumed_via_exact_session_status"]:
+    if (
+        trial["unique_input_accepted"] != 1
+        or not trial["consumed_via_exact_session_status"]
+    ):
         return "INCOMPLETE", "input_not_consumed"
     if not trial["context_recovered"]:
         return "INCOMPLETE", "context_not_recovered"
     if not trial["affected_real_decision"]:
         return "INCOMPLETE", "decision_unchanged"
-    if not safety["projection_stopped"] or not safety["fresh_process_cannot_retrieve_input"]:
+    if (
+        not safety["projection_stopped"]
+        or not safety["fresh_process_cannot_retrieve_input"]
+    ):
         return "INCOMPLETE", "cleanup_incomplete"
 
     savings = {key: record["baseline"][key] - trial[key] for key in METRIC_KEYS}
@@ -181,7 +237,9 @@ def _classify(record: dict[str, Any]) -> tuple[str, str]:
 
 
 def _diagnosis_digest(record: dict[str, Any], failure_class: str) -> str:
-    evidence = json.dumps(record["evidence"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    evidence = json.dumps(
+        record["evidence"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     material = f"{record['trial_id']}\n{failure_class}\n{evidence}".encode()
     return hashlib.sha256(material).hexdigest()
 
@@ -195,20 +253,40 @@ def decide(record: dict[str, Any]) -> dict[str, Any]:
             f"{failure_class}"
         )
     if failure_class == "none":
-        if diagnosis["persisted"] or diagnosis["persistence_reference"] or diagnosis["evidence_digest_sha256"]:
-            raise InvalidRecord("passing records must not claim a persisted failure diagnosis")
+        if (
+            diagnosis["persisted"]
+            or diagnosis["persistence_reference"]
+            or diagnosis["evidence_digest_sha256"]
+        ):
+            raise InvalidRecord(
+                "passing records must not claim a persisted failure diagnosis"
+            )
+        if diagnosis["retry_recommended"]:
+            raise InvalidRecord("passing records cannot recommend a retry")
     else:
         if not diagnosis["persisted"] or not diagnosis["persistence_reference"].strip():
-            raise InvalidRecord("non-passing records require a persisted diagnosis reference")
+            raise InvalidRecord(
+                "non-passing records require a persisted diagnosis reference"
+            )
         expected_digest = _diagnosis_digest(record, failure_class)
         if not re.fullmatch(r"[0-9a-f]{64}", diagnosis["evidence_digest_sha256"]):
-            raise InvalidRecord("diagnosis.evidence_digest_sha256 must be lowercase SHA-256")
+            raise InvalidRecord(
+                "diagnosis.evidence_digest_sha256 must be lowercase SHA-256"
+            )
         if diagnosis["evidence_digest_sha256"] != expected_digest:
-            raise InvalidRecord("diagnosis evidence digest does not bind trial, class, and evidence")
-        if failure_class in {"provider_timeout", "provider_lifecycle"} and diagnosis["retry_recommended"]:
+            raise InvalidRecord(
+                "diagnosis evidence digest does not bind trial, class, and evidence"
+            )
+        if (
+            failure_class in {"provider_timeout", "provider_lifecycle"}
+            and diagnosis["retry_recommended"]
+        ):
             raise InvalidRecord("provider failures cannot recommend an automatic retry")
 
-    savings = {f"{key}_saved": record["baseline"][key] - record["trial"][key] for key in METRIC_KEYS}
+    savings = {
+        f"{key}_saved": record["baseline"][key] - record["trial"][key]
+        for key in METRIC_KEYS
+    }
     return {
         "schema": "agent_bridge.real_task_input_friction_result.v0",
         "trial_id": record["trial_id"],
@@ -216,6 +294,7 @@ def decide(record: dict[str, Any]) -> dict[str, Any]:
         "failure_class": failure_class,
         "metrics": savings,
         "diagnosis": {
+            "stage": diagnosis["stage"],
             "persisted": diagnosis["persisted"],
             "persistence_reference": diagnosis["persistence_reference"],
             "evidence_digest_sha256": diagnosis["evidence_digest_sha256"],
@@ -234,7 +313,9 @@ def main() -> int:
         record = validate(json.loads(args.record.read_text(encoding="utf-8")))
         result = decide(record)
     except (OSError, json.JSONDecodeError, InvalidRecord) as error:
-        print(json.dumps({"decision": "INVALID", "error": str(error)}, ensure_ascii=False))
+        print(
+            json.dumps({"decision": "INVALID", "error": str(error)}, ensure_ascii=False)
+        )
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result["decision"] == "PASS_USEFUL" else 1
