@@ -71,6 +71,32 @@ def test_dispatch_fails_fast_when_mac_lock_is_busy(monkeypatch, tmp_path):
         raise AssertionError("busy remote lock was accepted")
 
 
+def test_dispatch_attempts_cleanup_after_worker_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_HOST", "mac.example")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_PYTHON", "/venv/bin/python")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ADAPTER", "/repo/scripts/remote.py")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_LOCK", str(tmp_path / "lock"))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if "--worker" in command[-1]:
+            return SimpleNamespace(returncode=1, stdout=json.dumps({
+                "ok": False, "detail": "decode failed",
+            }), stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(REMOTE.subprocess, "run", fake_run)
+    try:
+        REMOTE.dispatch(args(tmp_path))
+    except RuntimeError as exc:
+        assert "decode failed" in str(exc)
+    else:
+        raise AssertionError("remote worker failure was accepted")
+    assert len(calls) == 2
+    assert "--cleanup" in calls[-1][-1]
+
+
 def test_cleanup_rejects_non_job_paths():
     try:
         REMOTE.cleanup("../../danger")
