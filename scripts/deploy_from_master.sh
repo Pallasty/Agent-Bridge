@@ -57,6 +57,15 @@ WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
 ASSET_SOURCE_ROOT="$REPO"
 ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
 ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
+AUDIO_ADAPTER_COMPANIONS=(
+    omnivoice_mac_remote_synth.py
+    omnivoice_onnx_bundle_synth.py
+    omnivoice_onnx_official_decode.py
+    omnivoice_tts_synth.py
+    qwen3_tts_rust_gate.py
+    qwen3_tts_synth.py
+    tts_canary_router.py
+)
 RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 RUNTIME_ASSETS=(
     app_control.py
@@ -230,6 +239,10 @@ if [ -z "$USE_BINARY" ]; then
 fi
 ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
 [ -f "$ADAPTER_SOURCE" ] || die "deploy-source audio adapter missing: $ADAPTER_SOURCE"
+for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
+    [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
+        die "deploy-source audio companion missing: $ASSET_SOURCE_ROOT/scripts/$asset"
+done
 for asset in "${RUNTIME_ASSETS[@]}"; do
     [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
         die "deploy-source runtime asset missing: $ASSET_SOURCE_ROOT/scripts/$asset"
@@ -282,6 +295,7 @@ say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"
 say "  wrapper    : $WRAPPER_PATH (left untouched)"
 say "  adapter    : $ADAPTER_SOURCE -> $ADAPTER_PATH"
+say "  companions : ${#AUDIO_ADAPTER_COMPANIONS[@]} audio scripts -> $(dirname "$ADAPTER_PATH")"
 say "  runtime    : ${#RUNTIME_ASSETS[@]} scripts from $ASSET_SOURCE_ROOT -> $RUNTIME_ASSET_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -311,15 +325,26 @@ if [ -f "$REAL_PATH" ]; then
     say ">> backed up current binary -> $bak"
 fi
 
-# Install the repository-matched adapter before the binary. A brief
-# interruption can therefore leave the old binary with a backward-compatible
-# newer adapter, never the newer voice schema with a silently older adapter.
-mkdir -p "$(dirname "$ADAPTER_PATH")"
+# Install every repository-matched audio companion before activating the new
+# adapter. A brief interruption can therefore leave the old adapter with extra
+# compatible companions, never the new adapter with a missing sibling import.
+adapter_dir="$(dirname "$ADAPTER_PATH")"
+mkdir -p "$adapter_dir"
 if [ -f "$ADAPTER_PATH" ]; then
     adapter_bak="$ADAPTER_PATH.bak-deploy-$(date +%Y%m%dT%H%M%S)"
     cp "$ADAPTER_PATH" "$adapter_bak"
     say ">> backed up current audio adapter -> $adapter_bak"
 fi
+for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
+    companion_source="$ASSET_SOURCE_ROOT/scripts/$asset"
+    companion_target="$adapter_dir/$asset"
+    companion_stage="$companion_target.stage.$$"
+    cp "$companion_source" "$companion_stage"
+    chmod +x "$companion_stage"
+    mv -f "$companion_stage" "$companion_target"
+    cmp -s "$companion_source" "$companion_target" ||
+        die "installed audio companion differs from repository source: $asset"
+done
 adapter_stage="$ADAPTER_PATH.stage.$$"
 cp "$ADAPTER_SOURCE" "$adapter_stage"
 chmod +x "$adapter_stage"
@@ -327,6 +352,7 @@ mv -f "$adapter_stage" "$ADAPTER_PATH"
 cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "installed audio adapter differs from repository source"
 say ">> deployed matched audio adapter -> $ADAPTER_PATH"
+say ">> deployed matched audio companions -> $adapter_dir"
 
 # Install script-backed MCP assets at a stable path. The release binary embeds
 # its disposable build worktree in CARGO_MANIFEST_DIR, so compile-time fallback
@@ -374,6 +400,11 @@ dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
 cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "post-deploy audio adapter parity check failed"
 say "audio adapter parity: OK ($ADAPTER_PATH)"
+for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
+    cmp -s "$ASSET_SOURCE_ROOT/scripts/$asset" "$adapter_dir/$asset" ||
+        die "post-deploy audio companion parity check failed: $asset"
+done
+say "audio companion parity: OK (${#AUDIO_ADAPTER_COMPANIONS[@]} scripts in $adapter_dir)"
 for asset in "${RUNTIME_ASSETS[@]}"; do
     cmp -s "$ASSET_SOURCE_ROOT/scripts/$asset" "$RUNTIME_ASSET_DIR/$asset" ||
         die "post-deploy runtime asset parity check failed: $asset"
