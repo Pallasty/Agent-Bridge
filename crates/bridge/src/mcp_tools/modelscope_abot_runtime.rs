@@ -351,9 +351,126 @@ fn audit_chain_binding(evidence_binding: &Value, previous_chain_sha256: Option<&
     })
 }
 
-fn verify_audit_chain_history(history: &[Value], current: &Value) -> Value {
+fn audit_chain_checkpoint(chain_sha256: &str, total_link_count: u64) -> Value {
+    let payload = json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_payload.v0",
+        "chain_sha256": chain_sha256,
+        "total_link_count": total_link_count,
+    });
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint.v0",
+        "canonicalization": "rfc8785.jcs.v1",
+        "chain_sha256": chain_sha256,
+        "total_link_count": total_link_count,
+        "checkpoint_sha256": canonical_json_sha256(&payload),
+        "claims": {
+            "checkpoint_integrity_bound": true,
+            "historical_source_documents_verified": false,
+            "external_custody_verified": false,
+            "world_semantics_verified": false,
+        },
+    })
+}
+
+fn verify_audit_chain_checkpoint(checkpoint: &Value) -> (Option<(&str, u64)>, Vec<Value>) {
+    let mut violations = Vec::new();
+    let Some(object) = checkpoint.as_object() else {
+        return (
+            None,
+            vec![json!({"index": 0, "code": "chain_checkpoint_not_object"})],
+        );
+    };
+    if object.len() != 6
+        || ![
+            "schema",
+            "canonicalization",
+            "chain_sha256",
+            "total_link_count",
+            "checkpoint_sha256",
+            "claims",
+        ]
+        .iter()
+        .all(|key| object.contains_key(*key))
+    {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_shape_mismatch"}));
+    }
+    if checkpoint.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint.v0")
+    {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_schema_mismatch"}));
+    }
+    if checkpoint.get("canonicalization").and_then(Value::as_str) != Some("rfc8785.jcs.v1") {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_canonicalization_mismatch"}));
+    }
+    let chain_sha256 = checkpoint
+        .get("chain_sha256")
+        .filter(|value| lowercase_sha256(Some(value)))
+        .and_then(Value::as_str);
+    if chain_sha256.is_none() {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_chain_sha256_invalid"}));
+    }
+    let total_link_count = checkpoint
+        .get("total_link_count")
+        .and_then(Value::as_u64)
+        .filter(|count| *count > 0);
+    if total_link_count.is_none() {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_total_link_count_invalid"}));
+    }
+    let checkpoint_sha256 = checkpoint
+        .get("checkpoint_sha256")
+        .filter(|value| lowercase_sha256(Some(value)))
+        .and_then(Value::as_str);
+    if checkpoint_sha256.is_none() {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_sha256_invalid"}));
+    }
+    if checkpoint.get("claims")
+        != Some(&json!({
+            "checkpoint_integrity_bound": true,
+            "historical_source_documents_verified": false,
+            "external_custody_verified": false,
+            "world_semantics_verified": false,
+        }))
+    {
+        violations.push(json!({"index": 0, "code": "chain_checkpoint_claims_mismatch"}));
+    }
+    if let (Some(chain_sha256), Some(total_link_count), Some(checkpoint_sha256)) =
+        (chain_sha256, total_link_count, checkpoint_sha256)
+    {
+        let payload = json!({
+            "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_payload.v0",
+            "chain_sha256": chain_sha256,
+            "total_link_count": total_link_count,
+        });
+        if canonical_json_sha256(&payload) != checkpoint_sha256 {
+            violations.push(json!({"index": 0, "code": "chain_checkpoint_sha256_mismatch"}));
+        }
+    }
+    (
+        chain_sha256
+            .zip(total_link_count)
+            .filter(|_| violations.is_empty()),
+        violations,
+    )
+}
+
+fn verify_audit_chain_history(
+    history: &[Value],
+    current: &Value,
+    checkpoint: Option<&Value>,
+) -> Value {
     let mut violations = Vec::<Value>::new();
     let mut previous_head: Option<&str> = None;
+    let mut checkpoint_link_count = None;
+
+    if let Some(checkpoint) = checkpoint {
+        let (verified_checkpoint, checkpoint_violations) =
+            verify_audit_chain_checkpoint(checkpoint);
+        violations.extend(checkpoint_violations);
+        if let Some((checkpoint_head, total_link_count)) = verified_checkpoint {
+            checkpoint_link_count = Some(total_link_count);
+            previous_head = Some(checkpoint_head);
+        }
+    }
 
     for (index, link) in history.iter().enumerate() {
         let Some(object) = link.as_object() else {
@@ -416,7 +533,7 @@ fn verify_audit_chain_history(history: &[Value], current: &Value) -> Value {
             violations.push(json!({"index": index, "code": "chain_claims_mismatch"}));
         }
 
-        if index > 0 && predecessor.flatten() != previous_head {
+        if (index > 0 || checkpoint.is_some()) && predecessor.flatten() != previous_head {
             violations.push(json!({"index": index, "code": "chain_continuity_mismatch"}));
         }
         if let (Some(predecessor), Some(batch_sha256), Some(chain_sha256)) =
@@ -440,21 +557,60 @@ fn verify_audit_chain_history(history: &[Value], current: &Value) -> Value {
             "code": "current_link_predecessor_mismatch",
         }));
     }
+    let total_link_count = if let Some(count) = checkpoint_link_count {
+        match count.checked_add(history.len() as u64 + 1) {
+            Some(total) => Some(total),
+            None => {
+                violations.push(json!({
+                    "index": 0,
+                    "code": "chain_checkpoint_total_link_count_overflow",
+                }));
+                None
+            }
+        }
+    } else {
+        Some(history.len() as u64 + 1)
+    };
     let verified = violations.is_empty();
+    let mut claims = json!({
+        "bounded_chain_continuity_verified": verified,
+        "historical_source_documents_verified": false,
+        "external_custody_verified": false,
+        "world_semantics_verified": false,
+    });
+    if checkpoint.is_some() {
+        claims["caller_supplied_checkpoint_bound"] = json!(verified);
+    }
     json!({
         "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_history_verification.v0",
         "status": if verified { "verified" } else { "mismatch" },
         "history_link_count": history.len(),
-        "total_link_count": history.len() + 1,
+        "total_link_count": total_link_count,
         "chain_head_sha256": current["chain_sha256"],
         "violations": violations,
-        "claims": {
-            "bounded_chain_continuity_verified": verified,
-            "historical_source_documents_verified": false,
-            "external_custody_verified": false,
-            "world_semantics_verified": false,
-        },
+        "claims": claims,
     })
+}
+
+fn checkpoint_total_for_output(
+    emit: bool,
+    history_verification: Option<&Value>,
+    has_history: bool,
+    genesis: bool,
+) -> Option<u64> {
+    if !emit {
+        return None;
+    }
+    match history_verification {
+        Some(verification)
+            if has_history
+                && verification.get("status").and_then(Value::as_str) == Some("verified") =>
+        {
+            verification.get("total_link_count").and_then(Value::as_u64)
+        }
+        None if !has_history && genesis => Some(1),
+        _ => None,
+    }
 }
 
 fn verify_audit_chain_binding(expected: &Value, actual: &Value) -> Value {
@@ -2027,7 +2183,7 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Audit ModelScope ABot receipts; verify evidence, a chain link, or bounded chain history. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
+            description: "Audit ModelScope ABot receipts; verify evidence, a chain link, bounded history, or checkpoint-anchored suffix. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["documents"],
@@ -2058,6 +2214,15 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                         "maxItems": MAX_RECEIPT_AUDIT_DOCUMENTS,
                         "items": {"type": "object"},
                         "description": "Optional ordered Gate 8Q links to verify before joining this batch. This verifies bounded continuity, not historical source documents or external custody."
+                    },
+                    "chain_checkpoint": {
+                        "type": "object",
+                        "description": "Optional Gate 8S checkpoint anchoring the first history link and cumulative count. Requires chain_history; proves only supplied-checkpoint integrity and suffix continuity."
+                    },
+                    "emit_chain_checkpoint": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Opt in to a new checkpoint output after successful genesis or chain-history verification. False preserves the pre-8S response shape."
                     }
                 }
             }),
@@ -2086,6 +2251,17 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
             }
             None => None,
         };
+        let chain_checkpoint = args.get("chain_checkpoint");
+        if chain_checkpoint.is_some() && chain_history.is_none() {
+            return Ok(ToolResult::error(
+                "chain_checkpoint requires non-empty chain_history",
+            ));
+        }
+        let emit_chain_checkpoint = match args.get("emit_chain_checkpoint") {
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Ok(ToolResult::error("emit_chain_checkpoint must be boolean")),
+            None => false,
+        };
         let explicit_previous_chain_sha256 = match args.get("previous_chain_sha256") {
             Some(Value::String(value)) if lowercase_sha256(Some(&Value::String(value.clone()))) => {
                 Some(value.as_str())
@@ -2112,9 +2288,21 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
         if let Some(expected) = args.get("chain_binding") {
             audit["chain_verification"] = verify_audit_chain_binding(expected, &chain_binding);
         }
-        if let Some(history) = chain_history {
-            audit["chain_history_verification"] =
-                verify_audit_chain_history(history, &chain_binding);
+        let history_verification = chain_history
+            .map(|history| verify_audit_chain_history(history, &chain_binding, chain_checkpoint));
+        if let Some(verification) = &history_verification {
+            audit["chain_history_verification"] = verification.clone();
+        }
+        let checkpoint_total = checkpoint_total_for_output(
+            emit_chain_checkpoint,
+            history_verification.as_ref(),
+            chain_history.is_some(),
+            chain_history.is_none() && previous_chain_sha256.is_none(),
+        );
+        if let (Some(total_link_count), Some(chain_sha256)) =
+            (checkpoint_total, chain_binding["chain_sha256"].as_str())
+        {
+            audit["chain_checkpoint"] = audit_chain_checkpoint(chain_sha256, total_link_count);
         }
         audit["chain_binding"] = chain_binding;
         Ok(ToolResult::structured_json(&audit))
@@ -2425,6 +2613,9 @@ mod tests {
 
         assert_eq!(verification["status"], "verified");
         assert_eq!(verification["violations"], json!([]));
+        assert!(verification["claims"]
+            .get("caller_supplied_checkpoint_bound")
+            .is_none());
         assert_eq!(verification["claims"]["audit_evidence_bound"], true);
         assert!(verification.get("world_semantics_verified").is_none());
     }
@@ -2595,7 +2786,7 @@ mod tests {
     #[test]
     fn receipt_audit_chain_history_verifies_ordered_links_and_current_join() {
         let (history, current) = three_link_audit_chain();
-        let verification = verify_audit_chain_history(&history, &current);
+        let verification = verify_audit_chain_history(&history, &current, None);
 
         assert_eq!(verification["status"], "verified");
         assert_eq!(verification["history_link_count"], 2);
@@ -2618,7 +2809,7 @@ mod tests {
     fn receipt_audit_chain_history_rejects_tampered_link_digest() {
         let (mut history, current) = three_link_audit_chain();
         history[0]["chain_sha256"] = json!("0".repeat(64));
-        let verification = verify_audit_chain_history(&history, &current);
+        let verification = verify_audit_chain_history(&history, &current, None);
         let violations = verification["violations"].as_array().unwrap();
 
         assert_eq!(verification["status"], "mismatch");
@@ -2634,7 +2825,7 @@ mod tests {
     fn receipt_audit_chain_history_rejects_reordered_links() {
         let (mut history, current) = three_link_audit_chain();
         history.swap(0, 1);
-        let verification = verify_audit_chain_history(&history, &current);
+        let verification = verify_audit_chain_history(&history, &current, None);
         let violations = verification["violations"].as_array().unwrap();
 
         assert_eq!(verification["status"], "mismatch");
@@ -2660,7 +2851,7 @@ mod tests {
             &json!({"batch_sha256": &batch_sha256}),
             history[1]["chain_sha256"].as_str(),
         );
-        let verification = verify_audit_chain_history(&history, &current);
+        let verification = verify_audit_chain_history(&history, &current, None);
 
         assert_eq!(verification["status"], "mismatch");
         assert_eq!(
@@ -2675,6 +2866,7 @@ mod tests {
         let verification = verify_audit_chain_history(
             &[json!({"schema": "unexpected", "chain_sha256": 7})],
             &current,
+            None,
         );
         let violations = verification["violations"].as_array().unwrap();
 
@@ -2685,6 +2877,176 @@ mod tests {
         assert!(
             violations.contains(&json!({"index": 1, "code": "current_link_predecessor_mismatch"}))
         );
+    }
+
+    #[test]
+    fn receipt_audit_chain_checkpoint_verifies_bounded_suffix_and_count() {
+        let (history, current) = three_link_audit_chain();
+        let checkpoint = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let verification = verify_audit_chain_history(&history[1..], &current, Some(&checkpoint));
+
+        assert_eq!(verification["status"], "verified");
+        assert_eq!(verification["history_link_count"], 1);
+        assert_eq!(verification["total_link_count"], 3);
+        assert_eq!(verification["violations"], json!([]));
+        assert_eq!(
+            verification["claims"]["caller_supplied_checkpoint_bound"],
+            true
+        );
+        assert_eq!(
+            verification["claims"]["historical_source_documents_verified"],
+            false
+        );
+        assert_eq!(verification["claims"]["external_custody_verified"], false);
+        assert_eq!(verification["claims"]["world_semantics_verified"], false);
+    }
+
+    #[test]
+    fn receipt_audit_chain_checkpoint_rejects_tampered_count() {
+        let (history, current) = three_link_audit_chain();
+        let mut checkpoint =
+            audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        checkpoint["total_link_count"] = json!(9);
+        let verification = verify_audit_chain_history(&history[1..], &current, Some(&checkpoint));
+
+        assert_eq!(verification["status"], "mismatch");
+        assert!(verification["violations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"index": 0, "code": "chain_checkpoint_sha256_mismatch"})));
+        assert_eq!(
+            verification["claims"]["caller_supplied_checkpoint_bound"],
+            false
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_checkpoint_rejects_wrong_anchor() {
+        let (history, current) = three_link_audit_chain();
+        let checkpoint = audit_chain_checkpoint(&"f".repeat(64), 1);
+        let verification = verify_audit_chain_history(&history[1..], &current, Some(&checkpoint));
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(
+            verification["violations"],
+            json!([{"index": 0, "code": "chain_continuity_mismatch"}])
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_checkpoint_is_deterministic_and_bounded() {
+        let checkpoint = audit_chain_checkpoint(&"a".repeat(64), 257);
+        let duplicate = audit_chain_checkpoint(&"a".repeat(64), 257);
+
+        assert_eq!(checkpoint, duplicate);
+        assert_eq!(checkpoint["total_link_count"], 257);
+        assert_eq!(checkpoint["checkpoint_sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            checkpoint["claims"],
+            json!({
+                "checkpoint_integrity_bound": true,
+                "historical_source_documents_verified": false,
+                "external_custody_verified": false,
+                "world_semantics_verified": false,
+            })
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_checkpoint_rejects_count_overflow() {
+        let (history, current) = three_link_audit_chain();
+        let checkpoint =
+            audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), u64::MAX);
+        let verification = verify_audit_chain_history(&history[1..], &current, Some(&checkpoint));
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(verification["total_link_count"], Value::Null);
+        assert!(verification["violations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"index": 0, "code": "chain_checkpoint_total_link_count_overflow"})));
+    }
+
+    #[test]
+    fn receipt_audit_chain_checkpoint_output_requires_opt_in_and_verified_history() {
+        let verified = json!({"status": "verified", "total_link_count": 3});
+        let mismatch = json!({"status": "mismatch", "total_link_count": 3});
+
+        assert_eq!(
+            checkpoint_total_for_output(false, Some(&verified), true, false),
+            None
+        );
+        assert_eq!(
+            checkpoint_total_for_output(true, Some(&mismatch), true, false),
+            None
+        );
+        assert_eq!(
+            checkpoint_total_for_output(true, Some(&verified), true, false),
+            Some(3)
+        );
+        assert_eq!(
+            checkpoint_total_for_output(true, None, false, true),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn receipt_audit_tool_checkpoint_output_is_opt_in() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let tool = ModelScopeAbotReceiptAuditTool;
+        let legacy = tool
+            .execute(
+                json!({"documents": [document.clone()]}),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+        let opted_in = tool
+            .execute(
+                json!({"documents": [document], "emit_chain_checkpoint": true}),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+
+        assert!(legacy
+            .structured_content
+            .unwrap()
+            .get("chain_checkpoint")
+            .is_none());
+        let payload = opted_in.structured_content.unwrap();
+        let checkpoint = &payload["chain_checkpoint"];
+        assert_eq!(checkpoint["total_link_count"], 1);
+        assert_eq!(checkpoint["claims"]["checkpoint_integrity_bound"], true);
+    }
+
+    #[tokio::test]
+    async fn receipt_audit_tool_does_not_emit_checkpoint_for_invalid_history() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let tool = ModelScopeAbotReceiptAuditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "documents": [document],
+                    "chain_history": [{"schema": "unexpected"}],
+                    "emit_chain_checkpoint": true,
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+        let payload = result.structured_content.unwrap();
+
+        assert_eq!(payload["chain_history_verification"]["status"], "mismatch");
+        assert!(payload.get("chain_checkpoint").is_none());
     }
 
     #[test]
