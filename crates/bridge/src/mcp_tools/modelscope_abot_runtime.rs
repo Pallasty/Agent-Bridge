@@ -192,10 +192,20 @@ fn validate_abot_receipt(document: &Value) -> Value {
     validation_projection(document_kind, violations)
 }
 
+fn canonical_json_sha256(value: &Value) -> String {
+    let canonical = serde_json_canonicalizer::to_vec(value)
+        .expect("serde_json::Value always has a valid JCS representation");
+    format!("{:x}", Sha256::digest(canonical))
+}
+
 fn audit_abot_receipts(documents: &[Value]) -> Value {
     let mut accepted = 0_u64;
     let mut document_kinds = BTreeMap::<String, u64>::new();
     let mut violation_counts = BTreeMap::<String, u64>::new();
+    let document_sha256 = documents
+        .iter()
+        .map(canonical_json_sha256)
+        .collect::<Vec<_>>();
     let results = documents
         .iter()
         .enumerate()
@@ -222,6 +232,11 @@ fn audit_abot_receipts(documents: &[Value]) -> Value {
         .collect::<Vec<_>>();
     let total = documents.len() as u64;
     let rejected = total.saturating_sub(accepted);
+    let evidence_manifest = json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_evidence.v0",
+        "document_sha256": document_sha256,
+    });
+    let batch_sha256 = canonical_json_sha256(&evidence_manifest);
 
     json!({
         "schema": "agent_bridge.modelscope_abot_receipt_audit.v0",
@@ -234,6 +249,18 @@ fn audit_abot_receipts(documents: &[Value]) -> Value {
             "violation_counts": violation_counts,
         },
         "results": results,
+        "evidence_binding": {
+            "schema": "agent_bridge.modelscope_abot_receipt_audit_evidence.v0",
+            "canonicalization": "rfc8785.jcs.v1",
+            "documents": evidence_manifest["document_sha256"]
+                .as_array()
+                .expect("evidence manifest document list")
+                .iter()
+                .enumerate()
+                .map(|(index, sha256)| json!({"index": index, "sha256": sha256}))
+                .collect::<Vec<_>>(),
+            "batch_sha256": batch_sha256,
+        },
         "claims": {
             "all_prompt_submissions_bound": total > 0 && rejected == 0,
             "world_semantics_verified": false,
@@ -2030,6 +2057,65 @@ mod tests {
         assert_eq!(result["summary"]["accepted"], 2);
         assert_eq!(result["summary"]["violation_counts"], json!({}));
         assert_eq!(result["claims"]["all_prompt_submissions_bound"], true);
+    }
+
+    #[test]
+    fn receipt_audit_digest_is_stable_across_object_key_order() {
+        let left: Value = serde_json::from_str(
+            r#"{"schema":"agent_bridge.modelscope_abot_downstream_failure.v0","prompt_binding":{"schema":"agent_bridge.modelscope_abot_prompt_binding.v0","readback_observed":true,"exact_match":true,"raw_prompt_recorded":false,"observed_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"downstream_diagnostics":null}"#,
+        )
+        .expect("left document");
+        let right: Value = serde_json::from_str(
+            r#"{"downstream_diagnostics":null,"prompt_binding":{"expected_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","observed_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","raw_prompt_recorded":false,"exact_match":true,"readback_observed":true,"schema":"agent_bridge.modelscope_abot_prompt_binding.v0"},"schema":"agent_bridge.modelscope_abot_downstream_failure.v0"}"#,
+        )
+        .expect("right document");
+
+        let left_audit = audit_abot_receipts(&[left]);
+        let right_audit = audit_abot_receipts(&[right]);
+        assert_eq!(
+            left_audit["evidence_binding"],
+            right_audit["evidence_binding"]
+        );
+        assert_eq!(
+            left_audit["evidence_binding"]["documents"][0]["sha256"]
+                .as_str()
+                .expect("document digest")
+                .len(),
+            64
+        );
+    }
+
+    #[test]
+    fn receipt_audit_digest_binds_content_and_document_order() {
+        let first = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let second = json!({
+            "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        });
+        let original = audit_abot_receipts(&[first.clone(), second.clone()]);
+        let reordered = audit_abot_receipts(&[second, first.clone()]);
+        let changed = audit_abot_receipts(&[
+            first,
+            json!({
+                "schema": "example.changed.v0"
+            }),
+        ]);
+
+        assert_ne!(
+            original["evidence_binding"]["batch_sha256"],
+            reordered["evidence_binding"]["batch_sha256"]
+        );
+        assert_ne!(
+            original["evidence_binding"]["batch_sha256"],
+            changed["evidence_binding"]["batch_sha256"]
+        );
+        assert_eq!(
+            original["evidence_binding"]["canonicalization"],
+            "rfc8785.jcs.v1"
+        );
     }
 
     #[test]
