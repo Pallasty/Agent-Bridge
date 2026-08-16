@@ -80,3 +80,13 @@ not collect the Python TTS tests. Consequently, a green GitLab pipeline is a
 repository regression signal but is not evidence for this adapter by itself.
 The Python compilation, Ruff, 271-test suite, canary success, fault injection,
 and live cross-node checks above remain the merge evidence for this change.
+
+GitLab did not create an MR pipeline after two branch updates, so the required
+CI commands were also run manually on Linux. `cargo build --workspace
+--all-targets` passed. `cargo test --workspace --no-fail-fast` completed with two
+pre-existing failures: the Codex-essential extras test expects 67 tools while
+master currently exposes 69, and the S626 spawn-failure test expects
+`GrantDeclined` while the observed result is `Supervisor(Busy)`. This MR has no
+diff under `Cargo.toml`, `Cargo.lock`, `crates/`, `bin/`, or `.gitlab-ci.yml`, so
+these Rust failures are recorded as master baseline failures, not TTS adapter
+regressions.
