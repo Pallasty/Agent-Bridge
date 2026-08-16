@@ -633,7 +633,9 @@ def test_canary_checked_in_policy_routes_to_qwen(monkeypatch):
         assert info["canary_selected_backend"] == "qwen3"
         assert info["canary_assigned_backend"] == "qwen3"
         assert info["canary_fallback_used"] is False
-        assert "policy_disabled" in info["canary_reasons"]
+        # The checked-in policy is enabled but request-1 is outside its 10%
+        # stable bucket, so control routing must explain the bucket decision.
+        assert "outside_percentage_bucket" in info["canary_reasons"]
     finally:
         _restore(saved)
 
