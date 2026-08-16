@@ -351,6 +351,112 @@ fn audit_chain_binding(evidence_binding: &Value, previous_chain_sha256: Option<&
     })
 }
 
+fn verify_audit_chain_history(history: &[Value], current: &Value) -> Value {
+    let mut violations = Vec::<Value>::new();
+    let mut previous_head: Option<&str> = None;
+
+    for (index, link) in history.iter().enumerate() {
+        let Some(object) = link.as_object() else {
+            violations.push(json!({"index": index, "code": "chain_link_not_object"}));
+            previous_head = None;
+            continue;
+        };
+        if object.len() != 6
+            || ![
+                "schema",
+                "canonicalization",
+                "previous_chain_sha256",
+                "audit_batch_sha256",
+                "chain_sha256",
+                "claims",
+            ]
+            .iter()
+            .all(|key| object.contains_key(*key))
+        {
+            violations.push(json!({"index": index, "code": "chain_link_shape_mismatch"}));
+        }
+        if link.get("schema").and_then(Value::as_str)
+            != Some("agent_bridge.modelscope_abot_receipt_audit_chain.v0")
+        {
+            violations.push(json!({"index": index, "code": "chain_schema_mismatch"}));
+        }
+        if link.get("canonicalization").and_then(Value::as_str) != Some("rfc8785.jcs.v1") {
+            violations.push(json!({"index": index, "code": "canonicalization_mismatch"}));
+        }
+
+        let predecessor = match link.get("previous_chain_sha256") {
+            Some(Value::Null) => Some(None),
+            Some(value) if lowercase_sha256(Some(value)) => Some(value.as_str()),
+            _ => {
+                violations.push(json!({"index": index, "code": "previous_chain_sha256_invalid"}));
+                None
+            }
+        };
+        let batch_sha256 = link
+            .get("audit_batch_sha256")
+            .filter(|value| lowercase_sha256(Some(value)))
+            .and_then(Value::as_str);
+        if batch_sha256.is_none() {
+            violations.push(json!({"index": index, "code": "audit_batch_sha256_invalid"}));
+        }
+        let chain_sha256 = link
+            .get("chain_sha256")
+            .filter(|value| lowercase_sha256(Some(value)))
+            .and_then(Value::as_str);
+        if chain_sha256.is_none() {
+            violations.push(json!({"index": index, "code": "chain_sha256_invalid"}));
+        }
+        if link.get("claims")
+            != Some(&json!({
+                "chain_link_constructed": true,
+                "external_custody_verified": false,
+                "world_semantics_verified": false,
+            }))
+        {
+            violations.push(json!({"index": index, "code": "chain_claims_mismatch"}));
+        }
+
+        if index > 0 && predecessor.flatten() != previous_head {
+            violations.push(json!({"index": index, "code": "chain_continuity_mismatch"}));
+        }
+        if let (Some(predecessor), Some(batch_sha256), Some(chain_sha256)) =
+            (predecessor, batch_sha256, chain_sha256)
+        {
+            let payload = json!({
+                "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_payload.v0",
+                "previous_chain_sha256": predecessor,
+                "audit_batch_sha256": batch_sha256,
+            });
+            if canonical_json_sha256(&payload) != chain_sha256 {
+                violations.push(json!({"index": index, "code": "chain_sha256_mismatch"}));
+            }
+        }
+        previous_head = chain_sha256;
+    }
+
+    if current.get("previous_chain_sha256").and_then(Value::as_str) != previous_head {
+        violations.push(json!({
+            "index": history.len(),
+            "code": "current_link_predecessor_mismatch",
+        }));
+    }
+    let verified = violations.is_empty();
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_history_verification.v0",
+        "status": if verified { "verified" } else { "mismatch" },
+        "history_link_count": history.len(),
+        "total_link_count": history.len() + 1,
+        "chain_head_sha256": current["chain_sha256"],
+        "violations": violations,
+        "claims": {
+            "bounded_chain_continuity_verified": verified,
+            "historical_source_documents_verified": false,
+            "external_custody_verified": false,
+            "world_semantics_verified": false,
+        },
+    })
+}
+
 fn verify_audit_chain_binding(expected: &Value, actual: &Value) -> Value {
     let mut violations = Vec::<&'static str>::new();
     let Some(expected_object) = expected.as_object() else {
@@ -1921,7 +2027,7 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Audit ModelScope ABot receipts, verify evidence, and construct or verify a deterministic audit-chain link. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
+            description: "Audit ModelScope ABot receipts; verify evidence, a chain link, or bounded chain history. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["documents"],
@@ -1945,6 +2051,13 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                     "chain_binding": {
                         "type": "object",
                         "description": "Optional prior Gate 8Q chain binding to verify against these documents and previous-chain digest."
+                    },
+                    "chain_history": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_RECEIPT_AUDIT_DOCUMENTS,
+                        "items": {"type": "object"},
+                        "description": "Optional ordered Gate 8Q links to verify before joining this batch. This verifies bounded continuity, not historical source documents or external custody."
                     }
                 }
             }),
@@ -1960,7 +2073,20 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                 "documents must contain 1..={MAX_RECEIPT_AUDIT_DOCUMENTS} items"
             )));
         }
-        let previous_chain_sha256 = match args.get("previous_chain_sha256") {
+        let chain_history = match args.get("chain_history") {
+            Some(Value::Array(history))
+                if !history.is_empty() && history.len() <= MAX_RECEIPT_AUDIT_DOCUMENTS =>
+            {
+                Some(history.as_slice())
+            }
+            Some(_) => {
+                return Ok(ToolResult::error(format!(
+                    "chain_history must contain 1..={MAX_RECEIPT_AUDIT_DOCUMENTS} items"
+                )));
+            }
+            None => None,
+        };
+        let explicit_previous_chain_sha256 = match args.get("previous_chain_sha256") {
             Some(Value::String(value)) if lowercase_sha256(Some(&Value::String(value.clone()))) => {
                 Some(value.as_str())
             }
@@ -1971,6 +2097,12 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
             }
             None => None,
         };
+        let history_head_sha256 = chain_history
+            .and_then(|history| history.last())
+            .and_then(|link| link.get("chain_sha256"))
+            .filter(|value| lowercase_sha256(Some(value)))
+            .and_then(Value::as_str);
+        let previous_chain_sha256 = explicit_previous_chain_sha256.or(history_head_sha256);
         let mut audit = audit_abot_receipts(documents);
         if let Some(expected) = args.get("evidence_binding") {
             let verification = verify_audit_evidence_binding(expected, &audit["evidence_binding"]);
@@ -1979,6 +2111,10 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
         let chain_binding = audit_chain_binding(&audit["evidence_binding"], previous_chain_sha256);
         if let Some(expected) = args.get("chain_binding") {
             audit["chain_verification"] = verify_audit_chain_binding(expected, &chain_binding);
+        }
+        if let Some(history) = chain_history {
+            audit["chain_history_verification"] =
+                verify_audit_chain_history(history, &chain_binding);
         }
         audit["chain_binding"] = chain_binding;
         Ok(ToolResult::structured_json(&audit))
@@ -2439,6 +2575,116 @@ mod tests {
         assert!(violations.contains(&json!("audit_batch_sha256_mismatch")));
         assert!(violations.contains(&json!("chain_sha256_mismatch")));
         assert!(violations.contains(&json!("chain_claims_mismatch")));
+    }
+
+    fn three_link_audit_chain() -> (Vec<Value>, Value) {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let first = audit_chain_binding(&audit["evidence_binding"], None);
+        let second =
+            audit_chain_binding(&audit["evidence_binding"], first["chain_sha256"].as_str());
+        let current =
+            audit_chain_binding(&audit["evidence_binding"], second["chain_sha256"].as_str());
+        (vec![first, second], current)
+    }
+
+    #[test]
+    fn receipt_audit_chain_history_verifies_ordered_links_and_current_join() {
+        let (history, current) = three_link_audit_chain();
+        let verification = verify_audit_chain_history(&history, &current);
+
+        assert_eq!(verification["status"], "verified");
+        assert_eq!(verification["history_link_count"], 2);
+        assert_eq!(verification["total_link_count"], 3);
+        assert_eq!(verification["chain_head_sha256"], current["chain_sha256"]);
+        assert_eq!(verification["violations"], json!([]));
+        assert_eq!(
+            verification["claims"]["bounded_chain_continuity_verified"],
+            true
+        );
+        assert_eq!(
+            verification["claims"]["historical_source_documents_verified"],
+            false
+        );
+        assert_eq!(verification["claims"]["external_custody_verified"], false);
+        assert_eq!(verification["claims"]["world_semantics_verified"], false);
+    }
+
+    #[test]
+    fn receipt_audit_chain_history_rejects_tampered_link_digest() {
+        let (mut history, current) = three_link_audit_chain();
+        history[0]["chain_sha256"] = json!("0".repeat(64));
+        let verification = verify_audit_chain_history(&history, &current);
+        let violations = verification["violations"].as_array().unwrap();
+
+        assert_eq!(verification["status"], "mismatch");
+        assert!(violations.contains(&json!({"index": 0, "code": "chain_sha256_mismatch"})));
+        assert!(violations.contains(&json!({"index": 1, "code": "chain_continuity_mismatch"})));
+        assert_eq!(
+            verification["claims"]["bounded_chain_continuity_verified"],
+            false
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_history_rejects_reordered_links() {
+        let (mut history, current) = three_link_audit_chain();
+        history.swap(0, 1);
+        let verification = verify_audit_chain_history(&history, &current);
+        let violations = verification["violations"].as_array().unwrap();
+
+        assert_eq!(verification["status"], "mismatch");
+        assert!(violations.contains(&json!({"index": 1, "code": "chain_continuity_mismatch"})));
+        assert!(
+            violations.contains(&json!({"index": 2, "code": "current_link_predecessor_mismatch"}))
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_history_rejects_self_valid_gap() {
+        let (mut history, _) = three_link_audit_chain();
+        let gap_predecessor = "f".repeat(64);
+        let batch_sha256 = history[1]["audit_batch_sha256"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        history[1] = audit_chain_binding(
+            &json!({"batch_sha256": &batch_sha256}),
+            Some(&gap_predecessor),
+        );
+        let current = audit_chain_binding(
+            &json!({"batch_sha256": &batch_sha256}),
+            history[1]["chain_sha256"].as_str(),
+        );
+        let verification = verify_audit_chain_history(&history, &current);
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(
+            verification["violations"],
+            json!([{"index": 1, "code": "chain_continuity_mismatch"}])
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_history_rejects_malformed_link() {
+        let (_, current) = three_link_audit_chain();
+        let verification = verify_audit_chain_history(
+            &[json!({"schema": "unexpected", "chain_sha256": 7})],
+            &current,
+        );
+        let violations = verification["violations"].as_array().unwrap();
+
+        assert_eq!(verification["status"], "mismatch");
+        assert!(violations.contains(&json!({"index": 0, "code": "chain_link_shape_mismatch"})));
+        assert!(violations.contains(&json!({"index": 0, "code": "chain_schema_mismatch"})));
+        assert!(violations.contains(&json!({"index": 0, "code": "chain_sha256_invalid"})));
+        assert!(
+            violations.contains(&json!({"index": 1, "code": "current_link_predecessor_mismatch"}))
+        );
     }
 
     #[test]
