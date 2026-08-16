@@ -74,3 +74,9 @@ its tests. Review added conservative validation for the SSH destination and
 remote SCP path, including rejection of option-style hosts, shell metacharacters,
 and parent-directory traversal. The hardened path completed another live
 cross-node decode at RTF 2.52 with verified hashes and remote cleanup.
+
+The checked-in GitLab pipeline builds and tests the Rust workspace only; it does
+not collect the Python TTS tests. Consequently, a green GitLab pipeline is a
+repository regression signal but is not evidence for this adapter by itself.
+The Python compilation, Ruff, 271-test suite, canary success, fault injection,
+and live cross-node checks above remain the merge evidence for this change.
