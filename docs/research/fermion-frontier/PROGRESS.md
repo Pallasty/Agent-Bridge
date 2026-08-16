@@ -74,6 +74,32 @@ Status date: 2026-08-09
 - D82 supersedes only the owner-input part of this blocker; D81's ordinary session cgroup path must
   be freshly recaptured after the isolated service exists.
 
+## 2026-07-27 — FH-L8 D79 runtime scope-lock precheck
+
+- Synced the local worktree to the latest committed frontier state and validated
+  the D67–D79 chain end-to-end.
+- Re-verified fail-closed gates for D67 through D79, including external-capacity,
+  page-cache, runtime-environment, allocator-proof, evidence handoff, recipient
+  registry, owner-local attestation, capacity admission, envelope refresh,
+  owner host/allocator intake and runtime scope-lock precheck.
+- The precheck confirms that scope mode lacks cgroup memory-controller
+  capabilities and service mode applies only service-visible memory limits.
+  No external request, request-scope runtime lock commitment or full-53
+  execution authority was introduced.
+- All 34 D-line verifier tests passed. D58 numeric allocator inputs, D59
+  page-cache evidence, D60 runtime-rule inputs, D61 reconciliation and the D23
+  external-resource shortfall remain closed-state blockers.
+- Next gate remains `D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE`.
+
+## 2026-07-27 — FH-L8 D60 local readiness checkpoint before evidence exchange
+
+- A second local verifier sweep confirmed the D56–D79 artifacts remain in their
+  expected fail-closed states; no new execution authority was introduced.
+- Unsent/request-pending pre-closure artifacts remain structurally intact.
+- D60 remains blocked by missing premeasurement runtime-rule/environment inputs;
+  the next objective is to keep the evidence request lanes ready until valid
+  `runtime_experiment` packets arrive.
+
 ## 2026-07-26 — FH-L8 D64 owner-local capacity observation
 
 - Revalidated the reversible owner-local reservation at

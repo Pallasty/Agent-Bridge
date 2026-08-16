@@ -1,0 +1,10 @@
+{
+  "schema": "agent_bridge.tts_blind_review_key.v0",
+  "numbers_A": "Qwen3-TTS 1.7B CustomVoice BF16",
+  "numbers_B": "OmniVoice recommended ONNX composition",
+  "mixed_A": "OmniVoice recommended ONNX composition",
+  "mixed_B": "Qwen3-TTS 1.7B CustomVoice BF16",
+  "operational_A": "Qwen3-TTS 1.7B CustomVoice BF16",
+  "operational_B": "OmniVoice recommended ONNX composition",
+  "warning": "Reveal only after the public review sheet has been completed."
+}
