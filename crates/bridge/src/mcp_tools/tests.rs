@@ -10112,6 +10112,14 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
     assert!(audit.input_schema["properties"]
         .get("expected_successor_checkpoint")
         .is_some());
+    assert_eq!(
+        audit.input_schema["properties"]["successor_checkpoint_candidates"]["minItems"],
+        2
+    );
+    assert_eq!(
+        audit.input_schema["properties"]["successor_checkpoint_candidates"]["maxItems"],
+        256
+    );
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));

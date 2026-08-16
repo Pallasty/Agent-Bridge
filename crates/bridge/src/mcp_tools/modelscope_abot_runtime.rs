@@ -673,6 +673,11 @@ fn verify_audit_chain_checkpoint_candidates(
         history_verification.get("status").and_then(Value::as_str) == Some("verified");
     let mut candidate_verifications = Vec::with_capacity(candidates.len());
     let mut candidate_groups = BTreeMap::<String, Vec<usize>>::new();
+    let mut candidate_identities = candidates
+        .iter()
+        .map(canonical_json_sha256)
+        .collect::<Vec<_>>();
+    candidate_identities.sort();
     let mut all_candidates_self_valid = true;
     let mut all_candidates_valid = true;
 
@@ -725,6 +730,25 @@ fn verify_audit_chain_checkpoint_candidates(
     } else {
         "mismatch"
     };
+    let candidate_set_payload = json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_candidate_set_payload.v0",
+        "canonicalization": "rfc8785.jcs.v1",
+        "candidate_identity_sha256": candidate_identities,
+    });
+    let candidate_set_sha256 = canonical_json_sha256(&candidate_set_payload);
+    let mut stable_candidate_verifications = candidate_verifications
+        .iter()
+        .map(|verification| {
+            json!({
+                "identity_sha256": candidates
+                    .get(verification["index"].as_u64().unwrap_or_default() as usize)
+                    .map(canonical_json_sha256),
+                "status": verification["status"],
+                "violations": verification["violations"],
+            })
+        })
+        .collect::<Vec<_>>();
+    stable_candidate_verifications.sort_by_key(canonical_json_sha256);
     json!({
         "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_candidates_verification.v0",
         "status": status,
@@ -732,9 +756,18 @@ fn verify_audit_chain_checkpoint_candidates(
         "unique_candidate_count": candidate_groups.len(),
         "candidate_groups": candidate_groups,
         "candidate_verifications": candidate_verifications,
+        "candidate_set": {
+            "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_candidate_set.v0",
+            "canonicalization": "rfc8785.jcs.v1",
+            "candidate_identity_sha256": candidate_set_payload["candidate_identity_sha256"],
+            "candidate_set_sha256": candidate_set_sha256,
+        },
+        "stable_candidate_verifications": stable_candidate_verifications,
         "claims": {
             "candidate_consistency_verified": exact_agreement,
             "fork_detected": fork_detected,
+            "candidate_set_identity_bound": true,
+            "candidate_order_invariant_projection": true,
             "historical_source_documents_verified": false,
             "external_custody_verified": false,
             "world_semantics_verified": false,
@@ -3389,6 +3422,62 @@ mod tests {
     }
 
     #[test]
+    fn receipt_audit_checkpoint_candidate_set_is_order_invariant() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let actual = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let alternate = audit_chain_checkpoint(&"f".repeat(64), 3);
+        let left = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[actual.clone(), alternate.clone()],
+            Some(&actual),
+        );
+        let right = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[alternate, actual.clone()],
+            Some(&actual),
+        );
+
+        assert_eq!(left["status"], "fork");
+        assert_eq!(left["candidate_set"], right["candidate_set"]);
+        assert_eq!(
+            left["stable_candidate_verifications"],
+            right["stable_candidate_verifications"]
+        );
+        assert_eq!(left["claims"]["candidate_order_invariant_projection"], true);
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_candidate_set_changes_on_membership_change() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let actual = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let alternate = audit_chain_checkpoint(&"f".repeat(64), 3);
+        let one = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[actual.clone(), actual.clone()],
+            Some(&actual),
+        );
+        let two = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[actual, alternate],
+            Some(&audit_chain_checkpoint(
+                current["chain_sha256"].as_str().unwrap(),
+                3,
+            )),
+        );
+
+        assert_ne!(
+            one["candidate_set"]["candidate_set_sha256"],
+            two["candidate_set"]["candidate_set_sha256"]
+        );
+    }
+
+    #[test]
     fn receipt_audit_checkpoint_candidates_reject_tampered_candidate() {
         let (history, current) = three_link_audit_chain();
         let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
@@ -3443,6 +3532,19 @@ mod tests {
         assert_eq!(
             payload["checkpoint_candidates_verification"]["status"],
             "verified"
+        );
+        assert_eq!(
+            payload["checkpoint_candidates_verification"]["claims"]
+                ["candidate_order_invariant_projection"],
+            true
+        );
+        assert_eq!(
+            payload["checkpoint_candidates_verification"]["candidate_set"]
+                ["candidate_identity_sha256"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
         );
         assert!(payload.get("chain_checkpoint").is_none());
         assert_eq!(
