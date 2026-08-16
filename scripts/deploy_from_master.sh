@@ -66,6 +66,10 @@ AUDIO_ADAPTER_COMPANIONS=(
     qwen3_tts_synth.py
     tts_canary_router.py
 )
+AUDIO_POLICY_ASSETS=(
+    config/omnivoice-canary.json
+    docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json
+)
 RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 RUNTIME_ASSETS=(
     app_control.py
@@ -243,6 +247,10 @@ for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
     [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
         die "deploy-source audio companion missing: $ASSET_SOURCE_ROOT/scripts/$asset"
 done
+for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
+    [ -f "$ASSET_SOURCE_ROOT/$asset" ] ||
+        die "deploy-source audio policy asset missing: $ASSET_SOURCE_ROOT/$asset"
+done
 for asset in "${RUNTIME_ASSETS[@]}"; do
     [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
         die "deploy-source runtime asset missing: $ASSET_SOURCE_ROOT/scripts/$asset"
@@ -296,6 +304,7 @@ say "  target     : $REAL_PATH (current $cur_size bytes)"
 say "  wrapper    : $WRAPPER_PATH (left untouched)"
 say "  adapter    : $ADAPTER_SOURCE -> $ADAPTER_PATH"
 say "  companions : ${#AUDIO_ADAPTER_COMPANIONS[@]} audio scripts -> $(dirname "$ADAPTER_PATH")"
+say "  policy      : ${#AUDIO_POLICY_ASSETS[@]} review-bound assets -> $(dirname "$(dirname "$ADAPTER_PATH")")"
 say "  runtime    : ${#RUNTIME_ASSETS[@]} scripts from $ASSET_SOURCE_ROOT -> $RUNTIME_ASSET_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -329,6 +338,7 @@ fi
 # adapter. A brief interruption can therefore leave the old adapter with extra
 # compatible companions, never the new adapter with a missing sibling import.
 adapter_dir="$(dirname "$ADAPTER_PATH")"
+adapter_root="$(dirname "$adapter_dir")"
 mkdir -p "$adapter_dir"
 if [ -f "$ADAPTER_PATH" ]; then
     adapter_bak="$ADAPTER_PATH.bak-deploy-$(date +%Y%m%dT%H%M%S)"
@@ -353,6 +363,18 @@ cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "installed audio adapter differs from repository source"
 say ">> deployed matched audio adapter -> $ADAPTER_PATH"
 say ">> deployed matched audio companions -> $adapter_dir"
+for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
+    policy_source="$ASSET_SOURCE_ROOT/$asset"
+    policy_target="$adapter_root/$asset"
+    mkdir -p "$(dirname "$policy_target")"
+    policy_stage="$policy_target.stage.$$"
+    cp "$policy_source" "$policy_stage"
+    chmod 644 "$policy_stage"
+    mv -f "$policy_stage" "$policy_target"
+    cmp -s "$policy_source" "$policy_target" ||
+        die "installed audio policy asset differs from repository source: $asset"
+done
+say ">> deployed matched audio policy assets -> $adapter_root"
 
 # Install script-backed MCP assets at a stable path. The release binary embeds
 # its disposable build worktree in CARGO_MANIFEST_DIR, so compile-time fallback
@@ -405,6 +427,11 @@ for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
         die "post-deploy audio companion parity check failed: $asset"
 done
 say "audio companion parity: OK (${#AUDIO_ADAPTER_COMPANIONS[@]} scripts in $adapter_dir)"
+for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
+    cmp -s "$ASSET_SOURCE_ROOT/$asset" "$adapter_root/$asset" ||
+        die "post-deploy audio policy parity check failed: $asset"
+done
+say "audio policy parity: OK (${#AUDIO_POLICY_ASSETS[@]} files under $adapter_root)"
 for asset in "${RUNTIME_ASSETS[@]}"; do
     cmp -s "$ASSET_SOURCE_ROOT/scripts/$asset" "$RUNTIME_ASSET_DIR/$asset" ||
         die "post-deploy runtime asset parity check failed: $asset"

@@ -58,8 +58,12 @@ for asset in deploy_from_master.sh audio_embody.py app_control.py desktop_action
     tts_canary_router.py; do
     cp "$SCRIPT_DIR/$asset" "$SEED/scripts/$asset"
 done
+mkdir -p "$SEED/config" "$SEED/docs/reports/tts-comparison"
+cp "$SCRIPT_DIR/../config/omnivoice-canary.json" "$SEED/config/"
+cp "$SCRIPT_DIR/../docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json" \
+    "$SEED/docs/reports/tts-comparison/"
 chmod +x "$SEED/scripts/deploy_from_master.sh"
-git -C "$SEED" add scripts
+git -C "$SEED" add scripts config docs
 git -C "$SEED" commit -q -m initial
 git -C "$SEED" remote add origin "$REMOTE"
 git -C "$SEED" push -q -u origin master

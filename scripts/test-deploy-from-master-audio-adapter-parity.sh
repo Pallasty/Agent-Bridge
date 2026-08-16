@@ -30,6 +30,11 @@ for asset in omnivoice_mac_remote_synth.py omnivoice_onnx_bundle_synth.py \
     test -x "$(dirname "$ADAPTER_PATH")/$asset"
     cmp -s "$SCRIPT_DIR/$asset" "$(dirname "$ADAPTER_PATH")/$asset"
 done
+for asset in config/omnivoice-canary.json \
+    docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json; do
+    test -f "$ROOT/$asset"
+    cmp -s "$(dirname "$SCRIPT_DIR")/$asset" "$ROOT/$asset"
+done
 for asset in app_control.py desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
     vision_grounding_ocr.py; do
