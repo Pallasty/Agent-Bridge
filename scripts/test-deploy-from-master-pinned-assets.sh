@@ -47,8 +47,12 @@ for asset in deploy_from_master.sh audio_embody.py app_control.py desktop_action
     tts_canary_router.py; do
     cp "$SCRIPT_DIR/$asset" "$SEED/scripts/$asset"
 done
+mkdir -p "$SEED/config" "$SEED/docs/reports/tts-comparison"
+cp "$SCRIPT_DIR/../config/omnivoice-canary.json" "$SEED/config/"
+cp "$SCRIPT_DIR/../docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json" \
+    "$SEED/docs/reports/tts-comparison/"
 chmod +x "$SEED/scripts/deploy_from_master.sh"
-git -C "$SEED" add scripts
+git -C "$SEED" add scripts config docs
 git -C "$SEED" commit -q -m pinned-master-assets
 git -C "$SEED" remote add origin "$REMOTE"
 git -C "$SEED" push -q -u origin master
@@ -92,6 +96,11 @@ for asset in omnivoice_mac_remote_synth.py omnivoice_onnx_bundle_synth.py \
     git -C "$REPO" show "origin/master:scripts/$asset" > "$expected"
     cmp -s "$expected" "$(dirname "$ADAPTER_PATH")/$asset" ||
         fail "$asset came from dirty caller"
+done
+for asset in config/omnivoice-canary.json \
+    docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json; do
+    git -C "$REPO" show "origin/master:$asset" > "$expected"
+    cmp -s "$expected" "$TEST_ROOT/$asset" || fail "$asset came from dirty caller"
 done
 for asset in desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
