@@ -596,6 +596,29 @@ def test_omnivoice_pilot_invokes_explicit_adapter(monkeypatch, tmp_path):
     assert seen["command"][seen["command"].index("--manifest") + 1] == "/models/manifest.json"
 
 
+def test_omnivoice_remote_mode_uses_dispatch_adapter(monkeypatch, tmp_path):
+    seen = {}
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        output = command[command.index("--output") + 1]
+        with open(output, "wb") as handle:
+            handle.write(b"RIFFfake")
+        return SimpleNamespace(returncode=0, stdout=ae.json.dumps({
+            "ok": True, "backend": "omnivoice", "execution_transport": "ssh",
+            "hashes_verified": True, "steps": 32,
+        }), stderr="")
+    monkeypatch.setenv("AB_OMNIVOICE_TTS_ENABLED", "1")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ENABLED", "1")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON", ae.sys.executable)
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    wav, info = ae.synth_omnivoice(
+        "你好", "auto", 1.0, omnivoice_manifest="/remote/manifest.json")
+    assert wav and os.path.exists(wav)
+    assert seen["command"][1].endswith("omnivoice_mac_remote_synth.py")
+    assert seen["command"][seen["command"].index("--manifest") + 1] == "/remote/manifest.json"
+    assert info["execution_transport"] == "ssh"
+
+
 def test_synth_file_omnivoice_records_provenance():
     saved = _patch(
         synth_omnivoice=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
