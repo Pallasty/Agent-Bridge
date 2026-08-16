@@ -664,6 +664,84 @@ fn verify_audit_chain_checkpoint_transition(
     })
 }
 
+fn verify_audit_chain_checkpoint_candidates(
+    history_verification: &Value,
+    candidates: &[Value],
+    actual_successor: Option<&Value>,
+) -> Value {
+    let source_verified =
+        history_verification.get("status").and_then(Value::as_str) == Some("verified");
+    let mut candidate_verifications = Vec::with_capacity(candidates.len());
+    let mut candidate_groups = BTreeMap::<String, Vec<usize>>::new();
+    let mut all_candidates_self_valid = true;
+    let mut all_candidates_valid = true;
+
+    for (index, candidate) in candidates.iter().enumerate() {
+        let (_, checkpoint_violations) = verify_audit_chain_checkpoint(candidate);
+        let mut violations = checkpoint_violations
+            .into_iter()
+            .filter_map(|violation| {
+                violation.get("code").and_then(Value::as_str).map(|code| {
+                    let code = code.strip_prefix("chain_checkpoint_").unwrap_or(code);
+                    format!("candidate_{code}")
+                })
+            })
+            .collect::<Vec<_>>();
+        let self_valid = violations.is_empty();
+        all_candidates_self_valid &= self_valid;
+        if self_valid {
+            candidate_groups
+                .entry(canonical_json_sha256(candidate))
+                .or_default()
+                .push(index);
+        }
+        if self_valid {
+            if let Some(actual_successor) = actual_successor {
+                if candidate != actual_successor {
+                    violations.push("candidate_successor_mismatch".into());
+                }
+            } else {
+                violations.push("candidate_successor_unavailable".into());
+            }
+        }
+        let valid = violations.is_empty();
+        all_candidates_valid &= valid;
+        candidate_verifications.push(json!({
+            "index": index,
+            "status": if valid { "verified" } else { "mismatch" },
+            "violations": violations,
+        }));
+    }
+
+    let fork_detected = source_verified && all_candidates_self_valid && candidate_groups.len() > 1;
+    let exact_agreement = source_verified
+        && all_candidates_valid
+        && candidate_groups.len() == 1
+        && actual_successor.is_some();
+    let status = if exact_agreement {
+        "verified"
+    } else if fork_detected {
+        "fork"
+    } else {
+        "mismatch"
+    };
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_checkpoint_candidates_verification.v0",
+        "status": status,
+        "candidate_count": candidates.len(),
+        "unique_candidate_count": candidate_groups.len(),
+        "candidate_groups": candidate_groups,
+        "candidate_verifications": candidate_verifications,
+        "claims": {
+            "candidate_consistency_verified": exact_agreement,
+            "fork_detected": fork_detected,
+            "historical_source_documents_verified": false,
+            "external_custody_verified": false,
+            "world_semantics_verified": false,
+        },
+    })
+}
+
 fn verify_audit_chain_binding(expected: &Value, actual: &Value) -> Value {
     let mut violations = Vec::<&'static str>::new();
     let Some(expected_object) = expected.as_object() else {
@@ -2278,6 +2356,13 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                     "expected_successor_checkpoint": {
                         "type": "object",
                         "description": "Optional Gate 8T successor checkpoint to verify exactly after a valid checkpoint-anchored suffix transition. Requires chain_checkpoint and chain_history."
+                    },
+                    "successor_checkpoint_candidates": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": MAX_RECEIPT_AUDIT_DOCUMENTS,
+                        "items": {"type": "object"},
+                        "description": "Optional Gate 8U parallel successor candidates. Requires chain_checkpoint and chain_history; reports agreement or fork without selecting a candidate."
                     }
                 }
             }),
@@ -2320,6 +2405,31 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                 "expected_successor_checkpoint requires chain_checkpoint and non-empty chain_history",
             ));
         }
+        let successor_checkpoint_candidates = match args.get("successor_checkpoint_candidates") {
+            Some(Value::Array(candidates))
+                if candidates.len() >= 2 && candidates.len() <= MAX_RECEIPT_AUDIT_DOCUMENTS =>
+            {
+                Some(candidates.as_slice())
+            }
+            Some(Value::Array(_)) => {
+                return Ok(ToolResult::error(format!(
+                    "successor_checkpoint_candidates must contain 2..={MAX_RECEIPT_AUDIT_DOCUMENTS} items"
+                )));
+            }
+            Some(_) => {
+                return Ok(ToolResult::error(
+                    "successor_checkpoint_candidates must be an array",
+                ));
+            }
+            None => None,
+        };
+        if successor_checkpoint_candidates.is_some()
+            && (chain_checkpoint.is_none() || chain_history.is_none())
+        {
+            return Ok(ToolResult::error(
+                "successor_checkpoint_candidates requires chain_checkpoint and non-empty chain_history",
+            ));
+        }
         let emit_chain_checkpoint = match args.get("emit_chain_checkpoint") {
             Some(Value::Bool(value)) => *value,
             Some(_) => return Ok(ToolResult::error("emit_chain_checkpoint must be boolean")),
@@ -2357,7 +2467,9 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
             audit["chain_history_verification"] = verification.clone();
         }
         let checkpoint_total = checkpoint_total_for_output(
-            emit_chain_checkpoint || expected_successor_checkpoint.is_some(),
+            emit_chain_checkpoint
+                || expected_successor_checkpoint.is_some()
+                || successor_checkpoint_candidates.is_some(),
             history_verification.as_ref(),
             chain_history.is_some(),
             chain_history.is_none() && previous_chain_sha256.is_none(),
@@ -2375,6 +2487,16 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
             audit["checkpoint_transition_verification"] = verify_audit_chain_checkpoint_transition(
                 verification,
                 expected,
+                successor_checkpoint.as_ref(),
+            );
+        }
+        if let (Some(candidates), Some(verification)) = (
+            successor_checkpoint_candidates,
+            history_verification.as_ref(),
+        ) {
+            audit["checkpoint_candidates_verification"] = verify_audit_chain_checkpoint_candidates(
+                verification,
+                candidates,
                 successor_checkpoint.as_ref(),
             );
         }
@@ -3210,6 +3332,127 @@ mod tests {
         assert_eq!(
             verification["violations"],
             json!(["source_transition_not_verified"])
+        );
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_candidates_verify_exact_agreement() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let candidate = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let verification = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[candidate.clone(), candidate],
+            Some(&audit_chain_checkpoint(
+                current["chain_sha256"].as_str().unwrap(),
+                3,
+            )),
+        );
+
+        assert_eq!(verification["status"], "verified");
+        assert_eq!(verification["candidate_count"], 2);
+        assert_eq!(verification["unique_candidate_count"], 1);
+        assert_eq!(
+            verification["claims"]["candidate_consistency_verified"],
+            true
+        );
+        assert_eq!(verification["claims"]["fork_detected"], false);
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_candidates_detect_self_valid_fork() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let actual = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let alternate = audit_chain_checkpoint(&"f".repeat(64), 3);
+        let verification = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[actual.clone(), alternate],
+            Some(&actual),
+        );
+
+        assert_eq!(verification["status"], "fork");
+        assert_eq!(verification["unique_candidate_count"], 2);
+        assert_eq!(
+            verification["claims"]["candidate_consistency_verified"],
+            false
+        );
+        assert_eq!(verification["claims"]["fork_detected"], true);
+        assert!(verification["candidate_verifications"][1]["violations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("candidate_successor_mismatch")));
+    }
+
+    #[test]
+    fn receipt_audit_checkpoint_candidates_reject_tampered_candidate() {
+        let (history, current) = three_link_audit_chain();
+        let source = audit_chain_checkpoint(history[0]["chain_sha256"].as_str().unwrap(), 1);
+        let history_verification =
+            verify_audit_chain_history(&history[1..], &current, Some(&source));
+        let actual = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let mut tampered = actual.clone();
+        tampered["checkpoint_sha256"] = json!("0".repeat(64));
+        let verification = verify_audit_chain_checkpoint_candidates(
+            &history_verification,
+            &[actual.clone(), tampered],
+            Some(&actual),
+        );
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(verification["claims"]["fork_detected"], false);
+        assert!(verification["candidate_verifications"][1]["violations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("candidate_sha256_mismatch")));
+    }
+
+    #[tokio::test]
+    async fn receipt_audit_tool_verifies_checkpoint_candidates_without_runtime_effects() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(std::slice::from_ref(&document));
+        let first = audit_chain_binding(&audit["evidence_binding"], None);
+        let second =
+            audit_chain_binding(&audit["evidence_binding"], first["chain_sha256"].as_str());
+        let current =
+            audit_chain_binding(&audit["evidence_binding"], second["chain_sha256"].as_str());
+        let source = audit_chain_checkpoint(first["chain_sha256"].as_str().unwrap(), 1);
+        let candidate = audit_chain_checkpoint(current["chain_sha256"].as_str().unwrap(), 3);
+        let result = ModelScopeAbotReceiptAuditTool
+            .execute(
+                json!({
+                    "documents": [document],
+                    "chain_checkpoint": source,
+                    "chain_history": [second],
+                    "successor_checkpoint_candidates": [candidate.clone(), candidate],
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+        let payload = result.structured_content.unwrap();
+
+        assert_eq!(
+            payload["checkpoint_candidates_verification"]["status"],
+            "verified"
+        );
+        assert!(payload.get("chain_checkpoint").is_none());
+        assert_eq!(
+            payload["runtime_effects"],
+            json!({
+                "network_request_sent": false,
+                "browser_opened": false,
+                "task_state_read": false,
+                "task_state_written": false,
+            })
         );
     }
 
