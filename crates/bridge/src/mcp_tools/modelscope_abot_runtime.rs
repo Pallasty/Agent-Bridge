@@ -1,6 +1,7 @@
 use super::*;
 use ab_browser::BrowserBackend;
 use std::{
+    collections::BTreeMap,
     fs,
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
@@ -22,6 +23,7 @@ const STUDIO_READY_TIMEOUT_MS: u64 = 45_000;
 const STUDIO_START_TIMEOUT_MS: u64 = 20_000;
 const MAX_PROVIDER_TASK_SCAN: usize = 256;
 const MAX_FAILURE_DIAGNOSTIC_FRAMES: usize = 16;
+const MAX_RECEIPT_AUDIT_DOCUMENTS: usize = 256;
 const PROVIDER_COOLDOWN_STEPS_MS: &[u64] = &[5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -89,6 +91,17 @@ fn lowercase_sha256(value: Option<&Value>) -> bool {
     })
 }
 
+fn contains_raw_prompt_field(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(key, value)| {
+            matches!(key.as_str(), "prompt" | "raw_prompt" | "prompt_text")
+                || contains_raw_prompt_field(value)
+        }),
+        Value::Array(values) => values.iter().any(contains_raw_prompt_field),
+        _ => false,
+    }
+}
+
 fn validate_prompt_binding(binding: Option<&Value>, violations: &mut Vec<&'static str>) {
     let Some(binding) = binding.filter(|value| value.is_object()) else {
         violations.push("prompt_binding_missing");
@@ -118,6 +131,9 @@ fn validate_prompt_binding(binding: Option<&Value>, violations: &mut Vec<&'stati
 }
 
 fn validate_abot_receipt(document: &Value) -> Value {
+    if contains_raw_prompt_field(document) {
+        return validation_projection("unknown", vec!["raw_prompt_field_present"]);
+    }
     let schema = document.get("schema").and_then(Value::as_str);
     let (document_kind, binding) = match schema {
         Some("agent_bridge.modelscope_abot_run_once_receipt.v1") => {
@@ -174,6 +190,88 @@ fn validate_abot_receipt(document: &Value) -> Value {
     let mut violations = Vec::new();
     validate_prompt_binding(binding, &mut violations);
     validation_projection(document_kind, violations)
+}
+
+fn canonical_json_sha256(value: &Value) -> String {
+    let canonical = serde_json_canonicalizer::to_vec(value)
+        .expect("serde_json::Value always has a valid JCS representation");
+    format!("{:x}", Sha256::digest(canonical))
+}
+
+fn audit_abot_receipts(documents: &[Value]) -> Value {
+    let mut accepted = 0_u64;
+    let mut document_kinds = BTreeMap::<String, u64>::new();
+    let mut violation_counts = BTreeMap::<String, u64>::new();
+    let document_sha256 = documents
+        .iter()
+        .map(canonical_json_sha256)
+        .collect::<Vec<_>>();
+    let results = documents
+        .iter()
+        .enumerate()
+        .map(|(index, document)| {
+            let validation = validate_abot_receipt(document);
+            let status = validation["status"].as_str().unwrap_or("rejected");
+            let document_kind = validation["document_kind"].as_str().unwrap_or("unknown");
+            *document_kinds.entry(document_kind.to_string()).or_default() += 1;
+            if status == "accepted" {
+                accepted += 1;
+            }
+            if let Some(violations) = validation["violations"].as_array() {
+                for violation in violations.iter().filter_map(Value::as_str) {
+                    *violation_counts.entry(violation.to_string()).or_default() += 1;
+                }
+            }
+            json!({
+                "index": index,
+                "status": status,
+                "document_kind": document_kind,
+                "violations": validation["violations"],
+            })
+        })
+        .collect::<Vec<_>>();
+    let total = documents.len() as u64;
+    let rejected = total.saturating_sub(accepted);
+    let evidence_manifest = json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_evidence.v0",
+        "document_sha256": document_sha256,
+    });
+    let batch_sha256 = canonical_json_sha256(&evidence_manifest);
+
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit.v0",
+        "status": if rejected == 0 { "accepted" } else { "rejected" },
+        "summary": {
+            "total": total,
+            "accepted": accepted,
+            "rejected": rejected,
+            "document_kinds": document_kinds,
+            "violation_counts": violation_counts,
+        },
+        "results": results,
+        "evidence_binding": {
+            "schema": "agent_bridge.modelscope_abot_receipt_audit_evidence.v0",
+            "canonicalization": "rfc8785.jcs.v1",
+            "documents": evidence_manifest["document_sha256"]
+                .as_array()
+                .expect("evidence manifest document list")
+                .iter()
+                .enumerate()
+                .map(|(index, sha256)| json!({"index": index, "sha256": sha256}))
+                .collect::<Vec<_>>(),
+            "batch_sha256": batch_sha256,
+        },
+        "claims": {
+            "all_prompt_submissions_bound": total > 0 && rejected == 0,
+            "world_semantics_verified": false,
+        },
+        "runtime_effects": {
+            "network_request_sent": false,
+            "browser_opened": false,
+            "task_state_read": false,
+            "task_state_written": false,
+        },
+    })
 }
 
 fn validation_projection(document_kind: &str, violations: Vec<&'static str>) -> Value {
@@ -1688,6 +1786,47 @@ pub struct ModelScopeAbotTaskStatusTool;
 
 pub struct ModelScopeAbotReceiptValidateTool;
 
+pub struct ModelScopeAbotReceiptAuditTool;
+
+#[async_trait]
+impl McpTool for ModelScopeAbotReceiptAuditTool {
+    fn name(&self) -> &'static str {
+        "modelscope_abot_receipt_audit"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Audit a bounded set of ModelScope ABot receipts locally. Read-only and offline: it aggregates binding violations without reading task state, opening a browser, or contacting the provider.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["documents"],
+                "properties": {
+                    "documents": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_RECEIPT_AUDIT_DOCUMENTS,
+                        "items": {"type": "object"},
+                        "description": "Structured receipts or failure diagnostics. Raw prompt fields are rejected."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(documents) = args.get("documents").and_then(Value::as_array) else {
+            return Ok(ToolResult::error("missing array 'documents'"));
+        };
+        if documents.is_empty() || documents.len() > MAX_RECEIPT_AUDIT_DOCUMENTS {
+            return Ok(ToolResult::error(format!(
+                "documents must contain 1..={MAX_RECEIPT_AUDIT_DOCUMENTS} items"
+            )));
+        }
+        Ok(ToolResult::structured_json(&audit_abot_receipts(documents)))
+    }
+}
+
 #[async_trait]
 impl McpTool for ModelScopeAbotReceiptValidateTool {
     fn name(&self) -> &'static str {
@@ -1866,6 +2005,116 @@ mod tests {
         assert_eq!(
             unknown["violations"],
             json!(["unsupported_document_schema"])
+        );
+    }
+
+    #[test]
+    fn receipt_validator_rejects_nested_raw_prompt_fields() {
+        let result = validate_abot_receipt(&json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": {"prompt_text": "must not persist"},
+        }));
+        assert_eq!(result["status"], "rejected");
+        assert_eq!(result["violations"], json!(["raw_prompt_field_present"]));
+    }
+
+    #[test]
+    fn receipt_audit_aggregates_mixed_history_without_runtime_effects() {
+        let accepted = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let rejected = json!({
+            "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        });
+        let result = audit_abot_receipts(&[accepted, rejected]);
+        assert_eq!(result["status"], "rejected");
+        assert_eq!(result["summary"]["total"], 2);
+        assert_eq!(result["summary"]["accepted"], 1);
+        assert_eq!(result["summary"]["rejected"], 1);
+        assert_eq!(result["summary"]["document_kinds"]["downstream_failure"], 2);
+        assert_eq!(
+            result["summary"]["violation_counts"]["prompt_binding_missing"],
+            1
+        );
+        assert_eq!(result["claims"]["all_prompt_submissions_bound"], false);
+        assert_eq!(result["claims"]["world_semantics_verified"], false);
+        assert_eq!(result["runtime_effects"]["network_request_sent"], false);
+        assert_eq!(result["runtime_effects"]["task_state_read"], false);
+    }
+
+    #[test]
+    fn receipt_audit_accepts_all_bound_history() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let result = audit_abot_receipts(&[document.clone(), document]);
+        assert_eq!(result["status"], "accepted");
+        assert_eq!(result["summary"]["accepted"], 2);
+        assert_eq!(result["summary"]["violation_counts"], json!({}));
+        assert_eq!(result["claims"]["all_prompt_submissions_bound"], true);
+    }
+
+    #[test]
+    fn receipt_audit_digest_is_stable_across_object_key_order() {
+        let left: Value = serde_json::from_str(
+            r#"{"schema":"agent_bridge.modelscope_abot_downstream_failure.v0","prompt_binding":{"schema":"agent_bridge.modelscope_abot_prompt_binding.v0","readback_observed":true,"exact_match":true,"raw_prompt_recorded":false,"observed_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"downstream_diagnostics":null}"#,
+        )
+        .expect("left document");
+        let right: Value = serde_json::from_str(
+            r#"{"downstream_diagnostics":null,"prompt_binding":{"expected_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","observed_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","raw_prompt_recorded":false,"exact_match":true,"readback_observed":true,"schema":"agent_bridge.modelscope_abot_prompt_binding.v0"},"schema":"agent_bridge.modelscope_abot_downstream_failure.v0"}"#,
+        )
+        .expect("right document");
+
+        let left_audit = audit_abot_receipts(&[left]);
+        let right_audit = audit_abot_receipts(&[right]);
+        assert_eq!(
+            left_audit["evidence_binding"],
+            right_audit["evidence_binding"]
+        );
+        assert_eq!(
+            left_audit["evidence_binding"]["documents"][0]["sha256"]
+                .as_str()
+                .expect("document digest")
+                .len(),
+            64
+        );
+    }
+
+    #[test]
+    fn receipt_audit_digest_binds_content_and_document_order() {
+        let first = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let second = json!({
+            "schema": "agent_bridge.modelscope_abot_failure_diagnostics.v1"
+        });
+        let original = audit_abot_receipts(&[first.clone(), second.clone()]);
+        let reordered = audit_abot_receipts(&[second, first.clone()]);
+        let changed = audit_abot_receipts(&[
+            first,
+            json!({
+                "schema": "example.changed.v0"
+            }),
+        ]);
+
+        assert_ne!(
+            original["evidence_binding"]["batch_sha256"],
+            reordered["evidence_binding"]["batch_sha256"]
+        );
+        assert_ne!(
+            original["evidence_binding"]["batch_sha256"],
+            changed["evidence_binding"]["batch_sha256"]
+        );
+        assert_eq!(
+            original["evidence_binding"]["canonicalization"],
+            "rfc8785.jcs.v1"
         );
     }
 

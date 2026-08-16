@@ -79,7 +79,8 @@ use kitesurf::CloudflareKitesurfSnapshotTool;
 mod modelscope_abot_runtime;
 use modelscope_abot_runtime::{
     ModelScopeAbotAttemptPreviewTool, ModelScopeAbotProviderStatusTool,
-    ModelScopeAbotReceiptValidateTool, ModelScopeAbotRunOnceTool, ModelScopeAbotTaskStatusTool,
+    ModelScopeAbotReceiptAuditTool, ModelScopeAbotReceiptValidateTool, ModelScopeAbotRunOnceTool,
+    ModelScopeAbotTaskStatusTool,
 };
 #[cfg(feature = "embodiment-runtime-p4")]
 mod embodiment_runtime;
@@ -44774,6 +44775,7 @@ const CODEX_MODELSCOPE_ABOT_EXTRAS: &[&str] = &[
     "embodiment_lease",
     "modelscope_abot_attempt_preview",
     "modelscope_abot_provider_status",
+    "modelscope_abot_receipt_audit",
     "modelscope_abot_receipt_validate",
     "modelscope_abot_run_once",
     "modelscope_abot_task_status",
@@ -49517,6 +49519,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(ModelScopeAbotReceiptValidateTool),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(ModelScopeAbotReceiptAuditTool),
     );
     // Output / expression lane — E1 present() static-artifact sink (uses the
     // browser for self-verify; opt-in via AGENT_BRIDGE_TOOL_PROFILE=all for v0).
