@@ -326,6 +326,78 @@ fn verify_audit_evidence_binding(expected: &Value, actual: &Value) -> Value {
     })
 }
 
+fn audit_chain_binding(evidence_binding: &Value, previous_chain_sha256: Option<&str>) -> Value {
+    let audit_batch_sha256 = evidence_binding
+        .get("batch_sha256")
+        .and_then(Value::as_str)
+        .expect("audit evidence binding batch digest");
+    let chain_payload = json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_payload.v0",
+        "previous_chain_sha256": previous_chain_sha256,
+        "audit_batch_sha256": audit_batch_sha256,
+    });
+
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain.v0",
+        "canonicalization": "rfc8785.jcs.v1",
+        "previous_chain_sha256": previous_chain_sha256,
+        "audit_batch_sha256": audit_batch_sha256,
+        "chain_sha256": canonical_json_sha256(&chain_payload),
+        "claims": {
+            "chain_link_constructed": true,
+            "external_custody_verified": false,
+            "world_semantics_verified": false,
+        },
+    })
+}
+
+fn verify_audit_chain_binding(expected: &Value, actual: &Value) -> Value {
+    let mut violations = Vec::<&'static str>::new();
+    let Some(expected_object) = expected.as_object() else {
+        return json!({
+            "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_verification.v0",
+            "status": "mismatch",
+            "violations": ["chain_binding_not_object"],
+            "claims": {"audit_chain_bound": false},
+        });
+    };
+
+    if expected_object.len() != 6
+        || ![
+            "schema",
+            "canonicalization",
+            "previous_chain_sha256",
+            "audit_batch_sha256",
+            "chain_sha256",
+            "claims",
+        ]
+        .iter()
+        .all(|key| expected_object.contains_key(*key))
+    {
+        violations.push("chain_binding_shape_mismatch");
+    }
+    for (field, violation) in [
+        ("schema", "chain_schema_mismatch"),
+        ("canonicalization", "canonicalization_mismatch"),
+        ("previous_chain_sha256", "previous_chain_sha256_mismatch"),
+        ("audit_batch_sha256", "audit_batch_sha256_mismatch"),
+        ("chain_sha256", "chain_sha256_mismatch"),
+        ("claims", "chain_claims_mismatch"),
+    ] {
+        if expected.get(field) != actual.get(field) {
+            violations.push(violation);
+        }
+    }
+
+    let verified = violations.is_empty();
+    json!({
+        "schema": "agent_bridge.modelscope_abot_receipt_audit_chain_verification.v0",
+        "status": if verified { "verified" } else { "mismatch" },
+        "violations": violations,
+        "claims": {"audit_chain_bound": verified},
+    })
+}
+
 fn validation_projection(document_kind: &str, violations: Vec<&'static str>) -> Value {
     let accepted = violations.is_empty();
     json!({
@@ -1849,7 +1921,7 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Audit ModelScope ABot receipts and optionally verify a prior evidence binding. Read-only and offline: no task-state read, browser action, or provider request.".into(),
+            description: "Audit ModelScope ABot receipts, verify evidence, and construct or verify a deterministic audit-chain link. Read-only and offline: no persistence, task-state read, browser action, or provider request.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["documents"],
@@ -1864,6 +1936,15 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                     "evidence_binding": {
                         "type": "object",
                         "description": "Optional prior Gate 8O evidence binding to verify against these ordered documents."
+                    },
+                    "previous_chain_sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "description": "Optional prior Gate 8Q chain digest. Omit for a genesis link. This does not prove external custody."
+                    },
+                    "chain_binding": {
+                        "type": "object",
+                        "description": "Optional prior Gate 8Q chain binding to verify against these documents and previous-chain digest."
                     }
                 }
             }),
@@ -1879,11 +1960,27 @@ impl McpTool for ModelScopeAbotReceiptAuditTool {
                 "documents must contain 1..={MAX_RECEIPT_AUDIT_DOCUMENTS} items"
             )));
         }
+        let previous_chain_sha256 = match args.get("previous_chain_sha256") {
+            Some(Value::String(value)) if lowercase_sha256(Some(&Value::String(value.clone()))) => {
+                Some(value.as_str())
+            }
+            Some(_) => {
+                return Ok(ToolResult::error(
+                    "previous_chain_sha256 must be 64 lowercase hexadecimal characters",
+                ));
+            }
+            None => None,
+        };
         let mut audit = audit_abot_receipts(documents);
         if let Some(expected) = args.get("evidence_binding") {
             let verification = verify_audit_evidence_binding(expected, &audit["evidence_binding"]);
             audit["evidence_verification"] = verification;
         }
+        let chain_binding = audit_chain_binding(&audit["evidence_binding"], previous_chain_sha256);
+        if let Some(expected) = args.get("chain_binding") {
+            audit["chain_verification"] = verify_audit_chain_binding(expected, &chain_binding);
+        }
+        audit["chain_binding"] = chain_binding;
         Ok(ToolResult::structured_json(&audit))
     }
 }
@@ -2255,6 +2352,93 @@ mod tests {
         assert!(violations.contains(&json!("canonicalization_mismatch")));
         assert!(violations.contains(&json!("document_manifest_invalid")));
         assert!(violations.contains(&json!("batch_sha256_mismatch")));
+    }
+
+    #[test]
+    fn receipt_audit_chain_constructs_and_verifies_genesis_link() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let binding = audit_chain_binding(&audit["evidence_binding"], None);
+        let verification = verify_audit_chain_binding(&binding, &binding);
+
+        assert_eq!(binding["previous_chain_sha256"], Value::Null);
+        assert_eq!(
+            binding["audit_batch_sha256"],
+            audit["evidence_binding"]["batch_sha256"]
+        );
+        assert_eq!(binding["chain_sha256"].as_str().unwrap().len(), 64);
+        assert_eq!(binding["claims"]["external_custody_verified"], false);
+        assert_eq!(binding["claims"]["world_semantics_verified"], false);
+        assert_eq!(verification["status"], "verified");
+        assert_eq!(verification["violations"], json!([]));
+        assert_eq!(verification["claims"]["audit_chain_bound"], true);
+    }
+
+    #[test]
+    fn receipt_audit_chain_binds_predecessor_digest() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let left = audit_chain_binding(&audit["evidence_binding"], Some(&"1".repeat(64)));
+        let right = audit_chain_binding(&audit["evidence_binding"], Some(&"2".repeat(64)));
+        let verification = verify_audit_chain_binding(&left, &right);
+
+        assert_ne!(left["chain_sha256"], right["chain_sha256"]);
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(
+            verification["violations"],
+            json!(["previous_chain_sha256_mismatch", "chain_sha256_mismatch"])
+        );
+    }
+
+    #[test]
+    fn receipt_audit_chain_rejects_tampered_digest() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let actual = audit_chain_binding(&audit["evidence_binding"], None);
+        let mut expected = actual.clone();
+        expected["chain_sha256"] = json!("0".repeat(64));
+        let verification = verify_audit_chain_binding(&expected, &actual);
+
+        assert_eq!(verification["status"], "mismatch");
+        assert_eq!(verification["violations"], json!(["chain_sha256_mismatch"]));
+        assert_eq!(verification["claims"]["audit_chain_bound"], false);
+    }
+
+    #[test]
+    fn receipt_audit_chain_rejects_malformed_binding() {
+        let document = json!({
+            "schema": "agent_bridge.modelscope_abot_downstream_failure.v0",
+            "prompt_binding": verified_binding(),
+            "downstream_diagnostics": null,
+        });
+        let audit = audit_abot_receipts(&[document]);
+        let actual = audit_chain_binding(&audit["evidence_binding"], None);
+        let verification = verify_audit_chain_binding(
+            &json!({"schema": "unexpected", "chain_sha256": 7}),
+            &actual,
+        );
+
+        assert_eq!(verification["status"], "mismatch");
+        let violations = verification["violations"].as_array().unwrap();
+        assert!(violations.contains(&json!("chain_binding_shape_mismatch")));
+        assert!(violations.contains(&json!("chain_schema_mismatch")));
+        assert!(violations.contains(&json!("canonicalization_mismatch")));
+        assert!(violations.contains(&json!("previous_chain_sha256_mismatch")));
+        assert!(violations.contains(&json!("audit_batch_sha256_mismatch")));
+        assert!(violations.contains(&json!("chain_sha256_mismatch")));
+        assert!(violations.contains(&json!("chain_claims_mismatch")));
     }
 
     #[test]
