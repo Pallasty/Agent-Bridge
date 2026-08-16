@@ -37,6 +37,32 @@ The output receipt includes the manifest path/status, hash-verification result,
 decode steps, language, runtime, and RTF. Playback success is not treated as
 proof that a physical speaker was audible.
 
+### Optional Mac execution host
+
+The candidate can run on an explicitly configured Mac while the caller keeps
+the existing canary and Qwen fallback logic. Remote execution is separately
+default-off and requires all of the following settings:
+
+```bash
+AB_OMNIVOICE_TTS_ENABLED=1 \
+AB_OMNIVOICE_MAC_REMOTE_ENABLED=1 \
+AB_OMNIVOICE_MAC_REMOTE_HOST=user@mac-host \
+AB_OMNIVOICE_MAC_REMOTE_PYTHON=/path/to/venv/bin/python \
+AB_OMNIVOICE_MAC_REMOTE_ADAPTER=/path/to/agent-bridge/scripts/omnivoice_mac_remote_synth.py \
+AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON=/usr/bin/python3 \
+python3 scripts/audio_embody.py \
+  --mode speech --capture-channel synth_file --synth-backend omnivoice \
+  --omnivoice-manifest /path/on/mac/composition-manifest.json \
+  --voice auto --text '你好，欢迎使用远程语音执行节点。' --json
+```
+
+The dispatcher uses non-interactive SSH, sends request text as JSON on stdin,
+copies back only the generated WAV, and removes its UUID-scoped remote job
+directory. A non-blocking local lock admits one Mac decode at a time; lock,
+timeout, SSH, manifest, or copy failures return a candidate error so the canary
+router can execute its existing Qwen fallback policy. Host keys and SSH keys
+must be provisioned outside this runbook.
+
 ## Verified smoke
 
 The new Agent Bridge entry generated `你好。` as 1.20 seconds of 24 kHz mono

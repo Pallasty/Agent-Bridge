@@ -878,12 +878,24 @@ def synth_omnivoice(text, voice, speed, instruct=None, omnivoice_python=None,
         return None, {"detail": "OmniVoice pilot does not support named speakers; use --voice auto"}
     if instruct:
         return None, {"detail": "OmniVoice pilot does not support style instructions"}
-    omnivoice_python = (omnivoice_python or
-                        os.environ.get("AB_OMNIVOICE_TTS_PYTHON", "").strip())
+    remote_enabled = os.environ.get(
+        "AB_OMNIVOICE_MAC_REMOTE_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if remote_enabled:
+        omnivoice_python = os.environ.get(
+            "AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON", sys.executable
+        ).strip()
+    else:
+        omnivoice_python = (omnivoice_python or
+                            os.environ.get("AB_OMNIVOICE_TTS_PYTHON", "").strip())
     if not omnivoice_python or not os.path.exists(omnivoice_python):
+        if remote_enabled:
+            return None, {"detail": "OmniVoice remote dispatcher runtime not configured; "
+                                    "set AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON"}
         return None, {"detail": "OmniVoice runtime not configured; set AB_OMNIVOICE_TTS_PYTHON"}
-    adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "omnivoice_tts_synth.py")
+    adapter_name = ("omnivoice_mac_remote_synth.py" if remote_enabled
+                    else "omnivoice_tts_synth.py")
+    adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)), adapter_name)
     fd, wav = tempfile.mkstemp(prefix="ab_voice_omnivoice_", suffix=".wav")
     os.close(fd)
     os.unlink(wav)
