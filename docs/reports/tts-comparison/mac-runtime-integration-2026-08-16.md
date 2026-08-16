@@ -56,3 +56,21 @@ The UUID-scoped remote job directory was absent after the response was copied.
 
 These are isolated virtual-environment changes; no system Python or production
 service configuration was modified.
+
+## Merge-readiness review
+
+The branch was refreshed against GitLab master at
+`1fdcde8bffd8336fcda408f364a949c95b8e1ffc`: it was three commits ahead and
+zero commits behind, so no baseline merge or history rewrite was required.
+
+The broadened TTS/voice suite passed 271 tests. Two additional tests failed
+identically on an isolated worktree at the unmodified master commit: one binds
+to a Linux-only installed-binary path, and one expects exactly three fixtures
+although master contains a fourth fixture. They are recorded as pre-existing
+baseline failures rather than branch regressions.
+
+Python 3.9 and 3.12 compilation passed. Ruff passed for the new dispatcher and
+its tests. Review added conservative validation for the SSH destination and
+remote SCP path, including rejection of option-style hosts, shell metacharacters,
+and parent-directory traversal. The hardened path completed another live
+cross-node decode at RTF 2.52 with verified hashes and remote cleanup.

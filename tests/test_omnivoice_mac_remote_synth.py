@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-
 SCRIPT = Path(__file__).parents[1] / "scripts" / "omnivoice_mac_remote_synth.py"
 SPEC = importlib.util.spec_from_file_location("omnivoice_mac_remote_synth", SCRIPT)
 REMOTE = importlib.util.module_from_spec(SPEC)
@@ -95,6 +94,42 @@ def test_dispatch_attempts_cleanup_after_worker_failure(monkeypatch, tmp_path):
         raise AssertionError("remote worker failure was accepted")
     assert len(calls) == 2
     assert "--cleanup" in calls[-1][-1]
+
+
+def test_dispatch_rejects_unsafe_host_before_ssh(monkeypatch, tmp_path):
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_HOST", "-oProxyCommand=unsafe")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_PYTHON", "/venv/bin/python")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ADAPTER", "/repo/scripts/remote.py")
+    try:
+        REMOTE.dispatch(args(tmp_path))
+    except ValueError as exc:
+        assert "safe SSH destination" in str(exc)
+    else:
+        raise AssertionError("unsafe SSH destination was accepted")
+
+
+def test_dispatch_rejects_unsafe_worker_output_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_HOST", "mac.example")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_PYTHON", "/venv/bin/python")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ADAPTER", "/repo/scripts/remote.py")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_LOCK", str(tmp_path / "lock"))
+
+    def fake_run(command, **kwargs):
+        if "--worker" in command[-1]:
+            request = json.loads(kwargs["input"])
+            output = f"/tmp/unsafe;command/{request['job_id']}/speech.wav"
+            return SimpleNamespace(returncode=0, stdout=json.dumps({
+                "ok": True, "remote_output": output,
+            }), stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(REMOTE.subprocess, "run", fake_run)
+    try:
+        REMOTE.dispatch(args(tmp_path))
+    except RuntimeError as exc:
+        assert "unexpected output path" in str(exc)
+    else:
+        raise AssertionError("unsafe worker output path was accepted")
 
 
 def test_cleanup_rejects_non_job_paths():

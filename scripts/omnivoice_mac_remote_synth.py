@@ -13,8 +13,9 @@ import sys
 import uuid
 from pathlib import Path
 
-
 JOB_ID = re.compile(r"[0-9a-f]{32}")
+SSH_DESTINATION = re.compile(r"(?:[A-Za-z0-9_.+%-]+@)?[A-Za-z0-9_.:%-]+")
+REMOTE_OUTPUT = re.compile(r"/[A-Za-z0-9_./-]+")
 
 
 def emit(payload):
@@ -58,7 +59,7 @@ def worker(request):
     adapter = Path(__file__).with_name("omnivoice_tts_synth.py")
     command = [sys.executable, str(adapter), "--text", text, "--output", str(output),
                "--manifest", str(manifest_path)]
-    proc = subprocess.run(command, capture_output=True, text=True)
+    proc = subprocess.run(command, capture_output=True, text=True, check=False)
     try:
         receipt = json.loads((proc.stdout or "").strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
@@ -86,6 +87,8 @@ def dispatch(args):
     remote_adapter = os.environ.get("AB_OMNIVOICE_MAC_REMOTE_ADAPTER", "").strip()
     if not host or not remote_python or not remote_adapter:
         raise ValueError("set AB_OMNIVOICE_MAC_REMOTE_HOST, _PYTHON, and _ADAPTER")
+    if host.startswith("-") or not SSH_DESTINATION.fullmatch(host):
+        raise ValueError("AB_OMNIVOICE_MAC_REMOTE_HOST is not a safe SSH destination")
     if not args.manifest:
         raise ValueError("a remote OmniVoice manifest is required")
     timeout = timeout_seconds()
@@ -105,7 +108,7 @@ def dispatch(args):
         try:
             ssh = subprocess.run(
                 ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, worker_cmd],
-                input=request, capture_output=True, text=True, timeout=timeout,
+                input=request, capture_output=True, text=True, timeout=timeout, check=False,
             )
             try:
                 receipt = json.loads((ssh.stdout or "").strip().splitlines()[-1])
@@ -115,14 +118,18 @@ def dispatch(args):
             if ssh.returncode != 0 or not receipt.get("ok"):
                 raise RuntimeError(receipt.get("detail", f"remote worker rc={ssh.returncode}"))
             remote_output = receipt.get("remote_output", "")
+            if not isinstance(remote_output, str):
+                remote_output = ""
             remote_path = Path(remote_output)
-            if (not remote_path.is_absolute() or remote_path.name != "speech.wav" or
+            if (not REMOTE_OUTPUT.fullmatch(remote_output) or
+                    ".." in remote_path.parts or
+                    not remote_path.is_absolute() or remote_path.name != "speech.wav" or
                     remote_path.parent.name != job_id):
                 raise RuntimeError("remote worker returned an unexpected output path")
             copied = subprocess.run(
                 ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
                  f"{host}:{remote_output}", str(args.output)],
-                capture_output=True, text=True, timeout=timeout,
+                capture_output=True, text=True, timeout=timeout, check=False,
             )
             if copied.returncode != 0 or not args.output.is_file():
                 raise RuntimeError(f"remote WAV copy failed: {(copied.stderr or '')[-400:]}")
@@ -130,7 +137,7 @@ def dispatch(args):
             cleanup_cmd = remote_command(remote_python, remote_adapter, "--cleanup", job_id)
             subprocess.run(
                 ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, cleanup_cmd],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=30, check=False,
             )
     receipt.pop("remote_output", None)
     receipt.update({"execution_host": host, "execution_transport": "ssh",
