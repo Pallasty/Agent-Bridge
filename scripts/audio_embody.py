@@ -885,6 +885,13 @@ def synth_omnivoice(text, voice, speed, instruct=None, omnivoice_python=None,
         omnivoice_python = os.environ.get(
             "AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON", sys.executable
         ).strip()
+        omnivoice_manifest = (omnivoice_manifest or os.environ.get(
+            "AB_OMNIVOICE_MAC_REMOTE_MANIFEST", ""
+        ).strip())
+        if not omnivoice_manifest:
+            return None, {"detail": "Remote OmniVoice manifest not configured; "
+                                    "set AB_OMNIVOICE_MAC_REMOTE_MANIFEST or pass "
+                                    "--omnivoice-manifest"}
     else:
         omnivoice_python = (omnivoice_python or
                             os.environ.get("AB_OMNIVOICE_TTS_PYTHON", "").strip())

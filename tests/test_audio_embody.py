@@ -610,6 +610,7 @@ def test_omnivoice_remote_mode_uses_dispatch_adapter(monkeypatch, tmp_path):
     monkeypatch.setenv("AB_OMNIVOICE_TTS_ENABLED", "1")
     monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ENABLED", "1")
     monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON", ae.sys.executable)
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_MANIFEST", "/remote/default.json")
     monkeypatch.setattr(ae.subprocess, "run", fake_run)
     wav, info = ae.synth_omnivoice(
         "你好", "auto", 1.0, omnivoice_manifest="/remote/manifest.json")
@@ -617,6 +618,40 @@ def test_omnivoice_remote_mode_uses_dispatch_adapter(monkeypatch, tmp_path):
     assert seen["command"][1].endswith("omnivoice_mac_remote_synth.py")
     assert seen["command"][seen["command"].index("--manifest") + 1] == "/remote/manifest.json"
     assert info["execution_transport"] == "ssh"
+
+
+def test_omnivoice_remote_mode_uses_manifest_environment_default(monkeypatch):
+    seen = {}
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        output = command[command.index("--output") + 1]
+        with open(output, "wb") as handle:
+            handle.write(b"RIFFfake")
+        return SimpleNamespace(returncode=0, stdout=ae.json.dumps({
+            "ok": True, "backend": "omnivoice", "execution_transport": "ssh",
+            "hashes_verified": True, "steps": 32,
+        }), stderr="")
+    monkeypatch.setenv("AB_OMNIVOICE_TTS_ENABLED", "1")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ENABLED", "1")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON", ae.sys.executable)
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_MANIFEST", "/remote/default.json")
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    wav, info = ae.synth_omnivoice("你好", "auto", 1.0)
+    assert wav and os.path.exists(wav)
+    assert seen["command"][seen["command"].index("--manifest") + 1] == "/remote/default.json"
+    assert info["execution_transport"] == "ssh"
+
+
+def test_omnivoice_remote_mode_without_manifest_fails_before_dispatch(monkeypatch):
+    monkeypatch.setenv("AB_OMNIVOICE_TTS_ENABLED", "1")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_ENABLED", "1")
+    monkeypatch.setenv("AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON", ae.sys.executable)
+    monkeypatch.delenv("AB_OMNIVOICE_MAC_REMOTE_MANIFEST", raising=False)
+    monkeypatch.setattr(ae.subprocess, "run", lambda *args, **kwargs:
+                        (_ for _ in ()).throw(AssertionError("dispatch must not run")))
+    wav, info = ae.synth_omnivoice("你好", "auto", 1.0)
+    assert wav is None
+    assert "AB_OMNIVOICE_MAC_REMOTE_MANIFEST" in info["detail"]
 
 
 def test_synth_file_omnivoice_records_provenance():
