@@ -1,5 +1,10 @@
 //! SQLite-backed [`StateStore`] using `tokio-rusqlite` (bundled SQLite).
 
+use crate::resource_lineage::{
+    migrate_or_verify as migrate_or_verify_resource_lineage, unavailable_resource_lineage,
+    validate_resource_lineage, ResourceLineageReport, ResourceVersionRecord,
+    RESOURCE_LINEAGE_MAX_ROWS,
+};
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1879,6 +1884,9 @@ impl SqliteStore {
             // comment for why it cannot bump schema_meta.version past v43).
             c.execute_batch(SCHEMA_FUSION_SHADOW)?;
             c.execute_batch(SCHEMA_AGENT_WORLD_CAPTURE)?;
+            // SEPL P0: additive storage substrate plus read-only projection.
+            // There is deliberately no StateStore write method for this table.
+            migrate_or_verify_resource_lineage(c)?;
             #[cfg(feature = "episode-observation-slice-b")]
             temporal_evidence::migrate_or_verify_v43(
                 c,
@@ -13465,6 +13473,80 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("schema_meta_version: {e}")))?;
         Ok(v)
+    }
+
+    async fn resource_lineage_read(
+        &self,
+        resource_id: &str,
+        limit: u32,
+    ) -> Result<ResourceLineageReport> {
+        if resource_id.is_empty() || resource_id.len() > 512 {
+            return Err(Error::Backend(
+                "resource_lineage_read: resource_id length must be 1..=512".into(),
+            ));
+        }
+        let limit = limit.clamp(1, RESOURCE_LINEAGE_MAX_ROWS);
+        let requested_resource_id = resource_id.to_string();
+        let query_resource_id = requested_resource_id.clone();
+        let mut rows = self
+            .conn
+            .call(move |connection| -> RusqliteResult<Vec<ResourceVersionRecord>> {
+                let table_exists: i64 = connection.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='table' AND name='resource_versions'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                if table_exists == 0 {
+                    return Ok(Vec::new());
+                }
+                let mut statement = connection.prepare(
+                    "SELECT resource_id, resource_kind, version, content_sha256, \
+                            predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                     FROM resource_versions WHERE resource_id=?1 \
+                     ORDER BY version DESC LIMIT ?2",
+                )?;
+                let mapped = statement.query_map(
+                    params![query_resource_id, i64::from(limit) + 1],
+                    |row| {
+                        Ok(ResourceVersionRecord {
+                            resource_id: row.get(0)?,
+                            resource_kind: row.get(1)?,
+                            version: row.get::<_, i64>(2)? as u64,
+                            content_sha256: row.get(3)?,
+                            predecessor_version: row.get::<_, Option<i64>>(4)?.map(|v| v as u64),
+                            predecessor_record_sha256: row.get(5)?,
+                            observed_at: row.get(6)?,
+                            record_sha256: row.get(7)?,
+                        })
+                    },
+                )?;
+                mapped.collect()
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("resource_lineage_read: {error}")))?;
+        let substrate_available = self
+            .conn
+            .call(|connection| -> RusqliteResult<bool> {
+                connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+                     WHERE type='table' AND name='resource_versions')",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("resource_lineage_read: {error}")))?;
+        if !substrate_available {
+            return Ok(unavailable_resource_lineage(&requested_resource_id));
+        }
+        let truncated = rows.len() > limit as usize;
+        rows.truncate(limit as usize);
+        Ok(validate_resource_lineage(
+            &requested_resource_id,
+            rows,
+            truncated,
+        ))
     }
 
     async fn s234_counts(&self) -> Result<S234Counts> {

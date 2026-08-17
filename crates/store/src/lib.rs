@@ -47,6 +47,7 @@ pub mod lineage_audit;
 pub mod mmr;
 pub use mmr::mmr_rerank_by_text;
 pub mod quant;
+pub mod resource_lineage;
 pub mod sqlite;
 #[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
 mod temporal_candidate_evidence;
@@ -85,6 +86,11 @@ pub use temporal_candidate_evidence::{
 pub mod vector;
 pub use embedding::{
     default_backend, set_default_backend, EmbeddingBackend, HashBackend, OnnxBackend,
+};
+pub use resource_lineage::{
+    resource_version_record_sha256, unavailable_resource_lineage, validate_resource_lineage,
+    ResourceLineageReport, ResourceVersionRecord, RESOURCE_LINEAGE_HASH_DOMAIN,
+    RESOURCE_LINEAGE_MAX_ROWS, RESOURCE_LINEAGE_SCHEMA,
 };
 pub use vector::{
     active_model_name, cosine_similarity, decode_embedding, embed_text, encode_embedding,
@@ -5098,6 +5104,21 @@ pub trait StateStore: Send + Sync {
     /// backends silently no-op the daemon's S5 schema-change watch.
     async fn schema_meta_version(&self) -> Result<Option<String>> {
         Ok(None)
+    }
+
+    /// SEPL P0 — bounded, deterministic, read-only resource lineage.
+    ///
+    /// P0 intentionally has no corresponding write method. Future resource
+    /// commit/rollback producers require a separate admission gate.
+    async fn resource_lineage_read(
+        &self,
+        resource_id: &str,
+        limit: u32,
+    ) -> Result<ResourceLineageReport> {
+        let _ = (resource_id, limit);
+        Err(ab_core::Error::Backend(
+            "resource_lineage_read not implemented".into(),
+        ))
     }
 
     /// C3 §3.4 S2-S4 — read the three drop-detection counts in one
