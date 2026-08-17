@@ -1,14 +1,23 @@
 //! SQLite-backed [`StateStore`] using `tokio-rusqlite` (bundled SQLite).
 
 use crate::resource_lineage::{
-    migrate_or_verify as migrate_or_verify_resource_lineage, unavailable_resource_lineage,
-    validate_resource_lineage, ResourceLineageReport, ResourceVersionRecord,
-    RESOURCE_LINEAGE_MAX_ROWS,
+    migrate_or_verify as migrate_or_verify_resource_lineage, resource_binding_sha256,
+    resource_content_sha256, resource_version_record_sha256, unavailable_resource_lineage,
+    validate_resource_lineage, AgentMdBaselineAdmission, AgentMdBaselineReceipt,
+    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
+    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
+    RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::{
+    fs::OpenOptions,
+    io::{Read, Seek, SeekFrom},
+    os::unix::fs::OpenOptionsExt,
+};
 use tokio_rusqlite::{params, rusqlite, Connection};
 
 #[cfg(feature = "episode-observation-slice-b")]
@@ -32,6 +41,101 @@ pub use temporal_evidence::{
 // expects from the user closure.
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
 use tracing::info;
+
+fn resource_baseline_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(format!("resource baseline admission: {error}"))
+}
+
+#[cfg(unix)]
+struct OpenedAgentMd {
+    file: std::fs::File,
+    device: u64,
+    inode: u64,
+    content: Vec<u8>,
+}
+
+#[cfg(unix)]
+impl OpenedAgentMd {
+    fn open(path: &Path) -> std::result::Result<Self, String> {
+        use std::os::unix::fs::MetadataExt;
+
+        let path_metadata = std::fs::symlink_metadata(path)
+            .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+        if path_metadata.file_type().is_symlink() {
+            return Err(format!("target must not be a symlink: {}", path.display()));
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(path)
+            .map_err(|error| format!("open no-follow {}: {error}", path.display()))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("inspect opened {}: {error}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(format!("target must be a regular file: {}", path.display()));
+        }
+        if metadata.len() == 0 || metadata.len() > RESOURCE_CONTENT_MAX_BYTES {
+            return Err(format!(
+                "target size must be 1..={RESOURCE_CONTENT_MAX_BYTES} bytes: {}",
+                path.display()
+            ));
+        }
+        let content = read_open_agent_md(&mut file, path)?;
+        let opened = Self {
+            file,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            content,
+        };
+        opened.verify_path_identity(path)?;
+        Ok(opened)
+    }
+
+    fn readback(&mut self, path: &Path) -> std::result::Result<Vec<u8>, String> {
+        read_open_agent_md(&mut self.file, path)
+    }
+
+    fn verify_path_identity(&self, path: &Path) -> std::result::Result<(), String> {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|error| format!("inspect path identity {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || metadata.dev() != self.device
+            || metadata.ino() != self.inode
+        {
+            return Err(format!(
+                "path no longer identifies the opened regular file: {}",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn read_open_agent_md(
+    file: &mut std::fs::File,
+    path: &Path,
+) -> std::result::Result<Vec<u8>, String> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("seek {}: {error}", path.display()))?;
+    let mut content = Vec::new();
+    file.take(RESOURCE_CONTENT_MAX_BYTES + 1)
+        .read_to_end(&mut content)
+        .map_err(|error| format!("read opened {}: {error}", path.display()))?;
+    if content.is_empty() || content.len() as u64 > RESOURCE_CONTENT_MAX_BYTES {
+        return Err(format!(
+            "readback size must be 1..={RESOURCE_CONTENT_MAX_BYTES} bytes: {}",
+            path.display()
+        ));
+    }
+    std::str::from_utf8(&content)
+        .map_err(|_| format!("target must contain valid UTF-8: {}", path.display()))?;
+    Ok(content)
+}
 
 // ── Edge type canonical weights (P1: typed-edges) ──────────────────────────
 // Inspired by AiOT GraphMemoryBridge edge semantics + temporal bonus idea.
@@ -1884,8 +1988,9 @@ impl SqliteStore {
             // comment for why it cannot bump schema_meta.version past v43).
             c.execute_batch(SCHEMA_FUSION_SHADOW)?;
             c.execute_batch(SCHEMA_AGENT_WORLD_CAPTURE)?;
-            // SEPL P0: additive storage substrate plus read-only projection.
-            // There is deliberately no StateStore write method for this table.
+            // SEPL P0/P1A0: additive lineage plus AGENT.md path binding.
+            // StateStore remains read-only; baseline admission is an explicit
+            // inherent SqliteStore method with no runtime command surface.
             migrate_or_verify_resource_lineage(c)?;
             #[cfg(feature = "episode-observation-slice-b")]
             temporal_evidence::migrate_or_verify_v43(
@@ -1945,6 +2050,285 @@ impl SqliteStore {
             conn,
             node_id: crate::version_vector::node_id_from_env(),
         })
+    }
+
+    /// SEPL P1A0 — bind one explicit AGENT.md path and admit its current
+    /// content as lineage genesis. This method does not modify the resource
+    /// file and is intentionally absent from [`StateStore`] and all runtime
+    /// command surfaces.
+    #[cfg(unix)]
+    pub async fn admit_agent_md_baseline(
+        &self,
+        request: AgentMdBaselineAdmission,
+    ) -> Result<AgentMdBaselineReceipt> {
+        self.admit_agent_md_baseline_inner(request, None, None)
+            .await
+    }
+
+    #[cfg(not(unix))]
+    pub async fn admit_agent_md_baseline(
+        &self,
+        _request: AgentMdBaselineAdmission,
+    ) -> Result<AgentMdBaselineReceipt> {
+        Err(Error::Backend(
+            "admit_agent_md_baseline: O_NOFOLLOW file identity verification requires Unix".into(),
+        ))
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) async fn admit_agent_md_baseline_with_readback_override(
+        &self,
+        request: AgentMdBaselineAdmission,
+        readback: Vec<u8>,
+    ) -> Result<AgentMdBaselineReceipt> {
+        self.admit_agent_md_baseline_inner(request, Some(readback), None)
+            .await
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) async fn admit_agent_md_baseline_with_before_transaction_hook<F>(
+        &self,
+        request: AgentMdBaselineAdmission,
+        hook: F,
+    ) -> Result<AgentMdBaselineReceipt>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.admit_agent_md_baseline_inner(request, None, Some(Box::new(hook)))
+            .await
+    }
+
+    #[cfg(unix)]
+    async fn admit_agent_md_baseline_inner(
+        &self,
+        request: AgentMdBaselineAdmission,
+        readback_override: Option<Vec<u8>>,
+        before_transaction_hook: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<AgentMdBaselineReceipt> {
+        if request.resource_id.is_empty()
+            || request.resource_id.len() > 512
+            || request.resource_id.trim() != request.resource_id
+            || request.resource_id.chars().any(char::is_control)
+        {
+            return Err(Error::Backend(
+                "admit_agent_md_baseline: resource_id must be 1..=512 visible characters without surrounding whitespace".into(),
+            ));
+        }
+        if request.observed_at < 0 {
+            return Err(Error::Backend(
+                "admit_agent_md_baseline: observed_at must be non-negative".into(),
+            ));
+        }
+        if request.path.file_name().and_then(|name| name.to_str()) != Some("AGENT.md") {
+            return Err(Error::Backend(
+                "admit_agent_md_baseline: target filename must be AGENT.md".into(),
+            ));
+        }
+
+        let requested_file = OpenedAgentMd::open(&request.path)
+            .map_err(|error| Error::Backend(format!("admit_agent_md_baseline: {error}")))?;
+        let canonical_path_buf = std::fs::canonicalize(&request.path).map_err(|error| {
+            Error::Backend(format!(
+                "admit_agent_md_baseline: canonicalize {}: {error}",
+                request.path.display()
+            ))
+        })?;
+        let mut opened_file = OpenedAgentMd::open(&canonical_path_buf)
+            .map_err(|error| Error::Backend(format!("admit_agent_md_baseline: {error}")))?;
+        if requested_file.device != opened_file.device
+            || requested_file.inode != opened_file.inode
+            || resource_content_sha256(&requested_file.content)
+                != resource_content_sha256(&opened_file.content)
+        {
+            return Err(Error::Backend(
+                "admit_agent_md_baseline: resource changed while resolving canonical path".into(),
+            ));
+        }
+        let canonical_path = canonical_path_buf
+            .to_str()
+            .ok_or_else(|| {
+                Error::Backend("admit_agent_md_baseline: canonical path must be valid UTF-8".into())
+            })?
+            .to_string();
+        if canonical_path.len() > 4096 {
+            return Err(Error::Backend(
+                "admit_agent_md_baseline: canonical path exceeds 4096 bytes".into(),
+            ));
+        }
+
+        let content_sha256 = resource_content_sha256(&opened_file.content);
+        let mut requested_binding = ResourceBindingRecord {
+            resource_id: request.resource_id.clone(),
+            resource_kind: "agent_md".to_string(),
+            canonical_path: canonical_path.clone(),
+            bound_at: request.observed_at,
+            binding_sha256: String::new(),
+        };
+        requested_binding.binding_sha256 = resource_binding_sha256(&requested_binding);
+        let resource_id = request.resource_id;
+        let observed_at = request.observed_at;
+        let readback_path = PathBuf::from(&canonical_path);
+        if let Some(hook) = before_transaction_hook {
+            hook();
+        }
+
+        self.conn
+            .call(move |connection| -> RusqliteResult<AgentMdBaselineReceipt> {
+                let transaction = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                opened_file
+                    .verify_path_identity(&readback_path)
+                    .map_err(resource_baseline_sql_error)?;
+                let existing_binding = transaction
+                    .query_row(
+                        "SELECT resource_id, resource_kind, canonical_path, bound_at, binding_sha256 \
+                         FROM resource_bindings WHERE resource_id=?1",
+                        [&resource_id],
+                        |row| {
+                            Ok(ResourceBindingRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                canonical_path: row.get(2)?,
+                                bound_at: row.get(3)?,
+                                binding_sha256: row.get(4)?,
+                            })
+                        },
+                    )
+                    .optional()?;
+
+                let (binding, binding_created) = match existing_binding {
+                    Some(binding) => {
+                        if binding.resource_id != resource_id
+                            || binding.resource_kind != "agent_md"
+                            || binding.canonical_path != canonical_path
+                            || binding.binding_sha256 != resource_binding_sha256(&binding)
+                        {
+                            return Err(resource_baseline_sql_error(
+                                "existing resource binding does not match the requested canonical path",
+                            ));
+                        }
+                        (binding, false)
+                    }
+                    None => {
+                        transaction.execute(
+                            "INSERT INTO resource_bindings(\
+                                 resource_id, resource_kind, canonical_path, bound_at, binding_sha256\
+                             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                            params![
+                                requested_binding.resource_id,
+                                requested_binding.resource_kind,
+                                requested_binding.canonical_path,
+                                requested_binding.bound_at,
+                                requested_binding.binding_sha256,
+                            ],
+                        )?;
+                        (requested_binding, true)
+                    }
+                };
+
+                let existing_head = transaction
+                    .query_row(
+                        "SELECT resource_id, resource_kind, version, content_sha256, \
+                                predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                         FROM resource_versions WHERE resource_id=?1 \
+                         ORDER BY version DESC LIMIT 1",
+                        [&resource_id],
+                        |row| {
+                            Ok(ResourceVersionRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                version: row.get::<_, i64>(2)? as u64,
+                                content_sha256: row.get(3)?,
+                                predecessor_version: row
+                                    .get::<_, Option<i64>>(4)?
+                                    .map(|value| value as u64),
+                                predecessor_record_sha256: row.get(5)?,
+                                observed_at: row.get(6)?,
+                                record_sha256: row.get(7)?,
+                            })
+                        },
+                    )
+                    .optional()?;
+
+                let (version, version_created) = match existing_head {
+                    Some(version) => {
+                        if version.resource_id != resource_id
+                            || version.resource_kind != "agent_md"
+                            || version.version != 1
+                            || version.predecessor_version.is_some()
+                            || version.predecessor_record_sha256.is_some()
+                            || version.content_sha256 != content_sha256
+                            || version.record_sha256 != resource_version_record_sha256(&version)
+                        {
+                            return Err(resource_baseline_sql_error(
+                                "existing lineage head does not match the current resource content",
+                            ));
+                        }
+                        (version, false)
+                    }
+                    None => {
+                        let mut version = ResourceVersionRecord {
+                            resource_id: resource_id.clone(),
+                            resource_kind: "agent_md".to_string(),
+                            version: 1,
+                            content_sha256: content_sha256.clone(),
+                            predecessor_version: None,
+                            predecessor_record_sha256: None,
+                            observed_at,
+                            record_sha256: String::new(),
+                        };
+                        version.record_sha256 = resource_version_record_sha256(&version);
+                        transaction.execute(
+                            "INSERT INTO resource_versions(\
+                                 resource_id, resource_kind, version, content_sha256,\
+                                 predecessor_version, predecessor_record_sha256, observed_at, record_sha256\
+                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            params![
+                                version.resource_id,
+                                version.resource_kind,
+                                version.version as i64,
+                                version.content_sha256,
+                                version.predecessor_version.map(|value| value as i64),
+                                version.predecessor_record_sha256,
+                                version.observed_at,
+                                version.record_sha256,
+                            ],
+                        )?;
+                        (version, true)
+                    }
+                };
+
+                let readback = match readback_override {
+                    Some(content) => content,
+                    None => opened_file
+                        .readback(&readback_path)
+                        .map_err(resource_baseline_sql_error)?,
+                };
+                if resource_content_sha256(&readback) != content_sha256 {
+                    return Err(resource_baseline_sql_error(
+                        "resource changed during baseline admission readback",
+                    ));
+                }
+                opened_file
+                    .verify_path_identity(&readback_path)
+                    .map_err(resource_baseline_sql_error)?;
+
+                transaction.commit()?;
+                Ok(AgentMdBaselineReceipt {
+                    schema: RESOURCE_BASELINE_ADMISSION_SCHEMA.to_string(),
+                    binding,
+                    version,
+                    binding_created,
+                    version_created,
+                    content_readback_observed_before_commit: true,
+                    path_identity_observed_before_commit: true,
+                    observation_scope: RESOURCE_BASELINE_OBSERVATION_SCOPE.to_string(),
+                    external_writer_exclusion_verified: false,
+                    resource_content_mutated: false,
+                })
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("admit_agent_md_baseline: {error}")))
     }
 
     /// Write [`MemoryEdgeExport`] JSONL for edges whose endpoints are both in `keys`.
@@ -8057,8 +8441,7 @@ impl StateStore for SqliteStore {
         // importing a large divergent snapshot; records remain eligible for
         // the normal explicit reindex path once the node is idle.
         let embeddings_enabled = memory_import_embeddings_enabled();
-        let to_embed_idx =
-            memory_import_embedding_indices(&actions, &parsed, embeddings_enabled);
+        let to_embed_idx = memory_import_embedding_indices(&actions, &parsed, embeddings_enabled);
         let mut embeddings: Vec<Option<Vec<u8>>> = vec![None; parsed.len()];
         let mut embedding_backends: Vec<Option<String>> = vec![None; parsed.len()];
         if !to_embed_idx.is_empty() {

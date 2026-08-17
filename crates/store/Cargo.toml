@@ -28,7 +28,7 @@ temporal-evidence-s18-owned-lab-authorization-verifier-synthetic = ["temporal-ev
 temporal-evidence-s19-owned-lab-source-bound-runner-synthetic = ["temporal-evidence-s18-owned-lab-authorization-verifier-synthetic"]
 engram-g1-authenticated-envelope-shadow-synthetic = ["dep:ring"]
 temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic = ["temporal-evidence-s19-owned-lab-source-bound-runner-synthetic"]
-engram-g1-secure-custody-shadow-synthetic = ["dep:libc"]
+engram-g1-secure-custody-shadow-synthetic = []
 temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic"]
 temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic"]
 episode-observation-slice-a = ["dep:ring"]
@@ -57,7 +57,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 ring = { version = "0.17", optional = true }
-libc = { version = "0.2", optional = true }
+libc = "0.2"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

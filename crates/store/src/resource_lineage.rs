@@ -1,18 +1,26 @@
-//! SEPL P0 read-only resource-version lineage.
+//! SEPL resource-version lineage and P1A0 baseline admission contracts.
 //!
-//! P0 deliberately exposes no mutation API. The SQLite substrate can be
-//! populated only by a future, separately admitted producer. This module only
-//! validates and projects bounded lineage already present in the store.
+//! P0 remains read-only through [`crate::StateStore`]. P1A0 adds an explicit
+//! AGENT.md path binding and genesis admission through an inherent
+//! [`crate::SqliteStore`] method, but does not mutate the resource file or
+//! expose an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use tokio_rusqlite::rusqlite;
 
 pub const RESOURCE_LINEAGE_SCHEMA: &str = "agent_bridge.resource_lineage.v0";
 pub const RESOURCE_LINEAGE_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-version/v0";
 pub const RESOURCE_LINEAGE_MAX_ROWS: u32 = 256;
+pub const RESOURCE_BASELINE_ADMISSION_SCHEMA: &str = "agent_bridge.resource_baseline_admission.v0";
+pub const RESOURCE_BASELINE_OBSERVATION_SCOPE: &str =
+    "opened_file_and_path_identity_before_sqlite_commit";
+pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
+pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
+const RESOURCE_BINDINGS_MIGRATION_META_KEY: &str = "resource_bindings.migration_sha256";
 
 pub(crate) const RESOURCE_VERSIONS_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS resource_versions (
@@ -41,6 +49,19 @@ CREATE INDEX IF NOT EXISTS idx_resource_versions_latest
     ON resource_versions(resource_id, version DESC);
 "#;
 
+pub(crate) const RESOURCE_BINDINGS_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS resource_bindings (
+    resource_id       TEXT    NOT NULL PRIMARY KEY
+                              CHECK (length(resource_id) BETWEEN 1 AND 512),
+    resource_kind     TEXT    NOT NULL CHECK (resource_kind = 'agent_md'),
+    canonical_path    TEXT    NOT NULL CHECK (length(canonical_path) BETWEEN 1 AND 4096),
+    bound_at          INTEGER NOT NULL CHECK (typeof(bound_at) = 'integer'),
+    binding_sha256    TEXT    NOT NULL CHECK (length(binding_sha256) = 64)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_bindings_path
+    ON resource_bindings(canonical_path);
+"#;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceVersionRecord {
     pub resource_id: String,
@@ -53,6 +74,36 @@ pub struct ResourceVersionRecord {
     pub predecessor_record_sha256: Option<String>,
     pub observed_at: i64,
     pub record_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceBindingRecord {
+    pub resource_id: String,
+    pub resource_kind: String,
+    pub canonical_path: String,
+    pub bound_at: i64,
+    pub binding_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMdBaselineAdmission {
+    pub resource_id: String,
+    pub path: PathBuf,
+    pub observed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdBaselineReceipt {
+    pub schema: String,
+    pub binding: ResourceBindingRecord,
+    pub version: ResourceVersionRecord,
+    pub binding_created: bool,
+    pub version_created: bool,
+    pub content_readback_observed_before_commit: bool,
+    pub path_identity_observed_before_commit: bool,
+    pub observation_scope: String,
+    pub external_writer_exclusion_verified: bool,
+    pub resource_content_mutated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -83,9 +134,26 @@ fn migration_sha256() -> String {
         .collect()
 }
 
+fn bindings_migration_sha256() -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        b"agent-bridge/sepl/resource-bindings-migration/v0",
+    );
+    update_framed(&mut hasher, RESOURCE_BINDINGS_SCHEMA.as_bytes());
+    hex_digest(hasher.finalize())
+}
+
 fn schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!(
         "resource_versions schema mismatch: {}",
+        message.into()
+    ))
+}
+
+fn bindings_schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(format!(
+        "resource_bindings schema mismatch: {}",
         message.into()
     ))
 }
@@ -95,6 +163,7 @@ fn canonical_schema_sql(sql: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .replace("CREATE TABLE IF NOT EXISTS", "CREATE TABLE")
+        .replace("CREATE UNIQUE INDEX IF NOT EXISTS", "CREATE UNIQUE INDEX")
         .replace("CREATE INDEX IF NOT EXISTS", "CREATE INDEX")
 }
 
@@ -185,6 +254,102 @@ pub(crate) fn migrate_or_verify(connection: &rusqlite::Connection) -> rusqlite::
     if stored_digest != migration_sha256() {
         return Err(schema_mismatch("migration digest"));
     }
+    migrate_or_verify_bindings(connection)?;
+    Ok(())
+}
+
+fn migrate_or_verify_bindings(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    connection.execute_batch("SAVEPOINT sepl_resource_bindings_migration")?;
+    match migrate_or_verify_bindings_inner(connection) {
+        Ok(()) => connection.execute_batch("RELEASE sepl_resource_bindings_migration"),
+        Err(error) => {
+            if let Err(rollback_error) = connection.execute_batch(
+                "ROLLBACK TO sepl_resource_bindings_migration;
+                 RELEASE sepl_resource_bindings_migration;",
+            ) {
+                return Err(bindings_schema_mismatch(format!(
+                    "{error}; migration rollback failed: {rollback_error}"
+                )));
+            }
+            Err(error)
+        }
+    }
+}
+
+fn migrate_or_verify_bindings_inner(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let table_exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+         WHERE type='table' AND name='resource_bindings')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !table_exists {
+        connection.execute_batch(RESOURCE_BINDINGS_SCHEMA)?;
+    }
+
+    let mut statement = connection.prepare("PRAGMA table_info('resource_bindings')")?;
+    let columns = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let expected = vec![
+        ("resource_id".to_string(), "TEXT".to_string(), 1, 1),
+        ("resource_kind".to_string(), "TEXT".to_string(), 1, 0),
+        ("canonical_path".to_string(), "TEXT".to_string(), 1, 0),
+        ("bound_at".to_string(), "INTEGER".to_string(), 1, 0),
+        ("binding_sha256".to_string(), "TEXT".to_string(), 1, 0),
+    ];
+    if columns != expected {
+        return Err(bindings_schema_mismatch("column identity"));
+    }
+
+    let table_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='resource_bindings'",
+        [],
+        |row| row.get(0),
+    )?;
+    let expected_table_sql = RESOURCE_BINDINGS_SCHEMA
+        .split_once(';')
+        .map(|(table, _)| table)
+        .ok_or_else(|| bindings_schema_mismatch("embedded table DDL"))?;
+    if canonical_schema_sql(&table_sql) != canonical_schema_sql(expected_table_sql) {
+        return Err(bindings_schema_mismatch("table DDL identity"));
+    }
+
+    connection.execute_batch(RESOURCE_BINDINGS_SCHEMA)?;
+    let index_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master \
+         WHERE type='index' AND name='idx_resource_bindings_path'",
+        [],
+        |row| row.get(0),
+    )?;
+    let expected_index_sql = RESOURCE_BINDINGS_SCHEMA
+        .split_once(';')
+        .map(|(_, index)| index.trim().trim_end_matches(';'))
+        .ok_or_else(|| bindings_schema_mismatch("embedded index DDL"))?;
+    if canonical_schema_sql(&index_sql) != canonical_schema_sql(expected_index_sql) {
+        return Err(bindings_schema_mismatch("index DDL identity"));
+    }
+
+    let expected_digest = bindings_migration_sha256();
+    connection.execute(
+        "INSERT OR IGNORE INTO schema_meta(key, value) VALUES (?1, ?2)",
+        rusqlite::params![RESOURCE_BINDINGS_MIGRATION_META_KEY, expected_digest],
+    )?;
+    let stored_digest: String = connection.query_row(
+        "SELECT value FROM schema_meta WHERE key=?1",
+        [RESOURCE_BINDINGS_MIGRATION_META_KEY],
+        |row| row.get(0),
+    )?;
+    if stored_digest != bindings_migration_sha256() {
+        return Err(bindings_schema_mismatch("migration digest"));
+    }
     Ok(())
 }
 
@@ -206,6 +371,32 @@ pub fn unavailable_resource_lineage(resource_id: &str) -> ResourceLineageReport 
 fn update_framed(hasher: &mut Sha256, value: &[u8]) {
     hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value);
+}
+
+fn hex_digest(digest: impl AsRef<[u8]>) -> String {
+    digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn resource_content_sha256(content: &[u8]) -> String {
+    hex_digest(Sha256::digest(content))
+}
+
+pub fn resource_binding_sha256(binding: &ResourceBindingRecord) -> String {
+    let mut hasher = Sha256::new();
+    for value in [
+        RESOURCE_BINDING_HASH_DOMAIN.as_bytes(),
+        binding.resource_id.as_bytes(),
+        binding.resource_kind.as_bytes(),
+        binding.canonical_path.as_bytes(),
+        binding.bound_at.to_string().as_bytes(),
+    ] {
+        update_framed(&mut hasher, value);
+    }
+    hex_digest(hasher.finalize())
 }
 
 pub fn resource_version_record_sha256(record: &ResourceVersionRecord) -> String {
@@ -230,11 +421,7 @@ pub fn resource_version_record_sha256(record: &ResourceVersionRecord) -> String 
     ] {
         update_framed(&mut hasher, value);
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex_digest(hasher.finalize())
 }
 
 fn is_lower_hex_sha256(value: &str) -> bool {
@@ -368,6 +555,14 @@ mod tests {
     use super::*;
     use crate::{SqliteStore, StateStore};
 
+    #[test]
+    fn p0_migration_digest_remains_deployed_identity() {
+        assert_eq!(
+            migration_sha256(),
+            "a7853b4266f76eb462ced318554de47818e6d81df0ad58ce546ebcdf4e63d8e7"
+        );
+    }
+
     fn record(version: u64, predecessor: Option<&ResourceVersionRecord>) -> ResourceVersionRecord {
         let mut record = ResourceVersionRecord {
             resource_id: "agent-profile".to_string(),
@@ -468,6 +663,23 @@ mod tests {
             )
             .expect("query schema");
         assert_eq!(table_count, 1);
+        let binding_objects: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE name IN ('resource_bindings', 'idx_resource_bindings_path')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query binding schema");
+        assert_eq!(binding_objects, 2);
+        let binding_digest: String = connection
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='resource_bindings.migration_sha256'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query binding migration digest");
+        assert_eq!(binding_digest, bindings_migration_sha256());
     }
 
     #[tokio::test]
@@ -482,10 +694,16 @@ mod tests {
         let connection = rusqlite::Connection::open(&database).expect("open raw database");
         connection
             .execute_batch(
-                "DROP TABLE resource_versions;
-                 DELETE FROM schema_meta WHERE key='resource_lineage.migration_sha256';",
+                "DROP INDEX idx_resource_bindings_path;
+                 DROP TABLE resource_bindings;
+                 DROP TABLE resource_versions;
+                 DELETE FROM schema_meta
+                 WHERE key IN (
+                     'resource_lineage.migration_sha256',
+                     'resource_bindings.migration_sha256'
+                 );",
             )
-            .expect("rewind P0 rung");
+            .expect("rewind P0 and P1A0 rungs");
         drop(connection);
         let (left, right) =
             tokio::join!(SqliteStore::open(&database), SqliteStore::open(&database));
@@ -549,6 +767,75 @@ mod tests {
             .err()
             .expect("constraint drift must fail");
         assert!(error.to_string().contains("table DDL identity"));
+    }
+
+    #[tokio::test]
+    async fn incompatible_existing_bindings_table_fails_closed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let initial = SqliteStore::open(&database).await.expect("initial open");
+        drop(initial);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute_batch(
+                "DROP INDEX idx_resource_bindings_path;
+                 DROP TABLE resource_bindings;
+                 DELETE FROM schema_meta WHERE key='resource_bindings.migration_sha256';
+                 CREATE TABLE resource_bindings (resource_id TEXT PRIMARY KEY);",
+            )
+            .expect("install incompatible bindings table");
+        drop(connection);
+
+        let error = SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("incompatible bindings table must fail");
+        assert!(error
+            .to_string()
+            .contains("resource_bindings schema mismatch"));
+    }
+
+    #[tokio::test]
+    async fn bindings_migration_failure_rolls_back_partial_ddl() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let initial = SqliteStore::open(&database).await.expect("initial open");
+        drop(initial);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute_batch(
+                "DROP INDEX idx_resource_bindings_path;
+                 DROP TABLE resource_bindings;
+                 DELETE FROM schema_meta WHERE key='resource_bindings.migration_sha256';
+                 CREATE TABLE idx_resource_bindings_path (collision TEXT);",
+            )
+            .expect("install index-name collision");
+        drop(connection);
+
+        SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("colliding index identity must fail migration");
+
+        let connection = rusqlite::Connection::open(&database).expect("reopen raw database");
+        let binding_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='resource_bindings'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count binding table");
+        let digest_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_meta \
+                 WHERE key='resource_bindings.migration_sha256'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migration digest");
+        assert_eq!(binding_table_count, 0);
+        assert_eq!(digest_count, 0);
     }
 
     #[tokio::test]
@@ -631,5 +918,366 @@ mod tests {
             .expect("clamp above maximum");
         assert_eq!(all.status, "verified");
         assert_eq!(all.records.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn admits_agent_md_baseline_with_binding_and_verified_genesis() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&agent_md, "# Stable profile\n\nPrefer explicit evidence.\n")
+            .expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+
+        let receipt = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+
+        assert_eq!(receipt.schema, RESOURCE_BASELINE_ADMISSION_SCHEMA);
+        assert!(receipt.binding_created);
+        assert!(receipt.version_created);
+        assert!(receipt.content_readback_observed_before_commit);
+        assert!(receipt.path_identity_observed_before_commit);
+        assert_eq!(
+            receipt.observation_scope,
+            RESOURCE_BASELINE_OBSERVATION_SCOPE
+        );
+        assert!(!receipt.external_writer_exclusion_verified);
+        assert!(!receipt.resource_content_mutated);
+        assert_eq!(receipt.version.version, 1);
+        assert_eq!(receipt.version.predecessor_version, None);
+        assert_eq!(receipt.binding.resource_kind, "agent_md");
+        assert_eq!(
+            receipt.binding.canonical_path,
+            std::fs::canonicalize(&agent_md)
+                .expect("canonical path")
+                .to_str()
+                .expect("utf-8 path")
+        );
+        assert_eq!(
+            receipt.binding.binding_sha256,
+            resource_binding_sha256(&receipt.binding)
+        );
+
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.status, "verified");
+        assert_eq!(report.records, vec![receipt.version]);
+        assert_eq!(
+            std::fs::read_to_string(&agent_md).expect("read unchanged AGENT.md"),
+            "# Stable profile\n\nPrefer explicit evidence.\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_baseline_admission_is_idempotent() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let request = AgentMdBaselineAdmission {
+            resource_id: "agent-profile".to_string(),
+            path: agent_md,
+            observed_at: 1_700_000_000,
+        };
+
+        let first = store
+            .admit_agent_md_baseline(request.clone())
+            .await
+            .expect("first admission");
+        let second = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                observed_at: 1_800_000_000,
+                ..request
+            })
+            .await
+            .expect("idempotent admission");
+
+        assert!(first.binding_created);
+        assert!(first.version_created);
+        assert!(!second.binding_created);
+        assert!(!second.version_created);
+        assert_eq!(first.binding, second.binding);
+        assert_eq!(first.version, second.version);
+    }
+
+    #[tokio::test]
+    async fn baseline_admission_refuses_to_masquerade_as_post_commit_verification() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let first = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("baseline admission");
+
+        let mut second = record(2, Some(&first.version));
+        second.content_sha256 = first.version.content_sha256.clone();
+        second.record_sha256 = resource_version_record_sha256(&second);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute(
+                "INSERT INTO resource_versions(
+                     resource_id, resource_kind, version, content_sha256,
+                     predecessor_version, predecessor_record_sha256, observed_at, record_sha256
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    second.resource_id,
+                    second.resource_kind,
+                    second.version as i64,
+                    second.content_sha256,
+                    second.predecessor_version.map(|value| value as i64),
+                    second.predecessor_record_sha256,
+                    second.observed_at,
+                    second.record_sha256,
+                ],
+            )
+            .expect("insert simulated later version");
+        drop(connection);
+
+        let error = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md,
+                observed_at: 1_800_000_000,
+            })
+            .await
+            .expect_err("baseline API must reject a post-genesis lineage");
+        assert!(error
+            .to_string()
+            .contains("existing lineage head does not match"));
+    }
+
+    #[tokio::test]
+    async fn readback_mismatch_rolls_back_binding_and_genesis() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+
+        let error = store
+            .admit_agent_md_baseline_with_readback_override(
+                AgentMdBaselineAdmission {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    observed_at: 1_700_000_000,
+                },
+                b"# Changed concurrently\n".to_vec(),
+            )
+            .await
+            .expect_err("mismatched readback must fail");
+        assert!(error
+            .to_string()
+            .contains("resource changed during baseline admission readback"));
+
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        let binding_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM resource_bindings", [], |row| {
+                row.get(0)
+            })
+            .expect("count bindings");
+        let version_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM resource_versions", [], |row| {
+                row.get(0)
+            })
+            .expect("count versions");
+        assert_eq!(binding_count, 0);
+        assert_eq!(version_count, 0);
+    }
+
+    #[tokio::test]
+    async fn rejects_rebinding_resource_id_to_another_agent_md() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let first_directory = directory.path().join("first");
+        let second_directory = directory.path().join("second");
+        std::fs::create_dir_all(&first_directory).expect("first dir");
+        std::fs::create_dir_all(&second_directory).expect("second dir");
+        let first = first_directory.join("AGENT.md");
+        let second = second_directory.join("AGENT.md");
+        std::fs::write(&first, "# First\n").expect("first AGENT.md");
+        std::fs::write(&second, "# Second\n").expect("second AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: first,
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("first admission");
+
+        let error = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: second,
+                observed_at: 1_800_000_000,
+            })
+            .await
+            .expect_err("rebind must fail");
+        assert!(error
+            .to_string()
+            .contains("existing resource binding does not match"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_symlink_agent_md_target() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let target = directory.path().join("profile.md");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&target, "# Stable profile\n").expect("write target");
+        symlink(&target, &agent_md).expect("create symlink");
+        let store = SqliteStore::open(&database).await.expect("open store");
+
+        let error = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md,
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect_err("symlink must fail");
+        assert!(error.to_string().contains("target must not be a symlink"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_symlink_replacement_after_no_follow_open() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let displaced = directory.path().join("AGENT.displaced.md");
+        let decoy = directory.path().join("decoy.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        std::fs::write(&decoy, "# Decoy profile\n").expect("write decoy");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let hook_agent_md = agent_md.clone();
+
+        let error = store
+            .admit_agent_md_baseline_with_before_transaction_hook(
+                AgentMdBaselineAdmission {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    observed_at: 1_700_000_000,
+                },
+                move || {
+                    std::fs::rename(&hook_agent_md, &displaced).expect("displace original");
+                    symlink(&decoy, &hook_agent_md).expect("install symlink replacement");
+                },
+            )
+            .await
+            .expect_err("post-open symlink replacement must fail");
+        assert!(error
+            .to_string()
+            .contains("path no longer identifies the opened regular file"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_same_path_regular_file_replacement_after_open() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let displaced = directory.path().join("AGENT.displaced.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let hook_agent_md = agent_md.clone();
+
+        let error = store
+            .admit_agent_md_baseline_with_before_transaction_hook(
+                AgentMdBaselineAdmission {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    observed_at: 1_700_000_000,
+                },
+                move || {
+                    std::fs::rename(&hook_agent_md, &displaced).expect("displace original");
+                    std::fs::write(&hook_agent_md, "# Replacement profile\n")
+                        .expect("install regular replacement");
+                },
+            )
+            .await
+            .expect_err("same-path inode replacement must fail");
+        assert!(error
+            .to_string()
+            .contains("path no longer identifies the opened regular file"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_in_place_content_change_after_open() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let hook_agent_md = agent_md.clone();
+
+        let error = store
+            .admit_agent_md_baseline_with_before_transaction_hook(
+                AgentMdBaselineAdmission {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    observed_at: 1_700_000_000,
+                },
+                move || {
+                    std::fs::write(&hook_agent_md, "# Changed in place\n")
+                        .expect("change opened file content");
+                },
+            )
+            .await
+            .expect_err("in-place content change must fail readback");
+        assert!(error
+            .to_string()
+            .contains("resource changed during baseline admission readback"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn concurrent_baseline_admissions_converge_on_one_genesis() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        std::fs::write(&agent_md, "# Stable profile\n").expect("write AGENT.md");
+        let left_store = SqliteStore::open(&database).await.expect("open left store");
+        let right_store = SqliteStore::open(&database)
+            .await
+            .expect("open right store");
+        let request = AgentMdBaselineAdmission {
+            resource_id: "agent-profile".to_string(),
+            path: agent_md,
+            observed_at: 1_700_000_000,
+        };
+
+        let (left, right) = tokio::join!(
+            left_store.admit_agent_md_baseline(request.clone()),
+            right_store.admit_agent_md_baseline(request)
+        );
+        let left = left.expect("left admission");
+        let right = right.expect("right admission");
+        assert_ne!(left.version_created, right.version_created);
+        assert_eq!(left.binding, right.binding);
+        assert_eq!(left.version, right.version);
     }
 }
