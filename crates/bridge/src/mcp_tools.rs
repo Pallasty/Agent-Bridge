@@ -41861,6 +41861,7 @@ pub struct PracticalRecoveryMetrics {
     pub failed_calls: usize,
     pub failures_followed_by_success: usize,
     pub repeated_failure_loops: usize,
+    pub repeated_failure_tools: std::collections::BTreeMap<String, usize>,
     pub interpretation: &'static str,
 }
 
@@ -41965,13 +41966,17 @@ pub fn compute_practical_workflow_scorecard(
             })
         })
         .count();
-    let repeated_failure_loops = failures
-        .windows(2)
-        .filter(|pair| {
-            pair[0].1.tool_name == pair[1].1.tool_name
-                && pair[1].1.ts.saturating_sub(pair[0].1.ts) <= 300
-        })
-        .count();
+    let mut repeated_failure_tools = std::collections::BTreeMap::new();
+    for pair in failures.windows(2) {
+        if pair[0].1.tool_name == pair[1].1.tool_name
+            && pair[1].1.ts.saturating_sub(pair[0].1.ts) <= 300
+        {
+            *repeated_failure_tools
+                .entry(pair[1].1.tool_name.clone())
+                .or_insert(0) += 1;
+        }
+    }
+    let repeated_failure_loops = repeated_failure_tools.values().sum();
 
     let count_tool = |name: &str| calls.iter().filter(|call| call.tool_name == name).count();
     let forum_reads = count_tool("forum_read");
@@ -42016,7 +42021,7 @@ pub fn compute_practical_workflow_scorecard(
     recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
 
     PracticalWorkflowScorecard {
-        schema_version: 4,
+        schema_version: 5,
         read_only: true,
         window_secs,
         total_calls: calls.len(),
@@ -42051,7 +42056,8 @@ pub fn compute_practical_workflow_scorecard(
             failed_calls,
             failures_followed_by_success,
             repeated_failure_loops,
-            interpretation: "A later successful call is a recovery proxy; repeated same-tool failures within five minutes flag a retry loop.",
+            repeated_failure_tools,
+            interpretation: "A later successful call is a recovery proxy; repeated same-tool failures within five minutes flag a retry loop. Tool counts identify where to inspect without exposing arguments or error text.",
         },
         coordination: PracticalCoordinationMetrics {
             calls: coordination_calls,

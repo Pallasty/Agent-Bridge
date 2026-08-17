@@ -36048,6 +36048,10 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert_eq!(report.completion.plan_update_signals, 1);
     assert_eq!(report.recovery.failures_followed_by_success, 2);
     assert_eq!(report.recovery.repeated_failure_loops, 1);
+    assert_eq!(
+        report.recovery.repeated_failure_tools.get("memory_save"),
+        Some(&1)
+    );
     assert_eq!(report.coordination.calls, 3);
     assert_eq!(report.coordination.memory_saves, 3);
     assert_eq!(report.coordination.ratio, Some(3.0 / 7.0));
@@ -36081,7 +36085,7 @@ fn practical_scorecard_flags_coordination_majority() {
 
     let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
 
-    assert_eq!(report.schema_version, 4);
+    assert_eq!(report.schema_version, 5);
     assert_eq!(report.coordination.calls, 18);
     assert_eq!(report.coordination.ratio, Some(0.9));
     assert_eq!(report.coordination.forum_reads, 6);
@@ -36101,6 +36105,7 @@ fn practical_scorecard_keeps_missing_signals_explicit() {
     assert_eq!(report.continuation.median_followup_secs, None);
     assert_eq!(report.completion.finalize_signals, 0);
     assert_eq!(report.recovery.repeated_failure_loops, 0);
+    assert!(report.recovery.repeated_failure_tools.is_empty());
     assert_eq!(report.coordination.calls, 0);
     assert_eq!(report.coordination.ratio, None);
     assert!(report.recommendations[0].contains("No bootstrap signal"));
