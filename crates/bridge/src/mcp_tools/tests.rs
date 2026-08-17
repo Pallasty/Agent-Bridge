@@ -12032,13 +12032,25 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"]),
-        "all speech backends, including Sherpa, macOS say, and explicit Python/Rust Qwen3 must be visible"
+        json!(["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust", "omnivoice", "canary"]),
+        "all speech backends, including the explicit OmniVoice candidate and review-bound canary, must be visible"
     );
     for field in ["qwen_rust_bin", "qwen_rust_model_dir", "qwen_rust_profile"] {
         assert!(
             voice_schema.input_schema["properties"].get(field).is_some(),
             "qwen3-rust must expose its explicit local configuration field {field}"
+        );
+    }
+    for field in [
+        "omnivoice_python",
+        "omnivoice_manifest",
+        "canary_subject",
+        "canary_request_id",
+        "canary_policy",
+    ] {
+        assert!(
+            voice_schema.input_schema["properties"].get(field).is_some(),
+            "OmniVoice canary must expose {field}"
         );
     }
     assert_eq!(
@@ -12282,6 +12294,79 @@ print(json.dumps({
     assert_eq!(outcome["qwen_model_profile"], "1.7b-customvoice");
     assert_eq!(outcome["qwen_integrity_verified"], true);
     assert_eq!(outcome["qwen_binary_sha256"], "abc123");
+
+    std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn present_voice_canary_forwards_review_bound_routing_arguments() {
+    let _env = PRESENTATIONS_DIR_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-present-voice-canary-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &temp_dir);
+    let script = temp_dir.join("audio_embody.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({
+    "status": "emitted", "verify_status": "rendered_ok",
+    "verify_method": "synth_file", "verified_to": "synthesized audio file",
+    "not_verified": "physical transducer", "synth_backend": "canary",
+    "capture_channel": "synth_file", "voice": "auto",
+    "canary_assigned_backend": "omnivoice",
+    "canary_executed_backend": "omnivoice",
+    "canary_candidate_selected": True,
+    "canary_fallback_used": False,
+    "argv": sys.argv[1:]
+}))
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let tool = PresentVoiceTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "backend": "canary", "text": "你好", "voice": "auto",
+                "capture_channel": "synth_file",
+                "omnivoice_python": "/usr/bin/python3",
+                "omnivoice_manifest": "/models/omnivoice-manifest.json",
+                "canary_subject": "owner-local-pilot",
+                "canary_request_id": "owner-canary-9",
+                "canary_policy": "/config/omnivoice-canary.json",
+                "script_path": script.to_string_lossy()
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    let payload = result_text_as_json(&out);
+    let argv: Vec<&str> = payload["argv"].as_array().expect("argv")
+        .iter().filter_map(Value::as_str).collect();
+    for expected in [
+        "--omnivoice-python", "/usr/bin/python3",
+        "--omnivoice-manifest", "/models/omnivoice-manifest.json",
+        "--canary-subject", "owner-local-pilot",
+        "--canary-request-id", "owner-canary-9",
+        "--canary-policy", "/config/omnivoice-canary.json",
+    ] {
+        assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
+    }
+    assert_eq!(payload["canary_assigned_backend"], "omnivoice");
+    assert_eq!(payload["canary_executed_backend"], "omnivoice");
 
     std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;

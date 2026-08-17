@@ -54,14 +54,14 @@ impl McpTool for PresentVoiceTool {
                  Returns status (emitted|silent|mismatch|no_capture|error) plus an HONEST verified_to boundary. \
                  Writes a verified-outcome sidecar that flows into present_outcomes. capture_channel is \
                  sink_monitor, mic, or synth_file. Linux bus verification requires PipeWire + ffmpeg/paplay; \
-                 kokoro/piper need ab-tts-synth and their model assets; sherpa needs ab-sherpa-tts-synth plus explicit model/voice-map environment; qwen3 needs an explicit isolated Python runtime and official model assets; qwen3-rust additionally requires an enable flag, pinned local binary, complete local model directory, and integrity profile; say needs macOS /usr/bin/say and Whisper \
+                 kokoro/piper need ab-tts-synth and their model assets; sherpa needs ab-sherpa-tts-synth plus explicit model/voice-map environment; qwen3 needs an explicit isolated Python runtime and official model assets; qwen3-rust additionally requires an enable flag, pinned local binary, complete local model directory, and integrity profile; omnivoice is the explicit default-off candidate; canary applies the review-bound Qwen3/OmniVoice policy; say needs macOS /usr/bin/say and Whisper \
                  for synth_file verification. Opt-in (Niche)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; sherpa = offline Chinese multi-speaker VITS; say = macOS native TTS; qwen3 = explicit Python Qwen3-TTS; qwen3-rust = default-off local Rust Qwen3-TTS integrity-gated adapter. Speech on macOS verifies only the synthesized file via STT."},
-                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, sherpa, say, qwen3, or qwen3-rust."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust", "omnivoice", "canary"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; sherpa = offline Chinese multi-speaker VITS; say = macOS native TTS; qwen3 = explicit Python Qwen3-TTS; qwen3-rust = default-off local Rust Qwen3-TTS; omnivoice = explicit default-off candidate; canary = review-bound Qwen3/OmniVoice selector."},
+                    "text": {"type": "string", "description": "Speech text; required for every backend except tone."},
                     "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Sherpa requires a name from AB_TTS_SHERPA_VOICE_MAP; Qwen CustomVoice accepts an official speaker name; qwen3-rust 1.7B uses lowercase names such as serena; speaker IDs are not gender claims."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "Speech speed."},
                     "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "backend=tone: tone frequency (Hz) whose presence on the bus is verified."},
@@ -79,6 +79,11 @@ impl McpTool for PresentVoiceTool {
                     "qwen_rust_bin": {"type": "string", "description": "backend=qwen3-rust: explicit local qwen-tts executable (else AB_QWEN3_TTS_RUST_BIN). Requires AB_QWEN3_TTS_RUST_ENABLED=1."},
                     "qwen_rust_model_dir": {"type": "string", "description": "backend=qwen3-rust: explicit complete local model directory (else AB_QWEN3_TTS_RUST_MODEL_DIR). No download or model lookup is performed."},
                     "qwen_rust_profile": {"type": "string", "enum": ["0.6b-customvoice", "1.7b-customvoice"], "description": "backend=qwen3-rust: pinned size/SHA-256 integrity profile (else AB_QWEN3_TTS_RUST_PROFILE)."},
+                    "omnivoice_python": {"type": "string", "description": "backend=omnivoice/canary: explicit local OmniVoice Python; remote mode uses AB_OMNIVOICE_MAC_REMOTE_DISPATCH_PYTHON."},
+                    "omnivoice_manifest": {"type": "string", "description": "backend=omnivoice/canary: absolute pinned OmniVoice manifest path on the execution node."},
+                    "canary_subject": {"type": "string", "description": "backend=canary: subject identifier checked against the review-bound allowlist."},
+                    "canary_request_id": {"type": "string", "description": "backend=canary: stable non-empty request id used for deterministic bucket assignment."},
+                    "canary_policy": {"type": "string", "description": "backend=canary: explicit review-bound policy JSON (else AB_TTS_CANARY_POLICY)."},
                     "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper/sherpa: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
                     "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
                     "stt_model": {"type": "string", "description": "Whisper model used by synth_file, or whisper.cpp model path for Linux verify_intelligibility (else env AB_TTS_STT_MODEL / AB_TTS_WHISPER_MODEL as applicable)."},
@@ -187,6 +192,11 @@ impl McpTool for PresentVoiceTool {
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_bin", "--qwen-rust-bin");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_model_dir", "--qwen-rust-model-dir");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_profile", "--qwen-rust-profile");
+            push_optional_str_arg(&mut cmd, &args, "omnivoice_python", "--omnivoice-python");
+            push_optional_str_arg(&mut cmd, &args, "omnivoice_manifest", "--omnivoice-manifest");
+            push_optional_str_arg(&mut cmd, &args, "canary_subject", "--canary-subject");
+            push_optional_str_arg(&mut cmd, &args, "canary_request_id", "--canary-request-id");
+            push_optional_str_arg(&mut cmd, &args, "canary_policy", "--canary-policy");
             push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
             if verify_intelligibility {
                 cmd.arg("--check-intelligibility");
