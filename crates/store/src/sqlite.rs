@@ -1,11 +1,12 @@
 //! SQLite-backed [`StateStore`] using `tokio-rusqlite` (bundled SQLite).
 
 use crate::resource_lineage::{
-    migrate_or_verify as migrate_or_verify_resource_lineage, resource_binding_sha256,
-    resource_content_sha256, resource_version_record_sha256, unavailable_resource_lineage,
-    validate_resource_lineage, AgentMdBaselineAdmission, AgentMdBaselineReceipt,
-    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
-    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
+    is_lower_hex_sha256, migrate_or_verify as migrate_or_verify_resource_lineage,
+    resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
+    unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
+    AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, ResourceBindingRecord,
+    ResourceLineageReport, ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA,
+    RESOURCE_BASELINE_OBSERVATION_SCOPE, RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE,
     RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
@@ -15,7 +16,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::{
     fs::OpenOptions,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
 };
 use tokio_rusqlite::{params, rusqlite, Connection};
@@ -52,6 +53,7 @@ struct OpenedAgentMd {
     device: u64,
     inode: u64,
     content: Vec<u8>,
+    permissions: std::fs::Permissions,
 }
 
 #[cfg(unix)]
@@ -87,6 +89,7 @@ impl OpenedAgentMd {
             device: metadata.dev(),
             inode: metadata.ino(),
             content,
+            permissions: metadata.permissions(),
         };
         opened.verify_path_identity(path)?;
         Ok(opened)
@@ -135,6 +138,88 @@ fn read_open_agent_md(
     std::str::from_utf8(&content)
         .map_err(|_| format!("target must contain valid UTF-8: {}", path.display()))?;
     Ok(content)
+}
+
+#[cfg(unix)]
+fn write_agent_md_temp(
+    path: &Path,
+    content: &[u8],
+    permissions: &std::fs::Permissions,
+) -> std::result::Result<PathBuf, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("target has no parent directory: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("target filename is not valid UTF-8: {}", path.display()))?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("clock before UNIX epoch: {error}"))?
+        .as_nanos();
+    for attempt in 0..32u32 {
+        let temp = parent.join(format!(
+            ".{file_name}.agent-bridge-{}-{nonce}-{attempt}.tmp",
+            std::process::id()
+        ));
+        let opened = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(&temp);
+        let mut file = match opened {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "create replacement temp {}: {error}",
+                    temp.display()
+                ))
+            }
+        };
+        if let Err(error) = std::fs::set_permissions(&temp, permissions.clone()) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(format!(
+                "preserve target permissions {}: {error}",
+                temp.display()
+            ));
+        }
+        if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(format!(
+                "write replacement temp {}: {error}",
+                temp.display()
+            ));
+        }
+        return Ok(temp);
+    }
+    Err(format!(
+        "could not allocate a unique replacement temp beside {}",
+        path.display()
+    ))
+}
+
+#[cfg(unix)]
+fn restore_agent_md_after_replacement(
+    path: &Path,
+    original: &[u8],
+    permissions: &std::fs::Permissions,
+) -> std::result::Result<(), String> {
+    let temp = write_agent_md_temp(path, original, permissions)?;
+    if let Err(error) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("restore {}: {error}", path.display()));
+    }
+    let restored = OpenedAgentMd::open(path)?;
+    if restored.content != original {
+        return Err(format!(
+            "restoration readback mismatch for {}",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 // ── Edge type canonical weights (P1: typed-edges) ──────────────────────────
@@ -2329,6 +2414,350 @@ impl SqliteStore {
             })
             .await
             .map_err(|error| Error::Backend(format!("admit_agent_md_baseline: {error}")))
+    }
+
+    /// SEPL P1A1 — compare-and-swap one explicitly bound AGENT.md resource.
+    ///
+    /// This is an inherent, source-only primitive. It is intentionally absent
+    /// from [`StateStore`] and all runtime command surfaces. The SQLite
+    /// transaction stays open across the filesystem replacement so a lineage
+    /// append cannot commit without the replacement, while any failure after
+    /// replacement restores the exact previous bytes before returning.
+    #[cfg(unix)]
+    pub async fn commit_agent_md_cas(
+        &self,
+        request: AgentMdCasCommit,
+    ) -> Result<AgentMdCasCommitReceipt> {
+        self.commit_agent_md_cas_inner(request, None).await
+    }
+
+    #[cfg(not(unix))]
+    pub async fn commit_agent_md_cas(
+        &self,
+        _request: AgentMdCasCommit,
+    ) -> Result<AgentMdCasCommitReceipt> {
+        Err(Error::Backend(
+            "commit_agent_md_cas: O_NOFOLLOW file identity verification requires Unix".into(),
+        ))
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) async fn commit_agent_md_cas_with_post_replace_failure(
+        &self,
+        request: AgentMdCasCommit,
+    ) -> Result<AgentMdCasCommitReceipt> {
+        self.commit_agent_md_cas_inner(
+            request,
+            Some(Box::new(
+                || Err("injected post-replace failure".to_string()),
+            )),
+        )
+        .await
+    }
+
+    #[cfg(unix)]
+    async fn commit_agent_md_cas_inner(
+        &self,
+        request: AgentMdCasCommit,
+        post_replace_failure: Option<Box<dyn FnOnce() -> std::result::Result<(), String> + Send>>,
+    ) -> Result<AgentMdCasCommitReceipt> {
+        if request.resource_id.is_empty()
+            || request.resource_id.len() > 512
+            || request.resource_id.trim() != request.resource_id
+            || request.resource_id.chars().any(char::is_control)
+        {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: resource_id must be 1..=512 visible characters without surrounding whitespace".into(),
+            ));
+        }
+        if request.observed_at < 0 {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: observed_at must be non-negative".into(),
+            ));
+        }
+        if request.path.file_name().and_then(|name| name.to_str()) != Some("AGENT.md") {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: target filename must be AGENT.md".into(),
+            ));
+        }
+        if !is_lower_hex_sha256(&request.expected_content_sha256) {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: expected_content_sha256 must be lowercase SHA-256".into(),
+            ));
+        }
+        if request.proposed_content.is_empty()
+            || request.proposed_content.len() as u64 > RESOURCE_CONTENT_MAX_BYTES
+        {
+            return Err(Error::Backend(format!(
+                "commit_agent_md_cas: proposed content must be 1..={RESOURCE_CONTENT_MAX_BYTES} bytes"
+            )));
+        }
+        std::str::from_utf8(&request.proposed_content).map_err(|_| {
+            Error::Backend("commit_agent_md_cas: proposed content must be valid UTF-8".into())
+        })?;
+
+        let requested_file = OpenedAgentMd::open(&request.path)
+            .map_err(|error| Error::Backend(format!("commit_agent_md_cas: {error}")))?;
+        let canonical_path_buf = std::fs::canonicalize(&request.path).map_err(|error| {
+            Error::Backend(format!(
+                "commit_agent_md_cas: canonicalize {}: {error}",
+                request.path.display()
+            ))
+        })?;
+        let mut opened_file = OpenedAgentMd::open(&canonical_path_buf)
+            .map_err(|error| Error::Backend(format!("commit_agent_md_cas: {error}")))?;
+        if requested_file.device != opened_file.device
+            || requested_file.inode != opened_file.inode
+            || requested_file.content != opened_file.content
+        {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: resource changed while resolving canonical path".into(),
+            ));
+        }
+        let canonical_path = canonical_path_buf
+            .to_str()
+            .ok_or_else(|| {
+                Error::Backend("commit_agent_md_cas: canonical path must be valid UTF-8".into())
+            })?
+            .to_string();
+        if canonical_path.len() > 4096 {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: canonical path exceeds 4096 bytes".into(),
+            ));
+        }
+        if resource_content_sha256(&opened_file.content) != request.expected_content_sha256 {
+            return Err(Error::Backend(
+                "commit_agent_md_cas: expected content hash does not match current resource".into(),
+            ));
+        }
+
+        let resource_id = request.resource_id.clone();
+        let expected_content_sha256 = request.expected_content_sha256.clone();
+        let proposed_content = request.proposed_content;
+        let proposed_content_sha256 = resource_content_sha256(&proposed_content);
+        let observed_at = request.observed_at;
+        let readback_path = PathBuf::from(&canonical_path);
+        let original_content = opened_file.content.clone();
+        let original_permissions = opened_file.permissions.clone();
+
+        self.conn
+            .call(move |connection| -> RusqliteResult<AgentMdCasCommitReceipt> {
+                let transaction = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let mut replaced = false;
+                let mut post_replace_failure = post_replace_failure;
+                let result: RusqliteResult<AgentMdCasCommitReceipt> = (|| {
+                    opened_file
+                        .verify_path_identity(&readback_path)
+                        .map_err(resource_baseline_sql_error)?;
+                    let current_content = opened_file
+                        .readback(&readback_path)
+                        .map_err(resource_baseline_sql_error)?;
+                    if resource_content_sha256(&current_content) != expected_content_sha256 {
+                        return Err(resource_baseline_sql_error(
+                            "resource content changed before CAS replacement",
+                        ));
+                    }
+
+                    let binding = transaction
+                        .query_row(
+                            "SELECT resource_id, resource_kind, canonical_path, bound_at, binding_sha256 \
+                             FROM resource_bindings WHERE resource_id=?1",
+                            [&resource_id],
+                            |row| {
+                                Ok(ResourceBindingRecord {
+                                    resource_id: row.get(0)?,
+                                    resource_kind: row.get(1)?,
+                                    canonical_path: row.get(2)?,
+                                    bound_at: row.get(3)?,
+                                    binding_sha256: row.get(4)?,
+                                })
+                            },
+                        )
+                        .optional()?
+                        .ok_or_else(|| {
+                            resource_baseline_sql_error(
+                                "resource binding is missing; admit the baseline first",
+                            )
+                        })?;
+                    if binding.resource_kind != "agent_md"
+                        || binding.canonical_path != canonical_path
+                        || binding.binding_sha256 != resource_binding_sha256(&binding)
+                    {
+                        return Err(resource_baseline_sql_error(
+                            "resource binding does not match the requested canonical path",
+                        ));
+                    }
+
+                    let head = transaction
+                        .query_row(
+                            "SELECT resource_id, resource_kind, version, content_sha256, \
+                                    predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                             FROM resource_versions WHERE resource_id=?1 \
+                             ORDER BY version DESC LIMIT 1",
+                            [&resource_id],
+                            |row| {
+                                Ok(ResourceVersionRecord {
+                                    resource_id: row.get(0)?,
+                                    resource_kind: row.get(1)?,
+                                    version: row.get::<_, i64>(2)? as u64,
+                                    content_sha256: row.get(3)?,
+                                    predecessor_version: row
+                                        .get::<_, Option<i64>>(4)?
+                                        .map(|value| value as u64),
+                                    predecessor_record_sha256: row.get(5)?,
+                                    observed_at: row.get(6)?,
+                                    record_sha256: row.get(7)?,
+                                })
+                            },
+                        )
+                        .optional()?
+                        .ok_or_else(|| {
+                            resource_baseline_sql_error(
+                                "resource lineage is missing; admit the baseline first",
+                            )
+                        })?;
+                    if head.resource_kind != "agent_md"
+                        || head.record_sha256 != resource_version_record_sha256(&head)
+                        || head.content_sha256 != expected_content_sha256
+                    {
+                        return Err(resource_baseline_sql_error(
+                            "resource lineage head does not match the expected content",
+                        ));
+                    }
+                    let lineage_records = {
+                        let mut statement = transaction.prepare(
+                            "SELECT resource_id, resource_kind, version, content_sha256, \
+                                    predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                             FROM resource_versions WHERE resource_id=?1 ORDER BY version ASC",
+                        )?;
+                        let records = statement
+                            .query_map([&resource_id], |row| {
+                                Ok(ResourceVersionRecord {
+                                    resource_id: row.get(0)?,
+                                    resource_kind: row.get(1)?,
+                                    version: row.get::<_, i64>(2)? as u64,
+                                    content_sha256: row.get(3)?,
+                                    predecessor_version: row
+                                        .get::<_, Option<i64>>(4)?
+                                        .map(|value| value as u64),
+                                    predecessor_record_sha256: row.get(5)?,
+                                    observed_at: row.get(6)?,
+                                    record_sha256: row.get(7)?,
+                                })
+                            })?
+                            .collect::<RusqliteResult<Vec<_>>>()?;
+                        records
+                    };
+                    let lineage_report = validate_resource_lineage(
+                        &resource_id,
+                        lineage_records,
+                        false,
+                    );
+                    if lineage_report.status != "verified" {
+                        return Err(resource_baseline_sql_error(format!(
+                            "resource lineage is not verified: {}",
+                            lineage_report.violations.join(", ")
+                        )));
+                    }
+                    let next_version = head.version.checked_add(1).ok_or_else(|| {
+                        resource_baseline_sql_error("resource lineage version overflow")
+                    })?;
+                    if next_version > i64::MAX as u64 {
+                        return Err(resource_baseline_sql_error(
+                            "resource lineage version exceeds SQLite INTEGER",
+                        ));
+                    }
+
+                    let temp = write_agent_md_temp(
+                        &readback_path,
+                        &proposed_content,
+                        &original_permissions,
+                    )
+                    .map_err(resource_baseline_sql_error)?;
+                    if let Err(error) = std::fs::rename(&temp, &readback_path) {
+                        let _ = std::fs::remove_file(&temp);
+                        return Err(resource_baseline_sql_error(format!(
+                            "replace bound AGENT.md: {error}"
+                        )));
+                    }
+                    replaced = true;
+
+                    let replacement = OpenedAgentMd::open(&readback_path)
+                        .map_err(resource_baseline_sql_error)?;
+                    if replacement.content != proposed_content
+                        || resource_content_sha256(&replacement.content) != proposed_content_sha256
+                    {
+                        return Err(resource_baseline_sql_error(
+                            "replacement readback does not match proposed content",
+                        ));
+                    }
+                    if let Some(hook) = post_replace_failure.take() {
+                        hook().map_err(resource_baseline_sql_error)?;
+                    }
+
+                    let mut version = ResourceVersionRecord {
+                        resource_id: resource_id.clone(),
+                        resource_kind: "agent_md".to_string(),
+                        version: next_version,
+                        content_sha256: proposed_content_sha256.clone(),
+                        predecessor_version: Some(head.version),
+                        predecessor_record_sha256: Some(head.record_sha256.clone()),
+                        observed_at,
+                        record_sha256: String::new(),
+                    };
+                    version.record_sha256 = resource_version_record_sha256(&version);
+                    transaction.execute(
+                        "INSERT INTO resource_versions(\
+                             resource_id, resource_kind, version, content_sha256,\
+                             predecessor_version, predecessor_record_sha256, observed_at, record_sha256\
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![
+                            version.resource_id,
+                            version.resource_kind,
+                            version.version as i64,
+                            version.content_sha256,
+                            version.predecessor_version.map(|value| value as i64),
+                            version.predecessor_record_sha256,
+                            version.observed_at,
+                            version.record_sha256,
+                        ],
+                    )?;
+                    transaction.commit()?;
+                    Ok(AgentMdCasCommitReceipt {
+                        schema: RESOURCE_CAS_COMMIT_SCHEMA.to_string(),
+                        binding,
+                        version,
+                        expected_content_sha256,
+                        proposed_content_sha256,
+                        content_readback_verified: true,
+                        resource_content_mutated: true,
+                        rollback_performed: false,
+                        rollback_verified: false,
+                        external_writer_exclusion_verified: false,
+                        commit_scope: RESOURCE_CAS_COMMIT_SCOPE.to_string(),
+                    })
+                })();
+
+                match result {
+                    Ok(receipt) => Ok(receipt),
+                    Err(error) if replaced => {
+                        match restore_agent_md_after_replacement(
+                            &readback_path,
+                            &original_content,
+                            &original_permissions,
+                        ) {
+                            Ok(()) => Err(error),
+                            Err(restore_error) => Err(resource_baseline_sql_error(format!(
+                                "CAS failed and exact restoration failed: {error}; {restore_error}"
+                            ))),
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("commit_agent_md_cas: {error}")))
     }
 
     /// Write [`MemoryEdgeExport`] JSONL for edges whose endpoints are both in `keys`.

@@ -90,9 +90,10 @@ pub use embedding::{
 pub use resource_lineage::{
     resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
     unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
-    AgentMdBaselineReceipt, ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
-    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
-    RESOURCE_BINDING_HASH_DOMAIN, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_HASH_DOMAIN,
+    AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, ResourceBindingRecord,
+    ResourceLineageReport, ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA,
+    RESOURCE_BASELINE_OBSERVATION_SCOPE, RESOURCE_BINDING_HASH_DOMAIN, RESOURCE_CAS_COMMIT_SCHEMA,
+    RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_HASH_DOMAIN,
     RESOURCE_LINEAGE_MAX_ROWS, RESOURCE_LINEAGE_SCHEMA,
 };
 pub use vector::{

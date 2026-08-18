@@ -1,9 +1,9 @@
 //! SEPL resource-version lineage and P1A0 baseline admission contracts.
 //!
 //! P0 remains read-only through [`crate::StateStore`]. P1A0 adds an explicit
-//! AGENT.md path binding and genesis admission through an inherent
-//! [`crate::SqliteStore`] method, but does not mutate the resource file or
-//! expose an MCP, CLI, scheduler, or automatic producer.
+//! AGENT.md path binding and genesis admission, while P1A1 adds a controlled
+//! compare-and-swap commit through inherent [`crate::SqliteStore`] methods.
+//! Neither slice exposes an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -17,6 +17,9 @@ pub const RESOURCE_LINEAGE_MAX_ROWS: u32 = 256;
 pub const RESOURCE_BASELINE_ADMISSION_SCHEMA: &str = "agent_bridge.resource_baseline_admission.v0";
 pub const RESOURCE_BASELINE_OBSERVATION_SCOPE: &str =
     "opened_file_and_path_identity_before_sqlite_commit";
+pub const RESOURCE_CAS_COMMIT_SCHEMA: &str = "agent_bridge.resource_cas_commit.v0";
+pub const RESOURCE_CAS_COMMIT_SCOPE: &str =
+    "opened_bound_path_replace_readback_and_lineage_append_before_sqlite_commit";
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
@@ -104,6 +107,30 @@ pub struct AgentMdBaselineReceipt {
     pub observation_scope: String,
     pub external_writer_exclusion_verified: bool,
     pub resource_content_mutated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMdCasCommit {
+    pub resource_id: String,
+    pub path: PathBuf,
+    pub expected_content_sha256: String,
+    pub proposed_content: Vec<u8>,
+    pub observed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdCasCommitReceipt {
+    pub schema: String,
+    pub binding: ResourceBindingRecord,
+    pub version: ResourceVersionRecord,
+    pub expected_content_sha256: String,
+    pub proposed_content_sha256: String,
+    pub content_readback_verified: bool,
+    pub resource_content_mutated: bool,
+    pub rollback_performed: bool,
+    pub rollback_verified: bool,
+    pub external_writer_exclusion_verified: bool,
+    pub commit_scope: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -424,7 +451,7 @@ pub fn resource_version_record_sha256(record: &ResourceVersionRecord) -> String 
     hex_digest(hasher.finalize())
 }
 
-fn is_lower_hex_sha256(value: &str) -> bool {
+pub(crate) fn is_lower_hex_sha256(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -1007,6 +1034,248 @@ mod tests {
         assert!(!second.version_created);
         assert_eq!(first.binding, second.binding);
         assert_eq!(first.version, second.version);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn commits_agent_md_cas_and_appends_predecessor_bound_version() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n\nKeep evidence explicit.\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let baseline = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+
+        let receipt = store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: proposed.clone(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("commit CAS");
+
+        assert_eq!(receipt.schema, RESOURCE_CAS_COMMIT_SCHEMA);
+        assert_eq!(receipt.version.version, 2);
+        assert_eq!(
+            receipt.version.predecessor_record_sha256,
+            Some(baseline.version.record_sha256)
+        );
+        assert_eq!(
+            receipt.version.content_sha256,
+            resource_content_sha256(&proposed)
+        );
+        assert!(receipt.content_readback_verified);
+        assert!(receipt.resource_content_mutated);
+        assert!(!receipt.rollback_performed);
+        assert!(!receipt.rollback_verified);
+        assert!(!receipt.external_writer_exclusion_verified);
+        assert_eq!(receipt.commit_scope, RESOURCE_CAS_COMMIT_SCOPE);
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read committed AGENT.md"),
+            proposed
+        );
+
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.status, "verified");
+        assert_eq!(report.records.len(), 2);
+        assert_eq!(report.records[1], receipt.version);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stale_cas_expected_hash_leaves_file_and_lineage_unchanged() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let baseline = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+
+        let error = store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(b"# Wrong hash\n"),
+                proposed_content: proposed,
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect_err("stale expected hash must fail");
+        assert!(error.to_string().contains("expected content hash"));
+        assert_eq!(std::fs::read(&agent_md).expect("read AGENT.md"), original);
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.records, vec![baseline.version]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn corrupted_prior_lineage_blocks_cas_extension() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let second = b"# Updated profile\n".to_vec();
+        let third = b"# Third profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: second.clone(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("commit second version");
+
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute(
+                "UPDATE resource_versions SET record_sha256=?1 \
+                 WHERE resource_id='agent-profile' AND version=1",
+                ["0".repeat(64)],
+            )
+            .expect("corrupt prior record");
+        drop(connection);
+
+        let error = store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&second),
+                proposed_content: third,
+                observed_at: 1_700_000_002,
+            })
+            .await
+            .expect_err("corrupted prior lineage must block extension");
+        assert!(error
+            .to_string()
+            .contains("resource lineage is not verified"));
+        assert_eq!(std::fs::read(&agent_md).expect("read AGENT.md"), second);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn post_replace_failure_restores_exact_file_and_rolls_back_lineage() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let baseline = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+
+        let error = store
+            .commit_agent_md_cas_with_post_replace_failure(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: proposed,
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect_err("injected post-replace failure must fail");
+        assert!(error.to_string().contains("injected post-replace failure"));
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read restored AGENT.md"),
+            original
+        );
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.records, vec![baseline.version]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn concurrent_cas_commits_allow_one_and_reject_stale_peer() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let left_store = SqliteStore::open(&database).await.expect("open left store");
+        let right_store = SqliteStore::open(&database)
+            .await
+            .expect("open right store");
+        left_store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let request = || AgentMdCasCommit {
+            resource_id: "agent-profile".to_string(),
+            path: agent_md.clone(),
+            expected_content_sha256: resource_content_sha256(&original),
+            proposed_content: proposed.clone(),
+            observed_at: 1_700_000_001,
+        };
+
+        let (left, right) = tokio::join!(
+            left_store.commit_agent_md_cas(request()),
+            right_store.commit_agent_md_cas(request())
+        );
+        assert!(left.is_ok() ^ right.is_ok());
+        assert!(left.is_err() || right.is_err());
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read committed AGENT.md"),
+            proposed
+        );
+        let report = left_store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.status, "verified");
+        assert_eq!(report.records.len(), 2);
     }
 
     #[tokio::test]
