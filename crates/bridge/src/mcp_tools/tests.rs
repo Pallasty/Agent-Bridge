@@ -10283,7 +10283,8 @@ fn registry_exposes_macos_ax_probe_to_codex_essential() {
         .expect("macos_ax_probe schema");
 
     assert!(tool.description.contains("Read-only"));
-    assert!(tool.description.contains("never prompts"));
+    assert!(tool.description.contains("best-effort no-ask"));
+    assert!(tool.description.contains("fails closed"));
     assert!(tool.input_schema["properties"]
         .get("include_windows")
         .is_some());
@@ -10310,6 +10311,7 @@ fn registry_exposes_macos_ax_verify_to_codex_essential() {
 
     assert!(tool.description.contains("Read-only"));
     assert!(tool.description.contains("never"));
+    assert!(tool.description.contains("complete, readable, untruncated"));
     assert!(tool.input_schema["properties"].get("expect").is_some());
     assert!(tool.input_schema["properties"].get("bundle_id").is_some());
     assert!(tool.input_schema["properties"]
@@ -10325,6 +10327,8 @@ fn registry_exposes_macos_ax_verify_to_codex_essential() {
         .get("semantic_include_raw")
         .is_some());
     assert!(tool.input_schema["properties"].get("click").is_none());
+    assert_eq!(tool.input_schema["properties"]["pid"]["minimum"], 1);
+    assert_eq!(tool.input_schema["properties"]["index"]["minimum"], 0);
 }
 
 #[test]
@@ -10487,6 +10491,10 @@ fn semantic_bus_adapter_report_classifies_adapter_evidence() {
         Some("runtime_backed")
     );
     assert_eq!(macos_verify["ready_for_runtime"].as_bool(), Some(true));
+    assert_eq!(
+        macos_verify["runtime_assets"],
+        json!(["scripts/macos_ax_verify.py", "scripts/macos_ax_probe.py"])
+    );
 
     let macos_watch = find("macos_ax_watch");
     assert!(macos_watch["channels"]
@@ -11421,6 +11429,11 @@ payload = {
     }],
     "window_count": 1,
     "source_window_count": 1,
+    "windows_read_ok": True,
+    "app_identity_valid": True,
+    "counts_consistent": True,
+    "coverage_complete": True,
+    "incomplete_reasons": [],
     "limits": {"max_windows": 8, "truncated": False, "include_windows": True},
     "errors": [],
     "elapsed_ms": 5
@@ -11522,6 +11535,158 @@ print(json.dumps(payload))
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
+#[test]
+fn macos_ax_probe_semantic_bus_does_not_verify_degraded_observation() {
+    let degraded = json!({
+        "schema": MACOS_AX_PROBE_SOURCE_SCHEMA,
+        "captured_at": 1780835250,
+        "status": "degraded",
+        "permission": {"ax_trusted": true, "method": "AXIsProcessTrusted", "prompted": false},
+        "frontmost_app": {
+            "name": "Codex",
+            "pid": 54862,
+            "bundle_id": "com.openai.codex"
+        },
+        "windows": [],
+        "window_count": 0,
+        "source_window_count": 0,
+        "windows_read_ok": false,
+        "app_identity_valid": true,
+        "counts_consistent": true,
+        "limits": {"max_windows": 8, "truncated": false, "include_windows": true},
+        "errors": [{"stage": "system_events_windows", "message": "window enumeration failed"}]
+    });
+    let payload = macos_ax_probe_semantic_bus_payload(&degraded, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+    assert_eq!(payload["verification"]["recover"], "replan");
+    assert_eq!(
+        payload["verification"]["reason"],
+        "limited_accessibility_or_window_read"
+    );
+    assert_eq!(payload["verification"]["evidence"]["windows_read_ok"], false);
+
+    let ready_but_truncated = json!({
+        "schema": MACOS_AX_PROBE_SOURCE_SCHEMA,
+        "captured_at": 1780835251,
+        "status": "ready",
+        "permission": {"ax_trusted": true, "method": "AXIsProcessTrusted", "prompted": false},
+        "frontmost_app": {
+            "name": "Codex",
+            "pid": 54862,
+            "bundle_id": "com.openai.codex"
+        },
+        "windows": [{"index": 0, "title": "Codex", "role": "AXWindow"}],
+        "window_count": 1,
+        "source_window_count": 2,
+        "windows_read_ok": true,
+        "app_identity_valid": true,
+        "counts_consistent": false,
+        "coverage_complete": false,
+        "incomplete_reasons": ["window_enumeration_truncated"],
+        "limits": {"max_windows": 1, "truncated": true, "include_windows": true},
+        "errors": []
+    });
+    let payload = macos_ax_probe_semantic_bus_payload(&ready_but_truncated, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+    assert_eq!(payload["verification"]["recover"], "replan");
+    assert_eq!(payload["verification"]["reason"], "incomplete_probe_evidence");
+
+    let wrong_platform = json!({
+        "schema": MACOS_AX_PROBE_SOURCE_SCHEMA,
+        "captured_at": 1780835252,
+        "platform": {"system": "Linux"},
+        "read_only": true,
+        "status": "ready",
+        "permission": {"ax_trusted": true, "method": "AXIsProcessTrusted", "prompted": false},
+        "frontmost_app": null,
+        "windows": [],
+        "window_count": 0,
+        "source_window_count": null,
+        "windows_read_ok": null,
+        "app_identity_valid": false,
+        "counts_consistent": false,
+        "coverage_complete": true,
+        "incomplete_reasons": [],
+        "limits": {"max_windows": 0, "truncated": false, "include_windows": false},
+        "errors": [],
+        "mcp_wrapper": {"include_windows": false, "max_windows": 0}
+    });
+    let payload = macos_ax_probe_semantic_bus_payload(&wrong_platform, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+    assert_eq!(payload["verification"]["evidence"]["platform_ok"], false);
+
+    let mut request_mismatch = wrong_platform.clone();
+    request_mismatch["platform"]["system"] = json!("Darwin");
+    request_mismatch["mcp_wrapper"]["include_windows"] = json!(true);
+    let payload = macos_ax_probe_semantic_bus_payload(&request_mismatch, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+    assert_eq!(
+        payload["verification"]["evidence"]["request_binding_ok"],
+        false
+    );
+
+    let mut valid_no_windows = wrong_platform;
+    valid_no_windows["platform"]["system"] = json!("Darwin");
+    let payload = macos_ax_probe_semantic_bus_payload(&valid_no_windows, false);
+    assert_eq!(payload["verification"]["verdict"], "verified");
+
+    let mut hidden_window = valid_no_windows;
+    hidden_window["windows"] = json!([{"index": 0, "role": "AXWindow"}]);
+    hidden_window["window_count"] = json!(1);
+    hidden_window["source_window_count"] = json!(1);
+    hidden_window["windows_read_ok"] = json!(true);
+    let payload = macos_ax_probe_semantic_bus_payload(&hidden_window, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+
+    let valid_windowed = json!({
+        "schema": MACOS_AX_PROBE_SOURCE_SCHEMA,
+        "captured_at": 1780835253,
+        "platform": {"system": "Darwin"},
+        "read_only": true,
+        "status": "ready",
+        "permission": {"ax_trusted": true, "method": "AXIsProcessTrusted", "prompted": false},
+        "frontmost_app": {
+            "name": "Codex",
+            "pid": 54862,
+            "bundle_id": "com.openai.codex"
+        },
+        "windows": [{"index": 0, "title": "Codex", "role": "AXWindow"}],
+        "window_count": 1,
+        "source_window_count": 1,
+        "windows_read_ok": true,
+        "app_identity_valid": true,
+        "counts_consistent": true,
+        "coverage_complete": true,
+        "incomplete_reasons": [],
+        "limits": {"max_windows": 8, "truncated": false, "include_windows": true},
+        "errors": [],
+        "mcp_wrapper": {"include_windows": true, "max_windows": 8}
+    });
+    let payload = macos_ax_probe_semantic_bus_payload(&valid_windowed, false);
+    assert_eq!(payload["verification"]["verdict"], "verified");
+
+    let mut oversized = valid_windowed.clone();
+    oversized["limits"]["max_windows"] = json!(0);
+    oversized["mcp_wrapper"]["max_windows"] = json!(0);
+    let payload = macos_ax_probe_semantic_bus_payload(&oversized, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+
+    let mut malformed_window = valid_windowed.clone();
+    malformed_window["windows"] = json!([1]);
+    let payload = macos_ax_probe_semantic_bus_payload(&malformed_window, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+
+    let mut prompted = valid_windowed.clone();
+    prompted["permission"]["prompted"] = json!(true);
+    let payload = macos_ax_probe_semantic_bus_payload(&prompted, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+
+    let mut contradictory_reasons = valid_windowed;
+    contradictory_reasons["incomplete_reasons"] = json!(["unexpected"]);
+    let payload = macos_ax_probe_semantic_bus_payload(&contradictory_reasons, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+}
+
 #[tokio::test]
 async fn macos_ax_verify_wrapper_parses_unmet_json_and_passes_bounded_args() {
     let temp_dir = std::env::temp_dir().join(format!(
@@ -11544,10 +11709,10 @@ print(json.dumps({
     "argv": sys.argv[1:],
     "ts": 1780836100,
     "expect": "window_gone",
-    "selector": {"title": "Missing"},
-    "scope": {"source": "frontmost_app_windows"},
+    "selector": {"app": None, "bundle_id": "com.openai.codex", "pid": None, "title": "Missing", "role": None, "index": None, "ax_identifier": "codex-main-window", "state": None},
+    "scope": {"source": "frontmost_app_windows", "max_windows": 4},
     "verdict": "unmet",
-    "recover": "proceed",
+    "recover": "retry",
     "observed": {"count": 1, "matches": [{"title": "Missing"}]},
     "error": None
 }))
@@ -11599,7 +11764,201 @@ raise SystemExit(2)
     assert!(!argv.contains(&"--click"));
     assert_eq!(payload["mcp_wrapper"]["read_only"], true);
     assert_eq!(payload["mcp_wrapper"]["exit_code"], 2);
+    assert_eq!(payload["mcp_wrapper"]["source_contract_ok"], true);
     assert_eq!(payload["verdict"], "unmet");
+    assert_eq!(payload["recover"], "retry");
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn macos_ax_verify_wrapper_marks_source_error_and_preserves_evidence() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-macos-ax-verify-error-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let script = temp_dir.join("macos_ax_verify.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+print(json.dumps({
+    "schema": "macos_ax_verify/v0",
+    "ts": 1780836150,
+    "expect": "window_gone",
+    "selector": {"bundle_id": "com.openai.codex", "title": "Missing"},
+    "scope": {"source": "frontmost_app_windows", "max_windows": 8},
+    "verdict": "error",
+    "recover": "escalate",
+    "observed": {
+        "count": 0,
+        "matches": [],
+        "windows_read_ok": False,
+        "coverage": {"complete": False, "reasons": ["window_enumeration_unconfirmed"]},
+        "proof": {"complete": False, "truth": "unknown"}
+    },
+    "error": "probe_read_failed"
+}))
+raise SystemExit(3)
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let out = MacosAxVerifyTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "expect": "window_gone",
+                "bundle_id": "com.openai.codex",
+                "title": "Missing",
+                "poll_timeout_secs": 0.0,
+                "jxa_timeout_secs": 0.25,
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["verdict"], "error");
+    assert_eq!(payload["recover"], "escalate");
+    assert_eq!(payload["observed"]["windows_read_ok"], false);
+    assert_eq!(payload["observed"]["coverage"]["complete"], false);
+    assert_eq!(payload["mcp_wrapper"]["exit_code"], 3);
+    assert_eq!(payload["mcp_wrapper"]["source_contract_ok"], true);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn macos_ax_verify_wrapper_marks_exit_verdict_mismatch_as_error() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-macos-ax-verify-exit-contract-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let script = temp_dir.join("macos_ax_verify.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+print(json.dumps({
+    "schema": "macos_ax_verify/v0",
+    "expect": "frontmost_app_is",
+    "selector": {"app": "Codex", "bundle_id": None, "pid": None, "title": None, "role": None, "index": None, "ax_identifier": None, "state": None},
+    "scope": {"source": "frontmost_app_windows", "platform": {"system": "Darwin"}, "max_windows": 8},
+    "verdict": "verified",
+    "recover": "proceed",
+    "observed": {
+        "probe_status": "ready",
+        "permission": {"ax_trusted": True, "method": "AXIsProcessTrusted", "prompted": False},
+        "frontmost_app": {"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex"},
+        "count": 1,
+        "matches": [{"name": "Codex", "pid": 54862}],
+        "app_identity_valid": True,
+        "coverage_complete": True,
+        "incomplete_reasons": [],
+        "proof_complete": True,
+        "coverage": {"complete": True, "reasons": []},
+        "proof": {"complete": True, "truth": "match", "required_evidence": "frontmost_app_identity"},
+        "errors": []
+    },
+    "error": None
+}))
+raise SystemExit(3)
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let out = MacosAxVerifyTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "expect": "frontmost_app_is",
+                "app": "Codex",
+                "poll_timeout_secs": 0.0,
+                "jxa_timeout_secs": 0.25,
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["verdict"], "verified");
+    assert_eq!(payload["mcp_wrapper"]["exit_code"], 3);
+    assert_eq!(payload["mcp_wrapper"]["request_binding_ok"], true);
+    assert_eq!(payload["mcp_wrapper"]["outcome_contract_ok"], true);
+    assert_eq!(payload["mcp_wrapper"]["source_contract_ok"], false);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn macos_ax_verify_wrapper_rejects_verified_without_claim_evidence() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-macos-ax-verify-claim-contract-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let script = temp_dir.join("macos_ax_verify.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+print(json.dumps({
+    "schema": "macos_ax_verify/v0",
+    "expect": "frontmost_app_is",
+    "selector": {"app": "Codex", "bundle_id": None, "pid": None, "title": None, "role": None, "index": None, "ax_identifier": None, "state": None},
+    "scope": {"source": "frontmost_app_windows", "max_windows": 8},
+    "verdict": "verified",
+    "recover": "proceed",
+    "observed": {},
+    "error": None
+}))
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let out = MacosAxVerifyTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "expect": "frontmost_app_is",
+                "app": "Codex",
+                "poll_timeout_secs": 0.0,
+                "jxa_timeout_secs": 0.25,
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["verdict"], "verified");
+    assert_eq!(payload["mcp_wrapper"]["exit_code"], 0);
+    assert_eq!(payload["mcp_wrapper"]["request_binding_ok"], true);
+    assert_eq!(payload["mcp_wrapper"]["outcome_contract_ok"], false);
+    assert_eq!(payload["mcp_wrapper"]["source_contract_ok"], false);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
@@ -11639,6 +11998,16 @@ payload = {
         "matches": [{"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex", "role": "AXApplication"}],
         "window_count": 2,
         "source_window_count": 2,
+        "windows_read_ok": True,
+        "app_identity_valid": True,
+        "counts_consistent": True,
+        "scope_match": None,
+        "limits": {"max_windows": 8, "truncated": False, "include_windows": True},
+        "coverage_complete": True,
+        "incomplete_reasons": [],
+        "proof_complete": True,
+        "coverage": {"complete": True, "reasons": []},
+        "proof": {"complete": True, "truth": "match", "required_evidence": "frontmost_app_identity"},
         "errors": []
     },
     "error": None
@@ -11656,6 +12025,8 @@ print(json.dumps(payload))
                 "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
+                "bundle_id": "com.openai.codex",
+                "pid": 54862,
                 "timeout_ms": 5000
             }),
             &ToolContext::default(),
@@ -11673,6 +12044,8 @@ print(json.dumps(payload))
                 "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
+                "bundle_id": "com.openai.codex",
+                "pid": 54862,
                 "semantic_bus": true,
                 "semantic_include_raw": false,
                 "timeout_ms": 5000
@@ -11694,6 +12067,9 @@ print(json.dumps(payload))
     assert_eq!(payload["verification"]["verified_to"], "postcondition");
     assert_eq!(payload["verification"]["recover"], "proceed");
     assert_eq!(payload["verification"]["evidence"]["observed_count"], 1);
+    assert_eq!(payload["verification"]["evidence"]["proof_complete"], true);
+    assert_eq!(payload["verification"]["evidence"]["proof_truth"], "match");
+    assert_eq!(payload["verification"]["evidence"]["coverage_complete"], true);
 
     let objects = payload["semantic_objects"].as_array().expect("objects");
     assert_eq!(objects.len(), 1);
@@ -11717,11 +12093,73 @@ print(json.dumps(payload))
         1
     );
 
+    let wrong_raw_binding_out = tool
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "expect": "frontmost_app_is",
+                "app": "Other",
+                "bundle_id": "com.openai.codex",
+                "pid": 54862,
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("wrong raw binding execute");
+    assert!(wrong_raw_binding_out.is_error);
+    let wrong_raw_binding_payload = result_text_as_json(&wrong_raw_binding_out);
+    assert_eq!(
+        wrong_raw_binding_payload["mcp_wrapper"]["request_binding_ok"],
+        false
+    );
+    assert_eq!(
+        wrong_raw_binding_payload["mcp_wrapper"]["outcome_contract_ok"],
+        true
+    );
+    assert_eq!(
+        wrong_raw_binding_payload["mcp_wrapper"]["source_contract_ok"],
+        false
+    );
+
+    let wrong_binding_out = tool
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "expect": "frontmost_app_is",
+                "app": "Other",
+                "bundle_id": "com.openai.codex",
+                "pid": 54862,
+                "semantic_bus": true,
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("wrong-binding execute");
+    assert!(wrong_binding_out.is_error);
+    let wrong_binding_payload = result_text_as_json(&wrong_binding_out);
+    assert_eq!(
+        wrong_binding_payload["verification"]["source_verdict"],
+        "verified"
+    );
+    assert_eq!(
+        wrong_binding_payload["verification"]["verdict"],
+        "not_verified"
+    );
+    assert_ne!(
+        wrong_binding_payload["verification"]["recover"],
+        "proceed"
+    );
+
     let raw_out = tool
         .execute(
             json!({
                 "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
+                "app": "Codex",
+                "bundle_id": "com.openai.codex",
+                "pid": 54862,
                 "semantic_bus": true,
                 "semantic_include_raw": true,
                 "timeout_ms": 5000
@@ -11739,6 +12177,216 @@ print(json.dumps(payload))
     assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[test]
+fn macos_ax_verify_semantic_bus_rejects_incomplete_or_nonverified_proceed() {
+    let valid_gone = json!({
+        "schema": MACOS_AX_VERIFY_SOURCE_SCHEMA,
+        "ts": 1780836299,
+        "expect": "window_gone",
+        "selector": {
+            "bundle_id": "com.openai.codex",
+            "title": "Missing",
+            "pid": null,
+            "index": null
+        },
+        "scope": {
+            "source": "frontmost_app_windows",
+            "platform": {"system": "Darwin"},
+            "max_windows": 8
+        },
+        "verdict": "verified",
+        "recover": "proceed",
+        "observed": {
+            "probe_status": "ready",
+            "permission": {"ax_trusted": true, "method": "AXIsProcessTrusted", "prompted": false},
+            "frontmost_app": {
+                "name": "Codex",
+                "pid": 54862,
+                "bundle_id": "com.openai.codex"
+            },
+            "count": 0,
+            "matches": [],
+            "unknown_count": 0,
+            "unknowns": [],
+            "window_count": 0,
+            "source_window_count": 0,
+            "windows_read_ok": true,
+            "app_identity_valid": true,
+            "counts_consistent": true,
+            "scope_match": true,
+            "limits": {"max_windows": 8, "truncated": false, "include_windows": true},
+            "coverage_complete": true,
+            "incomplete_reasons": [],
+            "proof_complete": true,
+            "coverage": {"complete": true, "reasons": []},
+            "proof": {
+                "complete": true,
+                "truth": "match",
+                "required_evidence": "frontmost_app_window_observation"
+            },
+            "errors": []
+        },
+        "error": null,
+        "mcp_wrapper": {"exit_code": 0, "source_contract_ok": true}
+    });
+    let payload = macos_ax_verify_semantic_bus_payload(&valid_gone, false);
+    assert_eq!(payload["verification"]["verdict"], "verified");
+    assert_eq!(payload["verification"]["recover"], "proceed");
+
+    let truncated_appeared = json!({
+        "schema": MACOS_AX_VERIFY_SOURCE_SCHEMA,
+        "ts": 1780836300,
+        "expect": "window_appeared",
+        "selector": {
+            "bundle_id": "com.openai.codex",
+            "title": "Editor",
+            "pid": null,
+            "index": null
+        },
+        "scope": {
+            "source": "frontmost_app_windows",
+            "platform": {"system": "Darwin"},
+            "max_windows": 8
+        },
+        "verdict": "verified",
+        "recover": "proceed",
+        "observed": {
+            "probe_status": "ready",
+            "permission": {"ax_trusted": true, "method": "AXIsProcessTrusted", "prompted": false},
+            "frontmost_app": {
+                "name": "Codex",
+                "pid": 54862,
+                "bundle_id": "com.openai.codex"
+            },
+            "count": 1,
+            "matches": [{"index": 0, "title": "Editor", "role": "AXWindow"}],
+            "unknown_count": 0,
+            "unknowns": [],
+            "window_count": 1,
+            "source_window_count": 2,
+            "windows_read_ok": true,
+            "app_identity_valid": true,
+            "counts_consistent": false,
+            "scope_match": true,
+            "limits": {"max_windows": 8, "truncated": true, "include_windows": true},
+            "coverage_complete": false,
+            "incomplete_reasons": ["window_enumeration_truncated"],
+            "proof_complete": true,
+            "coverage": {
+                "complete": false,
+                "reasons": ["window_enumeration_truncated"]
+            },
+            "proof": {
+                "complete": true,
+                "truth": "match",
+                "required_evidence": "frontmost_app_window_observation"
+            },
+            "errors": []
+        },
+        "error": null,
+        "mcp_wrapper": {"exit_code": 0, "source_contract_ok": true}
+    });
+    let payload = macos_ax_verify_semantic_bus_payload(&truncated_appeared, false);
+    assert_eq!(payload["verification"]["verdict"], "verified");
+    assert_eq!(payload["verification"]["recover"], "proceed");
+    assert_eq!(payload["verification"]["evidence"]["truncated"], true);
+
+    let mut contradictory_payloads = Vec::new();
+    let mut unreadable = valid_gone.clone();
+    unreadable["observed"]["windows_read_ok"] = json!(false);
+    contradictory_payloads.push(("unreadable", unreadable));
+
+    let mut unknown_window = valid_gone.clone();
+    unknown_window["observed"]["unknown_count"] = json!(1);
+    unknown_window["observed"]["unknowns"] = json!([{"title": null}]);
+    contradictory_payloads.push(("unknown window", unknown_window));
+
+    let mut wrong_platform = valid_gone.clone();
+    wrong_platform["scope"]["platform"]["system"] = json!("Linux");
+    contradictory_payloads.push(("wrong platform", wrong_platform));
+
+    let mut malformed_selector = valid_gone.clone();
+    malformed_selector["selector"]["pid"] = json!(-1);
+    contradictory_payloads.push(("malformed selector", malformed_selector));
+
+    let mut stale_scope = valid_gone.clone();
+    stale_scope["observed"]["scope_match"] = json!(false);
+    contradictory_payloads.push(("scope mismatch", stale_scope));
+
+    let mut missing_error = valid_gone.clone();
+    missing_error.as_object_mut().expect("object").remove("error");
+    contradictory_payloads.push(("missing error field", missing_error));
+
+    let mut missing_recover = valid_gone.clone();
+    missing_recover
+        .as_object_mut()
+        .expect("object")
+        .remove("recover");
+    contradictory_payloads.push(("missing recover field", missing_recover));
+
+    let mut prompted_permission = valid_gone.clone();
+    prompted_permission["observed"]["permission"]["prompted"] = json!(true);
+    contradictory_payloads.push(("prompted permission", prompted_permission));
+
+    for (case, source) in contradictory_payloads {
+        let payload = macos_ax_verify_semantic_bus_payload(&source, false);
+        assert_eq!(
+            payload["verification"]["verdict"], "not_verified",
+            "{case}"
+        );
+        assert_ne!(payload["verification"]["recover"], "proceed", "{case}");
+    }
+
+    let incomplete_verified = json!({
+        "schema": MACOS_AX_VERIFY_SOURCE_SCHEMA,
+        "ts": 1780836300,
+        "expect": "window_gone",
+        "selector": {"bundle_id": "com.openai.codex", "title": "Missing"},
+        "scope": {"source": "frontmost_app_windows"},
+        "verdict": "verified",
+        "recover": "proceed",
+        "observed": {
+            "count": 0,
+            "scope_match": true,
+            "windows_read_ok": false,
+            "coverage": {"complete": false, "reasons": ["window_enumeration_unconfirmed"]},
+            "proof": {"complete": false, "truth": "unknown"}
+        },
+        "error": null,
+        "mcp_wrapper": {"exit_code": 0}
+    });
+    let payload = macos_ax_verify_semantic_bus_payload(&incomplete_verified, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+    assert_eq!(payload["verification"]["recover"], "replan");
+    assert_eq!(
+        payload["verification"]["reason"],
+        "source_verified_without_complete_proof"
+    );
+    assert_eq!(payload["verification"]["evidence"]["proof_complete"], false);
+
+    let unmet_proceed = json!({
+        "schema": MACOS_AX_VERIFY_SOURCE_SCHEMA,
+        "ts": 1780836301,
+        "expect": "window_gone",
+        "selector": {"bundle_id": "com.openai.codex", "title": "Missing"},
+        "scope": {"source": "frontmost_app_windows"},
+        "verdict": "unmet",
+        "recover": "proceed",
+        "observed": {
+            "count": 1,
+            "scope_match": true,
+            "coverage": {"complete": true, "reasons": []},
+            "proof": {"complete": true, "truth": "no_match"}
+        },
+        "error": null,
+        "mcp_wrapper": {"exit_code": 2}
+    });
+    let payload = macos_ax_verify_semantic_bus_payload(&unmet_proceed, false);
+    assert_eq!(payload["verification"]["verdict"], "not_verified");
+    assert_eq!(payload["verification"]["recover"], "replan");
+    assert_ne!(payload["semantic_objects"][0]["state"]["recover"], "proceed");
 }
 
 #[test]

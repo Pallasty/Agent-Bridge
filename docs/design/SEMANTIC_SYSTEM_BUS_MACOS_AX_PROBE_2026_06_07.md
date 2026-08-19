@@ -71,6 +71,19 @@ permission.prompted = false
 
 and skips System Events window reads.
 
+Before launching `osascript`, the probe calls
+`AEDeterminePermissionToAutomateTarget` for System Events with
+`askUserIfNeeded=false`. Every result other than explicit permission is a typed
+failure and prevents the Apple Event send. This is a best-effort prompt guard,
+not a platform-level proof: the preflight runs in Python while the eventual
+sender is `osascript`, so sender attribution and UI behavior must also pass the
+installed-path Mac acceptance test.
+
+If System Events is not already running, macOS returns `procNotFound` (`-600`)
+and the probe fails closed rather than launching it. Starting System Events is
+therefore an operator-owned acceptance prerequisite, not a side effect of this
+read-only adapter.
+
 ## 3. Arguments
 
 ```text
@@ -176,7 +189,8 @@ verification.recover = replan
 
 - read-only;
 - bounded;
-- non-prompting;
+- guarded by a best-effort no-ask Apple Events preflight and fail-closed when
+  permission is not already explicit;
 - useful for deciding whether semantic desktop state is available on macOS.
 
 ## 8. Tests
@@ -190,7 +204,8 @@ cargo test -p ab-bridge macos_ax_probe -- --nocapture
 They verify:
 
 - Codex essential exposes the tool and schema;
-- the wrapper passes bounded/no-prompt script flags;
+- the wrapper passes bounded arguments and the script gates System Events with
+  a no-ask Automation preflight;
 - default output remains `macos_ax_probe/v0`;
 - `semantic_bus=true` returns the semantic envelope;
 - raw payload inclusion is opt-in.

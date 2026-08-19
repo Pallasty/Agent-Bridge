@@ -80,16 +80,18 @@ identifier, bundle id, and CGWindow number. It emits:
 
 ### macos_ax_verify_postcondition
 
-Represents a read-only AX postcondition check:
+Represents the runtime-backed, read-only `macos_ax_verify` postcondition check:
 
 ```text
 source_adapter = macos.ax.verify
-object_type = desktop.verify.target.accessible
-method = macos.ax.verify.polling
+object_type = desktop.verify.target.window
+method = macos_ax_verify.semantic_normalizer
 recover = proceed
 ```
 
-It proves the verify-target object family from SSB-6 is platform-neutral.
+The fixture pins exact frontmost-process scope, complete negative window
+evidence, the proof/coverage split, and the shared recover vocabulary. It also
+keeps OCR as fallback rather than primary state.
 
 ## 4. Windows UIA Fixtures
 

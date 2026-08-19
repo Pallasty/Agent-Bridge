@@ -2790,8 +2790,10 @@ impl McpTool for MacosAxProbeTool {
             name: self.name().into(),
             description: "Read-only macOS Accessibility feasibility probe. Reports platform \
                  support, AX trust state, frontmost app metadata, and a bounded window summary \
-                 only when Accessibility is already trusted. It never prompts for permission, \
-                 clicks, types, focuses apps, or mutates window state."
+                 only when Accessibility is already trusted. It does not request AX permission; \
+                 before System Events it runs a best-effort no-ask Apple Events preflight and \
+                 fails closed unless explicitly allowed. It never clicks, types, focuses apps, \
+                 or mutates window state."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -2948,6 +2950,7 @@ impl McpTool for MacosAxProbeTool {
                             "tool": self.name(),
                             "read_only": true,
                             "include_windows": include_windows,
+                            "max_windows": max_windows,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
                             "stderr": stderr,
@@ -2984,17 +2987,89 @@ fn macos_ax_probe_semantic_bus_payload(probe: &Value, include_raw: bool) -> Valu
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     let schema_ok = source_schema == MACOS_AX_PROBE_SOURCE_SCHEMA;
-    let supported = status != "unsupported_platform";
+    let platform_ok = probe.pointer("/platform/system").and_then(Value::as_str)
+        == Some("Darwin");
+    let include_windows = probe
+        .pointer("/limits/include_windows")
+        .and_then(Value::as_bool);
+    let wrapper_include_windows = probe
+        .pointer("/mcp_wrapper/include_windows")
+        .and_then(Value::as_bool);
+    let wrapper_max_windows = probe
+        .pointer("/mcp_wrapper/max_windows")
+        .and_then(Value::as_u64);
+    let limit_max_windows = probe
+        .pointer("/limits/max_windows")
+        .and_then(Value::as_u64);
+    let request_binding_ok = include_windows.is_some()
+        && wrapper_include_windows == include_windows
+        && wrapper_max_windows.is_some()
+        && wrapper_max_windows == limit_max_windows;
+    let permission_ok = probe.pointer("/permission/ax_trusted").and_then(Value::as_bool)
+        == Some(true)
+        && probe.pointer("/permission/prompted").and_then(Value::as_bool) == Some(false)
+        && probe.pointer("/permission/method").and_then(Value::as_str)
+            == Some("AXIsProcessTrusted");
+    let errors_empty = probe
+        .get("errors")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let window_count = probe.get("window_count").and_then(Value::as_u64);
+    let source_window_count = probe.get("source_window_count").and_then(Value::as_u64);
+    let windows = probe.get("windows").and_then(Value::as_array);
+    let windows_len = windows.map(|windows| windows.len() as u64);
+    let windows_valid = windows.is_some_and(|windows| windows.iter().all(Value::is_object));
+    let incomplete_reasons_empty = probe
+        .get("incomplete_reasons")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let window_evidence_complete = probe.get("read_only").and_then(Value::as_bool) == Some(true)
+        && probe.get("windows_read_ok").and_then(Value::as_bool)
+        == Some(true)
+        && macos_ax_app_identity_valid(probe)
+        && windows_valid
+        && probe.get("counts_consistent").and_then(Value::as_bool) == Some(true)
+        && probe.get("coverage_complete").and_then(Value::as_bool) == Some(true)
+        && incomplete_reasons_empty
+        && probe.pointer("/limits/truncated").and_then(Value::as_bool) == Some(false)
+        && window_count.is_some()
+        && window_count == source_window_count
+        && window_count == windows_len
+        && window_count.zip(limit_max_windows).is_some_and(|(count, limit)| {
+            limit <= 50 && count <= limit
+        });
+    let no_window_evidence_complete = probe.get("read_only").and_then(Value::as_bool)
+        == Some(true)
+        && windows.is_some_and(Vec::is_empty)
+        && window_count == Some(0)
+        && probe.get("source_window_count") == Some(&Value::Null)
+        && probe.get("windows_read_ok") == Some(&Value::Null)
+        && probe.get("frontmost_app") == Some(&Value::Null)
+        && probe.get("app_identity_valid").and_then(Value::as_bool) == Some(false)
+        && probe.get("counts_consistent").and_then(Value::as_bool) == Some(false)
+        && probe.get("coverage_complete").and_then(Value::as_bool) == Some(true)
+        && incomplete_reasons_empty
+        && probe.pointer("/limits/truncated").and_then(Value::as_bool) == Some(false)
+        && limit_max_windows.is_some_and(|limit| limit <= 50);
+    let evidence_admissible = platform_ok
+        && request_binding_ok
+        && permission_ok
+        && errors_empty
+        && match include_windows {
+            Some(true) => window_evidence_complete,
+            Some(false) => no_window_evidence_complete,
+            None => false,
+        };
     let semantic_verdict = if !schema_ok {
         "not_verified"
-    } else if supported {
+    } else if status == "ready" && evidence_admissible {
         "verified"
-    } else {
+    } else if status == "unsupported_platform" {
         "blocked"
+    } else {
+        "not_verified"
     };
-    let recover = if !schema_ok {
-        "replan"
-    } else if status == "ready" || status == "degraded" {
+    let recover = if schema_ok && status == "ready" && evidence_admissible {
         "proceed"
     } else {
         "replan"
@@ -3005,6 +3080,10 @@ fn macos_ax_probe_semantic_bus_payload(probe: &Value, include_raw: bool) -> Valu
         json!("unsupported_platform")
     } else if status == "degraded" {
         json!("limited_accessibility_or_window_read")
+    } else if status == "ready" && !evidence_admissible {
+        json!("incomplete_probe_evidence")
+    } else if status != "ready" {
+        json!("probe_not_ready")
     } else {
         Value::Null
     };
@@ -3161,8 +3240,18 @@ fn macos_ax_probe_semantic_bus_payload(probe: &Value, include_raw: bool) -> Valu
             "evidence": {
                 "source_schema": source_schema,
                 "status": status,
+                "platform_ok": platform_ok,
+                "request_binding_ok": request_binding_ok,
                 "permission": probe.get("permission").cloned().unwrap_or_else(|| json!({})),
                 "window_count": window_count,
+                "source_window_count": probe.get("source_window_count").cloned().unwrap_or(Value::Null),
+                "windows_read_ok": probe.get("windows_read_ok").cloned().unwrap_or(Value::Null),
+                "app_identity_valid": probe.get("app_identity_valid").cloned().unwrap_or(Value::Null),
+                "counts_consistent": probe.get("counts_consistent").cloned().unwrap_or(Value::Null),
+                "coverage_complete": probe.get("coverage_complete").cloned().unwrap_or(Value::Null),
+                "incomplete_reasons": probe.get("incomplete_reasons").cloned().unwrap_or(Value::Null),
+                "limits": probe.get("limits").cloned().unwrap_or_else(|| json!({})),
+                "errors": probe.get("errors").cloned().unwrap_or_else(|| json!([])),
                 "raw_included": include_raw
             },
             "verified_to": if semantic_verdict == "verified" { json!("semantic_objects") } else { Value::Null },
@@ -3474,9 +3563,13 @@ impl McpTool for MacosAxVerifyTool {
             name: self.name().into(),
             description: "Read-only macOS Accessibility verifier. Re-observes the bounded \
                  macOS AX/System Events surface and checks one predicate such as AX trust, \
-                 frontmost app identity, window appeared/gone, or focused window. It never \
-                 prompts for permission, activates apps, focuses windows, clicks, types, \
-                 resizes, moves, or closes windows."
+                 frontmost app identity, window appeared/gone, or focused window. It does not \
+                 request AX permission; System Events reads are guarded by a best-effort no-ask \
+                 Automation preflight. It never activates apps, focuses windows, clicks, types, \
+                 resizes, moves, or closes windows. Window predicates require an exact \
+                 frontmost-process scope (bundle_id or pid) plus a window selector. Absence \
+                 is verified only from a complete, readable, untruncated enumeration; \
+                 unknown or incomplete evidence fails closed."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3492,7 +3585,7 @@ impl McpTool for MacosAxVerifyTool {
                     "expect": {
                         "type": "string",
                         "enum": ["ax_trusted_is", "frontmost_app_is", "window_appeared", "window_gone", "window_focused"],
-                        "description": "The read-only postcondition to check against frontmost app/window state."
+                        "description": "The read-only postcondition to check. window_gone needs complete enumeration; positive window witnesses remain decisive when the unseen tail is truncated."
                     },
                     "app": {
                         "type": "string",
@@ -3500,11 +3593,13 @@ impl McpTool for MacosAxVerifyTool {
                     },
                     "bundle_id": {
                         "type": "string",
-                        "description": "Frontmost app bundle identifier substring."
+                        "minLength": 1,
+                        "description": "Exact, case-insensitive frontmost app bundle identifier. Required with window predicates unless pid is supplied."
                     },
                     "pid": {
                         "type": "integer",
-                        "description": "Frontmost app process id."
+                        "minimum": 1,
+                        "description": "Positive frontmost app process id. Required with window predicates unless bundle_id is supplied."
                     },
                     "title": {
                         "type": "string",
@@ -3516,7 +3611,8 @@ impl McpTool for MacosAxVerifyTool {
                     },
                     "index": {
                         "type": "integer",
-                        "description": "Sampling-local window index from macos_ax_probe; do not treat it as stable across observations."
+                        "minimum": 0,
+                        "description": "Sampling-local window index from macos_ax_probe. It may only refine appeared/focused checks, is never sufficient alone, and is rejected for window_gone."
                     },
                     "ax_identifier": {
                         "type": "string",
@@ -3593,7 +3689,28 @@ impl McpTool for MacosAxVerifyTool {
             .and_then(Value::as_f64)
             .unwrap_or(4.0)
             .clamp(0.0, 30.0);
-        let min_proc_ms = (poll_timeout_secs * 1000.0) as u64 + 5_000;
+        let jxa_timeout_secs = args
+            .get("jxa_timeout_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(4.0)
+            .clamp(0.25, 10.0);
+        let poll_interval_secs = args
+            .get("poll_interval_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.3)
+            .clamp(0.05, 5.0);
+        let settle_secs = args
+            .get("settle_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(0.0, 5.0);
+        let min_proc_ms = ((settle_secs
+            + poll_timeout_secs
+            + poll_interval_secs
+            + jxa_timeout_secs)
+            * 1000.0)
+            .ceil() as u64
+            + 1_000;
         let timeout_ms = args
             .get("timeout_ms")
             .and_then(Value::as_u64)
@@ -3605,11 +3722,6 @@ impl McpTool for MacosAxVerifyTool {
             .and_then(Value::as_u64)
             .unwrap_or(8)
             .min(50);
-        let jxa_timeout_secs = args
-            .get("jxa_timeout_secs")
-            .and_then(Value::as_f64)
-            .unwrap_or(4.0)
-            .clamp(0.25, 10.0);
         let semantic_bus = args
             .get("semantic_bus")
             .and_then(Value::as_bool)
@@ -3638,7 +3750,7 @@ impl McpTool for MacosAxVerifyTool {
         cmd.arg(&script)
             .arg("--compact")
             .arg("--expect")
-            .arg(expect)
+            .arg(&expect)
             .arg("--max-windows")
             .arg(max_windows.to_string())
             .arg("--jxa-timeout-secs")
@@ -3706,10 +3818,59 @@ impl McpTool for MacosAxVerifyTool {
                         }),
                     );
                 }
+                let exit_code = output.status.code().unwrap_or(-1);
+                let source_schema_ok = payload.get("schema").and_then(Value::as_str)
+                    == Some(MACOS_AX_VERIFY_SOURCE_SCHEMA);
+                let source_verdict = payload.get("verdict").and_then(Value::as_str);
+                let exit_contract_ok = matches!(
+                    (source_verdict, exit_code),
+                    (Some("verified"), 0) | (Some("unmet"), 2) | (Some("error"), 3)
+                );
+                let request_binding_ok = macos_ax_verify_request_binding_valid(
+                    &payload,
+                    &args,
+                    &expect,
+                    max_windows,
+                );
+                let outcome_contract_ok =
+                    macos_ax_verify_source_outcome_contract_valid(&payload);
+                let source_contract_ok = source_schema_ok
+                    && exit_contract_ok
+                    && request_binding_ok
+                    && outcome_contract_ok;
+                if let Some(wrapper) = payload
+                    .get_mut("mcp_wrapper")
+                    .and_then(Value::as_object_mut)
+                {
+                    wrapper.insert("exit_code".to_string(), json!(exit_code));
+                    wrapper.insert(
+                        "source_contract_ok".to_string(),
+                        json!(source_contract_ok),
+                    );
+                    wrapper.insert(
+                        "request_binding_ok".to_string(),
+                        json!(request_binding_ok),
+                    );
+                    wrapper.insert(
+                        "outcome_contract_ok".to_string(),
+                        json!(outcome_contract_ok),
+                    );
+                }
                 if semantic_bus {
                     payload = macos_ax_verify_semantic_bus_payload(&payload, semantic_include_raw);
                 }
-                Ok(ToolResult::json_text(&payload))
+                let source_is_error = !source_contract_ok || if semantic_bus {
+                    payload
+                        .get("verification")
+                        .and_then(|verification| verification.get("source_verdict"))
+                        .and_then(Value::as_str)
+                        == Some("error")
+                } else {
+                    payload.get("verdict").and_then(Value::as_str) == Some("error")
+                };
+                let mut result = ToolResult::json_text(&payload);
+                result.is_error = source_is_error;
+                Ok(result)
             }
             Err(e) => Ok(macos_ax_verify_error(json!({
                 "code": "invalid_json",
@@ -3721,6 +3882,377 @@ impl McpTool for MacosAxVerifyTool {
                 "truncated": stdout_truncated || stderr_truncated
             }))),
         }
+    }
+}
+
+fn macos_ax_verify_request_binding_valid(
+    payload: &Value,
+    args: &Value,
+    expect: &str,
+    max_windows: u64,
+) -> bool {
+    if payload.get("expect").and_then(Value::as_str) != Some(expect)
+        || payload.pointer("/scope/source").and_then(Value::as_str)
+            != Some("frontmost_app_windows")
+        || payload.pointer("/scope/max_windows").and_then(Value::as_u64)
+            != Some(max_windows)
+    {
+        return false;
+    }
+    let Some(selector) = payload.get("selector") else {
+        return false;
+    };
+    for key in [
+        "app",
+        "bundle_id",
+        "pid",
+        "title",
+        "role",
+        "index",
+        "ax_identifier",
+        "state",
+    ] {
+        let expected = args.get(key).unwrap_or(&Value::Null);
+        let actual = selector.get(key).unwrap_or(&Value::Null);
+        if actual != expected {
+            return false;
+        }
+    }
+    true
+}
+
+fn macos_ax_nonempty_string(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn macos_ax_positive_pid(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_u64).is_some_and(|pid| pid > 0)
+}
+
+fn macos_ax_app_identity_valid(observed: &Value) -> bool {
+    if observed.get("app_identity_valid").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let Some(app) = observed.get("frontmost_app") else {
+        return false;
+    };
+    macos_ax_positive_pid(app.get("pid"))
+        && (macos_ax_nonempty_string(app.get("name"))
+            || macos_ax_nonempty_string(app.get("bundle_id")))
+}
+
+fn macos_ax_selector_app_matches(selector: &Value, observed: &Value) -> bool {
+    let Some(app) = observed.get("frontmost_app") else {
+        return false;
+    };
+    if let Some(expected) = selector.get("app").and_then(Value::as_str) {
+        let Some(actual) = app.get("name").and_then(Value::as_str) else {
+            return false;
+        };
+        if !actual.to_lowercase().contains(&expected.to_lowercase()) {
+            return false;
+        }
+    }
+    if let Some(expected) = selector.get("bundle_id").and_then(Value::as_str) {
+        let Some(actual) = app.get("bundle_id").and_then(Value::as_str) else {
+            return false;
+        };
+        if !actual.eq_ignore_ascii_case(expected) {
+            return false;
+        }
+    }
+    if let Some(expected) = selector.get("pid").and_then(Value::as_u64) {
+        if expected == 0 || app.get("pid").and_then(Value::as_u64) != Some(expected) {
+            return false;
+        }
+    }
+    true
+}
+
+fn macos_ax_window_selector_matches(selector: &Value, window: &Value) -> bool {
+    for (selector_key, window_key, exact) in [
+        ("title", "title", false),
+        ("role", "role", false),
+        ("ax_identifier", "ax_identifier", true),
+    ] {
+        let Some(expected) = selector.get(selector_key).and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(actual) = window.get(window_key).and_then(Value::as_str) else {
+            return false;
+        };
+        let matches = if exact {
+            actual == expected
+        } else {
+            actual.to_lowercase().contains(&expected.to_lowercase())
+        };
+        if !matches {
+            return false;
+        }
+    }
+    if let Some(expected) = selector.get("index").and_then(Value::as_u64) {
+        if window.get("index").and_then(Value::as_u64) != Some(expected) {
+            return false;
+        }
+    }
+    true
+}
+
+fn macos_ax_verify_selector_valid(expect: &str, selector: &Value) -> bool {
+    for key in ["app", "bundle_id", "title", "role", "ax_identifier"] {
+        if selector.get(key).is_some_and(|value| {
+            !value.is_null() && !macos_ax_nonempty_string(Some(value))
+        }) {
+            return false;
+        }
+    }
+    if selector
+        .get("pid")
+        .is_some_and(|value| !value.is_null() && !macos_ax_positive_pid(Some(value)))
+    {
+        return false;
+    }
+    if selector
+        .get("index")
+        .is_some_and(|value| !value.is_null() && value.as_u64().is_none())
+    {
+        return false;
+    }
+    let app_selector = macos_ax_nonempty_string(selector.get("app"))
+        || macos_ax_nonempty_string(selector.get("bundle_id"))
+        || macos_ax_positive_pid(selector.get("pid"));
+    let stable_scope = macos_ax_nonempty_string(selector.get("bundle_id"))
+        || macos_ax_positive_pid(selector.get("pid"));
+    let window_selector = macos_ax_nonempty_string(selector.get("title"))
+        || macos_ax_nonempty_string(selector.get("role"))
+        || macos_ax_nonempty_string(selector.get("ax_identifier"));
+    match expect {
+        "ax_trusted_is" => selector
+            .get("state")
+            .and_then(Value::as_str)
+            .is_some_and(|state| {
+                matches!(
+                    state.trim().to_ascii_lowercase().as_str(),
+                    "true" | "1" | "yes" | "y" | "false" | "0" | "no" | "n"
+                )
+            }),
+        "frontmost_app_is" => app_selector,
+        "window_appeared" | "window_focused" => stable_scope && window_selector,
+        "window_gone" => {
+            stable_scope
+                && window_selector
+                && selector.get("index").map(Value::is_null).unwrap_or(true)
+        }
+        _ => false,
+    }
+}
+
+fn macos_ax_verify_claim_evidence_valid(
+    expect: &str,
+    selector: &Value,
+    scope: &Value,
+    observed: &Value,
+) -> bool {
+    if !macos_ax_verify_selector_valid(expect, selector) {
+        return false;
+    }
+    if scope.get("source").and_then(Value::as_str) != Some("frontmost_app_windows")
+        || scope.pointer("/platform/system").and_then(Value::as_str) != Some("Darwin")
+    {
+        return false;
+    }
+    let permission = observed.get("permission");
+    let permission_ok = permission
+        .and_then(|value| value.get("ax_trusted"))
+        .and_then(Value::as_bool)
+        == Some(true)
+        && permission
+            .and_then(|value| value.get("prompted"))
+            .and_then(Value::as_bool)
+            == Some(false)
+        && permission
+            .and_then(|value| value.get("method"))
+            .and_then(Value::as_str)
+            == Some("AXIsProcessTrusted");
+    let observed_count = observed.get("count").and_then(Value::as_u64);
+    let matches = observed.get("matches").and_then(Value::as_array);
+    let errors = observed.get("errors").and_then(Value::as_array);
+    match expect {
+        "ax_trusted_is" => {
+            let expected = selector
+                .get("state")
+                .and_then(Value::as_str)
+                .map(|state| {
+                    matches!(
+                        state.trim().to_ascii_lowercase().as_str(),
+                        "true" | "1" | "yes" | "y"
+                    )
+                });
+            permission
+                .and_then(|value| value.get("ax_trusted"))
+                .and_then(Value::as_bool)
+                == expected
+                && permission
+                    .and_then(|value| value.get("prompted"))
+                    .and_then(Value::as_bool)
+                    == Some(false)
+                && permission
+                    .and_then(|value| value.get("method"))
+                    .and_then(Value::as_str)
+                    == Some("AXIsProcessTrusted")
+                && observed.get("probe_status").and_then(Value::as_str) == Some("ready")
+                && observed_count == Some(1)
+                && matches.is_some_and(|values| values.len() == 1)
+                && errors.is_some_and(Vec::is_empty)
+        }
+        "frontmost_app_is" => {
+            let app_errors_safe = errors.is_some_and(|values| {
+                values.iter().all(|error| {
+                    matches!(
+                        error.get("stage").and_then(Value::as_str),
+                        Some("system_events_windows" | "system_events_window_count")
+                    )
+                })
+            });
+            permission_ok
+                && matches!(
+                    observed.get("probe_status").and_then(Value::as_str),
+                    Some("ready" | "degraded")
+                )
+                && macos_ax_app_identity_valid(observed)
+                && macos_ax_selector_app_matches(selector, observed)
+                && observed_count == Some(1)
+                && matches.is_some_and(|values| values.len() == 1)
+                && app_errors_safe
+        }
+        "window_appeared" | "window_focused" | "window_gone" => {
+            let window_count = observed.get("window_count").and_then(Value::as_u64);
+            let source_count = observed
+                .get("source_window_count")
+                .and_then(Value::as_u64);
+            let scope_max_windows = scope.get("max_windows").and_then(Value::as_u64);
+            let limit_max_windows = observed
+                .pointer("/limits/max_windows")
+                .and_then(Value::as_u64);
+            let truncated = observed.pointer("/limits/truncated").and_then(Value::as_bool);
+            let counts_equal = source_count.zip(window_count).map(|(source, returned)| {
+                source == returned
+            });
+            let counts_consistent = observed.get("counts_consistent").and_then(Value::as_bool);
+            let coverage_complete = observed
+                .pointer("/coverage/complete")
+                .and_then(Value::as_bool);
+            let coverage_reasons = observed
+                .pointer("/coverage/reasons")
+                .and_then(Value::as_array);
+            let base_valid = permission_ok
+                && observed.get("probe_status").and_then(Value::as_str) == Some("ready")
+                && observed.get("windows_read_ok").and_then(Value::as_bool) == Some(true)
+                && macos_ax_app_identity_valid(observed)
+                && macos_ax_selector_app_matches(selector, observed)
+                && observed.get("scope_match").and_then(Value::as_bool) == Some(true)
+                && errors.is_some_and(Vec::is_empty)
+                && observed.pointer("/limits/include_windows").and_then(Value::as_bool)
+                    == Some(true)
+                && window_count.is_some()
+                && scope_max_windows == limit_max_windows
+                && limit_max_windows.is_some_and(|limit| {
+                    limit <= 50 && window_count.is_some_and(|count| count <= limit)
+                })
+                && source_count.is_some_and(|source| source >= window_count.unwrap_or(u64::MAX))
+                && truncated == source_count.zip(window_count).map(|(source, returned)| source > returned)
+                && counts_consistent == counts_equal
+                && coverage_complete == counts_equal
+                && coverage_reasons.is_some_and(|reasons| reasons.is_empty() == counts_equal.unwrap_or(false));
+            if !base_valid {
+                return false;
+            }
+            if expect == "window_gone" {
+                return observed_count == Some(0)
+                    && matches.is_some_and(Vec::is_empty)
+                    && observed.get("unknown_count").and_then(Value::as_u64) == Some(0)
+                    && observed.get("unknowns").and_then(Value::as_array).is_some_and(Vec::is_empty)
+                    && coverage_complete == Some(true)
+                    && counts_consistent == Some(true)
+                    && truncated == Some(false)
+                    && source_count == window_count;
+            }
+            let Some(values) = matches else {
+                return false;
+            };
+            observed_count == Some(values.len() as u64)
+                && !values.is_empty()
+                && window_count.is_some_and(|count| values.len() as u64 <= count)
+                && values.iter().any(|window| {
+                    macos_ax_window_selector_matches(selector, window)
+                        && (expect != "window_focused"
+                            || window.get("focused").and_then(Value::as_bool) == Some(true))
+                })
+        }
+        _ => false,
+    }
+}
+
+fn macos_ax_verify_verified_source_contract_valid(verify: &Value) -> bool {
+    let Some(expect) = verify.get("expect").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(selector) = verify.get("selector") else {
+        return false;
+    };
+    let Some(scope) = verify.get("scope") else {
+        return false;
+    };
+    let Some(observed) = verify.get("observed") else {
+        return false;
+    };
+    let expected_evidence = match expect {
+        "ax_trusted_is" => Some("ax_trust"),
+        "frontmost_app_is" => Some("frontmost_app_identity"),
+        "window_appeared" | "window_gone" | "window_focused" => {
+            Some("frontmost_app_window_observation")
+        }
+        _ => None,
+    };
+    let proof_complete = observed
+        .pointer("/proof/complete")
+        .and_then(Value::as_bool)
+        == Some(true);
+    let coverage_complete = observed
+        .pointer("/coverage/complete")
+        .and_then(Value::as_bool);
+    verify.get("recover").and_then(Value::as_str) == Some("proceed")
+        && verify.get("error") == Some(&Value::Null)
+        && proof_complete
+        && observed.pointer("/proof/truth").and_then(Value::as_str) == Some("match")
+        && expected_evidence.is_some()
+        && observed
+            .pointer("/proof/required_evidence")
+            .and_then(Value::as_str)
+            == expected_evidence
+        && observed.get("proof_complete").and_then(Value::as_bool) == Some(true)
+        && observed.get("coverage_complete").and_then(Value::as_bool)
+            == coverage_complete
+        && observed.get("incomplete_reasons") == observed.pointer("/coverage/reasons")
+        && macos_ax_verify_claim_evidence_valid(expect, selector, scope, observed)
+}
+
+fn macos_ax_verify_source_outcome_contract_valid(verify: &Value) -> bool {
+    let recover = verify.get("recover").and_then(Value::as_str);
+    match verify.get("verdict").and_then(Value::as_str) {
+        Some("verified") => macos_ax_verify_verified_source_contract_valid(verify),
+        Some("unmet") => {
+            matches!(recover, Some("retry" | "replan" | "escalate"))
+                && verify.get("error") == Some(&Value::Null)
+        }
+        Some("error") => {
+            matches!(recover, Some("replan" | "escalate"))
+                && verify.get("error").is_some_and(|error| !error.is_null())
+        }
+        _ => false,
     }
 }
 
@@ -3739,10 +4271,8 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
         .get("verdict")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let source_recover = verify
-        .get("recover")
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| match source_verdict {
+    let explicit_source_recover = verify.get("recover").and_then(Value::as_str);
+    let source_recover = explicit_source_recover.unwrap_or_else(|| match source_verdict {
             "verified" => "proceed",
             "error" => "escalate",
             "unmet" => "retry",
@@ -3762,18 +4292,42 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
         desktop_snapshot_slug(expect)
     );
     let schema_ok = source_schema == MACOS_AX_VERIFY_SOURCE_SCHEMA;
+    let source_exit_ok = verify
+        .pointer("/mcp_wrapper/exit_code")
+        .and_then(Value::as_i64)
+        == Some(0);
+    let wrapper_contract_ok = verify
+        .pointer("/mcp_wrapper/source_contract_ok")
+        .and_then(Value::as_bool)
+        == Some(true);
+    let verified_proof_ok = source_exit_ok
+        && wrapper_contract_ok
+        && macos_ax_verify_verified_source_contract_valid(verify);
     let semantic_verdict = if !schema_ok {
         "not_verified"
     } else {
         match source_verdict {
-            "verified" => "verified",
+            "verified" if verified_proof_ok => "verified",
+            "verified" => "not_verified",
             "error" => "error",
             _ => "not_verified",
         }
     };
+    let semantic_recover = if semantic_verdict == "verified" {
+        "proceed"
+    } else if source_recover == "proceed" {
+        "replan"
+    } else {
+        match source_recover {
+            "retry" | "replan" | "escalate" => source_recover,
+            _ => "replan",
+        }
+    };
     let reason = if !schema_ok {
         json!("unexpected_source_schema")
-    } else if source_verdict == "verified" {
+    } else if source_verdict == "verified" && !verified_proof_ok {
+        json!("source_verified_without_complete_proof")
+    } else if semantic_verdict == "verified" {
         Value::Null
     } else if source_verdict == "error" {
         verify
@@ -3810,7 +4364,8 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
                     "selector": selector,
                     "scope": scope,
                     "source_verdict": source_verdict,
-                    "recover": source_recover,
+                    "source_recover": source_recover,
+                    "recover": semantic_recover,
                     "change": verify.get("change").cloned().unwrap_or(Value::Null),
                     "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
                     "polls": verify.get("polls").cloned().unwrap_or(Value::Null),
@@ -3818,7 +4373,7 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
                     "error": verify.get("error").cloned().unwrap_or(Value::Null)
                 },
                 "relations": [],
-                "confidence": if schema_ok { 0.86 } else { 0.25 },
+                "confidence": if semantic_verdict == "verified" { 0.9 } else if schema_ok { 0.45 } else { 0.25 },
                 "observed_at": ts,
                 "provenance": {
                     "tool": "macos_ax_verify",
@@ -3847,7 +4402,8 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
                 "payload_json": {
                     "expect": expect,
                     "source_verdict": source_verdict,
-                    "recover": source_recover,
+                    "source_recover": source_recover,
+                    "recover": semantic_recover,
                     "observed_count": observed_count,
                     "held_after_ms": verify.get("held_after_ms").cloned().unwrap_or(Value::Null),
                     "polls": verify.get("polls").cloned().unwrap_or(Value::Null)
@@ -3858,6 +4414,7 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
         "verification": {
             "verdict": semantic_verdict,
             "source_verdict": source_verdict,
+            "source_recover": source_recover,
             "reason": reason,
             "method": "macos_ax_verify.semantic_normalizer",
             "evidence": {
@@ -3867,22 +4424,35 @@ fn macos_ax_verify_semantic_bus_payload(verify: &Value, include_raw: bool) -> Va
                 "scope": verify.get("scope").cloned().unwrap_or_else(|| json!({})),
                 "observed_count": observed.get("count").cloned().unwrap_or(Value::Null),
                 "probe_status": observed.get("probe_status").cloned().unwrap_or(Value::Null),
+                "proof_complete": observed.pointer("/proof/complete").cloned().unwrap_or(Value::Null),
+                "proof_truth": observed.pointer("/proof/truth").cloned().unwrap_or(Value::Null),
+                "scope_match": observed.get("scope_match").cloned().unwrap_or(Value::Null),
+                "coverage_complete": observed.pointer("/coverage/complete").cloned().unwrap_or(Value::Null),
+                "incomplete_reasons": observed.pointer("/coverage/reasons").cloned().unwrap_or(Value::Null),
+                "windows_read_ok": observed.get("windows_read_ok").cloned().unwrap_or(Value::Null),
+                "app_identity_valid": observed.get("app_identity_valid").cloned().unwrap_or(Value::Null),
+                "counts_consistent": observed.get("counts_consistent").cloned().unwrap_or(Value::Null),
+                "window_count": observed.get("window_count").cloned().unwrap_or(Value::Null),
+                "source_window_count": observed.get("source_window_count").cloned().unwrap_or(Value::Null),
+                "truncated": observed.pointer("/limits/truncated").cloned().unwrap_or(Value::Null),
+                "wrapper_exit_code": verify.pointer("/mcp_wrapper/exit_code").cloned().unwrap_or(Value::Null),
                 "raw_included": include_raw
             },
             "verified_to": if semantic_verdict == "verified" { json!("postcondition") } else { Value::Null },
-            "recover": if schema_ok { source_recover } else { "replan" },
+            "recover": semantic_recover,
             "raw_available": true
         },
         "presentation": {
             "presentation_id": format!("present-macos-ax-verify-{ts_label}"),
             "source_event_ids": [event_id],
             "human_summary": format!(
-                "macos_ax_verify {expect} returned {source_verdict}; recover={source_recover}."
+                "macos_ax_verify {expect} returned {source_verdict}; recover={semantic_recover}."
             ),
             "machine_payload": {
                 "expect": expect,
                 "source_verdict": source_verdict,
-                "recover": source_recover,
+                "source_recover": source_recover,
+                "recover": semantic_recover,
                 "observed_count": observed.get("count").cloned().unwrap_or(Value::Null),
                 "probe_status": observed.get("probe_status").cloned().unwrap_or(Value::Null)
             },
@@ -4160,7 +4730,7 @@ fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapt
             runtime_assets: &["scripts/macos_ax_probe.py"],
             fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_snapshot_state.json"],
             doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_PROBE_2026_06_07.md"],
-            notes: &["No permission prompt; bounded to existing Accessibility trust and frontmost-app state."],
+            notes: &["Best-effort no-ask Automation preflight; bounded to pregranted Accessibility and frontmost-app state."],
         },
         SemanticBusAdapterSpec {
             adapter_id: "macos_ax_verify",
@@ -4173,7 +4743,7 @@ fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapt
             status: "runtime_backed_if_assets_present",
             channels: &["ax_trust", "system_events", "frontmost_app_windows"],
             fallback_order: &["macos_ax_verify", "macos_ax_probe", "vision_grounding_ocr"],
-            runtime_assets: &["scripts/macos_ax_verify.py"],
+            runtime_assets: &["scripts/macos_ax_verify.py", "scripts/macos_ax_probe.py"],
             fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_verify_postcondition.json"],
             doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md"],
             notes: &["Read-only predicate verifier over the same bounded macOS AX surface."],
@@ -44933,8 +45503,8 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // with pre/post state reads. No arbitrary DBus method or shell surface.
     "app_control",
     // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
-    // No permission prompt and no host mutation; this is the first local
-    // cross-platform SSB runtime probe.
+    // Best-effort no-ask Automation preflight and no host mutation; this is the
+    // first local cross-platform SSB runtime probe.
     "macos_ax_probe",
     // macOS adapter verifier: read-only predicate check over the same bounded
     // AX/System Events observation surface as macos_ax_probe.

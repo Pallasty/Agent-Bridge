@@ -347,7 +347,7 @@ fn linux_adapter_conformance_fixtures_pin_read_only_semantics() {
 
 #[test]
 fn cross_platform_adapter_conformance_fixtures_pin_mapping_contract() {
-    let allowed_tools = ["desktop_snapshot", "desktop_verify"];
+    let allowed_tools = ["desktop_snapshot", "desktop_verify", "macos_ax_verify"];
     let allowed_recover = ["proceed", "retry", "replan", "escalate"];
 
     for (name, raw) in CROSS_PLATFORM_ADAPTER_CONFORMANCE_FIXTURES {
@@ -400,7 +400,9 @@ fn cross_platform_adapter_conformance_fixtures_pin_mapping_contract() {
                     "{name} source_adapter {source_adapter}"
                 );
                 assert!(
-                    channels.contains("ax") || channels.contains("cgwindow"),
+                    channels.contains("ax")
+                        || channels.contains("cgwindow")
+                        || channels.contains("frontmost_app_windows"),
                     "{name} macOS fixture should use AX/CGWindow channels"
                 );
             }
@@ -426,11 +428,21 @@ fn cross_platform_adapter_conformance_fixtures_pin_mapping_contract() {
                 "{name} snapshot fixture should emit a canonical desktop object"
             );
         }
-        if tool == "desktop_verify" {
+        if matches!(tool, "desktop_verify" | "macos_ax_verify") {
             assert!(
                 str_field(object, "object_type").starts_with("desktop.verify.target."),
                 "{name} verify fixture should emit a canonical verify target"
             );
+        }
+        if tool == "macos_ax_verify" {
+            assert_eq!(channels.len(), 3);
+            for channel in ["ax_trust", "system_events", "frontmost_app_windows"] {
+                assert!(channels.contains(channel), "missing {channel}");
+            }
+            assert_eq!(fallback_order.len(), 3);
+            for fallback in ["macos_ax_verify", "macos_ax_probe", "vision_grounding_ocr"] {
+                assert!(fallback_order.contains(fallback), "missing {fallback}");
+            }
         }
 
         let verification = object_field(&fixture, "verification");
@@ -462,7 +474,7 @@ fn cross_platform_adapter_conformance_fixtures_pin_mapping_contract() {
                     "{name} {action_type} must require a gate"
                 );
             }
-            if action_type == "desktop.verify" {
+            if matches!(action_type, "desktop.verify" | "macos_ax_verify") {
                 assert!(
                     !bool_field(affordance, "requires_gate"),
                     "{name} read-only verify affordance should not require a gate"

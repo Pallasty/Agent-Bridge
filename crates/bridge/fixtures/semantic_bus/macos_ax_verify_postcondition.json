@@ -4,99 +4,106 @@
   "adapter_contract": {
     "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
     "adapter_family": "macos_desktop",
-    "tool": "desktop_verify",
+    "tool": "macos_ax_verify",
     "read_only": true,
     "broad_host_mutation": false,
     "mutation_surface": "none",
     "channels": [
-      "ax",
-      "cgwindow"
+      "ax_trust",
+      "system_events",
+      "frontmost_app_windows"
     ],
     "fallback_order": [
-      "ax",
-      "cgwindow",
+      "macos_ax_verify",
+      "macos_ax_probe",
       "vision_grounding_ocr"
     ],
-    "isolation": "read_only_polling_requires_accessibility_permission",
-    "notes": "macOS verification should poll AX/CGWindow state and return the shared recover vocabulary."
+    "isolation": "read_only_polling_requires_pregranted_accessibility_and_automation_permission",
+    "notes": "macos_ax_verify binds an exact frontmost process scope and fails closed when AX window evidence is unreadable, truncated, unknown, or inconsistent."
   },
   "semantic_object": {
     "schema": "agent_bridge.semantic_bus.object.v0",
-    "object_id": "desktop:macos:verify:accessible:4242:approve-enabled",
-    "object_type": "desktop.verify.target.accessible",
+    "object_id": "desktop:macos:verify:window:window-gone-main",
+    "object_type": "desktop.verify.target.window",
     "source_adapter": "macos.ax.verify",
-    "label": "Approve enabled postcondition",
+    "label": "macos_ax_verify window_gone main",
     "state": {
-      "platform": {
-        "bundle_id": "com.example.AgentBridgeFixture",
-        "ax_identifier": "approve"
-      },
+      "platform": {"system": "Darwin", "machine": "arm64"},
       "selector": {
-        "platform": "macos",
-        "object_id": "desktop:macos:accessible:4242:axid-approve",
-        "role": "button",
-        "name": "Approve",
-        "state": "enabled"
+        "bundle_id": "com.example.AgentBridgeFixture",
+        "title": "Transient Dialog",
+        "pid": null,
+        "index": null
       },
-      "expect": "state_is",
+      "scope": {
+        "source": "frontmost_app_windows",
+        "platform": {"system": "Darwin"},
+        "max_windows": 8
+      },
+      "expect": "window_gone",
       "source_verdict": "verified",
+      "source_recover": "proceed",
       "recover": "proceed",
       "held_after_ms": 120,
-      "polls": 2
-    },
-    "relations": [
-      {
-        "type": "verified_after",
-        "target": "desktop:macos:accessible:4242:axid-approve"
+      "polls": 2,
+      "observed": {
+        "probe_status": "ready",
+        "scope_match": true,
+        "windows_read_ok": true,
+        "app_identity_valid": true,
+        "counts_consistent": true,
+        "window_count": 1,
+        "source_window_count": 1,
+        "unknown_count": 0,
+        "coverage": {"complete": true, "reasons": []},
+        "proof": {
+          "complete": true,
+          "truth": "match",
+          "required_evidence": "frontmost_app_window_observation"
+        },
+        "errors": []
       }
-    ],
-    "confidence": 0.91,
+    },
+    "relations": [],
+    "confidence": 0.9,
     "observed_at": "2026-06-07T12:01:00Z",
     "provenance": {
-      "tool": "desktop_verify",
-      "schema": "agent_bridge.semantic_bus.desktop_verify.v0",
-      "platform_schema": "macos.ax.verify.fixture"
+      "tool": "macos_ax_verify",
+      "schema": "agent_bridge.semantic_bus.macos_ax_verify.v0",
+      "platform_schema": "macos_ax_verify/v0"
     }
   },
   "affordances": [
     {
-      "affordance_id": "desktop:macos:verify:accessible:4242:approve-enabled:reverify",
-      "object_id": "desktop:macos:verify:accessible:4242:approve-enabled",
-      "action_type": "desktop.verify",
+      "affordance_id": "desktop:macos:verify:window:window-gone-main:reverify",
+      "object_id": "desktop:macos:verify:window:window-gone-main",
+      "action_type": "macos_ax_verify",
       "args_schema": {
-        "platform": "macos",
-        "expect": "state_is",
-        "object_id": "desktop:macos:accessible:4242:axid-approve",
-        "role": "button",
-        "name": "Approve",
-        "state": "enabled",
-        "macos": {
-          "bundle_id": "com.example.AgentBridgeFixture",
-          "ax_identifier": "approve"
-        }
+        "expect": "window_gone",
+        "bundle_id": "com.example.AgentBridgeFixture",
+        "title": "Transient Dialog"
       },
       "risk_level": "low",
       "requires_gate": false,
-      "expected_effect": "re-observes the same AX postcondition without mutating the desktop"
+      "expected_effect": "re-observes the same bounded frontmost-app AX window predicate without mutating desktop state"
     }
   ],
   "events": [
     {
       "event_id": "evt-macos-ax-verify-postcondition",
       "ts": "2026-06-07T12:01:00Z",
-      "source": "desktop_verify",
+      "source": "macos_ax_verify",
       "actor": "agent",
       "project": "agent-bridge",
       "event_type": "desktop.verify.completed",
-      "subject_id": "desktop:macos:verify:accessible:4242:approve-enabled",
+      "subject_id": "desktop:macos:verify:window:window-gone-main",
       "payload_json": {
-        "expect": "state_is",
+        "expect": "window_gone",
         "source_verdict": "verified",
+        "source_recover": "proceed",
         "recover": "proceed"
       },
-      "source_event_ids": [
-        "evt-macos-ax-snapshot-button-observed"
-      ],
+      "source_event_ids": [],
       "prev_hash": null,
       "hash": "fixture"
     }
@@ -104,14 +111,20 @@
   "verification": {
     "verdict": "verified",
     "reason": null,
-    "method": "macos.ax.verify.polling",
+    "method": "macos_ax_verify.semantic_normalizer",
     "evidence": {
-      "expect": "state_is",
-      "attribute": "AXEnabled",
-      "held_after_ms": 120,
-      "accessibility_permission": "available"
+      "expect": "window_gone",
+      "proof_complete": true,
+      "proof_truth": "match",
+      "scope_match": true,
+      "coverage_complete": true,
+      "windows_read_ok": true,
+      "app_identity_valid": true,
+      "counts_consistent": true,
+      "truncated": false,
+      "wrapper_exit_code": 0
     },
-    "verified_to": "desktop:macos:accessible:4242:axid-approve:state_is:enabled",
+    "verified_to": "postcondition",
     "recover": "proceed",
     "raw_available": true
   },
@@ -120,9 +133,10 @@
     "source_event_ids": [
       "evt-macos-ax-verify-postcondition"
     ],
-    "human_summary": "macOS AX verifier confirms a shared SSB postcondition and recover hint.",
+    "human_summary": "macos_ax_verify proved window absence from complete scoped AX evidence.",
     "machine_payload": {
-      "object_id": "desktop:macos:verify:accessible:4242:approve-enabled",
+      "expect": "window_gone",
+      "source_verdict": "verified",
       "recover": "proceed"
     },
     "ingestion": {
