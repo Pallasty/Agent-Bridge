@@ -9,6 +9,15 @@
 #   C. no --cage-pid, no --confirm (host posture) -> DENIED,  NO activation.
 #   D. desktop_semantic_task MCP transaction         -> snapshot + invoke + verify.
 #
+# Optional evidence controls:
+#   AB_ACCEPT_RECEIPT_PATH=/durable/path/receipt.json
+#       Write and validate agent_bridge.desktop_acceptance_receipt.v0.
+#   AB_ACCEPT_WLR_BACKEND=headless
+#       Use a virtual headless wlroots backend when no parent Wayland display
+#       exists. The default remains the nested Wayland backend.
+#   AB_ACCEPT_SOURCE_COMMIT=<40-64 lowercase hex>
+#       Bind a staged source/script bundle that is outside a Git checkout.
+#
 # AT-SPI is a session-global D-Bus registry, so desktop_invoke runs in the HOST
 # env (display-independent) and isolates by process: the toy is exec'd by the
 # nested sway, so its app PID is a descendant of $SWAY_PID.
@@ -19,6 +28,7 @@ INV="$DIR/../desktop_invoke.py"
 SNAP="$DIR/../desktop_snapshot.py"
 VERIFY="$DIR/../desktop_verify.py"
 TOY="$DIR/toy_button.py"
+RECEIPT="$DIR/desktop_acceptance_receipt.py"
 STATE="$HOME/.cache/agent-bridge/cage_invoke_hit.json"
 WORK="$(mktemp -d)"; LOG="$WORK/sway.log"; CONF="$WORK/sway.conf"
 SWAY_PID=""
@@ -35,7 +45,19 @@ bindsym Mod4+Shift+q exit
 EOF
 
 before=$(LC_ALL=C ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | grep -v '\.lock$' | LC_ALL=C sort)
-WLR_BACKENDS=wayland WLR_WL_OUTPUTS=1 WLR_RENDERER=pixman sway -c "$CONF" >"$LOG" 2>&1 &
+ACCEPT_BACKEND="${AB_ACCEPT_WLR_BACKEND:-wayland}"
+case "$ACCEPT_BACKEND" in
+  wayland)
+    WLR_BACKENDS=wayland WLR_WL_OUTPUTS=1 WLR_RENDERER=pixman sway -c "$CONF" >"$LOG" 2>&1 &
+    ;;
+  headless)
+    WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman sway -c "$CONF" >"$LOG" 2>&1 &
+    ;;
+  *)
+    echo "FAIL: AB_ACCEPT_WLR_BACKEND must be wayland or headless (got '$ACCEPT_BACKEND')"
+    exit 2
+    ;;
+esac
 SWAY_PID=$!
 disp=""
 for i in $(seq 1 40); do
@@ -51,6 +73,7 @@ export SWAYSOCK="$XDG_RUNTIME_DIR/sway-ipc.$(id -u).$SWAY_PID.sock"
 out_names=$(swaymsg -t get_outputs 2>/dev/null | python3 -c "import sys,json;print(','.join(o['name'] for o in json.load(sys.stdin)))" 2>/dev/null)
 case "$out_names" in *DP-*|*HDMI-*) echo "[ABORT] bound to host output '$out_names'"; exit 2 ;; esac
 echo "== nested sway pid=$SWAY_PID disp=$disp outputs=${out_names:-?}"
+echo "== nested sway backend=$ACCEPT_BACKEND"
 sleep 3
 echo "== toy ready: $(cat "$STATE" 2>/dev/null)"
 
@@ -186,6 +209,7 @@ if [ "$D_status" != "verified" ]; then
 fi
 
 echo "== VERDICT =="
+verdict_rc=0
 python3 - "$S_present" "$A_allowed" "$A_rc" "$A_iso" "$A_acts" "$V_verdict" "$V_recover" "$B_allowed" "$B_acts" "$C_allowed" "$C_acts" "$D_status" "$D_verdict" "$D_recover" "$D_mode" "$D_acts" <<'PY'
 import sys
 S_present,A_allowed,A_rc,A_iso,A_acts,V_verdict,V_recover,B_allowed,B_acts,C_allowed,C_acts,D_status,D_verdict,D_recover,D_mode,D_acts = sys.argv[1:17]
@@ -214,3 +238,43 @@ for label, passed in checks:
 print("== RESULT:", "ALL PASS — low-level invoke + one-call semantic task isolated and verified" if ok else "FAIL")
 raise SystemExit(0 if ok else 1)
 PY
+verdict_rc=$?
+
+receipt_rc=0
+if [ -n "${AB_ACCEPT_RECEIPT_PATH:-}" ]; then
+  printf '%s\n' "$A" >"$WORK/isolated-invoke.json"
+  printf '%s\n' "$V" >"$WORK/postcondition-verify.json"
+  printf '%s\n' "$B" >"$WORK/dry-run-invoke.json"
+  printf '%s\n' "$C" >"$WORK/host-invoke.json"
+  printf '%s\n' "$D" >"$WORK/semantic-task.json"
+  source_commit="${AB_ACCEPT_SOURCE_COMMIT:-}"
+  if [ -z "$source_commit" ]; then
+    source_commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
+  fi
+  binary_version=$("$AB_BIN" --version 2>/dev/null || true)
+  snapshot_target_present=false
+  [ "$S_present" = "True" ] && snapshot_target_present=true
+  python3 "$RECEIPT" write \
+    --output "$AB_ACCEPT_RECEIPT_PATH" \
+    --source-commit "$source_commit" \
+    --binary "$AB_BIN" \
+    --binary-version "$binary_version" \
+    --backend "$ACCEPT_BACKEND" \
+    --output-names "$out_names" \
+    --display "$disp" \
+    --sway-pid "$SWAY_PID" \
+    --snapshot-target-present "$snapshot_target_present" \
+    --isolated-invoke "$WORK/isolated-invoke.json" \
+    --postcondition-verify "$WORK/postcondition-verify.json" \
+    --dry-run-invoke "$WORK/dry-run-invoke.json" \
+    --host-invoke "$WORK/host-invoke.json" \
+    --semantic-task "$WORK/semantic-task.json" \
+    --isolated-activations "$A_acts" \
+    --dry-run-activations "$B_acts" \
+    --host-activations "$C_acts" \
+    --transaction-activations "$D_acts"
+  receipt_rc=$?
+fi
+
+[ "$verdict_rc" -eq 0 ] || exit "$verdict_rc"
+exit "$receipt_rc"
