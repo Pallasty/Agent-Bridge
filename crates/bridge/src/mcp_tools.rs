@@ -3263,6 +3263,9 @@ fn macos_ax_probe_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("macos_ax_probe.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_probe.py")
 }
 
@@ -3790,6 +3793,9 @@ fn macos_ax_verify_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("macos_ax_verify.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_verify.py")
 }

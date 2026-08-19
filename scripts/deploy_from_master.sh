@@ -80,6 +80,8 @@ RUNTIME_ASSETS=(
     desktop_snapshot.py
     desktop_steer.py
     desktop_verify.py
+    macos_ax_probe.py
+    macos_ax_verify.py
     vision_grounding_ocr.py
 )
 DEPLOY_REMOTE="${AGENT_BRIDGE_DEPLOY_REMOTE:-origin}"
