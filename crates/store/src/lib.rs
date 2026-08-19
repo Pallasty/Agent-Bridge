@@ -91,11 +91,13 @@ pub use resource_lineage::{
     resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
     unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
     AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, AgentMdCasRollback,
-    AgentMdCasRollbackReceipt, ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
+    AgentMdCasRollbackReceipt, AgentMdChangeProposal, AgentMdChangeProposalReceipt,
+    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
     RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
     RESOURCE_BINDING_HASH_DOMAIN, RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE,
-    RESOURCE_CAS_ROLLBACK_SCHEMA, RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CONTENT_MAX_BYTES,
-    RESOURCE_LINEAGE_HASH_DOMAIN, RESOURCE_LINEAGE_MAX_ROWS, RESOURCE_LINEAGE_SCHEMA,
+    RESOURCE_CAS_ROLLBACK_SCHEMA, RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CHANGE_PROPOSAL_SCHEMA,
+    RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_HASH_DOMAIN,
+    RESOURCE_LINEAGE_MAX_ROWS, RESOURCE_LINEAGE_SCHEMA,
 };
 pub use vector::{
     active_model_name, cosine_similarity, decode_embedding, embed_text, encode_embedding,

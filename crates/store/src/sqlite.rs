@@ -5,10 +5,12 @@ use crate::resource_lineage::{
     resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
     unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
     AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, AgentMdCasRollback,
-    AgentMdCasRollbackReceipt, ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
+    AgentMdCasRollbackReceipt, AgentMdChangeProposal, AgentMdChangeProposalReceipt,
+    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
     RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
     RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CAS_ROLLBACK_SCHEMA,
-    RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
+    RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CHANGE_PROPOSAL_SCHEMA, RESOURCE_CHANGE_PROPOSAL_SCOPE,
+    RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
@@ -139,6 +141,39 @@ fn read_open_agent_md(
     std::str::from_utf8(&content)
         .map_err(|_| format!("target must contain valid UTF-8: {}", path.display()))?;
     Ok(content)
+}
+
+#[cfg(unix)]
+fn agent_md_line_diff(before: &[u8], after: &[u8]) -> (u64, u64, u64, u64, u64) {
+    let before = std::str::from_utf8(before).unwrap_or_default();
+    let after = std::str::from_utf8(after).unwrap_or_default();
+    let before_lines: Vec<&str> = before.lines().collect();
+    let after_lines: Vec<&str> = after.lines().collect();
+    let mut prefix = 0usize;
+    while prefix < before_lines.len()
+        && prefix < after_lines.len()
+        && before_lines[prefix] == after_lines[prefix]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0usize;
+    while suffix < before_lines.len().saturating_sub(prefix)
+        && suffix < after_lines.len().saturating_sub(prefix)
+        && before_lines[before_lines.len() - 1 - suffix]
+            == after_lines[after_lines.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let removed = before_lines.len().saturating_sub(prefix + suffix) as u64;
+    let added = after_lines.len().saturating_sub(prefix + suffix) as u64;
+    let changed = added.max(removed);
+    (
+        before_lines.len() as u64,
+        after_lines.len() as u64,
+        added,
+        removed,
+        changed,
+    )
 }
 
 #[cfg(unix)]
@@ -2520,6 +2555,318 @@ impl SqliteStore {
     ) -> Result<AgentMdCasRollbackReceipt> {
         Err(Error::Backend(
             "rollback_agent_md_cas: O_NOFOLLOW file identity verification requires Unix".into(),
+        ))
+    }
+
+    /// SEPL P1A3 — build a read-only AGENT.md change proposal.
+    ///
+    /// This method deliberately stops at a content/hash/lineage proposal. It
+    /// never replaces the file, appends lineage, or exposes an execution
+    /// surface. An optional historical target is accepted only when its
+    /// immutable lineage hash matches the supplied candidate body.
+    #[cfg(unix)]
+    pub async fn propose_agent_md_change(
+        &self,
+        request: AgentMdChangeProposal,
+    ) -> Result<AgentMdChangeProposalReceipt> {
+        if request.resource_id.is_empty()
+            || request.resource_id.len() > 512
+            || request.resource_id.trim() != request.resource_id
+            || request.resource_id.chars().any(char::is_control)
+        {
+            return Err(Error::Backend(
+                "propose_agent_md_change: resource_id must be 1..=512 visible characters without surrounding whitespace".into(),
+            ));
+        }
+        if request.observed_at < 0 {
+            return Err(Error::Backend(
+                "propose_agent_md_change: observed_at must be non-negative".into(),
+            ));
+        }
+        if request.path.file_name().and_then(|name| name.to_str()) != Some("AGENT.md") {
+            return Err(Error::Backend(
+                "propose_agent_md_change: target filename must be AGENT.md".into(),
+            ));
+        }
+        if request.proposed_content.is_empty()
+            || request.proposed_content.len() as u64 > RESOURCE_CONTENT_MAX_BYTES
+        {
+            return Err(Error::Backend(format!(
+                "propose_agent_md_change: proposed content must be 1..={RESOURCE_CONTENT_MAX_BYTES} bytes",
+            )));
+        }
+        std::str::from_utf8(&request.proposed_content).map_err(|_| {
+            Error::Backend("propose_agent_md_change: proposed content must be valid UTF-8".into())
+        })?;
+        if let Some(expected) = &request.expected_current_content_sha256 {
+            if !is_lower_hex_sha256(expected) {
+                return Err(Error::Backend(
+                    "propose_agent_md_change: expected current hash must be lowercase SHA-256"
+                        .into(),
+                ));
+            }
+        }
+        if request.target_version == Some(0) {
+            return Err(Error::Backend(
+                "propose_agent_md_change: target_version must be >= 1".into(),
+            ));
+        }
+
+        let requested_file = OpenedAgentMd::open(&request.path)
+            .map_err(|error| Error::Backend(format!("propose_agent_md_change: {error}")))?;
+        let canonical_path_buf = std::fs::canonicalize(&request.path).map_err(|error| {
+            Error::Backend(format!(
+                "propose_agent_md_change: canonicalize {}: {error}",
+                request.path.display()
+            ))
+        })?;
+        let mut opened_file = OpenedAgentMd::open(&canonical_path_buf)
+            .map_err(|error| Error::Backend(format!("propose_agent_md_change: {error}")))?;
+        if requested_file.device != opened_file.device
+            || requested_file.inode != opened_file.inode
+            || resource_content_sha256(&requested_file.content)
+                != resource_content_sha256(&opened_file.content)
+        {
+            return Err(Error::Backend(
+                "propose_agent_md_change: resource changed while resolving canonical path".into(),
+            ));
+        }
+        let canonical_path = canonical_path_buf
+            .to_str()
+            .ok_or_else(|| {
+                Error::Backend("propose_agent_md_change: canonical path must be valid UTF-8".into())
+            })?
+            .to_string();
+        if canonical_path.len() > 4096 {
+            return Err(Error::Backend(
+                "propose_agent_md_change: canonical path exceeds 4096 bytes".into(),
+            ));
+        }
+
+        let initial_content_sha256 = resource_content_sha256(&opened_file.content);
+        if request.expected_current_content_sha256.as_deref()
+            != Some(initial_content_sha256.as_str())
+            && request.expected_current_content_sha256.is_some()
+        {
+            return Err(Error::Backend(
+                "propose_agent_md_change: current content does not match expected hash".into(),
+            ));
+        }
+        let proposed_content_sha256 = resource_content_sha256(&request.proposed_content);
+        let resource_id = request.resource_id.clone();
+        let target_version = request.target_version;
+        let expected_current_content_sha256 = request.expected_current_content_sha256;
+        let proposed_content = request.proposed_content;
+        let readback_path = PathBuf::from(&canonical_path);
+
+        self.conn
+            .call(move |connection| -> RusqliteResult<AgentMdChangeProposalReceipt> {
+                let transaction = connection.transaction()?;
+                opened_file
+                    .verify_path_identity(&readback_path)
+                    .map_err(resource_baseline_sql_error)?;
+                let current_content = opened_file
+                    .readback(&readback_path)
+                    .map_err(resource_baseline_sql_error)?;
+                let current_content_sha256 = resource_content_sha256(&current_content);
+                if current_content_sha256 != initial_content_sha256 {
+                    return Err(resource_baseline_sql_error(
+                        "resource content changed during proposal observation",
+                    ));
+                }
+                if let Some(expected) = expected_current_content_sha256.as_deref() {
+                    if expected != current_content_sha256 {
+                        return Err(resource_baseline_sql_error(
+                            "resource content does not match expected proposal hash",
+                        ));
+                    }
+                }
+
+                let binding = transaction
+                    .query_row(
+                        "SELECT resource_id, resource_kind, canonical_path, bound_at, binding_sha256 \
+                         FROM resource_bindings WHERE resource_id=?1",
+                        [&resource_id],
+                        |row| {
+                            Ok(ResourceBindingRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                canonical_path: row.get(2)?,
+                                bound_at: row.get(3)?,
+                                binding_sha256: row.get(4)?,
+                            })
+                        },
+                    )
+                    .optional()?
+                    .ok_or_else(|| {
+                        resource_baseline_sql_error(
+                            "resource binding is missing; admit the baseline first",
+                        )
+                    })?;
+                if binding.resource_kind != "agent_md"
+                    || binding.canonical_path != canonical_path
+                    || binding.binding_sha256 != resource_binding_sha256(&binding)
+                {
+                    return Err(resource_baseline_sql_error(
+                        "resource binding does not match the requested canonical path",
+                    ));
+                }
+
+                let head = transaction
+                    .query_row(
+                        "SELECT resource_id, resource_kind, version, content_sha256, \
+                                predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                         FROM resource_versions WHERE resource_id=?1 \
+                         ORDER BY version DESC LIMIT 1",
+                        [&resource_id],
+                        |row| {
+                            Ok(ResourceVersionRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                version: row.get::<_, i64>(2)? as u64,
+                                content_sha256: row.get(3)?,
+                                predecessor_version: row
+                                    .get::<_, Option<i64>>(4)?
+                                    .map(|value| value as u64),
+                                predecessor_record_sha256: row.get(5)?,
+                                observed_at: row.get(6)?,
+                                record_sha256: row.get(7)?,
+                            })
+                        },
+                    )
+                    .optional()?
+                    .ok_or_else(|| {
+                        resource_baseline_sql_error(
+                            "resource lineage is missing; admit the baseline first",
+                        )
+                    })?;
+                if head.resource_kind != "agent_md"
+                    || head.record_sha256 != resource_version_record_sha256(&head)
+                    || head.content_sha256 != current_content_sha256
+                {
+                    return Err(resource_baseline_sql_error(
+                        "resource lineage head does not match the current content",
+                    ));
+                }
+
+                let lineage_records = {
+                    let mut statement = transaction.prepare(
+                        "SELECT resource_id, resource_kind, version, content_sha256, \
+                                predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                         FROM resource_versions WHERE resource_id=?1 ORDER BY version ASC",
+                    )?;
+                    let records = statement
+                        .query_map([&resource_id], |row| {
+                            Ok(ResourceVersionRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                version: row.get::<_, i64>(2)? as u64,
+                                content_sha256: row.get(3)?,
+                                predecessor_version: row
+                                    .get::<_, Option<i64>>(4)?
+                                    .map(|value| value as u64),
+                                predecessor_record_sha256: row.get(5)?,
+                                observed_at: row.get(6)?,
+                                record_sha256: row.get(7)?,
+                            })
+                        })?
+                        .collect::<RusqliteResult<Vec<_>>>()?;
+                    records
+                };
+                let lineage_report = validate_resource_lineage(
+                    &resource_id,
+                    lineage_records,
+                    false,
+                );
+                if lineage_report.status != "verified" {
+                    return Err(resource_baseline_sql_error(format!(
+                        "resource lineage is not verified: {}",
+                        lineage_report.violations.join(", ")
+                    )));
+                }
+
+                let target_content_hash_match = if let Some(target_version) = target_version {
+                    if target_version >= head.version {
+                        return Err(resource_baseline_sql_error(
+                            "proposal target must be an earlier lineage version",
+                        ));
+                    }
+                    let target = transaction
+                        .query_row(
+                            "SELECT resource_id, resource_kind, version, content_sha256, \
+                                    predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                             FROM resource_versions WHERE resource_id=?1 AND version=?2",
+                            params![&resource_id, target_version as i64],
+                            |row| {
+                                Ok(ResourceVersionRecord {
+                                    resource_id: row.get(0)?,
+                                    resource_kind: row.get(1)?,
+                                    version: row.get::<_, i64>(2)? as u64,
+                                    content_sha256: row.get(3)?,
+                                    predecessor_version: row
+                                        .get::<_, Option<i64>>(4)?
+                                        .map(|value| value as u64),
+                                    predecessor_record_sha256: row.get(5)?,
+                                    observed_at: row.get(6)?,
+                                    record_sha256: row.get(7)?,
+                                })
+                            },
+                        )
+                        .optional()?
+                        .ok_or_else(|| {
+                            resource_baseline_sql_error(
+                                "proposal target lineage version is missing",
+                            )
+                        })?;
+                    if target.resource_kind != "agent_md"
+                        || target.record_sha256 != resource_version_record_sha256(&target)
+                        || target.content_sha256 != proposed_content_sha256
+                    {
+                        return Err(resource_baseline_sql_error(
+                            "proposal content does not match target lineage version",
+                        ));
+                    }
+                    Some(true)
+                } else {
+                    None
+                };
+                transaction.commit()?;
+
+                let (current_lines, proposed_lines, added_lines, removed_lines, changed_lines) =
+                    agent_md_line_diff(&current_content, &proposed_content);
+                Ok(AgentMdChangeProposalReceipt {
+                    schema: RESOURCE_CHANGE_PROPOSAL_SCHEMA.to_string(),
+                    binding,
+                    current_version: head,
+                    current_content_sha256,
+                    proposed_content_sha256,
+                    target_version,
+                    target_content_hash_match,
+                    current_bytes: current_content.len() as u64,
+                    proposed_bytes: proposed_content.len() as u64,
+                    current_lines,
+                    proposed_lines,
+                    added_lines,
+                    removed_lines,
+                    changed_lines,
+                    content_changed: current_content != proposed_content,
+                    proposal_only: true,
+                    resource_content_mutated: false,
+                    lineage_mutated: false,
+                    proposal_scope: RESOURCE_CHANGE_PROPOSAL_SCOPE.to_string(),
+                })
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("propose_agent_md_change: {error}")))
+    }
+
+    #[cfg(not(unix))]
+    pub async fn propose_agent_md_change(
+        &self,
+        _request: AgentMdChangeProposal,
+    ) -> Result<AgentMdChangeProposalReceipt> {
+        Err(Error::Backend(
+            "propose_agent_md_change: O_NOFOLLOW file identity verification requires Unix".into(),
         ))
     }
 
