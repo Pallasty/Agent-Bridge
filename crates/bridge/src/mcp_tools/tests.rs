@@ -10305,6 +10305,9 @@ fn registry_exposes_macos_ax_verify_to_codex_essential() {
     assert!(tool.input_schema["properties"].get("expect").is_some());
     assert!(tool.input_schema["properties"].get("bundle_id").is_some());
     assert!(tool.input_schema["properties"]
+        .get("ax_identifier")
+        .is_some());
+    assert!(tool.input_schema["properties"]
         .get("poll_timeout_secs")
         .is_some());
     assert!(tool.input_schema["properties"]
@@ -11278,6 +11281,8 @@ payload = {
     "frontmost_app": {"name": "Codex", "pid": 54862, "bundle_id": "com.openai.codex", "role": "AXApplication"},
     "windows": [{
         "index": 0,
+        "ax_identifier": "codex-main-window",
+        "identity": {"kind": "ax_identifier", "value": "codex-main-window", "stable_across_samples": True},
         "title": "Codex",
         "role": "AXWindow",
         "subrole": "AXStandardWindow",
@@ -11348,7 +11353,9 @@ print(json.dumps(payload))
         o["object_id"] == "desktop:macos:app:54862" && o["source_adapter"] == "macos.system_events"
     }));
     assert!(objects.iter().any(|o| {
-        o["object_id"] == "desktop:macos:window:54862:0" && o["source_adapter"] == "macos.ax.window"
+        o["object_id"] == "desktop:macos:window:54862:ax:codex-main-window"
+            && o["source_adapter"] == "macos.ax.window"
+            && o["state"]["identity"]["stable_across_samples"] == true
     }));
 
     let affordances = payload["affordances"].as_array().expect("affordances");
@@ -11430,6 +11437,7 @@ raise SystemExit(2)
                 "expect": "window_gone",
                 "title": "Missing",
                 "bundle_id": "com.openai.codex",
+                "ax_identifier": "codex-main-window",
                 "max_windows": 4,
                 "jxa_timeout_secs": 1.25,
                 "poll_timeout_secs": 0.5,
@@ -11452,6 +11460,8 @@ raise SystemExit(2)
     assert!(argv.contains(&"Missing"));
     assert!(argv.contains(&"--bundle-id"));
     assert!(argv.contains(&"com.openai.codex"));
+    assert!(argv.contains(&"--ax-identifier"));
+    assert!(argv.contains(&"codex-main-window"));
     assert!(argv.contains(&"--max-windows"));
     assert!(argv.contains(&"4"));
     assert!(argv.contains(&"--jxa-timeout-secs"));

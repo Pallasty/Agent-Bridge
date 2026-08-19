@@ -3075,6 +3075,8 @@ fn macos_ax_probe_semantic_bus_payload(probe: &Value, include_raw: bool) -> Valu
                 "label": window.get("title").and_then(Value::as_str).unwrap_or("macOS window"),
                 "state": {
                     "index": window.get("index").cloned().unwrap_or(Value::Null),
+                    "ax_identifier": window.get("ax_identifier").cloned().unwrap_or(Value::Null),
+                    "identity": window.get("identity").cloned().unwrap_or(Value::Null),
                     "title": window.get("title").cloned().unwrap_or(Value::Null),
                     "role": window.get("role").cloned().unwrap_or(Value::Null),
                     "subrole": window.get("subrole").cloned().unwrap_or(Value::Null),
@@ -3214,6 +3216,24 @@ fn macos_ax_window_object_id(probe: &Value, window: &Value, idx: usize) -> Strin
         .and_then(Value::as_i64)
         .map(|p| p.to_string())
         .unwrap_or_else(|| "unknown".to_string());
+    if window
+        .get("identity")
+        .and_then(|v| v.get("stable_across_samples"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        if let Some(identifier) = window
+            .get("identity")
+            .and_then(|v| v.get("value"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            return format!(
+                "desktop:macos:window:{pid}:ax:{}",
+                desktop_snapshot_slug(identifier)
+            );
+        }
+    }
     let source_index = window
         .get("index")
         .and_then(Value::as_i64)
@@ -3326,7 +3346,11 @@ impl McpTool for MacosAxVerifyTool {
                     },
                     "index": {
                         "type": "integer",
-                        "description": "Window index from macos_ax_probe."
+                        "description": "Sampling-local window index from macos_ax_probe; do not treat it as stable across observations."
+                    },
+                    "ax_identifier": {
+                        "type": "string",
+                        "description": "Exact stable AXIdentifier from macos_ax_probe when the app exposes one."
                     },
                     "state": {
                         "type": "string",
@@ -3457,6 +3481,7 @@ impl McpTool for MacosAxVerifyTool {
         push_optional_str_arg(&mut cmd, &args, "title", "--title");
         push_optional_str_arg(&mut cmd, &args, "role", "--role");
         push_optional_value_arg(&mut cmd, &args, "index", "--index");
+        push_optional_str_arg(&mut cmd, &args, "ax_identifier", "--ax-identifier");
         push_optional_str_arg(&mut cmd, &args, "state", "--state");
         if let Some(pi) = args.get("poll_interval_secs").and_then(Value::as_f64) {
             cmd.arg("--poll-interval")
@@ -3717,7 +3742,16 @@ fn macos_ax_verify_target_family(expect: &str) -> &'static str {
 
 fn macos_ax_verify_selector_summary(selector: &Value) -> String {
     let mut parts = Vec::new();
-    for key in ["app", "bundle_id", "pid", "title", "role", "index", "state"] {
+    for key in [
+        "app",
+        "bundle_id",
+        "pid",
+        "title",
+        "role",
+        "ax_identifier",
+        "index",
+        "state",
+    ] {
         if let Some(value) = selector.get(key) {
             match value {
                 Value::String(s) if !s.trim().is_empty() => {

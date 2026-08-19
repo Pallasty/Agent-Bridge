@@ -13,7 +13,7 @@ import platform
 import time
 from typing import Any
 
-from macos_ax_probe import _ax_is_trusted, _frontmost_jxa
+from macos_ax_probe import _annotate_window_identities, _ax_is_trusted, _frontmost_jxa
 
 SCHEMA_VERSION = "macos_ax_verify/v0"
 EXPECTS = {
@@ -54,6 +54,7 @@ def _selector(args: argparse.Namespace) -> dict[str, Any]:
         "title": args.title,
         "role": args.role,
         "index": args.index,
+        "ax_identifier": args.ax_identifier,
         "state": args.state,
     }
 
@@ -82,7 +83,9 @@ def _probe(max_windows: int, jxa_timeout_secs: float) -> tuple[dict[str, Any], s
             status = "degraded"
         else:
             frontmost = jxa_payload.get("frontmost_app") if jxa_payload else None
-            windows = jxa_payload.get("windows", []) if jxa_payload else []
+            windows = _annotate_window_identities(
+                jxa_payload.get("windows", []) if jxa_payload else []
+            )
             source_window_count = jxa_payload.get("window_count") if jxa_payload else None
             truncated = bool(source_window_count is not None and len(windows) < source_window_count)
             status = "ready" if frontmost else "degraded"
@@ -131,6 +134,11 @@ def _match_app(app: dict[str, Any] | None, args: argparse.Namespace) -> bool:
 
 
 def _match_window(window: dict[str, Any], args: argparse.Namespace) -> bool:
+    if (
+        args.ax_identifier is not None
+        and window.get("ax_identifier") != args.ax_identifier
+    ):
+        return False
     if args.index is not None and window.get("index") != args.index:
         return False
     if not _contains(window.get("title"), args.title):
@@ -188,6 +196,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title", help="Window title substring.")
     parser.add_argument("--role", help="Window AXRole substring.")
     parser.add_argument("--index", type=int, help="Window index from macos_ax_probe.")
+    parser.add_argument(
+        "--ax-identifier",
+        help="Exact stable AXIdentifier from macos_ax_probe when the app exposes one.",
+    )
     parser.add_argument("--state", help="Expected boolean state for ax_trusted_is.")
     parser.add_argument("--max-windows", type=int, default=8)
     parser.add_argument("--jxa-timeout-secs", type=float, default=4.0)

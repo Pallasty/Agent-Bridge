@@ -20,6 +20,28 @@ from typing import Any
 SCHEMA_VERSION = "macos_ax_probe/v0"
 
 
+def _window_identity(window: dict[str, Any]) -> dict[str, Any]:
+    """Describe whether a window identity can survive a later AX sample."""
+    ax_identifier = window.get("ax_identifier")
+    if isinstance(ax_identifier, str) and ax_identifier.strip():
+        return {
+            "kind": "ax_identifier",
+            "value": ax_identifier.strip(),
+            "stable_across_samples": True,
+        }
+    return {
+        "kind": "sample_index",
+        "value": str(window.get("index", "unknown")),
+        "stable_across_samples": False,
+    }
+
+
+def _annotate_window_identities(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for window in windows:
+        window["identity"] = _window_identity(window)
+    return windows
+
+
 def _ax_is_trusted() -> tuple[bool | None, str | None]:
     """Return AXIsProcessTrusted() without requesting permission."""
     if platform.system() != "Darwin":
@@ -62,6 +84,7 @@ if (!app) {{
     const size = safe(() => w.size());
     kept.push({{
       "index": i,
+      "ax_identifier": safe(() => w.attributes.byName("AXIdentifier").value()),
       "title": safe(() => w.name()),
       "role": safe(() => w.attributes.byName("AXRole").value()),
       "subrole": safe(() => w.attributes.byName("AXSubrole").value()),
@@ -143,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
             status = "degraded"
         else:
             frontmost = jxa_payload.get("frontmost_app") if jxa_payload else None
-            windows = jxa_payload.get("windows", []) if jxa_payload else []
+            windows = _annotate_window_identities(
+                jxa_payload.get("windows", []) if jxa_payload else []
+            )
             source_window_count = jxa_payload.get("window_count") if jxa_payload else None
             truncated = bool(source_window_count is not None and len(windows) < source_window_count)
             status = "ready" if frontmost else "degraded"
