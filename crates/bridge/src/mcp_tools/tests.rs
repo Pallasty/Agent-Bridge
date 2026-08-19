@@ -7727,6 +7727,7 @@ fn tool_policy_codex_essential_keeps_compact_surface() {
     assert!(p.includes(Tier::Niche, "mobile_ios_syslog_tail"));
     assert!(p.includes(Tier::Standard, "macos_ax_probe"));
     assert!(p.includes(Tier::Standard, "macos_ax_verify"));
+    assert!(p.includes(Tier::Standard, "macos_ax_watch"));
     assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
     assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
     assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
@@ -7876,7 +7877,7 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 67 total extras = 10 collab-group entries + 57 direct extras:
+    // 70 total extras = 10 collab-group entries + 60 direct extras:
     //      practical_workflow_scorecard
     //      + 6 avatar observation/sync/renderer tools
     //      + xiao_shu_action_request + 14 read-only mobile bridge tools
@@ -7892,7 +7893,9 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     //      + memory_related_keys_review_packet
     //      + memory_orphan_candidates + memory_orphan_inventory
     //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
-    //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
+    //      + desktop_semantic_task + app_control
+    //      + macos_ax_probe + macos_ax_verify + macos_ax_watch
+    //      + semantic_bus_adapter_report
     //      + semantic_bus_runtime_health
     //      + semantic_bus_runtime_conformance
     //      + semantic_bus_peer_conformance
@@ -7907,7 +7910,7 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // must not re-enter Codex's eager direct extras.
     // The five prune-continuity entries remain part of the direct list by
     // name, preserving the established Codex surface contract.
-    assert_eq!(extras.len(), 67);
+    assert_eq!(extras.len(), 70);
     assert!(extras.contains(&"practical_workflow_scorecard"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
@@ -7973,8 +7976,11 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     assert!(extras.contains(&"desktop_snapshot"));
     assert!(extras.contains(&"vision_grounding_ocr"));
     assert!(extras.contains(&"desktop_verify"));
+    assert!(extras.contains(&"desktop_semantic_task"));
+    assert!(extras.contains(&"app_control"));
     assert!(extras.contains(&"macos_ax_probe"));
     assert!(extras.contains(&"macos_ax_verify"));
+    assert!(extras.contains(&"macos_ax_watch"));
     assert!(extras.contains(&"semantic_bus_adapter_report"));
     assert!(extras.contains(&"semantic_bus_runtime_health"));
     assert!(extras.contains(&"semantic_bus_runtime_conformance"));
@@ -8480,6 +8486,7 @@ fn host_surface_gates_device_and_credential_families() {
                 "mobile_projection_start",
                 "mobile_projection_status",
                 "mobile_projection_stop",
+                "mobile_projection_sync_media",
                 "mobile_projection_update",
                 "mobile_projection_wait",
                 "mobile_screenshot",
@@ -8496,6 +8503,7 @@ fn host_surface_gates_device_and_credential_families() {
                 "mobile_ios_syslog_tail",
                 "macos_ax_probe",
                 "macos_ax_verify",
+                "macos_ax_watch",
             ],
         ),
         ("brave", &["brave_web_search"]),
@@ -10327,9 +10335,27 @@ fn registry_exposes_macos_ax_watch_to_codex_essential() {
     let tool = MacosAxWatchTool::new(Hub::builder().build()).schema();
     assert!(tool.description.contains("read-only"));
     assert!(tool.description.contains("AXIdentifier"));
+    assert!(tool.description.contains("unchanged/proceed"));
     assert!(tool.input_schema["properties"].get("samples").is_some());
     assert!(tool.input_schema["properties"].get("max_events").is_some());
     assert!(tool.input_schema["properties"].get("include_samples").is_some());
+    assert!(tool.input_schema["properties"]
+        .get("before_state_token")
+        .is_some());
+    assert!(tool.input_schema["properties"]
+        .get("max_token_age_ms")
+        .is_some());
+    let token = &tool.input_schema["properties"]["before_state_token"];
+    assert_eq!(token["additionalProperties"], false);
+    assert_eq!(
+        token["properties"]["schema"]["const"],
+        "agent_bridge.desktop_state_token.v0"
+    );
+    assert_eq!(
+        token["properties"]["scope_sha256"]["pattern"],
+        "^sha256:[0-9a-f]{64}$"
+    );
+    assert_eq!(token["properties"]["state_sha256"]["maxLength"], 71);
     assert!(tool.input_schema["properties"].get("activate").is_none());
 }
 
@@ -10461,6 +10487,13 @@ fn semantic_bus_adapter_report_classifies_adapter_evidence() {
         Some("runtime_backed")
     );
     assert_eq!(macos_verify["ready_for_runtime"].as_bool(), Some(true));
+
+    let macos_watch = find("macos_ax_watch");
+    assert!(macos_watch["channels"]
+        .as_array()
+        .expect("macos watch channels")
+        .iter()
+        .any(|channel| channel.as_str() == Some("desktop_state_fingerprint")));
 
     let daemon = find("daemon_http_service_fixture");
     assert_eq!(daemon["evidence_level"].as_str(), Some("fixture_backed"));
@@ -11303,6 +11336,17 @@ print(json.dumps({"schema": "macos_ax_watch/v0", "status": "ready", "argv": sys.
                 "max_events": 7,
                 "jxa_timeout_secs": 0.5,
                 "include_samples": true,
+                "before_state_token": {
+                    "schema": "agent_bridge.desktop_state_token.v0",
+                    "captured_at_unix_ms": 1787100000000_u64,
+                    "max_age_ms": 30000,
+                    "coverage_complete": true,
+                    "scope_projection": "agent_bridge.desktop_scope_projection.v1",
+                    "state_projection": "agent_bridge.desktop_state_projection.v1",
+                    "scope_sha256": format!("sha256:{}", "a".repeat(64)),
+                    "state_sha256": format!("sha256:{}", "b".repeat(64))
+                },
+                "max_token_age_ms": 15000,
                 "timeout_ms": 5000
             }),
             &ToolContext::default(),
@@ -11319,10 +11363,20 @@ print(json.dumps({"schema": "macos_ax_watch/v0", "status": "ready", "argv": sys.
     for expected in [
         "--compact", "--samples", "4", "--interval", "0.2", "--max-windows",
         "5", "--max-events", "7", "--jxa-timeout-secs", "0.5", "--include-samples",
+        "--max-token-age-ms", "15000", "--before-token-json",
     ] {
         assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
     }
     assert_eq!(payload["mcp_wrapper"]["read_only"], true);
+    assert_eq!(payload["mcp_wrapper"]["before_state_token_supplied"], true);
+    assert_eq!(payload["mcp_wrapper"]["max_token_age_ms"], 15000);
+    let before_index = argv
+        .iter()
+        .position(|value| *value == "--before-token-json")
+        .expect("before token flag");
+    let before: Value = serde_json::from_str(argv[before_index + 1]).expect("before token json");
+    assert_eq!(before["coverage_complete"], true);
+    assert_eq!(before["scope_projection"], "agent_bridge.desktop_scope_projection.v1");
     assert!(!argv.contains(&"--activate"));
     assert!(!argv.contains(&"--click"));
 

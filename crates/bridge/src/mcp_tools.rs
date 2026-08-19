@@ -3302,7 +3302,7 @@ impl McpTool for MacosAxWatchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Bounded, read-only macOS AX short-term event stream. Re-observes the frontmost app and emits frontmost-app changes plus window appeared, disappeared, and focus-changed events only within the same process when a sample-unique stable AXIdentifier supports the claim. Sample-local or ambiguous window identities are reported as coverage gaps and never produce lifecycle events. It never activates apps, focuses windows, clicks, types, or writes durable memory.".into(),
+            description: "Bounded, read-only macOS AX short-term event stream plus current desktop semantic state. It returns order-independent scope/state SHA-256 fingerprints and a short-lived state token; pass an earlier exact token back to distinguish unchanged/proceed from drifted, scope-changed, or indeterminate/replan. Window lifecycle events still require the same process and a sample-unique stable AXIdentifier. Sample-local windows contribute only semantic state, never object-continuity claims. Incomplete, truncated, stale, or malformed evidence fails closed. It never activates apps, focuses windows, clicks, types, or writes durable memory.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -3314,6 +3314,27 @@ impl McpTool for MacosAxWatchTool {
                     "max_events": {"type": "integer", "minimum": 1, "maximum": 100, "default": 32},
                     "jxa_timeout_secs": {"type": "number", "minimum": 0.25, "maximum": 5.0, "default": 4.0},
                     "include_samples": {"type": "boolean", "default": false, "description": "Include bounded raw samples. Default false returns only compact sample summaries."},
+                    "before_state_token": {
+                        "type": "object",
+                        "description": "Optional exact current_state.token from an earlier complete macos_ax_watch result. The token is read-only comparison evidence, not authorization.",
+                        "properties": {
+                            "schema": {"type": "string", "const": "agent_bridge.desktop_state_token.v0"},
+                            "captured_at_unix_ms": {"type": "integer", "minimum": 1},
+                            "max_age_ms": {"type": "integer", "minimum": 1000, "maximum": 300000},
+                            "coverage_complete": {"type": "boolean", "const": true},
+                            "scope_projection": {"type": "string", "const": "agent_bridge.desktop_scope_projection.v1"},
+                            "state_projection": {"type": "string", "const": "agent_bridge.desktop_state_projection.v1"},
+                            "scope_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "minLength": 71, "maxLength": 71},
+                            "state_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "minLength": 71, "maxLength": 71}
+                        },
+                        "required": [
+                            "schema", "captured_at_unix_ms", "max_age_ms",
+                            "coverage_complete", "scope_projection", "state_projection",
+                            "scope_sha256", "state_sha256"
+                        ],
+                        "additionalProperties": false
+                    },
+                    "max_token_age_ms": {"type": "integer", "minimum": 1000, "maximum": 300000, "default": 30000, "description": "Maximum accepted age for before_state_token; the stricter of this and the token's own max_age_ms wins."},
                     "timeout_ms": {"type": "integer", "minimum": 3000, "maximum": 60000, "default": 20000}
                 }
             }),
@@ -3327,6 +3348,10 @@ impl McpTool for MacosAxWatchTool {
         let max_events = args.get("max_events").and_then(Value::as_u64).unwrap_or(32).clamp(1, 100);
         let jxa_timeout_secs = args.get("jxa_timeout_secs").and_then(Value::as_f64).unwrap_or(4.0).clamp(0.25, 5.0);
         let include_samples = args.get("include_samples").and_then(Value::as_bool).unwrap_or(false);
+        // Forward even a malformed non-object value so the script can return
+        // indeterminate/replan instead of silently treating it as no baseline.
+        let before_state_token = args.get("before_state_token");
+        let max_token_age_ms = args.get("max_token_age_ms").and_then(Value::as_u64).unwrap_or(30_000).clamp(1_000, 300_000);
         let minimum_timeout = ((samples as f64 * jxa_timeout_secs
             + (samples.saturating_sub(1)) as f64 * interval_secs
             + 3.0)
@@ -3350,9 +3375,13 @@ impl McpTool for MacosAxWatchTool {
             .arg("--interval").arg(interval_secs.to_string())
             .arg("--max-windows").arg(max_windows.to_string())
             .arg("--max-events").arg(max_events.to_string())
-            .arg("--jxa-timeout-secs").arg(jxa_timeout_secs.to_string());
+            .arg("--jxa-timeout-secs").arg(jxa_timeout_secs.to_string())
+            .arg("--max-token-age-ms").arg(max_token_age_ms.to_string());
         if include_samples {
             cmd.arg("--include-samples");
+        }
+        if let Some(token) = before_state_token {
+            cmd.arg("--before-token-json").arg(token.to_string());
         }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -3374,7 +3403,9 @@ impl McpTool for MacosAxWatchTool {
                     obj.insert("mcp_wrapper".into(), json!({
                         "tool": self.name(), "read_only": true, "duration_ms": duration_ms,
                         "exit_code": output.status.code().unwrap_or(-1), "stderr": stderr,
-                        "truncated": stdout_truncated || stderr_truncated
+                        "truncated": stdout_truncated || stderr_truncated,
+                        "before_state_token_supplied": before_state_token.is_some(),
+                        "max_token_age_ms": max_token_age_ms
                     }));
                 }
                 Ok(ToolResult::json_text(&payload))
@@ -4156,12 +4187,17 @@ fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapt
             source_schema: "macos_ax_watch/v0",
             evidence_level: "runtime_backed",
             status: "runtime_backed_if_assets_present",
-            channels: &["ax_trust", "system_events", "short_term_event_stream"],
+            channels: &[
+                "ax_trust",
+                "system_events",
+                "short_term_event_stream",
+                "desktop_state_fingerprint",
+            ],
             fallback_order: &["macos_ax_watch", "macos_ax_probe"],
             runtime_assets: &["scripts/macos_ax_watch.py", "scripts/macos_ax_probe.py"],
             fixture_assets: &[],
             doc_assets: &[],
-            notes: &["Bounded read-only deltas; window lifecycle and focus events require the same process and a sample-unique stable AXIdentifier."],
+            notes: &["Bounded read-only deltas plus short-lived scope/state fingerprints for fail-closed drift decisions; window lifecycle and focus events require the same process and a sample-unique stable AXIdentifier."],
         },
         SemanticBusAdapterSpec {
             adapter_id: "windows_uia_snapshot_fixture",

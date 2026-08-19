@@ -72,9 +72,11 @@ const se = Application("System Events");
 const procSpec = se.applicationProcesses.whose({{frontmost: true}});
 const app = procSpec[0];
 if (!app) {{
-  JSON.stringify({{frontmost_app: null, window_count: 0, windows: []}});
+  JSON.stringify({{frontmost_app: null, windows_read_ok: false, window_count: 0, windows: []}});
 }} else {{
-  const wins = safe(() => app.windows()) || [];
+  const windowsResult = safe(() => app.windows());
+  const windowsReadOk = windowsResult !== null;
+  const wins = windowsResult || [];
   const count = safe(() => wins.length) || 0;
   const kept = [];
   const limit = Math.min(count, {max_windows});
@@ -106,6 +108,7 @@ if (!app) {{
       "bundle_id": safe(() => app.bundleIdentifier()),
       "role": safe(() => app.attributes.byName("AXRole").value())
     }},
+    "windows_read_ok": windowsReadOk,
     "window_count": count,
     "windows": kept
   }});
@@ -151,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     frontmost: dict[str, Any] | None = None
     windows: list[dict[str, Any]] = []
     source_window_count: int | None = None
+    windows_read_ok: bool | None = None
     truncated = False
 
     if system != "Darwin":
@@ -170,8 +174,13 @@ def main(argv: list[str] | None = None) -> int:
                 jxa_payload.get("windows", []) if jxa_payload else []
             )
             source_window_count = jxa_payload.get("window_count") if jxa_payload else None
+            windows_read_ok = jxa_payload.get("windows_read_ok") if jxa_payload else None
             truncated = bool(source_window_count is not None and len(windows) < source_window_count)
-            status = "ready" if frontmost else "degraded"
+            if windows_read_ok is False:
+                errors.append(
+                    {"stage": "system_events_windows", "message": "window enumeration failed"}
+                )
+            status = "ready" if frontmost and windows_read_ok is True else "degraded"
 
     elapsed_ms = int((time.time() - started) * 1000)
     payload = {
@@ -193,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         "windows": windows,
         "window_count": len(windows),
         "source_window_count": source_window_count,
+        "windows_read_ok": windows_read_ok,
         "limits": {
             "max_windows": max_windows,
             "truncated": truncated,
