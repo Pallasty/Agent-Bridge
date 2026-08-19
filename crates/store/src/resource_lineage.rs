@@ -2,7 +2,8 @@
 //!
 //! P0 remains read-only through [`crate::StateStore`]. P1A0 adds an explicit
 //! AGENT.md path binding and genesis admission, while P1A1 adds a controlled
-//! compare-and-swap commit through inherent [`crate::SqliteStore`] methods.
+//! compare-and-swap commit and P1A2 adds a verified historical rollback through
+//! inherent [`crate::SqliteStore`] methods.
 //! Neither slice exposes an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,9 @@ pub const RESOURCE_BASELINE_OBSERVATION_SCOPE: &str =
 pub const RESOURCE_CAS_COMMIT_SCHEMA: &str = "agent_bridge.resource_cas_commit.v0";
 pub const RESOURCE_CAS_COMMIT_SCOPE: &str =
     "opened_bound_path_replace_readback_and_lineage_append_before_sqlite_commit";
+pub const RESOURCE_CAS_ROLLBACK_SCHEMA: &str = "agent_bridge.resource_cas_rollback.v0";
+pub const RESOURCE_CAS_ROLLBACK_SCOPE: &str =
+    "historical_content_hash_match_cas_replace_readback_and_lineage_append";
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
@@ -131,6 +135,33 @@ pub struct AgentMdCasCommitReceipt {
     pub rollback_verified: bool,
     pub external_writer_exclusion_verified: bool,
     pub commit_scope: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMdCasRollback {
+    pub resource_id: String,
+    pub path: PathBuf,
+    pub expected_content_sha256: String,
+    pub target_version: u64,
+    pub target_content: Vec<u8>,
+    pub observed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdCasRollbackReceipt {
+    pub schema: String,
+    pub binding: ResourceBindingRecord,
+    pub previous_version: ResourceVersionRecord,
+    pub target_version: u64,
+    pub version: ResourceVersionRecord,
+    pub expected_content_sha256: String,
+    pub restored_content_sha256: String,
+    pub content_readback_verified: bool,
+    pub resource_content_mutated: bool,
+    pub rollback_performed: bool,
+    pub rollback_verified: bool,
+    pub external_writer_exclusion_verified: bool,
+    pub rollback_scope: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1094,6 +1125,179 @@ mod tests {
         assert_eq!(report.status, "verified");
         assert_eq!(report.records.len(), 2);
         assert_eq!(report.records[1], receipt.version);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rolls_back_agent_md_to_verified_historical_content() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let baseline = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let committed = store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: proposed.clone(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("commit second version");
+
+        let receipt = store
+            .rollback_agent_md_cas(AgentMdCasRollback {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&proposed),
+                target_version: baseline.version.version,
+                target_content: original.clone(),
+                observed_at: 1_700_000_002,
+            })
+            .await
+            .expect("rollback to baseline");
+
+        assert_eq!(receipt.schema, RESOURCE_CAS_ROLLBACK_SCHEMA);
+        assert_eq!(receipt.target_version, baseline.version.version);
+        assert_eq!(receipt.previous_version, committed.version);
+        assert_eq!(receipt.version.version, 3);
+        assert_eq!(
+            receipt.version.predecessor_record_sha256,
+            Some(committed.version.record_sha256)
+        );
+        assert_eq!(
+            receipt.restored_content_sha256,
+            resource_content_sha256(&original)
+        );
+        assert!(receipt.content_readback_verified);
+        assert!(receipt.rollback_performed);
+        assert!(receipt.rollback_verified);
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read rolled back AGENT.md"),
+            original
+        );
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.status, "verified");
+        assert_eq!(report.records.len(), 3);
+        assert_eq!(report.records[2], receipt.version);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rollback_rejects_content_that_does_not_match_historical_hash() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        let baseline = store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: proposed.clone(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("commit second version");
+
+        let error = store
+            .rollback_agent_md_cas(AgentMdCasRollback {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&proposed),
+                target_version: baseline.version.version,
+                target_content: b"# Forged historical body\n".to_vec(),
+                observed_at: 1_700_000_002,
+            })
+            .await
+            .expect_err("forged historical content must fail");
+        assert!(error
+            .to_string()
+            .contains("does not match target lineage version"));
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            proposed
+        );
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.records.len(), 2);
+        assert_eq!(report.records[1].version, 2);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rollback_rejects_current_or_future_target_version() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let proposed = b"# Updated profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: proposed.clone(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("commit second version");
+
+        for target_version in [2, 3] {
+            let error = store
+                .rollback_agent_md_cas(AgentMdCasRollback {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md.clone(),
+                    expected_content_sha256: resource_content_sha256(&proposed),
+                    target_version,
+                    target_content: proposed.clone(),
+                    observed_at: 1_700_000_002,
+                })
+                .await
+                .expect_err("current or future target must fail");
+            assert!(error.to_string().contains("earlier lineage version"));
+        }
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            proposed
+        );
     }
 
     #[cfg(unix)]

@@ -4,10 +4,11 @@ use crate::resource_lineage::{
     is_lower_hex_sha256, migrate_or_verify as migrate_or_verify_resource_lineage,
     resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
     unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
-    AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, ResourceBindingRecord,
-    ResourceLineageReport, ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA,
-    RESOURCE_BASELINE_OBSERVATION_SCOPE, RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE,
-    RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
+    AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, AgentMdCasRollback,
+    AgentMdCasRollbackReceipt, ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
+    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
+    RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CAS_ROLLBACK_SCHEMA,
+    RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
@@ -2428,7 +2429,9 @@ impl SqliteStore {
         &self,
         request: AgentMdCasCommit,
     ) -> Result<AgentMdCasCommitReceipt> {
-        self.commit_agent_md_cas_inner(request, None).await
+        self.commit_agent_md_cas_inner(request, None, None)
+            .await
+            .map(|(receipt, _)| receipt)
     }
 
     #[cfg(not(unix))]
@@ -2451,8 +2454,73 @@ impl SqliteStore {
             Some(Box::new(
                 || Err("injected post-replace failure".to_string()),
             )),
+            None,
         )
         .await
+        .map(|(receipt, _)| receipt)
+    }
+
+    /// SEPL P1A2 — restore an explicitly supplied historical AGENT.md version.
+    ///
+    /// The historical body is intentionally supplied by the caller because
+    /// P1A1 stores lineage hashes, not historical file contents. The body is
+    /// accepted only when its hash matches the selected immutable lineage row;
+    /// the actual verification is repeated inside the same SQLite transaction
+    /// that performs the CAS replacement and appends the new head.
+    #[cfg(unix)]
+    pub async fn rollback_agent_md_cas(
+        &self,
+        request: AgentMdCasRollback,
+    ) -> Result<AgentMdCasRollbackReceipt> {
+        if request.target_version == 0 {
+            return Err(Error::Backend(
+                "rollback_agent_md_cas: target_version must be >= 1".into(),
+            ));
+        }
+        let expected_content_sha256 = request.expected_content_sha256.clone();
+        let target_version = request.target_version;
+        let (commit, previous_version) = self
+            .commit_agent_md_cas_inner(
+                AgentMdCasCommit {
+                    resource_id: request.resource_id,
+                    path: request.path,
+                    expected_content_sha256: request.expected_content_sha256,
+                    proposed_content: request.target_content,
+                    observed_at: request.observed_at,
+                },
+                None,
+                Some(target_version),
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("rollback_agent_md_cas: {error}")))?;
+        let previous_version = previous_version.ok_or_else(|| {
+            Error::Backend("rollback_agent_md_cas: predecessor is missing".into())
+        })?;
+        Ok(AgentMdCasRollbackReceipt {
+            schema: RESOURCE_CAS_ROLLBACK_SCHEMA.to_string(),
+            binding: commit.binding,
+            previous_version,
+            target_version,
+            version: commit.version,
+            expected_content_sha256,
+            restored_content_sha256: commit.proposed_content_sha256,
+            content_readback_verified: commit.content_readback_verified,
+            resource_content_mutated: commit.resource_content_mutated,
+            rollback_performed: true,
+            rollback_verified: commit.content_readback_verified,
+            external_writer_exclusion_verified: commit.external_writer_exclusion_verified,
+            rollback_scope: RESOURCE_CAS_ROLLBACK_SCOPE.to_string(),
+        })
+    }
+
+    #[cfg(not(unix))]
+    pub async fn rollback_agent_md_cas(
+        &self,
+        _request: AgentMdCasRollback,
+    ) -> Result<AgentMdCasRollbackReceipt> {
+        Err(Error::Backend(
+            "rollback_agent_md_cas: O_NOFOLLOW file identity verification requires Unix".into(),
+        ))
     }
 
     #[cfg(unix)]
@@ -2460,7 +2528,8 @@ impl SqliteStore {
         &self,
         request: AgentMdCasCommit,
         post_replace_failure: Option<Box<dyn FnOnce() -> std::result::Result<(), String> + Send>>,
-    ) -> Result<AgentMdCasCommitReceipt> {
+        rollback_target_version: Option<u64>,
+    ) -> Result<(AgentMdCasCommitReceipt, Option<ResourceVersionRecord>)> {
         if request.resource_id.is_empty()
             || request.resource_id.len() > 512
             || request.resource_id.trim() != request.resource_id
@@ -2541,12 +2610,19 @@ impl SqliteStore {
         let original_permissions = opened_file.permissions.clone();
 
         self.conn
-            .call(move |connection| -> RusqliteResult<AgentMdCasCommitReceipt> {
+            .call(
+                move |connection| -> RusqliteResult<(
+                    AgentMdCasCommitReceipt,
+                    Option<ResourceVersionRecord>,
+                )> {
                 let transaction = connection
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 let mut replaced = false;
                 let mut post_replace_failure = post_replace_failure;
-                let result: RusqliteResult<AgentMdCasCommitReceipt> = (|| {
+                    let result: RusqliteResult<(
+                        AgentMdCasCommitReceipt,
+                        Option<ResourceVersionRecord>,
+                    )> = (|| {
                     opened_file
                         .verify_path_identity(&readback_path)
                         .map_err(resource_baseline_sql_error)?;
@@ -2660,6 +2736,48 @@ impl SqliteStore {
                             lineage_report.violations.join(", ")
                         )));
                     }
+                    if let Some(target_version) = rollback_target_version {
+                        if target_version >= head.version {
+                            return Err(resource_baseline_sql_error(
+                                "rollback target must be an earlier lineage version",
+                            ));
+                        }
+                        let target = transaction
+                            .query_row(
+                                "SELECT resource_id, resource_kind, version, content_sha256, \
+                                        predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                                 FROM resource_versions WHERE resource_id=?1 AND version=?2",
+                                params![&resource_id, target_version as i64],
+                                |row| {
+                                    Ok(ResourceVersionRecord {
+                                        resource_id: row.get(0)?,
+                                        resource_kind: row.get(1)?,
+                                        version: row.get::<_, i64>(2)? as u64,
+                                        content_sha256: row.get(3)?,
+                                        predecessor_version: row
+                                            .get::<_, Option<i64>>(4)?
+                                            .map(|value| value as u64),
+                                        predecessor_record_sha256: row.get(5)?,
+                                        observed_at: row.get(6)?,
+                                        record_sha256: row.get(7)?,
+                                    })
+                                },
+                            )
+                            .optional()?
+                            .ok_or_else(|| {
+                                resource_baseline_sql_error(
+                                    "rollback target lineage version is missing",
+                                )
+                            })?;
+                        if target.resource_kind != "agent_md"
+                            || target.record_sha256 != resource_version_record_sha256(&target)
+                            || target.content_sha256 != proposed_content_sha256
+                        {
+                            return Err(resource_baseline_sql_error(
+                                "rollback content does not match target lineage version",
+                            ));
+                        }
+                    }
                     let next_version = head.version.checked_add(1).ok_or_else(|| {
                         resource_baseline_sql_error("resource lineage version overflow")
                     })?;
@@ -2724,7 +2842,7 @@ impl SqliteStore {
                         ],
                     )?;
                     transaction.commit()?;
-                    Ok(AgentMdCasCommitReceipt {
+                    Ok((AgentMdCasCommitReceipt {
                         schema: RESOURCE_CAS_COMMIT_SCHEMA.to_string(),
                         binding,
                         version,
@@ -2736,7 +2854,7 @@ impl SqliteStore {
                         rollback_verified: false,
                         external_writer_exclusion_verified: false,
                         commit_scope: RESOURCE_CAS_COMMIT_SCOPE.to_string(),
-                    })
+                    }, Some(head)))
                 })();
 
                 match result {
