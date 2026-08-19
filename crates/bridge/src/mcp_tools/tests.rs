@@ -10320,6 +10320,20 @@ fn registry_exposes_macos_ax_verify_to_codex_essential() {
 }
 
 #[test]
+fn registry_exposes_macos_ax_watch_to_codex_essential() {
+    let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    assert!(p.includes(Tier::Standard, "macos_ax_watch"));
+
+    let tool = MacosAxWatchTool::new(Hub::builder().build()).schema();
+    assert!(tool.description.contains("read-only"));
+    assert!(tool.description.contains("AXIdentifier"));
+    assert!(tool.input_schema["properties"].get("samples").is_some());
+    assert!(tool.input_schema["properties"].get("max_events").is_some());
+    assert!(tool.input_schema["properties"].get("include_samples").is_some());
+    assert!(tool.input_schema["properties"].get("activate").is_none());
+}
+
+#[test]
 fn registry_exposes_semantic_bus_adapter_report_to_codex_essential() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
@@ -11251,6 +11265,66 @@ print(json.dumps({"schema": "macos_ax_probe/v0", "argv": sys.argv[1:]}))
     assert!(!argv.contains(&"--prompt"));
     assert_eq!(payload["mcp_wrapper"]["read_only"], true);
     assert_eq!(payload["mcp_wrapper"]["include_windows"], false);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn macos_ax_watch_wrapper_passes_bounded_read_only_args() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-macos-ax-watch-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let script = temp_dir.join("macos_ax_watch.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({"schema": "macos_ax_watch/v0", "status": "ready", "argv": sys.argv[1:]}))
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let tool = MacosAxWatchTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "samples": 4,
+                "interval_secs": 0.2,
+                "max_windows": 5,
+                "max_events": 7,
+                "jxa_timeout_secs": 0.5,
+                "include_samples": true,
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    let payload = result_text_as_json(&out);
+    let argv: Vec<&str> = payload["argv"]
+        .as_array()
+        .expect("argv")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    for expected in [
+        "--compact", "--samples", "4", "--interval", "0.2", "--max-windows",
+        "5", "--max-events", "7", "--jxa-timeout-secs", "0.5", "--include-samples",
+    ] {
+        assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
+    }
+    assert_eq!(payload["mcp_wrapper"]["read_only"], true);
+    assert!(!argv.contains(&"--activate"));
+    assert!(!argv.contains(&"--click"));
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }

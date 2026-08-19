@@ -3280,6 +3280,142 @@ fn macos_ax_probe_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                              macos_ax_watch
+// ===========================================================================
+
+pub struct MacosAxWatchTool {
+    _hub: Hub,
+}
+
+impl MacosAxWatchTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MacosAxWatchTool {
+    fn name(&self) -> &'static str {
+        "macos_ax_watch"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Bounded, read-only macOS AX short-term event stream. Re-observes the frontmost app and emits frontmost-app changes plus window appeared, disappeared, and focus-changed events only within the same process when a sample-unique stable AXIdentifier supports the claim. Sample-local or ambiguous window identities are reported as coverage gaps and never produce lifecycle events. It never activates apps, focuses windows, clicks, types, or writes durable memory.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": "string", "description": "Workspace/repo root used to resolve scripts/macos_ax_watch.py."},
+                    "script_path": {"type": "string", "description": "Optional explicit macos_ax_watch.py path for tests or alternate checkouts."},
+                    "samples": {"type": "integer", "minimum": 2, "maximum": 6, "default": 3},
+                    "interval_secs": {"type": "number", "minimum": 0.05, "maximum": 2.0, "default": 0.3},
+                    "max_windows": {"type": "integer", "minimum": 0, "maximum": 50, "default": 8},
+                    "max_events": {"type": "integer", "minimum": 1, "maximum": 100, "default": 32},
+                    "jxa_timeout_secs": {"type": "number", "minimum": 0.25, "maximum": 5.0, "default": 4.0},
+                    "include_samples": {"type": "boolean", "default": false, "description": "Include bounded raw samples. Default false returns only compact sample summaries."},
+                    "timeout_ms": {"type": "integer", "minimum": 3000, "maximum": 60000, "default": 20000}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let samples = args.get("samples").and_then(Value::as_u64).unwrap_or(3).clamp(2, 6);
+        let interval_secs = args.get("interval_secs").and_then(Value::as_f64).unwrap_or(0.3).clamp(0.05, 2.0);
+        let max_windows = args.get("max_windows").and_then(Value::as_u64).unwrap_or(8).min(50);
+        let max_events = args.get("max_events").and_then(Value::as_u64).unwrap_or(32).clamp(1, 100);
+        let jxa_timeout_secs = args.get("jxa_timeout_secs").and_then(Value::as_f64).unwrap_or(4.0).clamp(0.25, 5.0);
+        let include_samples = args.get("include_samples").and_then(Value::as_bool).unwrap_or(false);
+        let minimum_timeout = ((samples as f64 * jxa_timeout_secs
+            + (samples.saturating_sub(1)) as f64 * interval_secs
+            + 3.0)
+            * 1000.0) as u64;
+        let timeout_ms = args.get("timeout_ms").and_then(Value::as_u64).unwrap_or(20_000).clamp(3_000, 60_000).max(minimum_timeout).min(60_000);
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = macos_ax_watch_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(macos_ax_watch_error(json!({
+                "code": "script_missing",
+                "message": format!("macos_ax_watch.py not found at {}", script.display())
+            })));
+        }
+
+        let mut cmd = killable_command(
+            std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
+        );
+        cmd.arg(&script)
+            .arg("--compact")
+            .arg("--samples").arg(samples.to_string())
+            .arg("--interval").arg(interval_secs.to_string())
+            .arg("--max-windows").arg(max_windows.to_string())
+            .arg("--max-events").arg(max_events.to_string())
+            .arg("--jxa-timeout-secs").arg(jxa_timeout_secs.to_string());
+        if include_samples {
+            cmd.arg("--include-samples");
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+        let started = Instant::now();
+        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+            Err(_) => return Ok(macos_ax_watch_error(json!({"code": "timeout", "duration_ms": started.elapsed().as_millis() as u64}))),
+            Ok(Err(e)) => return Ok(macos_ax_watch_error(json!({"code": "spawn_failed", "message": e.to_string()}))),
+            Ok(Ok(output)) => output,
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+        match serde_json::from_str::<Value>(&stdout) {
+            Ok(mut payload) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert("mcp_wrapper".into(), json!({
+                        "tool": self.name(), "read_only": true, "duration_ms": duration_ms,
+                        "exit_code": output.status.code().unwrap_or(-1), "stderr": stderr,
+                        "truncated": stdout_truncated || stderr_truncated
+                    }));
+                }
+                Ok(ToolResult::json_text(&payload))
+            }
+            Err(e) => Ok(macos_ax_watch_error(json!({"code": "invalid_json", "message": e.to_string(), "stdout": stdout, "stderr": stderr}))),
+        }
+    }
+}
+
+fn macos_ax_watch_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_WATCH_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/macos_ax_watch.py");
+        if path.exists() { return path; }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/macos_ax_watch.py");
+        if path.exists() { return path; }
+    }
+    if let Some(path) = installed_runtime_script_path("macos_ax_watch.py") {
+        return path;
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_watch.py")
+}
+
+fn macos_ax_watch_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "macos_ax_watch_mcp_error.v0", "status": "error", "read_only": true, "error": error
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                              macos_ax_verify
 // ===========================================================================
 
@@ -4010,6 +4146,22 @@ fn semantic_bus_adapter_specs(include_design_only: bool) -> Vec<SemanticBusAdapt
             fixture_assets: &["crates/bridge/fixtures/semantic_bus/macos_ax_verify_postcondition.json"],
             doc_assets: &["docs/design/SEMANTIC_SYSTEM_BUS_MACOS_AX_VERIFY_2026_06_07.md"],
             notes: &["Read-only predicate verifier over the same bounded macOS AX surface."],
+        },
+        SemanticBusAdapterSpec {
+            adapter_id: "macos_ax_watch",
+            platform: "macos",
+            adapter_family: "macos_ax",
+            tool: Some("macos_ax_watch"),
+            semantic_schema: "macos_ax_watch/v0",
+            source_schema: "macos_ax_watch/v0",
+            evidence_level: "runtime_backed",
+            status: "runtime_backed_if_assets_present",
+            channels: &["ax_trust", "system_events", "short_term_event_stream"],
+            fallback_order: &["macos_ax_watch", "macos_ax_probe"],
+            runtime_assets: &["scripts/macos_ax_watch.py", "scripts/macos_ax_probe.py"],
+            fixture_assets: &[],
+            doc_assets: &[],
+            notes: &["Bounded read-only deltas; window lifecycle and focus events require the same process and a sample-unique stable AXIdentifier."],
         },
         SemanticBusAdapterSpec {
             adapter_id: "windows_uia_snapshot_fixture",
@@ -44751,6 +44903,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // macOS adapter verifier: read-only predicate check over the same bounded
     // AX/System Events observation surface as macos_ax_probe.
     "macos_ax_verify",
+    // macOS bounded short-term AX event stream. Lifecycle events require a
+    // stable AXIdentifier; sample-local indices never claim continuity.
+    "macos_ax_watch",
     // SSB conformance inventory: read-only source/fixture/doc classification.
     // It does not execute live probes or mutate desktop/service state.
     "semantic_bus_adapter_report",
@@ -48218,6 +48373,13 @@ pub(crate) fn build_registry_with_policy_surface(
         surface.apple_host,
         Tier::Standard,
         Arc::new(MacosAxVerifyTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.apple_host,
+        Tier::Standard,
+        Arc::new(MacosAxWatchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

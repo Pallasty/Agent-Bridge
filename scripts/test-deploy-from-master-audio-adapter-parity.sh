@@ -37,7 +37,7 @@ for asset in config/omnivoice-canary.json \
 done
 for asset in app_control.py desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
-    macos_ax_probe.py macos_ax_verify.py \
+    macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
     vision_grounding_ocr.py; do
     test -x "$RUNTIME_ASSET_DIR/$asset"
     cmp -s "$SCRIPT_DIR/$asset" "$RUNTIME_ASSET_DIR/$asset"
