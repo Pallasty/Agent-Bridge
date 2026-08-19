@@ -2779,6 +2779,26 @@ impl MacosAxProbeTool {
     }
 }
 
+fn macos_ax_probe_process_timeout_ms(
+    args: &Value,
+    include_windows: bool,
+    jxa_timeout_secs: f64,
+) -> u64 {
+    let requested_ms = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(8_000)
+        .clamp(1_000, 30_000);
+    if !include_windows {
+        return requested_ms;
+    }
+
+    // Leave the Python process enough time to exhaust its own bounded JXA
+    // read and report the result instead of preempting it at the outer layer.
+    let minimum_ms = (jxa_timeout_secs * 1000.0).ceil() as u64 + 3_000;
+    requested_ms.max(minimum_ms).min(30_000)
+}
+
 #[async_trait]
 impl McpTool for MacosAxProbeTool {
     fn name(&self) -> &'static str {
@@ -2840,7 +2860,7 @@ impl McpTool for MacosAxProbeTool {
                         "minimum": 1000,
                         "maximum": 30000,
                         "default": 8000,
-                        "description": "Milliseconds before the probe process is killed."
+                        "description": "Requested milliseconds before the probe process is killed. For window reads, the effective outer timeout is raised when necessary to cover jxa_timeout_secs plus three seconds of process/preflight overhead."
                     }
                 }
             }),
@@ -2848,11 +2868,6 @@ impl McpTool for MacosAxProbeTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let timeout_ms = args
-            .get("timeout_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(8_000)
-            .clamp(1_000, 30_000);
         let include_windows = args
             .get("include_windows")
             .and_then(Value::as_bool)
@@ -2867,6 +2882,8 @@ impl McpTool for MacosAxProbeTool {
             .and_then(Value::as_f64)
             .unwrap_or(4.0)
             .clamp(0.25, 10.0);
+        let timeout_ms =
+            macos_ax_probe_process_timeout_ms(&args, include_windows, jxa_timeout_secs);
         let semantic_bus = args
             .get("semantic_bus")
             .and_then(Value::as_bool)

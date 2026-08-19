@@ -11310,6 +11310,87 @@ print(json.dumps({"schema": "macos_ax_probe/v0", "argv": sys.argv[1:]}))
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
+#[test]
+fn macos_ax_probe_outer_timeout_covers_the_inner_jxa_budget() {
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({}), true, 4.0),
+        8_000
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({}), true, 10.0),
+        13_000
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({"timeout_ms": 1_000}), true, 10.0),
+        13_000
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({"timeout_ms": 1_000}), true, 1.25),
+        4_250
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({"timeout_ms": 1_000}), false, 10.0),
+        1_000
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({"timeout_ms": 30_000}), true, 10.0),
+        30_000
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({"timeout_ms": 20_000}), true, 10.0),
+        20_000
+    );
+    assert_eq!(
+        macos_ax_probe_process_timeout_ms(&json!({"timeout_ms": 60_000}), true, 10.0),
+        30_000
+    );
+}
+
+#[tokio::test]
+async fn macos_ax_probe_outer_timeout_does_not_preempt_a_valid_inner_budget() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-macos-ax-probe-timeout-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let script = temp_dir.join("macos_ax_probe.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+import time
+time.sleep(1.1)
+print(json.dumps({"schema": "macos_ax_probe/v0", "status": "ready"}))
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let tool = MacosAxProbeTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "script_path": script.to_string_lossy(),
+                "include_windows": true,
+                "jxa_timeout_secs": 0.25,
+                "timeout_ms": 1_000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+    assert_eq!(payload["status"], "ready");
+    assert!(!out.is_error);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
 #[tokio::test]
 async fn macos_ax_watch_wrapper_passes_bounded_read_only_args() {
     let temp_dir = std::env::temp_dir().join(format!(

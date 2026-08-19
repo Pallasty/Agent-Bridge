@@ -100,6 +100,12 @@ timeout_ms: integer = 8000
 `include_windows=true` reads frontmost app/window metadata through System
 Events only when Accessibility is already trusted.
 
+For a window read, the Rust wrapper raises the effective process timeout when
+needed so it is never shorter than `jxa_timeout_secs` plus three seconds for
+Python startup, the no-ask Automation preflight, and result serialization.
+This keeps the outer watchdog from preempting a valid inner JXA timeout. With
+`include_windows=false`, the requested `timeout_ms` remains unchanged.
+
 ## 4. Probe Payload
 
 `macos_ax_probe/v0` returns:
