@@ -138,3 +138,27 @@ The collector must be imported by any future live runner; duplicating these
 JSON paths in an inline script is no longer admissible. Pair 03 may be
 preregistered only after the runner itself is tested for stop-on-error cleanup
 and uses this collector for its final decision.
+
+## Bounded runner gate
+
+`scripts/embodied-media-episode-dogfood-runner.py` implements that orchestration
+boundary without adding an MCP tool. It validates every public binding before
+starting MCP, writes raw tool payloads only into a caller-selected new 0700
+directory as exclusive 0600 files, and delegates the sole success decision to
+the versioned collector above. Standard output contains only the collector's
+normalized result or a content-free rejection code.
+
+The baseline path is fixed to seven calls and the trial path to two calls. A
+baseline failure after projection start first attempts the allowlisted stop
+tool; a lost start response or failed stop falls back to the exact no-shell ADB
+`am force-stop` command for the pinned Companion package. A trial receipt whose
+composite cleanup is not verified receives the same fallback. Cleanup cannot
+turn a rejected or incomplete episode into success.
+
+The runner tests cover sequence cardinality, operation-hash binding, malformed
+public inputs before dispatch, exact track/revision/digest collection, sink
+failure, lost start response, stop failure, trial cleanup failure, exclusive
+receipt creation, and fixed fallback argv. These tests authorize a later Pair
+03 preregistration; they do not themselves preregister it or authorize a media
+action. A live pair still requires a fresh preregistration record and a new MCP
+process on the deployed, version-paired runtime.
