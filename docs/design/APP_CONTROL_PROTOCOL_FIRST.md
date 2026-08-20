@@ -214,6 +214,15 @@ This validates process and journal boundaries without touching real MPRIS or a
 phone; it does not establish current owner intent or authorize automatic live
 recovery.
 
+The first bounded real-MPRIS recovery-index handoff is recorded at
+`docs/design/evidence/app_control_recovery_handoff_live_2026_08_20.json`.
+It used one preregistered Rhythmbox `next`, an intentionally short settlement
+window, a separate read-only discovery process, a new recovery process, and a
+terminal replay process. The record proves one contract-bound dispatch budget
+for that operation ID and settled read-only recovery; it does not prove a
+global dispatch count, exclusive causation, current intent after restart, or
+safe automatic recovery.
+
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.
 The first durable action/replay plus authenticated mobile-delivery episode is

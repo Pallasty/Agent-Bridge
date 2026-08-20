@@ -1,0 +1,81 @@
+{
+  "schema": "agent_bridge.app_control.recovery_handoff_live.v0",
+  "observed_at": "2026-08-20T17:08:25Z",
+  "preregistration_commit": "fb6f92a2",
+  "implementation_commit": "361fa943b005310c63eab66c4b5366cf26c1a3d3",
+  "operation_id_sha256": "680d2189856137b906c925cf19ab516400fe22c7612b40f5225e7018ee20b21f",
+  "phase_1_dispatch_pending": {
+    "status": "indeterminate",
+    "verdict": "error",
+    "recover": "retry",
+    "error_code": "operation_effect_not_settled",
+    "transaction_phase": "dispatch_started",
+    "dispatch_count": 1,
+    "dispatch_rc": 0,
+    "dispatch_argv_sha256": "2ba2cbd42c68d12aa33efabbab121dad31630753ba7af9f7bb41c260e969c997",
+    "idempotent_replay": false,
+    "recovered_after_interruption": false,
+    "external_execution_repeated": false,
+    "settled": false,
+    "required_stable_ms": 500,
+    "journal_record_sha256": "8dc9f52cc2002338c2604f6d8bde8fdbed63ad898e06a2d3ba036d4e9c7b18e8",
+    "journal_payload_present": false
+  },
+  "phase_2_readonly_discovery": {
+    "scan_complete": true,
+    "candidate_count": 1,
+    "skipped_historical_count": 12,
+    "candidate_record_sha_matches_phase_1": true,
+    "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+    "request_action": "next",
+    "request_player": "rhythmbox",
+    "request_ttl_secs": 3600,
+    "automatic_execution_allowed": false,
+    "revalidation_required": true
+  },
+  "phase_3_new_process_recovery": {
+    "verdict": "verified",
+    "recover": "proceed",
+    "dispatch_field_present": false,
+    "dispatch_count": 1,
+    "idempotent_replay": false,
+    "recovered_after_interruption": true,
+    "external_execution_repeated": false,
+    "causal_attribution": "unknown_after_restart",
+    "predicate": "track_identity_changed_after_restart_settled",
+    "reason": null,
+    "observation_error": null,
+    "observed_consecutive": 3,
+    "observed_stable_ms": 665,
+    "settled": true,
+    "before_track_sha256": "52241ec9e30231f0cb25d93842d134358da2fb46a76a64f8af4f0b222b4f7d28",
+    "after_track_sha256": "4507d505111d3c6f7d2a6ea206bd032434891e1d3edba14b0939f821a048181b",
+    "current_track_matches_after_at_audit": true,
+    "terminal_record_sha256": "84d7d8fd8bebe677d2d6346c1120533a9de18ce93c7b629b6c1440691911912a"
+  },
+  "phase_4_terminal_replay": {
+    "verdict": "verified",
+    "dispatch_field_present": false,
+    "dispatch_count": 1,
+    "idempotent_replay": true,
+    "recovered_after_interruption": true,
+    "external_execution_repeated": false,
+    "causal_attribution": "unknown_after_restart",
+    "terminal_record_unchanged": true
+  },
+  "result": {
+    "status": "PASSED_BOUNDED_LIVE_MPRIS_HANDOFF",
+    "contract_bound_dispatch_count": 1,
+    "automatic_recovery_used": false,
+    "mobile_projection_used": false,
+    "player_status_after": "Playing"
+  },
+  "claim_boundary": {
+    "exclusive_causation_proven": false,
+    "global_next_count_proven": false,
+    "independent_playerctl_delivery_proven": false,
+    "human_observation_proven": false,
+    "current_owner_intent_after_restart_proven": false,
+    "general_autonomous_recovery_authorized": false
+  }
+}
