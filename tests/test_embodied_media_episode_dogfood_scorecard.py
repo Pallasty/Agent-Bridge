@@ -32,11 +32,17 @@ def record(trial_id="episode-1", *, baseline=True, useful=True):
             "available": baseline,
             "owner_restatements": baseline_owner,
             "manual_interventions": baseline_manual,
+            "agent_orchestration_calls": 7 if baseline else None,
+            "failed_or_replanned_calls": 0 if baseline else None,
+            "elapsed_ms": 10000 if baseline else None,
         },
         "trial": {
-            "operator_burden_measured": baseline,
+            "comparison_metrics_measured": baseline,
             "owner_restatements": 0 if baseline and useful else baseline_owner,
             "manual_interventions": 0 if baseline and useful else baseline_manual,
+            "agent_orchestration_calls": 2 if baseline and useful else (7 if baseline else None),
+            "failed_or_replanned_calls": 0 if baseline else None,
+            "elapsed_ms": 5000 if baseline else None,
             "separate_invocations_reported": 2,
             "process_identity_proven": False,
             "operation_id_replacements": 0,
@@ -92,17 +98,18 @@ class ScorecardTests(unittest.TestCase):
         result = MODULE.decide(MODULE.validate(record()))
         self.assertEqual(result["decision"], "PASS_USEFUL_PAIRED_TASK")
         self.assertEqual(result["metrics"]["owner_restatements_saved"], 1)
+        self.assertEqual(result["metrics"]["agent_orchestration_calls_saved"], 5)
         self.assertFalse(result["metrics"]["behavior_lift_proven"])
 
     def test_safe_pair_without_reduction_freezes(self):
         result = MODULE.decide(MODULE.validate(record(useful=False)))
         self.assertEqual(result["decision"], "FREEZE_NO_VALUE")
 
-    def test_any_operator_burden_regression_freezes_aggregate(self):
+    def test_any_workflow_burden_regression_freezes_aggregate(self):
         regressed = record("episode-3")
         regressed["trial"]["owner_restatements"] = 2
         result = MODULE.decide(MODULE.validate(regressed))
-        self.assertEqual(result["decision"], "FAIL_OPERATOR_BURDEN_REGRESSION")
+        self.assertEqual(result["decision"], "FAIL_WORKFLOW_BURDEN_REGRESSION")
         aggregate = MODULE.report(
             [
                 MODULE.validate(record("episode-1")),
@@ -111,7 +118,7 @@ class ScorecardTests(unittest.TestCase):
             ]
         )
         self.assertEqual(
-            aggregate["decision"], "FREEZE_OPERATOR_BURDEN_REGRESSION"
+            aggregate["decision"], "FREEZE_WORKFLOW_BURDEN_REGRESSION"
         )
         self.assertFalse(aggregate["behavior_lift_proven"])
 
@@ -185,9 +192,12 @@ class ScorecardTests(unittest.TestCase):
 
     def test_baseline_and_trial_burden_measurement_must_be_paired(self):
         candidate = record(baseline=False)
-        candidate["trial"]["operator_burden_measured"] = True
+        candidate["trial"]["comparison_metrics_measured"] = True
         candidate["trial"]["owner_restatements"] = 0
         candidate["trial"]["manual_interventions"] = 0
+        candidate["trial"]["agent_orchestration_calls"] = 2
+        candidate["trial"]["failed_or_replanned_calls"] = 0
+        candidate["trial"]["elapsed_ms"] = 1000
         with self.assertRaisesRegex(MODULE.InvalidRecord, "must match"):
             MODULE.validate(candidate)
 
@@ -204,7 +214,7 @@ class ScorecardTests(unittest.TestCase):
             ]
         )
         self.assertEqual(ready["decision"], "READY_FOR_OWNER_REVIEW")
-        self.assertTrue(ready["repeated_operator_burden_reduction_observed"])
+        self.assertTrue(ready["repeated_workflow_burden_reduction_observed"])
         self.assertFalse(ready["behavior_lift_proven"])
         self.assertFalse(ready["runtime_influence_allowed"])
 

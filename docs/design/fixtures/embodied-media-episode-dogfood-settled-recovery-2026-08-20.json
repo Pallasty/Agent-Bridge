@@ -1,5 +1,5 @@
 {
-  "schema": "agent_bridge.embodied_media_episode_dogfood.v0",
+  "schema": "agent_bridge.embodied_media_episode_dogfood.v1",
   "trial_id": "settled-recovery-20260820-01",
   "preregistered": true,
   "task": {
@@ -11,12 +11,18 @@
   "baseline": {
     "available": false,
     "owner_restatements": null,
-    "manual_interventions": null
+    "manual_interventions": null,
+    "agent_orchestration_calls": null,
+    "failed_or_replanned_calls": null,
+    "elapsed_ms": null
   },
   "trial": {
-    "operator_burden_measured": false,
+    "comparison_metrics_measured": false,
     "owner_restatements": null,
     "manual_interventions": null,
+    "agent_orchestration_calls": null,
+    "failed_or_replanned_calls": null,
+    "elapsed_ms": null,
     "separate_invocations_reported": 3,
     "process_identity_proven": false,
     "operation_id_replacements": 0,

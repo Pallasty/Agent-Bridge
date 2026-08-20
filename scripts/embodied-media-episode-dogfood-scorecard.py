@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "agent_bridge.embodied_media_episode_dogfood.v0"
-REPORT_SCHEMA = "agent_bridge.embodied_media_episode_dogfood_report.v0"
+SCHEMA = "agent_bridge.embodied_media_episode_dogfood.v1"
+REPORT_SCHEMA = "agent_bridge.embodied_media_episode_dogfood_report.v1"
 TARGET_PAIRED_TASKS = 3
 TOP_LEVEL_KEYS = {
     "schema",
@@ -31,11 +31,17 @@ TASK_KEYS = {
     "task_kind",
     "intent_declared_before_action",
 }
-BASELINE_KEYS = {"available", "owner_restatements", "manual_interventions"}
-TRIAL_KEYS = {
-    "operator_burden_measured",
+COMPARISON_METRIC_KEYS = {
     "owner_restatements",
     "manual_interventions",
+    "agent_orchestration_calls",
+    "failed_or_replanned_calls",
+    "elapsed_ms",
+}
+BASELINE_KEYS = {"available", *COMPARISON_METRIC_KEYS}
+TRIAL_KEYS = {
+    "comparison_metrics_measured",
+    *COMPARISON_METRIC_KEYS,
     "separate_invocations_reported",
     "process_identity_proven",
     "operation_id_replacements",
@@ -128,24 +134,28 @@ def validate(record: Any) -> dict[str, Any]:
         raise InvalidRecord("task.task_kind is not recognized")
 
     _require_bool(baseline["available"], "baseline.available")
-    for key in ("owner_restatements", "manual_interventions"):
+    for key in COMPARISON_METRIC_KEYS:
         _require_optional_count(
             baseline[key], f"baseline.{key}", required=baseline["available"]
         )
         if not baseline["available"] and baseline[key] is not None:
             raise InvalidRecord(f"baseline.{key} must be null when baseline is unavailable")
 
-    _require_bool(trial["operator_burden_measured"], "trial.operator_burden_measured")
-    if baseline["available"] != trial["operator_burden_measured"]:
+    _require_bool(
+        trial["comparison_metrics_measured"], "trial.comparison_metrics_measured"
+    )
+    if baseline["available"] != trial["comparison_metrics_measured"]:
         raise InvalidRecord(
-            "baseline availability and trial operator-burden measurement must match"
+            "baseline availability and trial comparison measurement must match"
         )
-    for key in ("owner_restatements", "manual_interventions"):
+    for key in COMPARISON_METRIC_KEYS:
         _require_optional_count(
-            trial[key], f"trial.{key}", required=trial["operator_burden_measured"]
+            trial[key], f"trial.{key}", required=trial["comparison_metrics_measured"]
         )
-        if not trial["operator_burden_measured"] and trial[key] is not None:
-            raise InvalidRecord(f"trial.{key} must be null when burden was not measured")
+        if not trial["comparison_metrics_measured"] and trial[key] is not None:
+            raise InvalidRecord(
+                f"trial.{key} must be null when comparison metrics were not measured"
+            )
     for key in (
         "separate_invocations_reported",
         "operation_id_replacements",
@@ -154,8 +164,7 @@ def validate(record: Any) -> dict[str, Any]:
         if not _is_count(trial[key]):
             raise InvalidRecord(f"trial.{key} must be a non-negative integer")
     for key in TRIAL_KEYS - {
-        "owner_restatements",
-        "manual_interventions",
+        *COMPARISON_METRIC_KEYS,
         "separate_invocations_reported",
         "operation_id_replacements",
         "contract_bound_dispatches_reported",
@@ -215,7 +224,7 @@ def decide(record: dict[str, Any]) -> dict[str, Any]:
     if failed_contract:
         return {"decision": "FAIL_CONTRACT", "reasons": failed_contract}
 
-    if not baseline["available"] or not trial["operator_burden_measured"]:
+    if not baseline["available"] or not trial["comparison_metrics_measured"]:
         return {
             "decision": "PASS_EPISODE_COLLECT_PAIRED_BASELINE",
             "reasons": ["verified_episode_without_paired_operator_burden_baseline"],
@@ -227,26 +236,55 @@ def decide(record: dict[str, Any]) -> dict[str, Any]:
 
     owner_restatements_saved = baseline["owner_restatements"] - trial["owner_restatements"]
     manual_interventions_saved = baseline["manual_interventions"] - trial["manual_interventions"]
-    no_regression = owner_restatements_saved >= 0 and manual_interventions_saved >= 0
+    orchestration_calls_saved = (
+        baseline["agent_orchestration_calls"] - trial["agent_orchestration_calls"]
+    )
+    failed_or_replanned_calls_saved = (
+        baseline["failed_or_replanned_calls"] - trial["failed_or_replanned_calls"]
+    )
+    elapsed_ms_saved = baseline["elapsed_ms"] - trial["elapsed_ms"]
+    no_regression = all(
+        value >= 0
+        for value in (
+            owner_restatements_saved,
+            manual_interventions_saved,
+            orchestration_calls_saved,
+            failed_or_replanned_calls_saved,
+        )
+    )
     if not no_regression:
         return {
-            "decision": "FAIL_OPERATOR_BURDEN_REGRESSION",
-            "reasons": ["operator_burden_regressed"],
+            "decision": "FAIL_WORKFLOW_BURDEN_REGRESSION",
+            "reasons": ["workflow_burden_regressed"],
             "metrics": {
                 "owner_restatements_saved": owner_restatements_saved,
                 "manual_interventions_saved": manual_interventions_saved,
-                "paired_operator_burden_reduction_observed": False,
+                "agent_orchestration_calls_saved": orchestration_calls_saved,
+                "failed_or_replanned_calls_saved": failed_or_replanned_calls_saved,
+                "elapsed_ms_saved_descriptive_only": elapsed_ms_saved,
+                "paired_workflow_burden_reduction_observed": False,
                 "behavior_lift_proven": False,
             },
         }
-    useful = no_regression and (owner_restatements_saved > 0 or manual_interventions_saved > 0)
+    useful = any(
+        value > 0
+        for value in (
+            owner_restatements_saved,
+            manual_interventions_saved,
+            orchestration_calls_saved,
+            failed_or_replanned_calls_saved,
+        )
+    )
     return {
         "decision": "PASS_USEFUL_PAIRED_TASK" if useful else "FREEZE_NO_VALUE",
         "reasons": ["operator_burden_reduced" if useful else "no_operator_burden_reduction"],
         "metrics": {
             "owner_restatements_saved": owner_restatements_saved,
             "manual_interventions_saved": manual_interventions_saved,
-            "paired_operator_burden_reduction_observed": useful,
+            "agent_orchestration_calls_saved": orchestration_calls_saved,
+            "failed_or_replanned_calls_saved": failed_or_replanned_calls_saved,
+            "elapsed_ms_saved_descriptive_only": elapsed_ms_saved,
+            "paired_workflow_burden_reduction_observed": useful,
             "behavior_lift_proven": False,
         },
     }
@@ -263,9 +301,9 @@ def report(records: list[dict[str, Any]]) -> dict[str, Any]:
     incomplete = decisions.count("INCOMPLETE")
     paired_tasks = decisions.count("PASS_USEFUL_PAIRED_TASK") + decisions.count(
         "FREEZE_NO_VALUE"
-    ) + decisions.count("FAIL_OPERATOR_BURDEN_REGRESSION")
+    ) + decisions.count("FAIL_WORKFLOW_BURDEN_REGRESSION")
     useful_paired_tasks = decisions.count("PASS_USEFUL_PAIRED_TASK")
-    burden_regressions = decisions.count("FAIL_OPERATOR_BURDEN_REGRESSION")
+    burden_regressions = decisions.count("FAIL_WORKFLOW_BURDEN_REGRESSION")
     if paired_tasks > TARGET_PAIRED_TASKS:
         raise InvalidRecord(
             f"paired-task gate is code-locked at {TARGET_PAIRED_TASKS} records"
@@ -278,7 +316,7 @@ def report(records: list[dict[str, Any]]) -> dict[str, Any]:
     elif incomplete:
         gate = "INCOMPLETE"
     elif burden_regressions:
-        gate = "FREEZE_OPERATOR_BURDEN_REGRESSION"
+        gate = "FREEZE_WORKFLOW_BURDEN_REGRESSION"
     elif paired_tasks < TARGET_PAIRED_TASKS:
         gate = "COLLECTING_PAIRED_REAL_TASKS"
     elif useful_paired_tasks * 3 >= paired_tasks * 2:
@@ -294,11 +332,11 @@ def report(records: list[dict[str, Any]]) -> dict[str, Any]:
         "records": len(records),
         "paired_real_tasks": paired_tasks,
         "useful_paired_real_tasks": useful_paired_tasks,
-        "operator_burden_regressions": burden_regressions,
+        "workflow_burden_regressions": burden_regressions,
         "safety_failures": safety_failures,
         "contract_failures": contract_failures,
         "incomplete_records": incomplete,
-        "repeated_operator_burden_reduction_observed": gate == "READY_FOR_OWNER_REVIEW",
+        "repeated_workflow_burden_reduction_observed": gate == "READY_FOR_OWNER_REVIEW",
         "behavior_lift_proven": False,
         "runtime_influence_allowed": False,
         "record_results": [
@@ -323,7 +361,7 @@ def main() -> int:
         "FAIL_SAFETY",
         "FAIL_CONTRACT",
         "INCOMPLETE",
-        "FREEZE_OPERATOR_BURDEN_REGRESSION",
+        "FREEZE_WORKFLOW_BURDEN_REGRESSION",
         "FREEZE_NO_REPEATED_VALUE",
     } else 0
 
