@@ -1,0 +1,395 @@
+{
+  "schema": "agent_bridge.app_control.settled_track_recovery_acceptance.v0",
+  "assembled_at": "2026-08-20T12:47:13Z",
+  "audited_at": "2026-08-20T12:52:49Z",
+  "status": "passed",
+  "acceptance_scope": "single_trusted_local_user_functional_path",
+  "source": {
+    "commit": "4a2849830c240228119378e68aedc6c7497a9b7a",
+    "origin_master": "4a2849830c240228119378e68aedc6c7497a9b7a",
+    "subject": "feat(app-control): settle durable track identity"
+  },
+  "deployment": {
+    "version": "agent-bridge 0.14.0 (v0.14.0-1715-g4a284983; 4a2849830c24)",
+    "binary_sha256": "d9f4a83a314fdc8b7a1b472f64e52d5d610e7f621c58eb7436b3057820a33ad2",
+    "binary_inode": "66309:1180079",
+    "runtime_app_control_sha256": "d53ca6ddd6a5a9ae81eec850e1e42d5be79a628d8a42cf0ef8f2c8d146b9bf24",
+    "settlement_marker": "agent_bridge.app_control.track_settlement.v0",
+    "hashes_observed_at": "2026-08-20T12:52:49Z",
+    "runtime_integrity_boundary": {
+      "binary_parent_owner_and_mode": "root:root 0777",
+      "binary_owner_and_mode": "root:root 0777",
+      "runtime_parent_owner_and_mode": "root:root 0777",
+      "runtime_script_owner_and_mode": "root:root 0777",
+      "runtime_files_owner_only": false,
+      "tamper_resistant_deployment_proven": false,
+      "meaning": "Hashes prove the observed bytes at audit time. This FUSE-mounted local deployment does not prove protection from another locally trusted writer."
+    },
+    "services": {
+      "agent-bridge-daemon.service": {
+        "pid": 1262015,
+        "active": true,
+        "binary_sha256_matches": true
+      },
+      "agent-bridge-daemon-http.service": {
+        "pid": 1262550,
+        "active": true,
+        "healthz": "ok",
+        "binary_sha256_matches": true
+      },
+      "agent-bridge-palace.service": {
+        "pid": 1262017,
+        "active": true,
+        "healthz": "ok",
+        "binary_sha256_matches": true
+      }
+    }
+  },
+  "device": {
+    "observed_at": "2026-08-20T12:52:49Z",
+    "serial": "3K661F0178H00000",
+    "model": "OPPO PKW110",
+    "package": "dev.agentbridge.companion",
+    "version_code": 3,
+    "version_name": "0.3.0",
+    "installed_apk_sha256": "62adfcd98f64c383d324d414855feb8ad71105ea2e7f679c43229a15fabca0db",
+    "repository_apk_sha256": "62adfcd98f64c383d324d414855feb8ad71105ea2e7f679c43229a15fabca0db"
+  },
+  "operation": {
+    "operation_id": "p2-settlement-live-20260820T124230Z-4a284983",
+    "journal_key_sha256": "666ef76de8080f47a6f5fca78691ade1a02b0f9bd0f99572e61cc90417c7bf6e",
+    "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+    "player_selector": "rhythmbox",
+    "operation_ttl_secs": 3600,
+    "initial_track": {
+      "track_id": "/org/mpris/MediaPlayer2/Track/2677",
+      "title": "Redline (No Vox)",
+      "artist": "Brand X Music",
+      "playback_status": "Paused"
+    }
+  },
+  "phase_1_single_dispatch_pending": {
+    "mcp_process": "fresh_stdio_process",
+    "request": {
+      "tool": "app_control",
+      "domain": "media",
+      "action": "next",
+      "player": "rhythmbox",
+      "operation_id": "p2-settlement-live-20260820T124230Z-4a284983",
+      "operation_ttl_secs": 3600,
+      "verify_timeout_secs": 0.1,
+      "timeout_ms": 30000
+    },
+    "rpc_error": null,
+    "tool_is_error": true,
+    "evidence_representation": {
+      "kind": "selected_fields_normalized_from_live_mcp_payload",
+      "not_a_raw_receipt": true,
+      "raw_envelope_persisted": false,
+      "source_json_pointer": "/result/content/0/text decoded as JSON",
+      "field_paths_preserved": true
+    },
+    "process_boundary": {
+      "separate_stdio_invocation_reported": true,
+      "pid_and_start_time_persisted": false,
+      "raw_rpc_envelope_sha256_persisted": false,
+      "executable_commit_reported": "4a2849830c240228119378e68aedc6c7497a9b7a"
+    },
+    "normalized_observation": {
+      "schema": "agent_bridge.app_control.v0",
+      "status": "indeterminate",
+      "verdict": "error",
+      "recover": "retry",
+      "error": {
+        "code": "operation_effect_not_settled",
+        "reason": "track_settlement_pending"
+      },
+      "before": {
+        "player": "rhythmbox",
+        "track_id": "/org/mpris/MediaPlayer2/Track/2677",
+        "title": "Redline (No Vox)"
+      },
+      "after": {
+        "player": "rhythmbox",
+        "track_id": "/org/mpris/MediaPlayer2/Track/1560",
+        "title": "May You Run"
+      },
+      "dispatch": {
+        "status": "dispatched",
+        "rc": 0,
+        "argv": [
+          "playerctl",
+          "-p",
+          "rhythmbox",
+          "next"
+        ]
+      },
+      "verification": {
+        "status": "indeterminate",
+        "predicate": "track_identity_change_not_settled",
+        "polls": 2,
+        "reason": "track_settlement_pending",
+        "observation_error": null,
+        "settlement": {
+          "schema": "agent_bridge.app_control.track_settlement.v0",
+          "candidate_track_id": "/org/mpris/MediaPlayer2/Track/1560",
+          "required_consecutive_observations": 3,
+          "observed_consecutive_observations": 2,
+          "required_stable_ms": 500,
+          "observed_stable_ms": 92,
+          "settled": false
+        }
+      },
+      "transaction": {
+        "phase": "dispatch_started",
+        "dispatch_count": 1,
+        "idempotent_replay": false,
+        "recovered_after_interruption": false,
+        "external_execution_repeated": false
+      },
+      "mcp_wrapper": {
+        "exit_code": 2,
+        "source_contract_ok": true,
+        "operation_id_bound": true,
+        "truncated": false
+      }
+    },
+    "journal_after_call": {
+      "record_sha256": "72a9af8294195c748cc48b936c53b97ae9411c326425f11de4604ff7ae9a0725",
+      "journal_manifest_sha256": "beb680c3eed8b8ba2fdda8bbed01b360b284819e71d21f6faf0f00b9c33848bc",
+      "record_mode": "0600",
+      "lock_mode": "0600",
+      "owner_uid": 1000,
+      "phase": "dispatch_started",
+      "dispatch_count": 1,
+      "resolved_player": "rhythmbox",
+      "baseline_track_id": "/org/mpris/MediaPlayer2/Track/2677",
+      "payload_present": false
+    }
+  },
+  "phase_2_cross_process_recovery_and_projection": {
+    "mcp_process": "second_fresh_stdio_process",
+    "request": {
+      "tool": "advance_track_then_project",
+      "operation_id": "p2-settlement-live-20260820T124230Z-4a284983",
+      "bind": "192.168.1.16",
+      "player": "rhythmbox",
+      "serial": "3K661F0178H00000",
+      "operation_ttl_secs": 3600,
+      "verify_timeout_secs": 5.0,
+      "auto_connect": true,
+      "projection_ttl_seconds": 120,
+      "timeout_ms": 30000
+    },
+    "rpc_error": null,
+    "tool_is_error": false,
+    "evidence_representation": {
+      "kind": "selected_fields_normalized_from_live_mcp_payload",
+      "not_a_raw_receipt": true,
+      "raw_envelope_persisted": false,
+      "source_json_pointer": "/result/content/0/text decoded as JSON",
+      "source_json_pointers": {
+        "preflight": "/steps/operation_preflight",
+        "app_control": "/steps/app_control",
+        "binding": "/binding",
+        "device_draw": "/steps/wait",
+        "authority": "/authority",
+        "cleanup": "/cleanup"
+      }
+    },
+    "process_boundary": {
+      "separate_stdio_invocation_reported": true,
+      "pid_and_start_time_persisted": false,
+      "raw_rpc_envelope_sha256_persisted": false,
+      "executable_commit_reported": "4a2849830c240228119378e68aedc6c7497a9b7a"
+    },
+    "normalized_observation": {
+      "schema": "agent_bridge.advance_track_then_project.v0",
+      "status": "verified",
+      "verdict": "verified",
+      "recover": "proceed",
+      "last_completed_phase": "projection_stopped",
+      "preflight": {
+        "status": "recovery_observation_candidate",
+        "candidate": true,
+        "blocked": false,
+        "observed_phase": "dispatch_started",
+        "dispatch_count": 1,
+        "record_sha256": "72a9af8294195c748cc48b936c53b97ae9411c326425f11de4604ff7ae9a0725",
+        "source_contract_ok": true,
+        "authorizes_dispatch": false
+      },
+      "app_control": {
+        "schema": "agent_bridge.app_control.v0",
+        "status": "verified",
+        "verdict": "verified",
+        "recover": "proceed",
+        "source_contract_ok": true,
+        "dispatch_field_present": false,
+        "before_track_id": "/org/mpris/MediaPlayer2/Track/2677",
+        "after_track_id": "/org/mpris/MediaPlayer2/Track/1560",
+        "verification": {
+          "status": "verified",
+          "predicate": "track_identity_changed_after_restart_settled",
+          "polls": 3,
+          "reason": null,
+          "observation_error": null,
+          "causal_attribution": "unknown_after_restart",
+          "settlement": {
+            "schema": "agent_bridge.app_control.track_settlement.v0",
+            "candidate_track_id": "/org/mpris/MediaPlayer2/Track/1560",
+            "required_consecutive_observations": 3,
+            "observed_consecutive_observations": 3,
+            "required_stable_ms": 500,
+            "observed_stable_ms": 651,
+            "settled": true
+          }
+        },
+        "transaction": {
+          "phase": "verified",
+          "dispatch_count": 1,
+          "idempotent_replay": false,
+          "recovered_after_interruption": true,
+          "external_execution_repeated": false
+        }
+      },
+      "binding": {
+        "player_exact_match": true,
+        "track_exact_match": true,
+        "revision_and_digest_exact_match": true,
+        "action_before_track_id": "/org/mpris/MediaPlayer2/Track/2677",
+        "action_after_track_id": "/org/mpris/MediaPlayer2/Track/1560",
+        "projected_track_id": "/org/mpris/MediaPlayer2/Track/1560",
+        "target_revision": 2,
+        "target_frame_sha256": "e38c5510d869c8c075f6d77606e5a7a732ad9a489ee312e42b69431bfe227e51"
+      },
+      "device_draw": {
+        "schema": "agent_bridge.mobile_projection_wait.v1",
+        "status": "revision_draw_reported_by_device",
+        "verdict": "verified",
+        "recover": "proceed",
+        "session_id": "mcp-1787229862-ac622f4281cf",
+        "target_revision": 2,
+        "target_frame_sha256": "e38c5510d869c8c075f6d77606e5a7a732ad9a489ee312e42b69431bfe227e51",
+        "draw_report_revision": 2,
+        "draw_report_frame_sha256": "e38c5510d869c8c075f6d77606e5a7a732ad9a489ee312e42b69431bfe227e51",
+        "authenticated_exact_pair": true,
+        "device_reported_at_unix_seconds": 1787229865,
+        "host_received_at_unix_seconds": 1787229865,
+        "device_activity_draw_reported": true,
+        "human_observed": false,
+        "pixel_verified": false
+      },
+      "authority": {
+        "media_actuation": {
+          "durable_dispatch_budget_consumed": true,
+          "reported_dispatch_count": 1,
+          "dispatched": null,
+          "dispatched_in_this_call": null,
+          "effect_verified": true,
+          "recovered_after_interruption": true,
+          "causal_attribution": "unknown_after_restart"
+        },
+        "projection_grants": {
+          "actuation": false,
+          "attention": false,
+          "memory": false,
+          "sensor": false
+        }
+      },
+      "cleanup": {
+        "attempted": true,
+        "verified": true,
+        "listener_stop_requested": true,
+        "activity_force_stop_succeeded": true,
+        "error": null
+      }
+    },
+    "journal_after_recovery": {
+      "record_sha256": "f231b827ca85403e57929148d739bb59b97148707fd0f7fefcebe5a60f7dbe05",
+      "journal_manifest_sha256": "4dcc500254d5f356ed8cc26752104b56803aba674c072b890cf7016709d32631",
+      "phase": "terminal",
+      "dispatch_count": 1,
+      "payload_dispatch_field_present": false,
+      "payload_after_track_id": "/org/mpris/MediaPlayer2/Track/1560"
+    }
+  },
+  "phase_3_terminal_replay": {
+    "mcp_process": "third_fresh_stdio_process",
+    "request": {
+      "tool": "app_control",
+      "operation_id": "p2-settlement-live-20260820T124230Z-4a284983",
+      "player": "rhythmbox",
+      "operation_ttl_secs": 3600,
+      "verify_timeout_secs": 5.0
+    },
+    "rpc_error": null,
+    "tool_is_error": false,
+    "evidence_representation": {
+      "kind": "selected_fields_normalized_from_live_mcp_payload",
+      "not_a_raw_receipt": true,
+      "raw_envelope_persisted": false,
+      "source_json_pointer": "/result/content/0/text decoded as JSON",
+      "source_json_pointers": {
+        "before_track_id": "/before/track_id",
+        "after_track_id": "/after/track_id",
+        "predicate": "/verification/predicate",
+        "transaction": "/transaction",
+        "mcp_wrapper": "/mcp_wrapper"
+      }
+    },
+    "process_boundary": {
+      "separate_stdio_invocation_reported": true,
+      "pid_and_start_time_persisted": false,
+      "raw_rpc_envelope_sha256_persisted": false,
+      "executable_commit_reported": "4a2849830c240228119378e68aedc6c7497a9b7a"
+    },
+    "normalized_observation": {
+      "status": "verified",
+      "verdict": "verified",
+      "recover": "proceed",
+      "dispatch_field_present": false,
+      "before_track_id": "/org/mpris/MediaPlayer2/Track/2677",
+      "after_track_id": "/org/mpris/MediaPlayer2/Track/1560",
+      "predicate": "track_identity_changed_after_restart_settled",
+      "transaction": {
+        "phase": "verified",
+        "dispatch_count": 1,
+        "idempotent_replay": true,
+        "recovered_after_interruption": true,
+        "external_execution_repeated": false
+      },
+      "mcp_wrapper": {
+        "exit_code": 0,
+        "source_contract_ok": true,
+        "operation_id_bound": true,
+        "truncated": false
+      }
+    },
+    "record_sha256_before": "f231b827ca85403e57929148d739bb59b97148707fd0f7fefcebe5a60f7dbe05",
+    "record_sha256_after": "f231b827ca85403e57929148d739bb59b97148707fd0f7fefcebe5a60f7dbe05",
+    "track_after_replay": "/org/mpris/MediaPlayer2/Track/1560"
+  },
+  "claims": {
+    "exactly_one_contract_bound_dispatch_reported_for_this_operation_id": true,
+    "global_next_dispatch_count_proven": false,
+    "playerctl_delivery_independently_proven": false,
+    "pending_was_not_terminalized": true,
+    "separate_stdio_invocations_reported": true,
+    "stdio_process_identity_evidence_persisted": false,
+    "recovery_observation_reported_no_dispatch_field": true,
+    "bounded_500ms_settled_track_identity_verified": true,
+    "long_lived_stability_proven": false,
+    "terminal_replay_did_not_rewrite_journal": true,
+    "android_exact_revision_and_digest_draw_reported": true,
+    "raw_mcp_envelopes_persisted": false,
+    "ephemeral_receipt_claims_independently_replayable": false,
+    "cleanup_verified": true,
+    "companion_process_absent_after_cleanup": true,
+    "companion_absence_observed_at": "2026-08-20T12:52:49Z",
+    "exclusive_causal_attribution_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false,
+    "tamper_resistant_deployment_proven": false
+  }
+}
