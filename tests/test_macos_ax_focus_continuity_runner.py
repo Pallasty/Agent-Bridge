@@ -343,6 +343,10 @@ class FocusContinuityEligibilityTests(unittest.TestCase):
         self.assertTrue(result["eligible_now"])
         self.assertEqual(result["stable_window_count"], 2)
         self.assertEqual(result["unfocused_stable_window_count"], 1)
+        self.assertEqual(
+            result["readable_attribute_counts"],
+            {"ax_identifier": 2, "title": 2, "role": 2, "focused": 2},
+        )
         self.assertFalse(result["titles_retained"])
         self.assertFalse(result["raw_receipt_retained"])
         self.assertEqual(result["error_stages"], [])
@@ -366,6 +370,21 @@ class FocusContinuityEligibilityTests(unittest.TestCase):
                 value["captured_at"] = 1000
                 mutate(value)
                 self.assertFalse(ELIGIBILITY.summarize(value, now=now)["eligible_now"])
+
+    def test_native_probe_source_is_read_only_and_has_no_system_events_dependency(self):
+        source = (ROOT / "scripts/macos_ax_native_probe.swift").read_text(encoding="utf-8")
+        self.assertIn("NSWorkspace.shared.frontmostApplication", source)
+        self.assertIn("AXUIElementCreateApplication", source)
+        self.assertIn("kAXWindowsAttribute", source)
+        self.assertIn('"uses_system_events": false', source)
+        self.assertIn('"uses_apple_events": false', source)
+        for forbidden in (
+            "AXUIElementSetAttributeValue",
+            "osascript",
+            'Application("System Events")',
+            "activate()",
+        ):
+            self.assertNotIn(forbidden, source)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,10 @@ ELIGIBILITY = (
     ROOT
     / "docs/design/evidence/macos_ax_focus_continuity_readonly_eligibility_2026_08_20.json"
 )
+NATIVE_ELIGIBILITY = (
+    ROOT
+    / "docs/design/evidence/macos_ax_focus_continuity_native_readonly_eligibility_2026_08_20.json"
+)
 
 
 class MacosAxFocusContinuityDesignTests(unittest.TestCase):
@@ -210,6 +214,50 @@ class MacosAxFocusContinuityEligibilityEvidenceTests(unittest.TestCase):
         self.assertFalse(decision["may_acquire_write_lease"])
 
     def test_negative_gate_makes_no_effect_or_recovery_claim(self):
+        for value in self.value["claim_boundary"].values():
+            self.assertIs(value, False)
+
+
+class MacosAxFocusContinuityNativeEligibilityEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.value = json.loads(NATIVE_ELIGIBILITY.read_text(encoding="utf-8"))
+
+    def test_native_probe_removes_automation_without_authorizing_action(self):
+        source = self.value["source"]
+        self.assertFalse(source["uses_system_events"])
+        self.assertFalse(source["uses_apple_events"])
+        self.assertFalse(source["uses_ax_setters"])
+        self.assertFalse(source["remote_source_file_written"])
+        self.assertFalse(source["raw_receipt_retained"])
+        self.assertFalse(source["titles_retained"])
+        authority = self.value["authority"]
+        self.assertTrue(authority["native_readonly_probe_authorized"])
+        self.assertFalse(authority["live_focus_authorized"])
+        self.assertFalse(authority["identity_fallback_authorized"])
+
+    def test_complete_two_window_surface_without_identifiers_is_ineligible(self):
+        observed = self.value["observation"]
+        self.assertTrue(observed["counts_consistent"])
+        self.assertFalse(observed["truncated"])
+        self.assertEqual(observed["returned_window_count"], 2)
+        self.assertEqual(observed["source_window_count"], 2)
+        self.assertEqual(
+            observed["readable_attribute_counts"],
+            {"ax_identifier": 0, "title": 2, "role": 2, "focused": 2},
+        )
+        self.assertEqual(observed["stable_window_count"], 0)
+        decision = self.value["decision"]
+        self.assertEqual(decision["status"], "INELIGIBLE_NO_STABLE_WINDOW_IDENTITY")
+        for key in (
+            "may_use_sample_index",
+            "may_use_title_as_identity",
+            "may_use_coordinate_or_visual_fallback",
+            "may_switch_to_another_application",
+            "may_run_focus_transaction",
+        ):
+            self.assertFalse(decision[key])
+
+    def test_native_gate_makes_no_effect_or_rollout_claim(self):
         for value in self.value["claim_boundary"].values():
             self.assertIs(value, False)
 

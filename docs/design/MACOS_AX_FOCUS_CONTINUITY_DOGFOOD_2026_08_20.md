@@ -128,3 +128,18 @@ The result is `INELIGIBLE_NO_LIVE_ACTION`. The gate did not start System Events,
 activate an app, create a window, acquire a lease, invoke focus, or retain raw
 window titles. This negative result is a successful fail-closed gate, not a
 failed experiment and not authority to manufacture eligibility.
+
+## Native AX follow-up
+
+The next authorized implementation removed `System Events` from the
+eligibility observation itself. A source-local Swift probe used only
+`NSWorkspace` and read-only `AXUIElementCopyAttributeValue` calls. It was
+streamed to the Mac Swift interpreter and its raw JSON was again piped directly
+through the content-free reducer.
+
+This native path successfully observed a complete, untruncated two-window
+surface with consistent counts. Both windows exposed title, role, and focused
+state, but neither exposed a non-empty `AXIdentifier`. The result therefore
+remains `INELIGIBLE_NO_STABLE_WINDOW_IDENTITY`. The experiment does not fall
+back to title, sample index, coordinates, pixels, or a different application.
+No focus action or application-state mutation was performed.

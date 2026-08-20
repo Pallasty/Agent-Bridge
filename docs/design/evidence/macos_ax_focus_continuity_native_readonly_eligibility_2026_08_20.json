@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.macos_ax_focus_continuity_native_readonly_eligibility.v0",
+  "observed_at": "2026-08-20T15:58:31Z",
+  "parent_eligibility_commit": "51595cede15e76b134cbf6b90a574a25c158e612",
+  "authority": {
+    "native_readonly_probe_authorized": true,
+    "live_focus_authorized": false,
+    "application_activation_authorized": false,
+    "identity_fallback_authorized": false,
+    "deployment_authorized": false
+  },
+  "source": {
+    "native_probe": "scripts/macos_ax_native_probe.swift",
+    "native_probe_sha256": "76c7c99dc184d8d9c725bdea8a7d86dd857f2360581f5c84b3ca7dafac174b98",
+    "eligibility_filter_sha256": "f265bcc2c02403876926398ab05e99f7383ad7ce6e0919b1eab7b15e9eabcbdb",
+    "uses_system_events": false,
+    "uses_apple_events": false,
+    "uses_ax_setters": false,
+    "remote_source_file_written": false,
+    "swift_toolchain_may_write_compilation_cache": true,
+    "raw_receipt_retained": false,
+    "titles_retained": false
+  },
+  "observation": {
+    "native_probe_exit_code": 0,
+    "eligibility_filter_exit_code": 2,
+    "platform_system": "Darwin",
+    "ax_trusted": true,
+    "permission_prompted": false,
+    "counts_consistent": true,
+    "truncated": false,
+    "returned_window_count": 2,
+    "source_window_count": 2,
+    "readable_attribute_counts": {
+      "ax_identifier": 0,
+      "title": 2,
+      "role": 2,
+      "focused": 2
+    },
+    "stable_window_count": 0,
+    "unfocused_stable_window_count": 0,
+    "error_stages": [
+      "native_ax_window_attributes"
+    ],
+    "action_performed": false
+  },
+  "decision": {
+    "status": "INELIGIBLE_NO_STABLE_WINDOW_IDENTITY",
+    "reason": "two_windows_observed_but_ax_identifier_unavailable",
+    "may_use_sample_index": false,
+    "may_use_title_as_identity": false,
+    "may_use_coordinate_or_visual_fallback": false,
+    "may_switch_to_another_application": false,
+    "may_run_focus_transaction": false,
+    "next_step": "design_a_separate_stable_identity_contract_or_wait_for_a_naturally_eligible_application"
+  },
+  "claim_boundary": {
+    "stable_target_observed": false,
+    "focus_effect_verified": false,
+    "cross_process_recovery_proven": false,
+    "exclusive_causation_proven": false,
+    "workflow_burden_reduction_proven": false,
+    "general_native_ax_probe_deployment_authorized": false
+  }
+}

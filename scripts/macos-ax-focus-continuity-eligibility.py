@@ -25,8 +25,23 @@ def summarize(value: Any, *, now: float | None = None) -> dict[str, Any]:
     windows = value.get("windows") if isinstance(value.get("windows"), list) else []
     stable: list[dict[str, Any]] = []
     complete = True
+    readable_counts = {
+        "ax_identifier": 0,
+        "title": 0,
+        "role": 0,
+        "focused": 0,
+    }
     for window in windows:
         identity = window.get("identity") if isinstance(window, dict) else None
+        if isinstance(window, dict):
+            if isinstance(window.get("ax_identifier"), str) and window["ax_identifier"]:
+                readable_counts["ax_identifier"] += 1
+            if isinstance(window.get("title"), str):
+                readable_counts["title"] += 1
+            if isinstance(window.get("role"), str) and window["role"]:
+                readable_counts["role"] += 1
+            if isinstance(window.get("focused"), bool):
+                readable_counts["focused"] += 1
         valid = (
             isinstance(window, dict)
             and isinstance(identity, dict)
@@ -123,6 +138,7 @@ def summarize(value: Any, *, now: float | None = None) -> dict[str, Any]:
         "stable_window_count": len(stable),
         "stable_identities_unique": len(identities) == len(set(identities)),
         "unfocused_stable_window_count": len(unfocused),
+        "readable_attribute_counts": readable_counts,
         "stable_identity_sha256": [_digest(identity) for identity in identities],
         "probe_age_ms_at_summary": age_ms,
         "titles_retained": False,
