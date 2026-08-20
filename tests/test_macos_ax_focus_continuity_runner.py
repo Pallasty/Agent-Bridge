@@ -13,6 +13,13 @@ SPEC = importlib.util.spec_from_file_location("macos_ax_focus_continuity_runner"
 RUNNER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(RUNNER)
+ELIGIBILITY_SCRIPT = ROOT / "scripts/macos-ax-focus-continuity-eligibility.py"
+ELIGIBILITY_SPEC = importlib.util.spec_from_file_location(
+    "macos_ax_focus_continuity_eligibility", ELIGIBILITY_SCRIPT
+)
+ELIGIBILITY = importlib.util.module_from_spec(ELIGIBILITY_SPEC)
+assert ELIGIBILITY_SPEC.loader is not None
+ELIGIBILITY_SPEC.loader.exec_module(ELIGIBILITY)
 
 
 TARGET = {
@@ -326,6 +333,39 @@ class FocusContinuityRunnerTests(unittest.TestCase):
                     RUNNER.canonical_request("focus-op-1", target, 3600)
         with self.assertRaisesRegex(RUNNER.RunnerError, "journal_directory_not_absolute"):
             RUNNER.OperationJournal(pathlib.Path("relative"), "focus-op-1")
+
+
+class FocusContinuityEligibilityTests(unittest.TestCase):
+    def test_complete_two_window_probe_is_eligible_without_retaining_content(self):
+        value = probe()
+        value["captured_at"] = 1000
+        result = ELIGIBILITY.summarize(value, now=1001)
+        self.assertTrue(result["eligible_now"])
+        self.assertEqual(result["stable_window_count"], 2)
+        self.assertEqual(result["unfocused_stable_window_count"], 1)
+        self.assertFalse(result["titles_retained"])
+        self.assertFalse(result["raw_receipt_retained"])
+        self.assertEqual(result["error_stages"], [])
+        self.assertEqual(result["incomplete_reason_codes"], [])
+        self.assertNotIn("Target", json.dumps(result))
+        self.assertNotIn("target-window", json.dumps(result))
+
+    def test_stale_incomplete_or_single_window_probe_is_ineligible(self):
+        for mutate, now in (
+            (lambda value: None, 1006),
+            (lambda value: value.update(coverage_complete=False), 1001),
+            (
+                lambda value: (
+                    value.update(windows=value["windows"][:1], window_count=1, source_window_count=1)
+                ),
+                1001,
+            ),
+        ):
+            with self.subTest(now=now):
+                value = probe()
+                value["captured_at"] = 1000
+                mutate(value)
+                self.assertFalse(ELIGIBILITY.summarize(value, now=now)["eligible_now"])
 
 
 if __name__ == "__main__":

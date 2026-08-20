@@ -113,3 +113,18 @@ The runner is not a public MCP tool and is not a deployed runtime asset. This
 implementation gate does not authorize a real Mac focus action. Read-only Mac
 eligibility inspection, live fault injection, paired measurement, and rollout
 remain distinct owner gates.
+
+## First read-only Mac eligibility gate
+
+The owner subsequently authorized only the read-only eligibility inspection.
+The merged probe bytes were streamed to the Mac system Python without writing
+a remote file, and the raw receipt was piped directly through the content-free
+eligibility reducer. At the observation time, AX trust was true and no prompt
+was requested, but `System Events` was not running. The no-ask preflight
+correctly refused to start it, so the probe returned degraded with no complete
+window surface. Finder was running, but no window identity was retained.
+
+The result is `INELIGIBLE_NO_LIVE_ACTION`. The gate did not start System Events,
+activate an app, create a window, acquire a lease, invoke focus, or retain raw
+window titles. This negative result is a successful fail-closed gate, not a
+failed experiment and not authority to manufacture eligibility.

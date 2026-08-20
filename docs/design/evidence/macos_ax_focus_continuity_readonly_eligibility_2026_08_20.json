@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.macos_ax_focus_continuity_readonly_eligibility.v0",
+  "observed_at": "2026-08-20T15:53:31Z",
+  "implementation_commit": "e70f1d5b59f9793f7b79e1f90f263982a96f02fe",
+  "authority": {
+    "readonly_eligibility_authorized": true,
+    "live_focus_authorized": false,
+    "application_activation_authorized": false,
+    "window_creation_authorized": false,
+    "permission_prompt_authorized": false
+  },
+  "source": {
+    "probe_sha256": "32626b48148be799307818d693ee6967d6ba72afb002daaf0c6dec59200b2069",
+    "eligibility_filter_sha256": "516fba84d554d8ab3c6ab72766a9151c55b09fcc645158aed0e4b01b10845250",
+    "probe_streamed_over_stdin": true,
+    "remote_probe_file_written": false,
+    "raw_receipt_retained": false,
+    "titles_retained": false
+  },
+  "observation": {
+    "probe_exit_code": 0,
+    "eligibility_filter_exit_code": 2,
+    "platform_system": "Darwin",
+    "ax_trusted": true,
+    "permission_prompted": false,
+    "probe_status": "degraded",
+    "coverage_complete": false,
+    "counts_consistent": false,
+    "errors_empty": false,
+    "error_stages": [
+      "system_events"
+    ],
+    "incomplete_reason_codes": [
+      "frontmost_app_identity_invalid",
+      "probe_errors",
+      "probe_not_ready",
+      "window_counts_incomplete",
+      "window_enumeration_unconfirmed"
+    ],
+    "returned_window_count": 0,
+    "source_window_count": null,
+    "stable_window_count": 0,
+    "unfocused_stable_window_count": 0,
+    "system_events_running": false,
+    "finder_running": true,
+    "action_performed": false
+  },
+  "decision": {
+    "status": "INELIGIBLE_NO_LIVE_ACTION",
+    "reason": "complete_window_surface_unavailable_without_starting_system_events",
+    "may_manufacture_eligibility": false,
+    "may_run_focus_transaction": false,
+    "may_acquire_write_lease": false,
+    "next_step": "wait_for_a_naturally_eligible_surface_or_obtain_separate_owner_authority"
+  },
+  "claim_boundary": {
+    "two_stable_windows_observed": false,
+    "target_selected": false,
+    "focus_effect_verified": false,
+    "cross_process_recovery_proven": false,
+    "workflow_burden_reduction_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false
+  }
+}

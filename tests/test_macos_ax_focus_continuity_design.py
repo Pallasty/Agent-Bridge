@@ -12,6 +12,10 @@ IMPLEMENTATION = (
     ROOT
     / "docs/design/evidence/macos_ax_focus_continuity_offline_implementation_2026_08_20.json"
 )
+ELIGIBILITY = (
+    ROOT
+    / "docs/design/evidence/macos_ax_focus_continuity_readonly_eligibility_2026_08_20.json"
+)
 
 
 class MacosAxFocusContinuityDesignTests(unittest.TestCase):
@@ -164,6 +168,48 @@ class MacosAxFocusContinuityImplementationEvidenceTests(unittest.TestCase):
 
     def test_offline_evidence_makes_no_live_or_general_claim(self):
         self.assertEqual(self.value["offline_tests"]["runner_and_design_tests_passed"], 23)
+        for value in self.value["claim_boundary"].values():
+            self.assertIs(value, False)
+
+
+class MacosAxFocusContinuityEligibilityEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.value = json.loads(ELIGIBILITY.read_text(encoding="utf-8"))
+
+    def test_negative_gate_is_read_only_and_does_not_expand_authority(self):
+        self.assertEqual(
+            self.value["schema"],
+            "agent_bridge.macos_ax_focus_continuity_readonly_eligibility.v0",
+        )
+        authority = self.value["authority"]
+        self.assertTrue(authority["readonly_eligibility_authorized"])
+        for key in (
+            "live_focus_authorized",
+            "application_activation_authorized",
+            "window_creation_authorized",
+            "permission_prompt_authorized",
+        ):
+            self.assertFalse(authority[key])
+        self.assertFalse(self.value["source"]["remote_probe_file_written"])
+        self.assertFalse(self.value["source"]["raw_receipt_retained"])
+        self.assertFalse(self.value["source"]["titles_retained"])
+
+    def test_incomplete_system_events_surface_blocks_before_action(self):
+        observation = self.value["observation"]
+        self.assertTrue(observation["ax_trusted"])
+        self.assertFalse(observation["permission_prompted"])
+        self.assertEqual(observation["probe_status"], "degraded")
+        self.assertFalse(observation["coverage_complete"])
+        self.assertEqual(observation["error_stages"], ["system_events"])
+        self.assertFalse(observation["system_events_running"])
+        self.assertFalse(observation["action_performed"])
+        decision = self.value["decision"]
+        self.assertEqual(decision["status"], "INELIGIBLE_NO_LIVE_ACTION")
+        self.assertFalse(decision["may_manufacture_eligibility"])
+        self.assertFalse(decision["may_run_focus_transaction"])
+        self.assertFalse(decision["may_acquire_write_lease"])
+
+    def test_negative_gate_makes_no_effect_or_recovery_claim(self):
         for value in self.value["claim_boundary"].values():
             self.assertIs(value, False)
 
