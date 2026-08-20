@@ -3,8 +3,9 @@
 //! P0 remains read-only through [`crate::StateStore`]. P1A0 adds an explicit
 //! AGENT.md path binding and genesis admission, while P1A1 adds a controlled
 //! compare-and-swap commit, P1A2 adds a verified historical rollback, P1A3
-//! adds proposal metadata, and P1A4 adds an unauthenticated review preflight
-//! through inherent [`crate::SqliteStore`] methods.
+//! adds proposal metadata, P1A4 adds an unauthenticated review preflight, and
+//! P1A5 adds a persisted, content-addressed proposal artifact through
+//! inherent [`crate::SqliteStore`] methods.
 //! Neither slice exposes an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
@@ -32,10 +33,16 @@ pub const RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA: &str =
     "agent_bridge.resource_change_proposal_review.v0";
 pub const RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE: &str =
     "read_only_receipt_invariants_current_file_binding_and_complete_lineage";
+pub const RESOURCE_PERSISTED_PROPOSAL_SCHEMA: &str = "agent_bridge.resource_persisted_proposal.v0";
+pub const RESOURCE_PERSISTED_PROPOSAL_SCOPE: &str =
+    "sqlite_persisted_candidate_receipt_and_domain_separated_record_hash";
+pub const RESOURCE_PERSISTED_PROPOSAL_HASH_DOMAIN: &str =
+    "agent-bridge/sepl/resource-persisted-proposal/v0";
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
 const RESOURCE_BINDINGS_MIGRATION_META_KEY: &str = "resource_bindings.migration_sha256";
+const RESOURCE_PROPOSALS_MIGRATION_META_KEY: &str = "resource_proposals.migration_sha256";
 
 pub(crate) const RESOURCE_VERSIONS_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS resource_versions (
@@ -75,6 +82,22 @@ CREATE TABLE IF NOT EXISTS resource_bindings (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_bindings_path
     ON resource_bindings(canonical_path);
+"#;
+
+pub(crate) const RESOURCE_PROPOSALS_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS resource_change_proposals (
+    proposal_id              TEXT    NOT NULL PRIMARY KEY CHECK (length(proposal_id) = 64),
+    resource_id              TEXT    NOT NULL CHECK (length(resource_id) BETWEEN 1 AND 512),
+    producer_id              TEXT    NOT NULL CHECK (length(producer_id) BETWEEN 1 AND 256),
+    proposed_at               INTEGER NOT NULL CHECK (typeof(proposed_at) = 'integer' AND proposed_at >= 0),
+    current_content          BLOB    NOT NULL CHECK (length(current_content) BETWEEN 1 AND 1048576),
+    candidate_content        BLOB    NOT NULL CHECK (length(candidate_content) BETWEEN 1 AND 1048576),
+    proposal_receipt_json    TEXT    NOT NULL CHECK (length(proposal_receipt_json) >= 2),
+    record_sha256            TEXT    NOT NULL CHECK (length(record_sha256) = 64),
+    UNIQUE (record_sha256)
+);
+CREATE INDEX IF NOT EXISTS idx_resource_change_proposals_resource_proposed
+    ON resource_change_proposals(resource_id, proposed_at DESC);
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -233,6 +256,58 @@ pub struct AgentMdChangeProposalReviewReceipt {
     pub review_scope: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMdPersistedProposalCreate {
+    pub proposal: AgentMdChangeProposal,
+    pub producer_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdPersistedProposalArtifact {
+    pub schema: String,
+    pub proposal_id: String,
+    pub resource_id: String,
+    pub producer_id: String,
+    pub proposed_at: i64,
+    pub current_content: Vec<u8>,
+    pub candidate_content: Vec<u8>,
+    pub proposal: AgentMdChangeProposalReceipt,
+    pub record_sha256: String,
+    pub persistence_integrity_verified: bool,
+    pub source_authenticity_verified: bool,
+    pub candidate_content_available: bool,
+    pub semantic_review_performed: bool,
+    pub eligible_for_human_review: bool,
+    pub automatic_apply_allowed: bool,
+    pub resource_content_mutated: bool,
+    pub lineage_mutated: bool,
+    pub artifact_scope: String,
+}
+
+pub fn persisted_proposal_record_sha256(
+    resource_id: &str,
+    producer_id: &str,
+    proposed_at: i64,
+    current_content: &[u8],
+    candidate_content: &[u8],
+    proposal: &AgentMdChangeProposalReceipt,
+) -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        RESOURCE_PERSISTED_PROPOSAL_HASH_DOMAIN.as_bytes(),
+    );
+    update_framed(&mut hasher, resource_id.as_bytes());
+    update_framed(&mut hasher, producer_id.as_bytes());
+    update_framed(&mut hasher, &proposed_at.to_be_bytes());
+    update_framed(&mut hasher, current_content);
+    update_framed(&mut hasher, candidate_content);
+    let receipt =
+        serde_json::to_vec(proposal).expect("proposal receipt serialization is infallible");
+    update_framed(&mut hasher, &receipt);
+    hex_digest(hasher.finalize())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceLineageReport {
     pub schema: String,
@@ -271,6 +346,16 @@ fn bindings_migration_sha256() -> String {
     hex_digest(hasher.finalize())
 }
 
+fn proposals_migration_sha256() -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        b"agent-bridge/sepl/resource-proposals-migration/v0",
+    );
+    update_framed(&mut hasher, RESOURCE_PROPOSALS_SCHEMA.as_bytes());
+    hex_digest(hasher.finalize())
+}
+
 fn schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!(
         "resource_versions schema mismatch: {}",
@@ -281,6 +366,13 @@ fn schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
 fn bindings_schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!(
         "resource_bindings schema mismatch: {}",
+        message.into()
+    ))
+}
+
+fn proposals_schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(format!(
+        "resource_change_proposals schema mismatch: {}",
         message.into()
     ))
 }
@@ -382,6 +474,7 @@ pub(crate) fn migrate_or_verify(connection: &rusqlite::Connection) -> rusqlite::
         return Err(schema_mismatch("migration digest"));
     }
     migrate_or_verify_bindings(connection)?;
+    migrate_or_verify_proposals(connection)?;
     Ok(())
 }
 
@@ -478,6 +571,97 @@ fn migrate_or_verify_bindings_inner(connection: &rusqlite::Connection) -> rusqli
         return Err(bindings_schema_mismatch("migration digest"));
     }
     Ok(())
+}
+
+fn migrate_or_verify_proposals(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    connection.execute_batch("SAVEPOINT sepl_resource_proposals_migration")?;
+    let result = (|| {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='resource_change_proposals')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            connection.execute_batch(RESOURCE_PROPOSALS_SCHEMA)?;
+        }
+        let mut statement = connection.prepare("PRAGMA table_info('resource_change_proposals')")?;
+        let columns = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let expected = vec![
+            ("proposal_id".to_string(), "TEXT".to_string(), 1, 1),
+            ("resource_id".to_string(), "TEXT".to_string(), 1, 0),
+            ("producer_id".to_string(), "TEXT".to_string(), 1, 0),
+            ("proposed_at".to_string(), "INTEGER".to_string(), 1, 0),
+            ("current_content".to_string(), "BLOB".to_string(), 1, 0),
+            ("candidate_content".to_string(), "BLOB".to_string(), 1, 0),
+            (
+                "proposal_receipt_json".to_string(),
+                "TEXT".to_string(),
+                1,
+                0,
+            ),
+            ("record_sha256".to_string(), "TEXT".to_string(), 1, 0),
+        ];
+        if columns != expected {
+            return Err(proposals_schema_mismatch("column identity"));
+        }
+        let table_sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='resource_change_proposals'",
+            [],
+            |row| row.get(0),
+        )?;
+        let expected_table_sql = RESOURCE_PROPOSALS_SCHEMA
+            .split_once(';')
+            .map(|(table, _)| table)
+            .ok_or_else(|| proposals_schema_mismatch("embedded table DDL"))?;
+        if canonical_schema_sql(&table_sql) != canonical_schema_sql(expected_table_sql) {
+            return Err(proposals_schema_mismatch("table DDL identity"));
+        }
+        connection.execute_batch(RESOURCE_PROPOSALS_SCHEMA)?;
+        let index_sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_resource_change_proposals_resource_proposed'",
+            [],
+            |row| row.get(0),
+        )?;
+        let expected_index_sql = RESOURCE_PROPOSALS_SCHEMA
+            .split_once(';')
+            .map(|(_, index)| index.trim().trim_end_matches(';'))
+            .ok_or_else(|| proposals_schema_mismatch("embedded index DDL"))?;
+        if canonical_schema_sql(&index_sql) != canonical_schema_sql(expected_index_sql) {
+            return Err(proposals_schema_mismatch("index DDL identity"));
+        }
+        let expected_digest = proposals_migration_sha256();
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_meta(key, value) VALUES (?1, ?2)",
+            rusqlite::params![RESOURCE_PROPOSALS_MIGRATION_META_KEY, expected_digest],
+        )?;
+        let stored: String = connection.query_row(
+            "SELECT value FROM schema_meta WHERE key=?1",
+            [RESOURCE_PROPOSALS_MIGRATION_META_KEY],
+            |row| row.get(0),
+        )?;
+        if stored != proposals_migration_sha256() {
+            return Err(proposals_schema_mismatch("migration digest"));
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => connection.execute_batch("RELEASE sepl_resource_proposals_migration"),
+        Err(error) => {
+            connection.execute_batch(
+                "ROLLBACK TO sepl_resource_proposals_migration; RELEASE sepl_resource_proposals_migration;",
+            )?;
+            Err(error)
+        }
+    }
 }
 
 pub fn unavailable_resource_lineage(resource_id: &str) -> ResourceLineageReport {
@@ -807,6 +991,25 @@ mod tests {
             )
             .expect("query binding migration digest");
         assert_eq!(binding_digest, bindings_migration_sha256());
+        let proposal_objects: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+                    'resource_change_proposals',
+                    'idx_resource_change_proposals_resource_proposed'
+                )",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query proposal schema");
+        assert_eq!(proposal_objects, 2);
+        let proposal_digest: String = connection
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='resource_proposals.migration_sha256'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query proposal migration digest");
+        assert_eq!(proposal_digest, proposals_migration_sha256());
     }
 
     #[tokio::test]
@@ -821,13 +1024,16 @@ mod tests {
         let connection = rusqlite::Connection::open(&database).expect("open raw database");
         connection
             .execute_batch(
-                "DROP INDEX idx_resource_bindings_path;
+                "DROP INDEX idx_resource_change_proposals_resource_proposed;
+                 DROP TABLE resource_change_proposals;
+                 DROP INDEX idx_resource_bindings_path;
                  DROP TABLE resource_bindings;
                  DROP TABLE resource_versions;
                  DELETE FROM schema_meta
                  WHERE key IN (
                      'resource_lineage.migration_sha256',
-                     'resource_bindings.migration_sha256'
+                     'resource_bindings.migration_sha256',
+                     'resource_proposals.migration_sha256'
                  );",
             )
             .expect("rewind P0 and P1A0 rungs");
@@ -923,6 +1129,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn incompatible_existing_proposals_table_fails_closed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let initial = SqliteStore::open(&database).await.expect("initial open");
+        drop(initial);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute_batch(
+                "DROP INDEX idx_resource_change_proposals_resource_proposed;
+                 DROP TABLE resource_change_proposals;
+                 DELETE FROM schema_meta WHERE key='resource_proposals.migration_sha256';
+                 CREATE TABLE resource_change_proposals (proposal_id TEXT PRIMARY KEY);",
+            )
+            .expect("install incompatible proposals table");
+        drop(connection);
+
+        let error = SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("incompatible proposals table must fail");
+        assert!(error
+            .to_string()
+            .contains("resource_change_proposals schema mismatch"));
+    }
+
+    #[tokio::test]
     async fn bindings_migration_failure_rolls_back_partial_ddl() {
         let directory = tempfile::tempdir().expect("tempdir");
         let database = directory.path().join("state.db");
@@ -962,6 +1194,47 @@ mod tests {
             )
             .expect("count migration digest");
         assert_eq!(binding_table_count, 0);
+        assert_eq!(digest_count, 0);
+    }
+
+    #[tokio::test]
+    async fn proposals_migration_failure_rolls_back_partial_ddl() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let initial = SqliteStore::open(&database).await.expect("initial open");
+        drop(initial);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute_batch(
+                "DROP INDEX idx_resource_change_proposals_resource_proposed;
+                 DROP TABLE resource_change_proposals;
+                 DELETE FROM schema_meta WHERE key='resource_proposals.migration_sha256';
+                 CREATE TABLE idx_resource_change_proposals_resource_proposed (collision TEXT);",
+            )
+            .expect("install proposal-index name collision");
+        drop(connection);
+
+        SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("colliding proposal index must fail migration");
+
+        let connection = rusqlite::Connection::open(&database).expect("reopen raw database");
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='resource_change_proposals'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count proposal table");
+        let digest_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_meta WHERE key='resource_proposals.migration_sha256'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count proposal migration digest");
+        assert_eq!(table_count, 0);
         assert_eq!(digest_count, 0);
     }
 
@@ -1742,6 +2015,150 @@ mod tests {
             std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
             original
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn persisted_proposal_retains_candidate_without_claiming_source_authenticity() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let candidate = b"# Candidate profile\nreview me\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+
+        let artifact = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md.clone(),
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: candidate.clone(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create persisted proposal");
+
+        assert_eq!(artifact.schema, RESOURCE_PERSISTED_PROPOSAL_SCHEMA);
+        assert_eq!(artifact.proposal_id, artifact.record_sha256);
+        assert_eq!(artifact.candidate_content, candidate);
+        assert!(artifact.persistence_integrity_verified);
+        assert!(!artifact.source_authenticity_verified);
+        assert!(artifact.candidate_content_available);
+        assert!(!artifact.eligible_for_human_review);
+        assert!(!artifact.semantic_review_performed);
+        assert!(!artifact.automatic_apply_allowed);
+        assert!(!artifact.resource_content_mutated);
+        assert!(!artifact.lineage_mutated);
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            original
+        );
+        let reopened = SqliteStore::open(&database).await.expect("reopen store");
+        let readback = reopened
+            .read_persisted_agent_md_proposal(&artifact.proposal_id)
+            .await
+            .expect("read integrity-checked proposal");
+        assert_eq!(readback, artifact);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn persisted_proposal_is_content_addressed_and_idempotent() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let make_request = || AgentMdPersistedProposalCreate {
+            proposal: AgentMdChangeProposal {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                target_version: None,
+                proposed_content: b"# Candidate\n".to_vec(),
+                observed_at: 1_700_000_001,
+            },
+            producer_id: "codex:test".to_string(),
+        };
+        let first = store
+            .create_persisted_agent_md_proposal(make_request())
+            .await
+            .expect("first proposal");
+        let second = store
+            .create_persisted_agent_md_proposal(make_request())
+            .await
+            .expect("idempotent proposal");
+        assert_eq!(first, second);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn persisted_proposal_read_rejects_persisted_candidate_tampering() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let artifact = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: b"# Candidate\n".to_vec(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create proposal");
+        drop(store);
+        let connection = rusqlite::Connection::open(&database).expect("open raw fixture db");
+        connection
+            .execute(
+                "UPDATE resource_change_proposals SET candidate_content=?1",
+                [b"# Tampered\n".as_slice()],
+            )
+            .expect("tamper fixture");
+        drop(connection);
+        let reopened = SqliteStore::open(&database).await.expect("reopen store");
+        let error = reopened
+            .read_persisted_agent_md_proposal(&artifact.proposal_id)
+            .await
+            .expect_err("tampering must fail closed");
+        assert!(error.to_string().contains("record hash mismatch"));
     }
 
     #[cfg(unix)]
