@@ -107,3 +107,13 @@ Pair 02 was preregistered only after that admission gate passed at
 It uses fresh opaque operation identities and retains the same seven-call
 baseline versus two-call trial measurement, so the protocol repair does not
 retroactively change the comparison.
+
+Pair 02 was also aborted and is not enrolled. Its failure record is
+`docs/design/evidence/embodied_media_episode_dogfood_pair_02_aborted_2026_08_20.json`.
+The repaired wrapper/runtime handshake, secure journal, settled recovery,
+authenticated connection, and media sync all passed. The temporary collector
+then read `/media_context/track/id`, while the versioned sync receipt exposes
+`/media_context/track_id`; it stopped and cleaned up before exact draw, and the
+trial was never started. No further live pair may run until receipt extraction
+and cleanup are implemented as a versioned, unit-tested collector rather than
+an inline acceptance script.

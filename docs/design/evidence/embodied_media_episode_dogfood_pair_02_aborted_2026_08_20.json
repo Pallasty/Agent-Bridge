@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_pair_aborted.v0",
+  "pair_id": "embodied-media-pair-02",
+  "audited_at": "2026-08-20T13:59:53Z",
+  "preregistration_commit": "ef18b71feb5a4b7638ab42479de278b0ebb457e1",
+  "preregistration_path": "docs/design/evidence/embodied_media_episode_dogfood_pair_02_preregistration_2026_08_20.json",
+  "status": "ABORTED_NOT_ENROLLED",
+  "reason": "collector_receipt_path_mismatch",
+  "private_bindings": {
+    "baseline_operation_id_sha256": "b33c549f4f575e80751c0f28095c94630014cf3cd509995b002aa88888f98223",
+    "trial_operation_id_sha256": "529d66562580f2b2215a138ef2d95e3c47e1a83a278ab05e5980d52de5ba591f",
+    "trial_operation_used": false,
+    "raw_values_persisted": false
+  },
+  "observed": {
+    "wrapper_contract_verified": true,
+    "secure_journal_verified": true,
+    "baseline_pending_source_contract_verified": true,
+    "baseline_pending_reported_contract_bound_dispatch": true,
+    "baseline_recovery_source_contract_verified": true,
+    "baseline_recovery_reported_dispatch_field_present": false,
+    "baseline_recovery_reported_external_execution_repeated": false,
+    "baseline_settled_recovery_verified": true,
+    "projection_connection_verified": true,
+    "media_sync_updated": true,
+    "collector_expected_json_pointer": "/media_context/track/id",
+    "runtime_json_pointer": "/media_context/track_id",
+    "exact_draw_wait_attempted": false,
+    "cleanup_force_stop_exit_code": 0,
+    "companion_process_absent_after_cleanup": true,
+    "baseline_agent_visible_calls_including_cleanup": 6,
+    "trial_started": false,
+    "journal_terminal_record_sha256": "330b27795db3aa16114de2e6708c4a4f43db45bc9cf3d86dba255f6e57a2a47f"
+  },
+  "gate_effect": {
+    "counts_as_paired_success": false,
+    "counts_in_three_pair_denominator": false,
+    "must_remain_in_operational_history": true,
+    "blocks_new_live_collection_until_versioned_collector_contract_is_tested": true
+  },
+  "claim_boundary": {
+    "exact_device_draw_proven": false,
+    "workflow_burden_reduction_observed": false,
+    "pair_proves_behavior_lift": false,
+    "pair_authorizes_runtime_influence": false,
+    "pair_proves_global_dispatch_count": false,
+    "pair_proves_exclusive_causation": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false
+  }
+}
