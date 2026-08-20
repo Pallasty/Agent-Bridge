@@ -1,0 +1,114 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_pair_preregistration.v0",
+  "pair_id": "embodied-media-pair-03",
+  "registered_at": "2026-08-20T14:19:39Z",
+  "registered_before_actuation": true,
+  "task_kind": "settled_next_then_exact_projection",
+  "real_task_operator_attested": true,
+  "intent": {
+    "fixed": "compare_bounded_manual_orchestration_with_composite_recovery_for_one_settled_next_and_exact_projection",
+    "player_selector": "rhythmbox",
+    "operation_ttl_secs": 3600,
+    "pending_verify_timeout_secs": 0.1,
+    "recovery_verify_timeout_secs": 5.0,
+    "timeout_ms": 30000,
+    "projection_ttl_seconds": 120,
+    "test_only_auto_connect": true
+  },
+  "private_bindings": {
+    "baseline_operation_id_sha256": "babc59a3c188e4d000fcf62cbc05b261e69a8aec3b46f29eb72fc096995d60a0",
+    "trial_operation_id_sha256": "bbd0a0a98a2d5c9b8230c095b47202bd3c61c7a93c3ac4cb42c55b37f5c6d5fa",
+    "adb_serial_sha256": "d69513994e181e3550e51f9683a44be7ca93bb05097f1ddb8103320ba847225e",
+    "bind_address_sha256": "998788e0f2eaf59156bc86fd67f78597e795f6e82e26d10f221ded470a00bbcc",
+    "raw_values_persisted_in_git": false,
+    "private_binding_file_owner_only_required": true,
+    "separate_new_receipt_directory_per_side_required": true
+  },
+  "admission": {
+    "required_master_commit": "3f677c9bd0447c9526d262e285752e7e62a9f609",
+    "required_runner_schema": "agent_bridge.embodied_media_episode_runner.v0",
+    "required_collector_schema": "agent_bridge.embodied_media_episode_collector_result.v0",
+    "required_wrapper_contract": "agent_bridge.app_control.wrapper_contract.v1",
+    "new_stdio_process_per_side": true,
+    "secure_journal_required": true,
+    "private_receipt_directory_must_not_preexist": true,
+    "runner_tests_passed_before_registration": 37,
+    "pair_01_and_pair_02_excluded_from_denominator": true
+  },
+  "baseline": {
+    "label": "runner_bounded_manual_orchestration",
+    "steps": [
+      "app_control_pending",
+      "app_control_same_id_recovery",
+      "mobile_projection_start",
+      "mobile_projection_wait_connection",
+      "mobile_projection_sync_exact_player",
+      "mobile_projection_wait_exact_draw",
+      "mobile_projection_stop"
+    ],
+    "expected_agent_orchestration_calls": 7,
+    "owner_restatements": 0,
+    "manual_interventions": 0,
+    "failed_or_replanned_calls": 0
+  },
+  "trial": {
+    "label": "runner_bounded_composite_orchestration",
+    "steps": [
+      "app_control_pending",
+      "advance_track_then_project_same_id_recovery"
+    ],
+    "expected_agent_orchestration_calls": 2,
+    "owner_restatements": 0,
+    "manual_interventions": 0,
+    "failed_or_replanned_calls": 0
+  },
+  "success_contract": {
+    "collector_is_sole_success_authority": true,
+    "each_operation_reports_one_contract_bound_dispatch": true,
+    "each_operation_reports_no_external_execution_repeat": true,
+    "same_operation_id_reused_within_each_side": true,
+    "recovery_requires_three_matching_track_ids_over_at_least_ms": 500,
+    "exact_device_revision_and_digest_draw_required": true,
+    "cleanup_required": true,
+    "implicit_ui_fallback_allowed": false,
+    "background_authority_allowed": false,
+    "arbitrary_mobile_control_allowed": false
+  },
+  "measurement": {
+    "gating_metrics": [
+      "owner_restatements",
+      "manual_interventions",
+      "agent_orchestration_calls",
+      "failed_or_replanned_calls"
+    ],
+    "descriptive_only_metrics": ["elapsed_ms"],
+    "baseline_and_trial_start_at_first_pending_call": true,
+    "end_after_verified_cleanup": true,
+    "nested_composite_calls_counted_as_one_agent_visible_call": true,
+    "enrollment_requires_both_normalized_runner_results": true
+  },
+  "stop_conditions": [
+    "runner_or_collector_commit_is_not_current",
+    "private_binding_or_secure_journal_mode_is_not_owner_only",
+    "private_receipt_directory_already_exists",
+    "wrapper_contract_or_secure_journal_binding_is_not_verified",
+    "pending_call_does_not_return_source_valid_operation_effect_not_settled",
+    "dispatch_count_is_not_one",
+    "operation_id_binding_changes",
+    "recovery_reports_a_dispatch_field",
+    "settlement_or_exact_draw_is_not_verified",
+    "cleanup_is_not_verified",
+    "runner_returns_rejected",
+    "any_unexpected_owner_intervention_is_needed"
+  ],
+  "claim_boundary": {
+    "pair_can_observe_workflow_burden_reduction": true,
+    "pair_proves_behavior_lift": false,
+    "pair_authorizes_runtime_influence_beyond_two_preregistered_next_operations": false,
+    "pair_proves_global_dispatch_count": false,
+    "pair_proves_exclusive_causation": false,
+    "long_lived_stability_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false
+  }
+}
