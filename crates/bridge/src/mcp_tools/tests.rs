@@ -7875,6 +7875,7 @@ fn tool_policy_codex_essential_keeps_compact_surface() {
     assert!(p.includes(Tier::Standard, "macos_ax_verify"));
     assert!(p.includes(Tier::Standard, "macos_ax_watch"));
     assert!(p.includes(Tier::Niche, "macos_ax_action_admission"));
+    assert!(p.includes(Tier::Niche, "embodiment_lease"));
     assert!(p.includes(Tier::Niche, "macos_ax_focus_transaction"));
     assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
     assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
@@ -8025,7 +8026,7 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 72 total extras = 10 collab-group entries + 62 direct extras:
+    // 73 total extras = 10 collab-group entries + 63 direct extras:
     //      practical_workflow_scorecard
     //      + 6 avatar observation/sync/renderer tools
     //      + xiao_shu_action_request + 14 read-only mobile bridge tools
@@ -8043,7 +8044,8 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
     //      + desktop_semantic_task + app_control
     //      + macos_ax_probe + macos_ax_verify + macos_ax_watch
-    //      + macos_ax_action_admission + macos_ax_focus_transaction
+    //      + macos_ax_action_admission + embodiment_lease
+    //      + macos_ax_focus_transaction
     //      + semantic_bus_adapter_report
     //      + semantic_bus_runtime_health
     //      + semantic_bus_runtime_conformance
@@ -8059,7 +8061,7 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // must not re-enter Codex's eager direct extras.
     // The five prune-continuity entries remain part of the direct list by
     // name, preserving the established Codex surface contract.
-    assert_eq!(extras.len(), 72);
+    assert_eq!(extras.len(), 73);
     assert!(extras.contains(&"practical_workflow_scorecard"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
@@ -8131,6 +8133,7 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     assert!(extras.contains(&"macos_ax_verify"));
     assert!(extras.contains(&"macos_ax_watch"));
     assert!(extras.contains(&"macos_ax_action_admission"));
+    assert!(extras.contains(&"embodiment_lease"));
     assert!(extras.contains(&"macos_ax_focus_transaction"));
     assert!(extras.contains(&"semantic_bus_adapter_report"));
     assert!(extras.contains(&"semantic_bus_runtime_health"));
@@ -11583,7 +11586,14 @@ fn macos_ax_focus_rejects_runtime_asset_byte_mismatch() {
 fn registry_exposes_bounded_macos_ax_focus_transaction_to_codex() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     assert!(p.includes(Tier::Niche, "macos_ax_action_admission"));
+    assert!(p.includes(Tier::Niche, "embodiment_lease"));
     assert!(p.includes(Tier::Niche, "macos_ax_focus_transaction"));
+
+    let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+    assert!(schemas.iter().any(|schema| schema.name == "embodiment_lease"));
+    assert!(schemas
+        .iter()
+        .any(|schema| schema.name == "macos_ax_focus_transaction"));
 
     let admission = MacosAxActionAdmissionTool::new().schema();
     assert!(admission.description.contains("Preview-only"));

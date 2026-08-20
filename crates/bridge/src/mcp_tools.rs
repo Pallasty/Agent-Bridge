@@ -49048,6 +49048,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // First real rank-1 macOS actuator. Niche by tier but explicit for Codex:
     // an exclusive body lease plus a unique AXIdentifier binds one focus
     // transaction inside the already-frontmost app, with mandatory postflight.
+    "embodiment_lease",
     "macos_ax_focus_transaction",
     // SSB conformance inventory: read-only source/fixture/doc classification.
     // It does not execute live probes or mutate desktop/service state.
