@@ -108,6 +108,9 @@ the durable media-operation identity.
 
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.
+The first durable action/replay plus authenticated mobile-delivery episode is
+stored at
+`docs/design/evidence/app_control_embodied_media_episode_acceptance_2026_08_19.json`.
 
 ## Extension rule
 

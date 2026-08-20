@@ -1,0 +1,49 @@
+{
+  "schema": "agent_bridge.embodied_media_episode.acceptance.v0",
+  "date": "2026-08-19",
+  "host": "local-linux-sway",
+  "source_commit": "bcb261530ea59ed6ed6f3cd82d41311daaab0a11",
+  "runtime": {
+    "binary": "debug agent-bridge built with default features from source_commit",
+    "toolset": "codex-essential-mobile-projection",
+    "runtime_asset": "scripts/app_control.py from source_commit",
+    "player": "rhythmbox"
+  },
+  "durable_operation": {
+    "operation_id": "embodied-media-mcp-20260819-01",
+    "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+    "action": "next",
+    "before_track_id": "/org/mpris/MediaPlayer2/Track/1346",
+    "after_track_id": "/org/mpris/MediaPlayer2/Track/2558",
+    "dispatch_count": 1,
+    "mcp_source_contract_ok": true,
+    "same_id_replay": {
+      "idempotent_replay": true,
+      "observed_track_id": "/org/mpris/MediaPlayer2/Track/2558",
+      "external_execution_repeated": false
+    }
+  },
+  "mobile_projection": {
+    "device_serial": "3K661F0178H00000",
+    "device_model": "PKW110",
+    "session_id": "mcp-1787196601-fbc01c16852b",
+    "media_artist": "Brand X Music",
+    "media_title": "A Greater Good (No Choir)",
+    "target_revision": 2,
+    "last_served_revision": 2,
+    "authenticated_pull_count": 2,
+    "delivery_outcome": "revision_observed_by_device",
+    "stop_outcome": "stop_requested"
+  },
+  "postcondition": {
+    "playlist_name": "Allin1.m3u",
+    "playback_status": "Paused",
+    "projection_session_stopped": true
+  },
+  "claim_boundary": {
+    "at_most_once_scope": "one durable action=next operation_id",
+    "recovery_causality": "a changed track after interruption proves the outcome is satisfied but is attributed as unknown_after_restart",
+    "projection_delivery": "complete only after authenticated device pull observes target revision",
+    "projection_session_persistence": "process-local and reconstructible; not part of durable operation identity"
+  }
+}
