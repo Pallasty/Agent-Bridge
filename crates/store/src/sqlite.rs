@@ -3,21 +3,23 @@
 use crate::resource_lineage::{
     is_lower_hex_sha256, migrate_or_verify as migrate_or_verify_resource_lineage,
     persisted_proposal_record_sha256, proposal_review_observation_record_sha256,
-    resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
-    unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
-    AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, AgentMdCasRollback,
-    AgentMdCasRollbackReceipt, AgentMdChangeProposal, AgentMdChangeProposalReceipt,
-    AgentMdChangeProposalReview, AgentMdChangeProposalReviewReceipt,
+    proposal_review_snapshot_sha256, resource_binding_sha256, resource_content_sha256,
+    resource_version_record_sha256, unavailable_resource_lineage, validate_resource_lineage,
+    AgentMdBaselineAdmission, AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt,
+    AgentMdCasRollback, AgentMdCasRollbackReceipt, AgentMdChangeProposal,
+    AgentMdChangeProposalReceipt, AgentMdChangeProposalReview, AgentMdChangeProposalReviewReceipt,
     AgentMdPersistedProposalArtifact, AgentMdPersistedProposalCreate,
     AgentMdProposalReviewObservationArtifact, AgentMdProposalReviewObservationCreate,
-    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
-    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
+    AgentMdProposalReviewSnapshot, ResourceBindingRecord, ResourceLineageReport,
+    ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
     RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CAS_ROLLBACK_SCHEMA,
     RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA,
     RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE, RESOURCE_CHANGE_PROPOSAL_SCHEMA,
     RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
     RESOURCE_PERSISTED_PROPOSAL_SCHEMA, RESOURCE_PERSISTED_PROPOSAL_SCOPE,
     RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA, RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE,
+    RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS, RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCHEMA,
+    RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
@@ -31,6 +33,8 @@ use std::{
     os::unix::fs::OpenOptionsExt,
 };
 use tokio_rusqlite::{params, rusqlite, Connection};
+
+type ProposalReviewObservationRow = (String, String, String, i64, String, String, String, String);
 
 #[cfg(feature = "episode-observation-slice-b")]
 mod episode_observation_slice_b;
@@ -285,6 +289,153 @@ fn proposal_receipt_violations(
         violations.insert("proposal_mutation_boundary_violated".to_string());
     }
     violations.into_iter().collect()
+}
+
+fn read_persisted_agent_md_proposal_from_connection(
+    connection: &rusqlite::Connection,
+    requested_id: &str,
+) -> RusqliteResult<AgentMdPersistedProposalArtifact> {
+    let (
+        resource_id,
+        producer_id,
+        proposed_at,
+        current_content,
+        candidate_content,
+        proposal_json,
+        record_sha256,
+    ): (String, String, i64, Vec<u8>, Vec<u8>, String, String) = connection.query_row(
+        "SELECT resource_id, producer_id, proposed_at, current_content,
+                candidate_content, proposal_receipt_json, record_sha256
+         FROM resource_change_proposals WHERE proposal_id=?1",
+        [requested_id],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+            ))
+        },
+    )?;
+    let proposal: AgentMdChangeProposalReceipt =
+        serde_json::from_str(&proposal_json).map_err(|error| {
+            resource_baseline_sql_error(format!("invalid persisted proposal receipt: {error}"))
+        })?;
+    let expected = persisted_proposal_record_sha256(
+        &resource_id,
+        &producer_id,
+        proposed_at,
+        &current_content,
+        &candidate_content,
+        &proposal,
+    );
+    if requested_id != record_sha256 || record_sha256 != expected {
+        return Err(resource_baseline_sql_error(
+            "persisted proposal record hash mismatch",
+        ));
+    }
+    let mut receipt_violations = proposal_receipt_violations(&resource_id, &proposal);
+    let stored_binding = connection
+        .query_row(
+            "SELECT resource_id, resource_kind, canonical_path, bound_at, binding_sha256
+             FROM resource_bindings WHERE resource_id=?1",
+            [&resource_id],
+            |row| {
+                Ok(ResourceBindingRecord {
+                    resource_id: row.get(0)?,
+                    resource_kind: row.get(1)?,
+                    canonical_path: row.get(2)?,
+                    bound_at: row.get(3)?,
+                    binding_sha256: row.get(4)?,
+                })
+            },
+        )
+        .optional()?;
+    if stored_binding.as_ref() != Some(&proposal.binding) {
+        receipt_violations.push("persisted_binding_mismatch".to_string());
+    }
+    let mut statement = connection.prepare(
+        "SELECT resource_id, resource_kind, version, content_sha256,
+                predecessor_version, predecessor_record_sha256, observed_at, record_sha256
+         FROM resource_versions WHERE resource_id=?1 ORDER BY version ASC",
+    )?;
+    let lineage = statement
+        .query_map([&resource_id], |row| {
+            Ok(ResourceVersionRecord {
+                resource_id: row.get(0)?,
+                resource_kind: row.get(1)?,
+                version: row.get::<_, i64>(2)? as u64,
+                content_sha256: row.get(3)?,
+                predecessor_version: row.get::<_, Option<i64>>(4)?.map(|value| value as u64),
+                predecessor_record_sha256: row.get(5)?,
+                observed_at: row.get(6)?,
+                record_sha256: row.get(7)?,
+            })
+        })?
+        .collect::<RusqliteResult<Vec<_>>>()?;
+    let lineage_report = validate_resource_lineage(&resource_id, lineage.clone(), false);
+    if lineage_report.status != "verified"
+        || !lineage.iter().any(|row| row == &proposal.current_version)
+    {
+        receipt_violations.push("persisted_lineage_mismatch".to_string());
+    }
+    if let Some(target_version) = proposal.target_version {
+        let target_matches = lineage.iter().any(|row| {
+            row.version == target_version
+                && row.content_sha256 == proposal.proposed_content_sha256
+        });
+        if !target_matches {
+            receipt_violations.push("persisted_target_mismatch".to_string());
+        }
+    }
+    let candidate_lines = std::str::from_utf8(&candidate_content)
+        .map_err(|_| resource_baseline_sql_error("persisted candidate is not UTF-8"))?
+        .lines()
+        .count() as u64;
+    let current_lines = std::str::from_utf8(&current_content)
+        .map_err(|_| resource_baseline_sql_error("persisted current content is not UTF-8"))?
+        .lines()
+        .count() as u64;
+    let (_, _, added_lines, removed_lines, changed_lines) =
+        agent_md_line_diff(&current_content, &candidate_content);
+    if !receipt_violations.is_empty()
+        || proposal.current_content_sha256 != resource_content_sha256(&current_content)
+        || proposal.current_bytes != current_content.len() as u64
+        || proposal.current_lines != current_lines
+        || proposal.proposed_content_sha256 != resource_content_sha256(&candidate_content)
+        || proposal.proposed_bytes != candidate_content.len() as u64
+        || proposal.proposed_lines != candidate_lines
+        || proposal.added_lines != added_lines
+        || proposal.removed_lines != removed_lines
+        || proposal.changed_lines != changed_lines
+    {
+        return Err(resource_baseline_sql_error(
+            "persisted proposal receipt or candidate invariant mismatch",
+        ));
+    }
+    Ok(AgentMdPersistedProposalArtifact {
+        schema: RESOURCE_PERSISTED_PROPOSAL_SCHEMA.to_string(),
+        proposal_id: requested_id.to_string(),
+        resource_id,
+        producer_id,
+        proposed_at,
+        current_content,
+        candidate_content,
+        proposal,
+        record_sha256,
+        persistence_integrity_verified: true,
+        source_authenticity_verified: false,
+        candidate_content_available: true,
+        semantic_review_performed: false,
+        eligible_for_human_review: false,
+        automatic_apply_allowed: false,
+        resource_content_mutated: false,
+        lineage_mutated: false,
+        artifact_scope: RESOURCE_PERSISTED_PROPOSAL_SCOPE.to_string(),
+    })
 }
 
 #[cfg(unix)]
@@ -3314,163 +3465,9 @@ impl SqliteStore {
         }
         let requested_id = proposal_id.to_string();
         self.conn
-            .call(
-                move |connection| -> RusqliteResult<AgentMdPersistedProposalArtifact> {
-                    let (
-                        resource_id,
-                        producer_id,
-                        proposed_at,
-                        current_content,
-                        candidate_content,
-                        proposal_json,
-                        record_sha256,
-                    ): (String, String, i64, Vec<u8>, Vec<u8>, String, String) = connection
-                        .query_row(
-                            "SELECT resource_id, producer_id, proposed_at, current_content,
-                            candidate_content, proposal_receipt_json, record_sha256
-                     FROM resource_change_proposals WHERE proposal_id=?1",
-                            [&requested_id],
-                            |row| {
-                                Ok((
-                                    row.get(0)?,
-                                    row.get(1)?,
-                                    row.get(2)?,
-                                    row.get(3)?,
-                                    row.get(4)?,
-                                    row.get(5)?,
-                                    row.get(6)?,
-                                ))
-                            },
-                        )?;
-                    let proposal: AgentMdChangeProposalReceipt =
-                        serde_json::from_str(&proposal_json).map_err(|error| {
-                            resource_baseline_sql_error(format!(
-                                "invalid persisted proposal receipt: {error}"
-                            ))
-                        })?;
-                    let expected = persisted_proposal_record_sha256(
-                        &resource_id,
-                        &producer_id,
-                        proposed_at,
-                        &current_content,
-                        &candidate_content,
-                        &proposal,
-                    );
-                    if requested_id != record_sha256 || record_sha256 != expected {
-                        return Err(resource_baseline_sql_error(
-                            "persisted proposal record hash mismatch",
-                        ));
-                    }
-                    let mut receipt_violations =
-                        proposal_receipt_violations(&resource_id, &proposal);
-                    let stored_binding = connection
-                        .query_row(
-                            "SELECT resource_id, resource_kind, canonical_path, bound_at, binding_sha256
-                             FROM resource_bindings WHERE resource_id=?1",
-                            [&resource_id],
-                            |row| {
-                                Ok(ResourceBindingRecord {
-                                    resource_id: row.get(0)?,
-                                    resource_kind: row.get(1)?,
-                                    canonical_path: row.get(2)?,
-                                    bound_at: row.get(3)?,
-                                    binding_sha256: row.get(4)?,
-                                })
-                            },
-                        )
-                        .optional()?;
-                    if stored_binding.as_ref() != Some(&proposal.binding) {
-                        receipt_violations.push("persisted_binding_mismatch".to_string());
-                    }
-                    let mut statement = connection.prepare(
-                        "SELECT resource_id, resource_kind, version, content_sha256,
-                                predecessor_version, predecessor_record_sha256, observed_at, record_sha256
-                         FROM resource_versions WHERE resource_id=?1 ORDER BY version ASC",
-                    )?;
-                    let lineage = statement
-                        .query_map([&resource_id], |row| {
-                            Ok(ResourceVersionRecord {
-                                resource_id: row.get(0)?,
-                                resource_kind: row.get(1)?,
-                                version: row.get::<_, i64>(2)? as u64,
-                                content_sha256: row.get(3)?,
-                                predecessor_version: row
-                                    .get::<_, Option<i64>>(4)?
-                                    .map(|value| value as u64),
-                                predecessor_record_sha256: row.get(5)?,
-                                observed_at: row.get(6)?,
-                                record_sha256: row.get(7)?,
-                            })
-                        })?
-                        .collect::<RusqliteResult<Vec<_>>>()?;
-                    let lineage_report = validate_resource_lineage(&resource_id, lineage.clone(), false);
-                    if lineage_report.status != "verified"
-                        || !lineage.iter().any(|row| row == &proposal.current_version)
-                    {
-                        receipt_violations.push("persisted_lineage_mismatch".to_string());
-                    }
-                    if let Some(target_version) = proposal.target_version {
-                        let target_matches = lineage.iter().any(|row| {
-                            row.version == target_version
-                                && row.content_sha256 == proposal.proposed_content_sha256
-                        });
-                        if !target_matches {
-                            receipt_violations.push("persisted_target_mismatch".to_string());
-                        }
-                    }
-                    let candidate_lines = std::str::from_utf8(&candidate_content)
-                        .map_err(|_| {
-                            resource_baseline_sql_error("persisted candidate is not UTF-8")
-                        })?
-                        .lines()
-                        .count() as u64;
-                    let current_lines = std::str::from_utf8(&current_content)
-                        .map_err(|_| {
-                            resource_baseline_sql_error("persisted current content is not UTF-8")
-                        })?
-                        .lines()
-                        .count() as u64;
-                    let (_, _, added_lines, removed_lines, changed_lines) =
-                        agent_md_line_diff(&current_content, &candidate_content);
-                    if !receipt_violations.is_empty()
-                        || proposal.current_content_sha256
-                            != resource_content_sha256(&current_content)
-                        || proposal.current_bytes != current_content.len() as u64
-                        || proposal.current_lines != current_lines
-                        || proposal.proposed_content_sha256
-                            != resource_content_sha256(&candidate_content)
-                        || proposal.proposed_bytes != candidate_content.len() as u64
-                        || proposal.proposed_lines != candidate_lines
-                        || proposal.added_lines != added_lines
-                        || proposal.removed_lines != removed_lines
-                        || proposal.changed_lines != changed_lines
-                    {
-                        return Err(resource_baseline_sql_error(
-                            "persisted proposal receipt or candidate invariant mismatch",
-                        ));
-                    }
-                    Ok(AgentMdPersistedProposalArtifact {
-                        schema: RESOURCE_PERSISTED_PROPOSAL_SCHEMA.to_string(),
-                        proposal_id: requested_id,
-                        resource_id,
-                        producer_id,
-                        proposed_at,
-                        current_content,
-                        candidate_content,
-                        proposal,
-                        record_sha256,
-                        persistence_integrity_verified: true,
-                        source_authenticity_verified: false,
-                        candidate_content_available: true,
-                        semantic_review_performed: false,
-                        eligible_for_human_review: false,
-                        automatic_apply_allowed: false,
-                        resource_content_mutated: false,
-                        lineage_mutated: false,
-                        artifact_scope: RESOURCE_PERSISTED_PROPOSAL_SCOPE.to_string(),
-                    })
-                },
-            )
+            .call(move |connection| {
+                read_persisted_agent_md_proposal_from_connection(connection, &requested_id)
+            })
             .await
             .map_err(|error| Error::Backend(format!("read_persisted_agent_md_proposal: {error}")))
     }
@@ -3724,6 +3721,203 @@ impl SqliteStore {
             resource_content_mutated: false,
             lineage_mutated: false,
             artifact_scope: RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE.to_string(),
+        })
+    }
+
+    /// SEPL P1A7 — read a bounded, deterministic snapshot of review observations.
+    ///
+    /// The snapshot preserves conflicting dispositions as observations. It
+    /// does not authenticate reviewer labels, establish quorum, select a
+    /// winner, or authorize application of the proposal.
+    pub async fn read_agent_md_proposal_review_snapshot(
+        &self,
+        proposal_id: &str,
+    ) -> Result<AgentMdProposalReviewSnapshot> {
+        if !is_lower_hex_sha256(proposal_id) {
+            return Err(Error::Backend(
+                "read_agent_md_proposal_review_snapshot: proposal_id must be a lowercase SHA-256"
+                    .into(),
+            ));
+        }
+        let requested_id = proposal_id.to_string();
+        let query_id = requested_id.clone();
+        let (snapshot_proposal, rows) = self
+            .conn
+            .call(
+                move |connection| -> RusqliteResult<(
+                    AgentMdPersistedProposalArtifact,
+                    Vec<ProposalReviewObservationRow>,
+                )> {
+                    let transaction = connection.transaction()?;
+                    let proposal =
+                        read_persisted_agent_md_proposal_from_connection(&transaction, &query_id)?;
+                    let rows = {
+                        let mut statement = transaction.prepare(
+                            "SELECT review_id, proposal_id, reviewer_id, reviewed_at, disposition,
+                                reason, proposal_record_sha256, record_sha256
+                         FROM resource_proposal_review_observations
+                         WHERE proposal_id=?1
+                         ORDER BY reviewed_at ASC, review_id ASC
+                         LIMIT ?2",
+                        )?;
+                        let mapped = statement.query_map(
+                            params![
+                                &query_id,
+                                (RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS + 1) as i64
+                            ],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, i64>(3)?,
+                                    row.get::<_, String>(4)?,
+                                    row.get::<_, String>(5)?,
+                                    row.get::<_, String>(6)?,
+                                    row.get::<_, String>(7)?,
+                                ))
+                            },
+                        )?;
+                        mapped.collect::<RusqliteResult<Vec<_>>>()?
+                    };
+                    transaction.commit()?;
+                    Ok((proposal, rows))
+                },
+            )
+            .await
+            .map_err(|error| {
+                Error::Backend(format!("read_agent_md_proposal_review_snapshot: {error}"))
+            })?;
+        if rows.len() > RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS {
+            return Err(Error::Backend(format!(
+                "read_agent_md_proposal_review_snapshot: observation count exceeds bounded maximum of {}",
+                RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS
+            )));
+        }
+
+        let snapshot_proposal_record_sha256 = snapshot_proposal.record_sha256.clone();
+
+        let mut observations = Vec::with_capacity(rows.len());
+        let mut dispositions = BTreeSet::new();
+        let mut accept_candidate_count = 0_u64;
+        let mut reject_candidate_count = 0_u64;
+        let mut defer_count = 0_u64;
+        let mut previous_order_key: Option<(i64, String)> = None;
+        for (
+            review_id,
+            row_proposal_id,
+            reviewer_id,
+            reviewed_at,
+            disposition,
+            reason,
+            proposal_record_sha256,
+            record_sha256,
+        ) in rows
+        {
+            let expected = proposal_review_observation_record_sha256(
+                &row_proposal_id,
+                &reviewer_id,
+                reviewed_at,
+                &disposition,
+                &reason,
+                &proposal_record_sha256,
+            );
+            if row_proposal_id != requested_id
+                || proposal_record_sha256 != snapshot_proposal_record_sha256
+                || review_id != record_sha256
+                || review_id != expected
+            {
+                return Err(Error::Backend(
+                    "read_agent_md_proposal_review_snapshot: review observation integrity mismatch"
+                        .into(),
+                ));
+            }
+            let order_key = (reviewed_at, review_id.clone());
+            if previous_order_key
+                .as_ref()
+                .is_some_and(|previous| previous >= &order_key)
+            {
+                return Err(Error::Backend(
+                    "read_agent_md_proposal_review_snapshot: review observation order is not canonical"
+                        .into(),
+                ));
+            }
+            previous_order_key = Some(order_key);
+            match disposition.as_str() {
+                "accept_candidate" => accept_candidate_count += 1,
+                "reject_candidate" => reject_candidate_count += 1,
+                "defer" => defer_count += 1,
+                _ => {
+                    return Err(Error::Backend(
+                        "read_agent_md_proposal_review_snapshot: invalid persisted disposition"
+                            .into(),
+                    ));
+                }
+            }
+            dispositions.insert(disposition.clone());
+            observations.push(AgentMdProposalReviewObservationArtifact {
+                schema: RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA.to_string(),
+                review_id,
+                proposal_id: row_proposal_id,
+                reviewer_id,
+                reviewed_at,
+                disposition,
+                reason,
+                proposal_record_sha256,
+                record_sha256,
+                persistence_integrity_verified: true,
+                proposal_integrity_verified: true,
+                reviewer_identity_authenticated: false,
+                human_review_claimed: true,
+                human_review_authenticated: false,
+                source_authenticity_verified: false,
+                semantic_review_authority_granted: false,
+                automatic_apply_allowed: false,
+                resource_content_mutated: false,
+                lineage_mutated: false,
+                artifact_scope: RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE.to_string(),
+            });
+        }
+        let ordered_record_sha256s = observations
+            .iter()
+            .map(|observation| observation.record_sha256.clone())
+            .collect::<Vec<_>>();
+        let snapshot_sha256 = proposal_review_snapshot_sha256(
+            &requested_id,
+            &snapshot_proposal_record_sha256,
+            &ordered_record_sha256s,
+        );
+        let observation_count = observations.len() as u64;
+        let distinct_disposition_count = dispositions.len() as u64;
+
+        Ok(AgentMdProposalReviewSnapshot {
+            schema: RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCHEMA.to_string(),
+            proposal_id: requested_id,
+            proposal_record_sha256: snapshot_proposal_record_sha256,
+            observations,
+            observation_count,
+            accept_candidate_count,
+            reject_candidate_count,
+            defer_count,
+            distinct_disposition_count,
+            no_observations: observation_count == 0,
+            conflicting_dispositions_observed: distinct_disposition_count > 1,
+            snapshot_sha256,
+            bounded_snapshot_complete: true,
+            snapshot_integrity_verified: true,
+            proposal_integrity_verified: true,
+            all_observations_integrity_verified: true,
+            external_writer_exclusion_verified: false,
+            reviewer_identities_authenticated: false,
+            human_reviews_authenticated: false,
+            semantic_review_authority_granted: false,
+            quorum_established: false,
+            winner_selected: false,
+            eligible_for_apply: false,
+            automatic_apply_allowed: false,
+            resource_content_mutated: false,
+            lineage_mutated: false,
+            snapshot_scope: RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE.to_string(),
         })
     }
 

@@ -5,7 +5,9 @@
 //! compare-and-swap commit, P1A2 adds a verified historical rollback, P1A3
 //! adds proposal metadata, P1A4 adds an unauthenticated review preflight, and
 //! P1A5 adds a persisted, content-addressed proposal artifact through
-//! inherent [`crate::SqliteStore`] methods.
+//! inherent [`crate::SqliteStore`] methods. P1A6 persists untrusted review
+//! observations and P1A7 projects them into a bounded, conflict-preserving
+//! read-only snapshot.
 //! Neither slice exposes an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
@@ -44,6 +46,13 @@ pub const RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE: &str =
     "persisted_untrusted_review_observation_only";
 pub const RESOURCE_PROPOSAL_REVIEW_OBSERVATION_HASH_DOMAIN: &str =
     "agent-bridge/sepl/resource-proposal-review-observation/v0";
+pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCHEMA: &str =
+    "agent_bridge.resource_proposal_review_snapshot.v0";
+pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE: &str =
+    "bounded_integrity_verified_untrusted_review_observation_set";
+pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_HASH_DOMAIN: &str =
+    "agent-bridge/sepl/resource-proposal-review-snapshot/v0";
+pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS: usize = 256;
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
@@ -342,6 +351,37 @@ pub struct AgentMdProposalReviewObservationArtifact {
     pub artifact_scope: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdProposalReviewSnapshot {
+    pub schema: String,
+    pub proposal_id: String,
+    pub proposal_record_sha256: String,
+    pub observations: Vec<AgentMdProposalReviewObservationArtifact>,
+    pub observation_count: u64,
+    pub accept_candidate_count: u64,
+    pub reject_candidate_count: u64,
+    pub defer_count: u64,
+    pub distinct_disposition_count: u64,
+    pub no_observations: bool,
+    pub conflicting_dispositions_observed: bool,
+    pub snapshot_sha256: String,
+    pub bounded_snapshot_complete: bool,
+    pub snapshot_integrity_verified: bool,
+    pub proposal_integrity_verified: bool,
+    pub all_observations_integrity_verified: bool,
+    pub external_writer_exclusion_verified: bool,
+    pub reviewer_identities_authenticated: bool,
+    pub human_reviews_authenticated: bool,
+    pub semantic_review_authority_granted: bool,
+    pub quorum_established: bool,
+    pub winner_selected: bool,
+    pub eligible_for_apply: bool,
+    pub automatic_apply_allowed: bool,
+    pub resource_content_mutated: bool,
+    pub lineage_mutated: bool,
+    pub snapshot_scope: String,
+}
+
 pub fn persisted_proposal_record_sha256(
     resource_id: &str,
     producer_id: &str,
@@ -385,6 +425,28 @@ pub fn proposal_review_observation_record_sha256(
     update_framed(&mut hasher, disposition.as_bytes());
     update_framed(&mut hasher, reason.as_bytes());
     update_framed(&mut hasher, proposal_record_sha256.as_bytes());
+    hex_digest(hasher.finalize())
+}
+
+pub fn proposal_review_snapshot_sha256(
+    proposal_id: &str,
+    proposal_record_sha256: &str,
+    ordered_review_record_sha256s: &[String],
+) -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_HASH_DOMAIN.as_bytes(),
+    );
+    update_framed(&mut hasher, proposal_id.as_bytes());
+    update_framed(&mut hasher, proposal_record_sha256.as_bytes());
+    update_framed(
+        &mut hasher,
+        &(ordered_review_record_sha256s.len() as u64).to_be_bytes(),
+    );
+    for record_sha256 in ordered_review_record_sha256s {
+        update_framed(&mut hasher, record_sha256.as_bytes());
+    }
     hex_digest(hasher.finalize())
 }
 
@@ -2599,6 +2661,369 @@ mod tests {
             .await
             .expect_err("referenced proposal tampering must fail closed");
         assert!(error.to_string().contains("record hash mismatch"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_snapshot_is_bounded_deterministic_conflict_preserving_and_non_authoritative() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md.clone(),
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: b"# Candidate\n".to_vec(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create proposal");
+
+        let empty = store
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect("read empty snapshot");
+        assert!(empty.no_observations);
+        assert_eq!(empty.observation_count, 0);
+        assert_eq!(empty.distinct_disposition_count, 0);
+        assert!(!empty.conflicting_dispositions_observed);
+        assert_eq!(
+            empty.snapshot_sha256,
+            proposal_review_snapshot_sha256(&proposal.proposal_id, &proposal.record_sha256, &[])
+        );
+
+        for (reviewer_id, reviewed_at, disposition, reason) in [
+            (
+                "reviewer:later",
+                1_700_000_003,
+                "defer",
+                "Need another bounded pass.",
+            ),
+            (
+                "reviewer:accept",
+                1_700_000_002,
+                "accept_candidate",
+                "Candidate can remain under observation.",
+            ),
+            (
+                "reviewer:reject",
+                1_700_000_002,
+                "reject_candidate",
+                "Candidate conflicts with one local constraint.",
+            ),
+        ] {
+            store
+                .create_agent_md_proposal_review_observation(
+                    AgentMdProposalReviewObservationCreate {
+                        proposal_id: proposal.proposal_id.clone(),
+                        reviewer_id: reviewer_id.to_string(),
+                        reviewed_at,
+                        disposition: disposition.to_string(),
+                        reason: reason.to_string(),
+                    },
+                )
+                .await
+                .expect("create review observation");
+        }
+
+        let first = store
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect("read review snapshot");
+        let second = store
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect("read deterministic review snapshot");
+        assert_eq!(first, second);
+        assert_eq!(first.schema, RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCHEMA);
+        assert_eq!(first.observation_count, 3);
+        assert_eq!(first.accept_candidate_count, 1);
+        assert_eq!(first.reject_candidate_count, 1);
+        assert_eq!(first.defer_count, 1);
+        assert_eq!(first.distinct_disposition_count, 3);
+        assert!(!first.no_observations);
+        assert!(first.conflicting_dispositions_observed);
+        assert!(first.bounded_snapshot_complete);
+        assert!(first.snapshot_integrity_verified);
+        assert!(first.proposal_integrity_verified);
+        assert!(first.all_observations_integrity_verified);
+        assert!(!first.external_writer_exclusion_verified);
+        assert!(!first.reviewer_identities_authenticated);
+        assert!(!first.human_reviews_authenticated);
+        assert!(!first.semantic_review_authority_granted);
+        assert!(!first.quorum_established);
+        assert!(!first.winner_selected);
+        assert!(!first.eligible_for_apply);
+        assert!(!first.automatic_apply_allowed);
+        assert!(!first.resource_content_mutated);
+        assert!(!first.lineage_mutated);
+        assert!(first.observations.windows(2).all(|pair| (
+            pair[0].reviewed_at,
+            &pair[0].review_id
+        ) < (
+            pair[1].reviewed_at,
+            &pair[1].review_id
+        )));
+        let ordered_hashes = first
+            .observations
+            .iter()
+            .map(|observation| observation.record_sha256.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            first.snapshot_sha256,
+            proposal_review_snapshot_sha256(
+                &proposal.proposal_id,
+                &proposal.record_sha256,
+                &ordered_hashes
+            )
+        );
+        let mut reordered_hashes = ordered_hashes.clone();
+        reordered_hashes.swap(0, 1);
+        assert_ne!(
+            first.snapshot_sha256,
+            proposal_review_snapshot_sha256(
+                &proposal.proposal_id,
+                &proposal.record_sha256,
+                &reordered_hashes
+            )
+        );
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            original
+        );
+        let lineage = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read unchanged lineage");
+        assert_eq!(lineage.records.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_snapshot_rejects_observation_and_proposal_tampering() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: b"# Candidate\n".to_vec(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create proposal");
+        let review = store
+            .create_agent_md_proposal_review_observation(AgentMdProposalReviewObservationCreate {
+                proposal_id: proposal.proposal_id.clone(),
+                reviewer_id: "reviewer:test".to_string(),
+                reviewed_at: 1_700_000_002,
+                disposition: "defer".to_string(),
+                reason: "Need another pass.".to_string(),
+            })
+            .await
+            .expect("create review observation");
+        drop(store);
+
+        let connection = rusqlite::Connection::open(&database).expect("open raw fixture db");
+        connection
+            .execute(
+                "UPDATE resource_proposal_review_observations SET reason='tampered' WHERE review_id=?1",
+                [&review.review_id],
+            )
+            .expect("tamper review fixture");
+        drop(connection);
+        let reopened = SqliteStore::open(&database).await.expect("reopen store");
+        let error = reopened
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect_err("review tampering must fail closed");
+        assert!(error
+            .to_string()
+            .contains("review observation integrity mismatch"));
+        drop(reopened);
+
+        let connection = rusqlite::Connection::open(&database).expect("reopen raw fixture db");
+        connection
+            .execute(
+                "UPDATE resource_proposal_review_observations SET reason=?1 WHERE review_id=?2",
+                rusqlite::params![review.reason, review.review_id],
+            )
+            .expect("restore review fixture");
+        connection
+            .execute(
+                "UPDATE resource_change_proposals SET candidate_content=?1 WHERE proposal_id=?2",
+                rusqlite::params![b"# Tampered\n".as_slice(), proposal.proposal_id],
+            )
+            .expect("tamper proposal fixture");
+        drop(connection);
+        let reopened = SqliteStore::open(&database)
+            .await
+            .expect("reopen store again");
+        let error = reopened
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect_err("proposal tampering must fail closed");
+        assert!(error.to_string().contains("record hash mismatch"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_snapshot_fails_closed_above_the_observation_bound() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: b"# Candidate\n".to_vec(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create proposal");
+        drop(store);
+
+        let mut connection = rusqlite::Connection::open(&database).expect("open raw fixture db");
+        let transaction = connection.transaction().expect("start fixture transaction");
+        for index in 0..RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS {
+            let reviewer_id = format!("reviewer:{index}");
+            let reviewed_at = 1_700_000_002 + index as i64;
+            let disposition = "defer";
+            let reason = format!("bounded fixture {index}");
+            let review_id = proposal_review_observation_record_sha256(
+                &proposal.proposal_id,
+                &reviewer_id,
+                reviewed_at,
+                disposition,
+                &reason,
+                &proposal.record_sha256,
+            );
+            transaction
+                .execute(
+                    "INSERT INTO resource_proposal_review_observations (
+                        review_id, proposal_id, reviewer_id, reviewed_at, disposition,
+                        reason, proposal_record_sha256, record_sha256
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![
+                        review_id,
+                        proposal.proposal_id,
+                        reviewer_id,
+                        reviewed_at,
+                        disposition,
+                        reason,
+                        proposal.record_sha256,
+                        review_id,
+                    ],
+                )
+                .expect("insert bounded fixture");
+        }
+        transaction.commit().expect("commit fixtures");
+        drop(connection);
+
+        let reopened = SqliteStore::open(&database).await.expect("reopen store");
+        let full = reopened
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect("exactly bounded observation set must succeed");
+        assert_eq!(full.observation_count, 256);
+        assert!(full.bounded_snapshot_complete);
+        assert_eq!(full.defer_count, 256);
+        assert!(full.snapshot_integrity_verified);
+        drop(reopened);
+
+        let connection = rusqlite::Connection::open(&database).expect("reopen raw fixture db");
+        let index = RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS;
+        let reviewer_id = format!("reviewer:{index}");
+        let reviewed_at = 1_700_000_002 + index as i64;
+        let disposition = "defer";
+        let reason = format!("bounded fixture {index}");
+        let review_id = proposal_review_observation_record_sha256(
+            &proposal.proposal_id,
+            &reviewer_id,
+            reviewed_at,
+            disposition,
+            &reason,
+            &proposal.record_sha256,
+        );
+        connection
+            .execute(
+                "INSERT INTO resource_proposal_review_observations (
+                    review_id, proposal_id, reviewer_id, reviewed_at, disposition,
+                    reason, proposal_record_sha256, record_sha256
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    review_id,
+                    proposal.proposal_id,
+                    reviewer_id,
+                    reviewed_at,
+                    disposition,
+                    reason,
+                    proposal.record_sha256,
+                    review_id,
+                ],
+            )
+            .expect("insert overflow fixture");
+        drop(connection);
+
+        let reopened = SqliteStore::open(&database).await.expect("reopen store again");
+        let error = reopened
+            .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
+            .await
+            .expect_err("oversized observation set must fail closed");
+        assert!(error.to_string().contains("bounded maximum of 256"));
+        assert_eq!(
+            std::fs::read(directory.path().join("AGENT.md")).expect("read unchanged AGENT.md"),
+            original
+        );
     }
 
     #[tokio::test]
