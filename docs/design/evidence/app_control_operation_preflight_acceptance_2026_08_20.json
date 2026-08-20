@@ -1,0 +1,130 @@
+{
+  "schema": "agent_bridge.app_control.operation_preflight.acceptance.v0",
+  "date": "2026-08-20",
+  "host": "local-linux-sway",
+  "implementation_commit": "66bc770b8627fbe37a3d9dd59294bc3873dda956",
+  "integration": {
+    "origin_master_exact": true,
+    "non_force_fast_forward": true,
+    "feature_branch": "codex/app-control-operation-preflight-20260820"
+  },
+  "deployment": {
+    "binary": "/home/pallasting/.local/bin/agent-bridge.real",
+    "version": "agent-bridge 0.14.0 (v0.14.0-1712-g66bc770b; 66bc770b8627)",
+    "sha256": "c3a2486a4b81dbf6b83ec9f5d1cba911a368d8add7b42b6cd40d70815c1a9562",
+    "runtime_assets": 13,
+    "runtime_parity": true,
+    "wrapper_replaced": false,
+    "rollback": {
+      "binary": "/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-66bc770-20260820T034621",
+      "runtime": "/home/pallasting/.local/lib/agent-bridge/scripts.bak-deploy-20260820T034621"
+    },
+    "managed_services": {
+      "agent_bridge_daemon": "active, new binary sha256 matched",
+      "agent_bridge_daemon_http": "active, new binary sha256 matched, healthz ok",
+      "agent_bridge_palace": "active, new binary sha256 matched, healthz ok"
+    }
+  },
+  "journal_activation": {
+    "finding": "The default XDG state location is on fuseblk with allow_other and presents newly created files as root:root 0777, so it cannot satisfy the owner-only durable receipt contract.",
+    "old_path": "/home/pallasting/.local/state/agent-bridge/app_control_operations",
+    "old_path_retained": true,
+    "old_path_trusted_for_future_dispatch": false,
+    "new_path": "/Data/.agent-bridge-state/app_control_operations",
+    "new_filesystem": "f2fs",
+    "new_directory_mode": "0700",
+    "new_record_and_lock_mode": "0600",
+    "owner": "pallasting:1000",
+    "records_migrated": 3,
+    "migration_policy": "Conservatively preserve already-used operation identities to prevent duplicate actuation; migration never authorizes dispatch.",
+    "source_and_destination_record_sha256_equal": true,
+    "wrapper_machine_env": "AB_APP_CONTROL_OPERATION_DIR=/Data/.agent-bridge-state/app_control_operations",
+    "machine_env_backup": "/home/pallasting/.config/agent-bridge/machine.env.bak-app-control-journal-20260820T0354"
+  },
+  "private_preflight_checks": {
+    "fresh": {
+      "operation_id": "preflight-readonly-smoke-66bc770",
+      "state": "fresh_candidate",
+      "candidate": true,
+      "record_present": false,
+      "dispatch_authorized": false,
+      "reservation_created": false,
+      "operation_record_mutated": false
+    },
+    "terminal_replay": {
+      "operation_id": "embodied-media-live-direct-20260819-01",
+      "state": "terminal_replay_candidate",
+      "candidate": true,
+      "observed_phase": "terminal",
+      "dispatch_count": 1,
+      "terminal_verdict": "verified",
+      "player_observed": false,
+      "effect_verified": false
+    },
+    "expired": {
+      "operation_id": "p2-live-20260819-0515",
+      "state": "operation_expired",
+      "candidate": false,
+      "blocked": true,
+      "observed_phase": "terminal",
+      "dispatch_count": 1,
+      "remaining_secs": 0.0,
+      "same_id_retry_allowed": false,
+      "automatic_new_id_allowed": false,
+      "record_sha256": "e0e2891adc330fe88075c0b7687fe78d038789eaaf25359e34fd59b6c9f481b6"
+    },
+    "journal_file_count_before_and_after": 6,
+    "journal_manifest_before_and_after": "23db19e002b981e52672404a2a775dfddc49854d80b34d92e82d50f6cb0b3c0c",
+    "journal_unchanged": true
+  },
+  "installed_mcp_acceptance": {
+    "profile": "codex-essential-mobile-projection",
+    "database": "isolated temporary SQLite store",
+    "adb_backend": "/usr/bin/false",
+    "request_operation_id": "p2-live-20260819-0515",
+    "result": {
+      "schema": "agent_bridge.advance_track_then_project.v0",
+      "verdict": "error",
+      "recover": "replan",
+      "last_completed_phase": "inputs_validated",
+      "operation_preflight_state": "operation_expired",
+      "operation_preflight_source_contract_ok": true,
+      "projection_start": null,
+      "connection": null,
+      "app_control": null,
+      "sync": null,
+      "wait": null,
+      "stop": null,
+      "action_invocation_count_this_call": 0,
+      "cleanup_attempted": false,
+      "media_actuation_invoked": false,
+      "media_dispatched_in_this_call": false,
+      "projection_authority_granted": false
+    }
+  },
+  "verification": {
+    "python_app_control_tests": "56 passed",
+    "rust_app_control_tests": "10 passed",
+    "rust_advance_track_then_project_tests": "10 passed",
+    "cargo_check_ab_bridge_lib": "passed",
+    "deploy_audio_adapter_parity": "passed",
+    "deploy_pinned_assets": "passed",
+    "deploy_postbuild_race": "passed",
+    "deploy_dry_run": "passed without live mutation",
+    "deploy_origin_master_postbuild_recheck": "passed"
+  },
+  "claim_boundary": {
+    "proved": [
+      "The installed composite rejects the known expired operation before projection start and before durable media action invocation.",
+      "Private preflight is journal-only and did not mutate or reserve an operation identity.",
+      "Managed daemon, HTTP, and Palace services loaded the deployed binary bytes and the secure journal path at the observed time."
+    ],
+    "not_proved": [
+      "human observation",
+      "pixel verification",
+      "a media effect for the blocked request",
+      "multi-user local binary integrity on the fuseblk /home mount",
+      "activation of the new inode in already-running external MCP client sessions"
+    ]
+  }
+}
