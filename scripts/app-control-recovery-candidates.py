@@ -86,17 +86,32 @@ def discover(directory: Path, *, now: float | None = None) -> dict[str, Any]:
                 if type(expires_at) not in (int, float) or isinstance(expires_at, bool) or float(expires_at) <= now:
                     result["skipped_count"] += 1; continue
                 request = record.get("request")
-                if not isinstance(request, dict) or request.get("action") != "next":
+                ttl = request.get("operation_ttl_secs") if isinstance(request, dict) else None
+                selector = request.get("player_selector") if isinstance(request, dict) else None
+                canonical_request = backend.operation_request("next", selector, ttl) if type(ttl) is int else None
+                canonical_digest = backend.operation_request_digest("next", selector, ttl) if type(ttl) is int else None
+                if (
+                    not isinstance(request, dict)
+                    or request != canonical_request
+                    or request.get("schema") != backend.SCHEMA
+                    or request.get("action") != "next"
+                    or not isinstance(selector, str) or not selector
+                    or type(ttl) is not int
+                    or not (backend.MIN_OPERATION_TTL_SECS <= ttl <= backend.MAX_OPERATION_TTL_SECS)
+                    or record.get("request_digest") != canonical_digest
+                ):
                     result["skipped_count"] += 1; continue
                 result["candidates"].append({
                     "operation_id": operation_id,
-                    "request_digest": record.get("request_digest"),
-                    "player_selector": request.get("player_selector"),
+                    "request": canonical_request,
+                    "request_digest": canonical_digest,
                     "expires_at": float(expires_at),
                     "remaining_secs": max(0.0, float(expires_at) - now),
                     "phase": "dispatch_started", "dispatch_count": 1,
                     "record_sha256": hashlib.sha256(raw).hexdigest(),
                     "discovery_only": True, "revalidation_required": True,
+                    "recommended_next": "explicitly_review_then_call_same_canonical_request",
+                    "automatic_execution_allowed": False,
                 })
             except (OSError, ValueError, json.JSONDecodeError):
                 result["status"] = "error"; result["verdict"] = "error"; result["recover"] = "replan"

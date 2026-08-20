@@ -198,6 +198,12 @@ current. Every returned candidate must be revalidated by a later explicitly
 authorized invocation; a busy record is skipped and any unsafe or corrupt
 record makes the entire scan fail closed. Human-semantic legacy IDs are not
 enumerated, and the journal path is emitted only as a SHA-256 digest.
+For each admissible candidate the helper returns the exact canonical request,
+including its original player selector and operation TTL, and independently
+recomputes the request digest. This is enough for a new instance to prepare an
+explicit same-request recovery decision without owner restatement. It is not a
+resume token or dispatch permit: the normal mutating path still takes the
+exclusive lock and revalidates the record, expiry, player and effect evidence.
 
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.

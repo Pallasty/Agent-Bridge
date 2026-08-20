@@ -14,6 +14,8 @@
     "accepted_action": "next",
     "maximum_records": 64,
     "unexpired_required": true,
+    "exact_canonical_request_and_digest_required": true,
+    "original_player_selector_and_ttl_required": true,
     "owner_only_journal_required": true,
     "shared_nonblocking_lock_required": true
   },

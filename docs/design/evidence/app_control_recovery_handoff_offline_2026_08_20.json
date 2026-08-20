@@ -1,0 +1,30 @@
+{
+  "schema": "agent_bridge.app_control.recovery_handoff_offline.v0",
+  "recorded_at": "2026-08-20T16:20:00Z",
+  "implementation_base": "20e3fe03",
+  "handoff_contract": {
+    "opaque_operation_id_required": true,
+    "exact_canonical_request_returned": true,
+    "operation_ttl_secs_returned": true,
+    "player_selector_returned": true,
+    "request_digest_recomputed": true,
+    "record_sha256_returned": true,
+    "explicit_review_required": true,
+    "mutating_path_must_revalidate": true,
+    "automatic_execution_allowed": false
+  },
+  "offline_verification": {
+    "candidate_discovery_and_existing_app_control_tests_passed": 71,
+    "canonical_request_mutations_rejected": true,
+    "busy_lock_does_not_claim_candidate": true,
+    "record_bytes_and_mtime_unchanged": true,
+    "player_or_mobile_called": false
+  },
+  "claim_boundary": {
+    "cross_codex_live_recovery_proven": false,
+    "candidate_is_still_owner_intent": false,
+    "automatic_resume_safe": false,
+    "effect_or_current_track_observed": false,
+    "runtime_or_public_tool_rollout_authorized": false
+  }
+}

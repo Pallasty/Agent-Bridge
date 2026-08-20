@@ -48,7 +48,10 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "verified")
         self.assertEqual(result["candidate_count"], 1)
         self.assertEqual(result["candidates"][0]["operation_id"], self.operation_id)
+        self.assertEqual(result["candidates"][0]["request"], APP.operation_request("next", "rhythmbox", 3600))
+        self.assertEqual(result["candidates"][0]["request_digest"], APP.operation_request_digest("next", "rhythmbox", 3600))
         self.assertTrue(result["candidates"][0]["revalidation_required"])
+        self.assertFalse(result["candidates"][0]["automatic_execution_allowed"])
         self.assertFalse(result["action_invoked"]); self.assertFalse(result["media_observed"])
         self.assertEqual(before, (record_path.read_bytes(), lock_path.read_bytes(), record_path.stat().st_mtime_ns))
 
@@ -70,6 +73,17 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
             result = INDEX.discover(self.directory, now=1100.0)
         self.assertEqual(result["candidate_count"], 0)
         self.assertEqual(result["skipped_count"], 1)
+
+    def test_request_ttl_selector_and_digest_must_be_canonical(self):
+        for changes in (
+            {"request_digest": "0" * 64},
+            {"request": APP.operation_request("next", None, 3600)},
+            {"request": {**APP.operation_request("next", "rhythmbox", 3600), "extra": True}},
+        ):
+            with self.subTest(changes=changes):
+                self.write_candidate(**changes)
+                self.assertEqual(INDEX.discover(self.directory, now=1100.0)["candidate_count"], 0)
+                for path in self.directory.iterdir(): path.unlink()
 
     def test_unsafe_or_corrupt_journal_fails_entire_scan_closed(self):
         record_path, _ = self.write_candidate()
