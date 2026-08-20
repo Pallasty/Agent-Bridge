@@ -1,0 +1,55 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_dogfood.v1",
+  "trial_id": "embodied-media-pair-05",
+  "preregistered": true,
+  "task": {
+    "real_task": true,
+    "operator_attested_real_task": true,
+    "task_kind": "settled_next_then_exact_projection",
+    "intent_declared_before_action": true
+  },
+  "baseline": {
+    "available": true,
+    "owner_restatements": 0,
+    "manual_interventions": 0,
+    "agent_orchestration_calls": 7,
+    "failed_or_replanned_calls": 0,
+    "elapsed_ms": 4027
+  },
+  "trial": {
+    "comparison_metrics_measured": true,
+    "owner_restatements": 0,
+    "manual_interventions": 0,
+    "agent_orchestration_calls": 2,
+    "failed_or_replanned_calls": 0,
+    "elapsed_ms": 3305,
+    "separate_invocations_reported": 2,
+    "process_identity_proven": false,
+    "operation_id_replacements": 0,
+    "contract_bound_dispatches_reported": 1,
+    "external_execution_repeated_reported": false,
+    "recovered_after_interruption": true,
+    "bounded_settlement_verified": true,
+    "device_draw_reported": true,
+    "cleanup_verified": true
+  },
+  "safety": {
+    "implicit_ui_fallback": false,
+    "background_authority_granted": false,
+    "arbitrary_mobile_control_granted": false,
+    "sensitive_content_retained": false
+  },
+  "evidence": {
+    "normalized_receipt_sha256": "sha256:35e2fc87f7033f2e55a9bf5bacea77b97ba64f23a461f84b8255a8462e35e97f",
+    "implementation_commit": "git:8fbc8faa505fe31bd337ffbbb3b25d5cd45a1758",
+    "evidence_commit": "git:76c2a4a289f26fc95e6e3611d334c1a51a6defee"
+  },
+  "claim_boundary": {
+    "behavior_lift_proven": false,
+    "global_dispatch_count_proven": false,
+    "exclusive_causation_proven": false,
+    "long_lived_stability_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false
+  }
+}

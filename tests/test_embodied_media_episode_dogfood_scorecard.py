@@ -92,6 +92,22 @@ class ScorecardTests(unittest.TestCase):
         self.assertEqual(aggregate["decision"], "COLLECTING_PAIRED_REAL_TASKS")
         self.assertFalse(aggregate["behavior_lift_proven"])
 
+    def test_checked_in_three_pairs_reach_owner_review_only(self):
+        records = []
+        for number in ("03", "04", "05"):
+            path = (
+                Path(__file__).parents[1]
+                / "docs/design/fixtures"
+                / f"embodied-media-episode-dogfood-pair-{number}-2026-08-20.json"
+            )
+            records.append(MODULE.validate(json.loads(path.read_text(encoding="utf-8"))))
+        aggregate = MODULE.report(records)
+        self.assertEqual(aggregate["decision"], "READY_FOR_OWNER_REVIEW")
+        self.assertEqual(aggregate["paired_real_tasks"], 3)
+        self.assertEqual(aggregate["useful_paired_real_tasks"], 3)
+        self.assertFalse(aggregate["behavior_lift_proven"])
+        self.assertFalse(aggregate["runtime_influence_allowed"])
+
     def test_checked_in_pair04_is_a_useful_replication(self):
         fixture = (
             Path(__file__).parents[1]

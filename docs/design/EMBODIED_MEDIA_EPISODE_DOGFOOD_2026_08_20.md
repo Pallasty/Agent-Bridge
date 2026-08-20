@@ -191,3 +191,18 @@ cleanup passed on both sides. The scorecard therefore classifies Pair 04 as a
 second `PASS_USEFUL_PAIRED_TASK`. With two useful pairs and the code-locked
 target still at three, the aggregate remains `COLLECTING_PAIRED_REAL_TASKS`;
 owner review and any broader runtime influence remain premature.
+
+## Pair 05 and aggregate gate
+
+Pair 05 repeated the same frozen protocol a third time. Its baseline used seven
+agent-visible calls and its trial used two; settlement, exact draw, cleanup,
+and all zero-regression gating metrics passed. The closed scorecard classifies
+it as a third `PASS_USEFUL_PAIRED_TASK`.
+
+The three-record aggregate is now `READY_FOR_OWNER_REVIEW`. This is a bounded
+workflow-burden result: each trial avoided five agent-visible orchestration
+calls relative to its paired baseline. It is not behavior-lift evidence and
+does not prove global dispatch counts, exclusive causation, long-lived
+stability, human observation, or pixel verification. No new runtime influence,
+cross-domain expansion, or automatic product decision is authorized by this
+aggregate; those require an explicit owner review.
