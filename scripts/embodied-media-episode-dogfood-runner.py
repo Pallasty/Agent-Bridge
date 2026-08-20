@@ -23,7 +23,7 @@ from typing import Any, Callable
 
 RUNNER_SCHEMA = "agent_bridge.embodied_media_episode_runner.v0"
 OPERATION_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z", re.ASCII)
-COMPANION_PACKAGE = "com.pallasting.agentbridge.companion"
+COMPANION_PACKAGE = "dev.agentbridge.companion"
 
 
 def load_collector():

@@ -188,6 +188,7 @@ class RunnerTests(unittest.TestCase):
                 runner.PrivateReceiptSink(pathlib.Path(tmp))
 
     def test_fallback_force_stop_uses_only_fixed_argv(self):
+        self.assertEqual(runner.COMPANION_PACKAGE, "dev.agentbridge.companion")
         completed = subprocess.CompletedProcess([], 0)
         with mock.patch.object(runner.subprocess, "run", return_value=completed) as called:
             self.assertTrue(runner.fallback_force_stop("/usr/bin/adb", "serial-01", 7.0))
