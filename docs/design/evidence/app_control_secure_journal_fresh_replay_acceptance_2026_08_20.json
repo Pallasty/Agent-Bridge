@@ -1,0 +1,152 @@
+{
+  "schema": "agent_bridge.app_control.secure_journal_fresh_replay.acceptance.v0",
+  "date": "2026-08-20",
+  "host": "local-linux-sway",
+  "implementation_commit": "66bc770b8627fbe37a3d9dd59294bc3873dda956",
+  "acceptance_base_master": "912bda1bb9d17fc82a170025150fbad4b5f21d04",
+  "runtime": {
+    "binary_version": "agent-bridge 0.14.0 (v0.14.0-1712-g66bc770b; 66bc770b8627)",
+    "binary_sha256": "c3a2486a4b81dbf6b83ec9f5d1cba911a368d8add7b42b6cd40d70815c1a9562",
+    "app_control_sha256": "35a0f7c0f827b81d079600f455849a8b52da62ebc14abcc490eacb0d6db9de72",
+    "toolset": "codex-essential-mobile-projection",
+    "sqlite": "isolated temporary store per MCP process",
+    "journal": "/Data/.agent-bridge-state/app_control_operations",
+    "journal_directory_mode": "0700",
+    "journal_record_and_lock_mode": "0600"
+  },
+  "android": {
+    "serial": "3K661F0178H00000",
+    "model": "OPPO PKW110",
+    "version_code": 3,
+    "version_name": "0.3.0",
+    "apk_sha256": "62adfcd98f64c383d324d414855feb8ad71105ea2e7f679c43229a15fabca0db",
+    "signer_certificate_sha256": "ebcd0970f09f2d5818f84ab738971827f5af8ba9482d5087ae2fcd821cb8b655",
+    "connection_mode": "test_only_auto_connect",
+    "holder_confirmation_observed": false,
+    "foreground_before_and_after": "com.dragon.read/.component.shortvideo.impl.fullscreen.ShortSeriesLandActivity",
+    "companion_process_after_cleanup": false
+  },
+  "player_precondition": {
+    "discovered_players": [
+      "rhythmbox"
+    ],
+    "selected_player": "rhythmbox",
+    "playback_status": "Paused",
+    "track_id": "/org/mpris/MediaPlayer2/Track/1657",
+    "title": "Full Sail",
+    "artist": "Ryan Farish",
+    "active_playlist_id": "/org/gnome/Rhythmbox3/Playlist/0x605f65c99420",
+    "active_playlist_name": "Allin1.m3u"
+  },
+  "operation": {
+    "operation_id": "p2-secure-live-20260820-01",
+    "operation_ttl_secs": 3600,
+    "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+    "journal_key": "e48b858dfd000e65afc75de48cdd164a325a36408339af429ce2bdcfb0863df1",
+    "terminal_record_sha256": "9a2b7b243469717ab60ec6a755960dd6d622652ea4d3d722e44b9c2defda22ef"
+  },
+  "fresh_process": {
+    "preflight": {
+      "state": "fresh_candidate",
+      "source_contract_ok": true,
+      "record_present": false,
+      "dispatch_authorized": false,
+      "reservation_created": false
+    },
+    "composite_verdict": "verified",
+    "last_completed_phase": "projection_stopped",
+    "projection_session_id": "mcp-1787224193-830ab147dd31",
+    "media_action": {
+      "before_track_id": "/org/mpris/MediaPlayer2/Track/1657",
+      "before_title": "Full Sail",
+      "after_track_id": "/org/mpris/MediaPlayer2/Track/1475",
+      "after_title": "Don't Wanna Lose You",
+      "dispatch_count": 1,
+      "dispatched_in_this_call": true,
+      "idempotent_replay": false,
+      "external_execution_repeated": false,
+      "source_contract_ok": true,
+      "predicate": "track_identity_changed"
+    },
+    "projection": {
+      "projected_track_id": "/org/mpris/MediaPlayer2/Track/1475",
+      "target_revision": 2,
+      "target_frame_sha256": "fc3ecb103bcc97146d9b61620a01488e43e7373fffc175f5ae79b723b4851bf5",
+      "draw_report_revision": 2,
+      "draw_report_frame_sha256": "fc3ecb103bcc97146d9b61620a01488e43e7373fffc175f5ae79b723b4851bf5",
+      "device_reported_at_unix_seconds": 1787224196,
+      "host_received_at_unix_seconds": 1787224196,
+      "authenticated_exact_pair": true,
+      "human_observed": false,
+      "pixel_verified": false
+    },
+    "cleanup_verified": true
+  },
+  "post_fresh_independent_observation": {
+    "track_id": "/org/mpris/MediaPlayer2/Track/2677",
+    "title": "Redline (No Vox)",
+    "artist": "Brand X Music",
+    "playback_status": "Paused",
+    "five_sample_terminal_stability_seconds": 5,
+    "matches_fresh_terminal_receipt_after_track": false,
+    "cause": "unknown_external_or_player_transition",
+    "claim": "The fresh receipt proves one dispatch followed by an observed strict track-id change, but it does not prove that the first changed identity remained the settled current track."
+  },
+  "fresh_mcp_process_same_id_replay": {
+    "preflight": {
+      "state": "terminal_replay_candidate",
+      "source_contract_ok": true,
+      "record_present": true,
+      "observed_phase": "terminal",
+      "dispatch_count": 1,
+      "record_sha256": "9a2b7b243469717ab60ec6a755960dd6d622652ea4d3d722e44b9c2defda22ef"
+    },
+    "projection_session_id": "mcp-1787224258-79d9772952c6",
+    "app_control": {
+      "verdict": "verified",
+      "idempotent_replay": true,
+      "external_execution_repeated": false,
+      "reported_dispatch_count": 1,
+      "dispatched_in_this_call": null,
+      "stored_after_track_id": "/org/mpris/MediaPlayer2/Track/1475"
+    },
+    "independent_media_context_track_id": "/org/mpris/MediaPlayer2/Track/2677",
+    "composite_verdict": "error",
+    "last_completed_phase": "track_advanced",
+    "error_code": "media_projection_binding_mismatch",
+    "track_exact_match": false,
+    "wait": null,
+    "device_draw_claimed": false,
+    "cleanup_verified": true,
+    "journal_record_sha256_after_replay": "9a2b7b243469717ab60ec6a755960dd6d622652ea4d3d722e44b9c2defda22ef",
+    "player_track_after_replay": "/org/mpris/MediaPlayer2/Track/2677"
+  },
+  "result": {
+    "fresh_secure_journal_path_verified": true,
+    "fresh_dispatch_exactly_one": true,
+    "fresh_exact_device_draw_report_verified": true,
+    "same_id_replay_created_second_dispatch": false,
+    "same_id_replay_projected_stale_terminal_track": false,
+    "same_id_replay_failed_closed_on_current_state_drift": true,
+    "phone_cleanup_verified_after_both_processes": true
+  },
+  "next_gap": {
+    "title": "Distinguish first observed track change from a settled post-action track identity",
+    "priority": "P1",
+    "reason": "The first changed MPRIS track can be transient or externally superseded before presentation continuity is reused.",
+    "minimum_direction": "Keep at-most-once dispatch unchanged; add bounded post-action stability evidence or an explicit unstable/reobserve disposition, and never rewrite the terminal action receipt merely to match a later current track."
+  },
+  "claim_boundary": {
+    "proved": [
+      "A secure-journal fresh operation dispatched next once and produced an exact authenticated Android Activity draw report for the first verified changed track.",
+      "A fresh MCP process reused the same operation identity without a second external dispatch.",
+      "When current media no longer matched the durable terminal receipt, the composite refused to claim an exact projection and cleaned up its owned session."
+    ],
+    "not_proved": [
+      "exclusive causal attribution in the presence of other MPRIS controllers",
+      "long-lived stability of the first observed changed track",
+      "human observation",
+      "pixel verification"
+    ]
+  }
+}
