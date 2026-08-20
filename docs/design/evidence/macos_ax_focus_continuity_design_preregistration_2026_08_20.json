@@ -1,0 +1,98 @@
+{
+  "schema": "agent_bridge.macos_ax_focus_continuity_design_preregistration.v0",
+  "registered_at": "2026-08-20T15:32:16Z",
+  "registered_before_implementation": true,
+  "owner_authorized_candidate": true,
+  "authority": {
+    "design_authorized": true,
+    "implementation_authorized_after_design_gate": false,
+    "live_execution_authorized": false,
+    "new_runtime_influence_authorized": false
+  },
+  "existing_primitives": {
+    "probe": "macos_ax_probe",
+    "admission": "macos_ax_action_admission",
+    "lease": "embodiment_lease",
+    "transaction": "macos_ax_focus_transaction",
+    "postcondition": "macos_ax_verify",
+    "transaction_resumes_action": false,
+    "caller_supplied_operation_id_already_supported": false
+  },
+  "offline_baseline": {
+    "implementation_commit": "4435369cda1fec5763ba2b5be908d3d0311a7a4a",
+    "rust_focus_tests_passed": 9,
+    "python_ax_tests_passed": 64,
+    "live_mac_action_performed": false
+  },
+  "scope": {
+    "operation": "focus_window",
+    "risk_class": "embodied_navigation",
+    "risk_rank": 1,
+    "already_frontmost_app_required": true,
+    "stable_ax_identifier_required": true,
+    "sample_local_index_allowed": false,
+    "cross_app_activation_allowed": false,
+    "content_mutation_allowed": false,
+    "coordinate_or_visual_fallback_allowed": false
+  },
+  "episode_contract": {
+    "caller_supplied_operation_id_required": true,
+    "canonical_request_binding_required": true,
+    "write_ahead_phase": "dispatch_started",
+    "same_id_recovery_is_read_only": true,
+    "redispatch_after_dispatch_started_allowed": false,
+    "recovery_postcondition": "window_focused",
+    "recovery_causal_attribution": "unknown_after_interruption",
+    "automatic_new_operation_id_allowed": false
+  },
+  "live_admission": {
+    "complete_untruncated_probe_required": true,
+    "maximum_probe_age_ms": 5000,
+    "two_distinct_stable_windows_required": true,
+    "target_initially_unfocused_required": true,
+    "hidden_or_unknown_candidates_allowed": false,
+    "permission_prompt_allowed": false,
+    "owner_only_journal_required": true,
+    "ineligible_surface_may_be_manufactured": false
+  },
+  "paired_measurement": {
+    "baseline_agent_visible_calls": 5,
+    "trial_agent_visible_calls": 2,
+    "baseline_steps": [
+      "macos_ax_probe",
+      "macos_ax_action_admission",
+      "embodiment_lease_acquire",
+      "macos_ax_focus_transaction",
+      "embodiment_lease_release"
+    ],
+    "trial_steps": [
+      "focus_episode_dispatch_with_registered_response_loss",
+      "focus_episode_same_id_read_only_recovery"
+    ],
+    "gating_metrics": [
+      "owner_restatements",
+      "manual_interventions",
+      "agent_visible_calls",
+      "failed_or_replanned_calls"
+    ],
+    "elapsed_ms_descriptive_only": true,
+    "target_useful_pairs": 3
+  },
+  "required_before_implementation": [
+    "closed collector contract",
+    "private runner contract",
+    "operation journal state machine",
+    "response-loss fault injection",
+    "same-id no-redispatch tests",
+    "lease cleanup tests",
+    "Mac eligibility read-only preflight"
+  ],
+  "claim_boundary": {
+    "general_computer_use_proven": false,
+    "exclusive_causation_proven": false,
+    "pixel_verification_proven": false,
+    "human_observation_proven": false,
+    "cross_app_navigation_authorized": false,
+    "content_action_replay_authorized": false
+  }
+}
