@@ -1,0 +1,30 @@
+{
+  "schema": "agent_bridge.app_control.recovery_candidate_index_readonly.v0",
+  "observed_at": "2026-08-20T16:14:01Z",
+  "preregistration": "docs/design/evidence/app_control_recovery_candidate_index_preregistration_2026_08_20.json",
+  "source_commit_before_change": "2c57f1b07798f4be239aec9545a9d54188c8a6ab",
+  "observation": {
+    "scan_complete": true,
+    "records_seen": 12,
+    "candidate_count": 0,
+    "skipped_count": 12,
+    "journal_manifest_unchanged": true,
+    "media_observed": false,
+    "action_invoked": false,
+    "projection_opened": false
+  },
+  "decision": {
+    "status": "READY_FOR_FUTURE_OPAQUE_ID_HANDOFF",
+    "current_recovery_candidate_present": false,
+    "automatic_recovery_authorized": false,
+    "live_action_authorized": false,
+    "deployment_authorized": false
+  },
+  "claim_boundary": {
+    "historical_ids_are_current_intents": false,
+    "absence_of_candidate_proves_no_unfinished_work": false,
+    "future_candidate_should_be_resumed": false,
+    "player_state_or_effect_verified": false,
+    "cross_domain_handoff_proven": false
+  }
+}

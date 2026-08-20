@@ -1,0 +1,28 @@
+{
+  "schema": "agent_bridge.app_control.recovery_candidate_index_preregistration.v0",
+  "registered_at": "2026-08-20T16:12:00Z",
+  "authority": {
+    "source_local_private_implementation_authorized": true,
+    "public_tool_authorized": false,
+    "deployment_authorized": false,
+    "automatic_recovery_authorized": false,
+    "media_or_mobile_action_authorized": false
+  },
+  "scope": {
+    "accepted_operation_id_pattern": "ab-episode-[0-9a-f]{32}",
+    "accepted_phase": "dispatch_started",
+    "accepted_action": "next",
+    "maximum_records": 64,
+    "unexpired_required": true,
+    "owner_only_journal_required": true,
+    "shared_nonblocking_lock_required": true
+  },
+  "claim_boundary": {
+    "candidate_is_current_intent": false,
+    "candidate_effect_occurred": false,
+    "candidate_should_be_automatically_resumed": false,
+    "player_state_observed": false,
+    "new_operation_id_authorized": false,
+    "cross_domain_discovery_authorized": false
+  }
+}

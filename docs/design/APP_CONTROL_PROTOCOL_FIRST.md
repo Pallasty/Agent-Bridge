@@ -186,6 +186,19 @@ journal-bounded media actuation; the projection grants no additional
 actuation, attention, memory, sensor, arbitrary mobile input, or
 background-service authority.
 
+### Private recovery-candidate discovery
+
+The source-local `app-control-recovery-candidates.py` helper narrows one
+restart-handoff gap without granting recovery authority. It scans an explicit
+owner-only journal under shared nonblocking locks and reports only unexpired
+`dispatch_started/count=1` records whose operation IDs use the opaque
+`ab-episode-<32 hex>` shape. It never observes MPRIS, opens projection, invokes
+an action, reserves an identity, or decides that the old intent is still
+current. Every returned candidate must be revalidated by a later explicitly
+authorized invocation; a busy record is skipped and any unsafe or corrupt
+record makes the entire scan fail closed. Human-semantic legacy IDs are not
+enumerated, and the journal path is emitted only as a SHA-256 digest.
+
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.
 The first durable action/replay plus authenticated mobile-delivery episode is
