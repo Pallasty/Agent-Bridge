@@ -117,3 +117,24 @@ then read `/media_context/track/id`, while the versioned sync receipt exposes
 trial was never started. No further live pair may run until receipt extraction
 and cleanup are implemented as a versioned, unit-tested collector rather than
 an inline acceptance script.
+
+## Versioned collector gate
+
+`scripts/embodied-media-episode-dogfood-collector.py` is the read-only gate for
+future enrollment. It accepts a private bundle of raw tool payloads, requires
+the exact seven-call baseline or two-call trial sequence, and emits only a
+closed, content-free `agent_bridge.embodied_media_episode_collector_result.v0`
+record. It does not start MCP, call the player, open ADB, or persist the input.
+
+The validator fixes the sync binding at `/media_context/track_id`, requires the
+same settled track in the action and projection, requires an exact revision and
+frame-digest draw report, and requires verified cleanup. Served-only frames,
+later revisions, recovery payloads containing a dispatch field, repeated
+execution, type confusion, extra top-level input fields, and the obsolete
+nested track path are rejected. Its normalized output hashes track identities
+and omits operation IDs, device identifiers, sessions, titles, and artists.
+
+The collector must be imported by any future live runner; duplicating these
+JSON paths in an inline script is no longer admissible. Pair 03 may be
+preregistered only after the runner itself is tested for stop-on-error cleanup
+and uses this collector for its final decision.
