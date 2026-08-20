@@ -15,6 +15,41 @@ ADAPTER_PATH="$ROOT/share/audio_embody.py"
 RUNTIME_ASSET_DIR="$ROOT/lib/agent-bridge/scripts"
 mkdir -p "$INSTALL_DIR"
 cp "$(type -P true)" "$ROOT/new-agent-bridge"
+printf '\nagent_bridge.app_control.operation_preflight.v0\n' >> "$ROOT/new-agent-bridge"
+
+# A --use-binary caller can provide a new binary from one source snapshot and
+# runtime assets from another. The preflight marker must reject that mismatch
+# before touching any live binary/runtime file, not only during postflight.
+STALE_ROOT="$ROOT/stale-source"
+mkdir -p "$STALE_ROOT" "$STALE_ROOT/config" \
+    "$STALE_ROOT/docs/reports/tts-comparison"
+cp -a "$SCRIPT_DIR" "$STALE_ROOT/scripts"
+cp "$SCRIPT_DIR/../config/omnivoice-canary.json" "$STALE_ROOT/config/"
+cp "$SCRIPT_DIR/../docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json" \
+    "$STALE_ROOT/docs/reports/tts-comparison/"
+sed -i '/agent_bridge\.app_control\.operation_preflight\.v0/d' \
+    "$STALE_ROOT/scripts/app_control.py"
+NEGATIVE_INSTALL="$ROOT/negative/bin"
+NEGATIVE_ADAPTER="$ROOT/negative/share/audio_embody.py"
+NEGATIVE_RUNTIME="$ROOT/negative/lib/agent-bridge/scripts"
+mkdir -p "$NEGATIVE_INSTALL" "$(dirname "$NEGATIVE_ADAPTER")" "$NEGATIVE_RUNTIME"
+cp "$(type -P true)" "$NEGATIVE_INSTALL/agent-bridge.real"
+printf '%s\n' 'existing-adapter' > "$NEGATIVE_ADAPTER"
+printf '%s\n' 'existing-runtime' > "$NEGATIVE_RUNTIME/app_control.py"
+cp "$NEGATIVE_INSTALL/agent-bridge.real" "$ROOT/negative-real.before"
+cp "$NEGATIVE_ADAPTER" "$ROOT/negative-adapter.before"
+cp "$NEGATIVE_RUNTIME/app_control.py" "$ROOT/negative-runtime.before"
+if AGENT_BRIDGE_INSTALL_DIR="$NEGATIVE_INSTALL" \
+    AGENT_BRIDGE_AUDIO_EMBODY_PATH="$NEGATIVE_ADAPTER" \
+    AGENT_BRIDGE_RUNTIME_ASSET_DIR="$NEGATIVE_RUNTIME" \
+        "$STALE_ROOT/scripts/deploy_from_master.sh" \
+        --use-binary "$ROOT/new-agent-bridge" --yes >/dev/null 2>&1; then
+    printf '%s\n' 'FAIL: stale --use-binary runtime source unexpectedly passed' >&2
+    exit 1
+fi
+cmp -s "$ROOT/negative-real.before" "$NEGATIVE_INSTALL/agent-bridge.real"
+cmp -s "$ROOT/negative-adapter.before" "$NEGATIVE_ADAPTER"
+cmp -s "$ROOT/negative-runtime.before" "$NEGATIVE_RUNTIME/app_control.py"
 
 AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
 AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
@@ -45,5 +80,6 @@ done
 grep -q '"playlist_current"' "$RUNTIME_ASSET_DIR/app_control.py"
 grep -q '"playlist_activate"' "$RUNTIME_ASSET_DIR/app_control.py"
 grep -q 'agent_bridge.app_control.operation.v0' "$RUNTIME_ASSET_DIR/app_control.py"
+grep -q 'agent_bridge.app_control.operation_preflight.v0' "$RUNTIME_ASSET_DIR/app_control.py"
 
 printf 'PASS: deploy keeps binary, audio adapter, and runtime scripts at repository parity\n'

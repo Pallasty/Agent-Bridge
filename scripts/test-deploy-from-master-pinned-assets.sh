@@ -73,7 +73,7 @@ sha="$(git rev-parse HEAD)"
 source_file="$CARGO_TARGET_DIR/fake-agent-bridge.c"
 cat > "$source_file" <<EOF
 #include <stdio.h>
-int main(void) { puts("agent-bridge test ${sha}"); return 0; }
+int main(void) { puts("agent-bridge test ${sha} agent_bridge.app_control.operation_preflight.v0"); return 0; }
 EOF
 mkdir -p "$CARGO_TARGET_DIR/release"
 "$AB_DEPLOY_PINNED_ASSETS_CC" "$source_file" -o "$CARGO_TARGET_DIR/release/agent-bridge"
@@ -117,5 +117,7 @@ grep -q DIRTY_CALLER "$RUNTIME_ASSET_DIR/desktop_snapshot.py" &&
     fail "dirty snapshot marker deployed"
 grep -q DIRTY_CALLER "$RUNTIME_ASSET_DIR/app_control.py" &&
     fail "dirty app_control marker deployed"
+grep -q 'agent_bridge.app_control.operation_preflight.v0' "$RUNTIME_ASSET_DIR/app_control.py" ||
+    fail "durable operation preflight marker missing from deployed app_control"
 
 printf '%s\n' "pinned-master-runtime-assets-ok"

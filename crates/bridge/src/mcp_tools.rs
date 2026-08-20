@@ -11095,6 +11095,125 @@ impl AppControlTool {
     pub fn new(hub: Hub) -> Self {
         Self { _hub: hub }
     }
+
+    /// Inspect the installed durable-next journal without exposing a new MCP
+    /// action or treating the snapshot as dispatch authority.
+    pub(super) async fn preflight_durable_next(
+        &self,
+        operation_id: &str,
+        player_selector: Option<&str>,
+        operation_ttl_secs: u64,
+        timeout_ms: u64,
+    ) -> ToolResult {
+        let script = app_control_durable_script_path();
+        if !script.exists() {
+            return app_control_error(
+                "replan",
+                json!({
+                    "code": "script_missing",
+                    "message": format!("app_control.py not found at {}", script.display())
+                }),
+            );
+        }
+        let mut cmd = killable_command(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "python3".into()),
+        );
+        cmd.arg(&script)
+            .arg("--domain")
+            .arg("media")
+            .arg("--action")
+            .arg("next")
+            .arg("--operation-id")
+            .arg(operation_id)
+            .arg("--operation-ttl-secs")
+            .arg(operation_ttl_secs.to_string())
+            .arg("--operation-preflight");
+        if let Some(player) = player_selector {
+            cmd.arg("--player").arg(player);
+        }
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let started = Instant::now();
+        let output = match tokio::time::timeout(
+            Duration::from_millis(timeout_ms.clamp(1_000, 30_000)),
+            cmd.output(),
+        )
+        .await
+        {
+            Err(_) => {
+                return app_control_error(
+                    "retry",
+                    json!({"code": "preflight_timeout", "duration_ms": started.elapsed().as_millis()}),
+                )
+            }
+            Ok(Err(error)) => {
+                return app_control_error(
+                    "retry",
+                    json!({"code": "preflight_spawn_failed", "message": error.to_string()}),
+                )
+            }
+            Ok(Ok(output)) => output,
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+        let mut payload = match serde_json::from_str::<Value>(&stdout) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return app_control_error(
+                    "replan",
+                    json!({
+                        "code": "preflight_invalid_json",
+                        "message": error.to_string(),
+                        "exit_code": output.status.code().unwrap_or(-1),
+                        "stdout": stdout,
+                        "stderr": stderr
+                    }),
+                )
+            }
+        };
+        let exit_code = output.status.code().unwrap_or(-1);
+        let source_contract_ok = app_control_preflight_source_contract_valid(
+            &payload,
+            operation_id,
+            player_selector,
+            operation_ttl_secs,
+            exit_code,
+        );
+        if let Some(object) = payload.as_object_mut() {
+            object.insert(
+                "mcp_wrapper".into(),
+                json!({
+                    "tool": "app_control",
+                    "mode": "durable_operation_preflight",
+                    "duration_ms": duration_ms,
+                    "exit_code": exit_code,
+                    "stderr": stderr,
+                    "truncated": stdout_truncated || stderr_truncated,
+                    "source_contract_ok": source_contract_ok,
+                    "operation_id_bound": true
+                }),
+            );
+        }
+        if !source_contract_ok {
+            return app_control_error(
+                "replan",
+                json!({
+                    "code": "preflight_source_contract_mismatch",
+                    "exit_code": exit_code,
+                    "source": payload
+                }),
+            );
+        }
+        let verified = payload.get("verdict").and_then(Value::as_str) == Some("verified");
+        let mut result = ToolResult::json_text(&payload);
+        result.is_error = !verified;
+        result
+    }
 }
 
 #[async_trait]
@@ -11530,6 +11649,272 @@ impl McpTool for AppControlTool {
         result.is_error = !verified;
         Ok(result)
     }
+}
+
+fn app_control_preflight_source_contract_valid(
+    payload: &Value,
+    operation_id: &str,
+    player_selector: Option<&str>,
+    operation_ttl_secs: u64,
+    exit_code: i32,
+) -> bool {
+    let verdict = payload.get("verdict").and_then(Value::as_str);
+    let status = payload.get("status").and_then(Value::as_str);
+    let preflight = match payload.get("preflight").and_then(Value::as_object) {
+        Some(value) => value,
+        None => return false,
+    };
+    let expected_request = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "action": "next",
+        "player_selector": player_selector,
+        "operation_ttl_secs": operation_ttl_secs
+    });
+    let expected_digest =
+        app_control_operation_request_digest("next", player_selector, operation_ttl_secs);
+    let outcome = preflight.get("outcome").and_then(Value::as_str);
+    let candidate = preflight.get("candidate").and_then(Value::as_bool);
+    let blocked = preflight.get("blocked").and_then(Value::as_bool);
+    let candidate_state = matches!(
+        status,
+        Some(
+            "fresh_candidate"
+                | "retryable_candidate"
+                | "terminal_replay_candidate"
+                | "recovery_observation_candidate"
+        )
+    );
+    let blocked_state = matches!(
+        status,
+        Some(
+            "operation_expired"
+                | "idempotency_conflict"
+                | "terminal_operation_not_verified"
+                | "operation_record_invalid"
+                | "operation_journal_unavailable"
+                | "operation_lock_busy"
+        )
+    );
+    if payload.get("schema").and_then(Value::as_str) != Some("agent_bridge.app_control.v0")
+        || payload.get("domain").and_then(Value::as_str) != Some("media")
+        || payload.get("action").and_then(Value::as_str) != Some("next")
+        || payload.get("read_only").and_then(Value::as_bool) != Some(true)
+        || payload.get("preflight_only").and_then(Value::as_bool) != Some(true)
+        || preflight.get("schema").and_then(Value::as_str)
+            != Some("agent_bridge.app_control.operation_preflight.v0")
+        || preflight.get("state").and_then(Value::as_str) != status
+        || preflight.get("operation_id").and_then(Value::as_str) != Some(operation_id)
+        || preflight.get("request") != Some(&expected_request)
+        || preflight.get("request_digest").and_then(Value::as_str)
+            != Some(expected_digest.as_str())
+        || preflight.get("advisory").and_then(Value::as_bool) != Some(true)
+        || preflight.get("must_revalidate").and_then(Value::as_bool) != Some(true)
+        || preflight.get("dispatch_authorized").and_then(Value::as_bool) != Some(false)
+        || preflight.get("reservation_created").and_then(Value::as_bool) != Some(false)
+        || preflight.get("operation_record_mutated").and_then(Value::as_bool) != Some(false)
+        || preflight.get("player_observed").and_then(Value::as_bool) != Some(false)
+        || preflight.get("effect_verified").and_then(Value::as_bool) != Some(false)
+        || preflight.get("automatic_new_id_allowed").and_then(Value::as_bool) != Some(false)
+        || !preflight
+            .get("observed_at_unix_seconds")
+            .and_then(Value::as_f64)
+            .is_some_and(|value| value.is_finite() && value > 0.0)
+        || payload
+            .pointer("/claim_boundary/authorizes_dispatch")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || payload
+            .pointer("/claim_boundary/reserves_operation_id")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || payload
+            .pointer("/claim_boundary/lock_held_at_return")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || payload
+            .pointer("/claim_boundary/state_unchanged_until_action")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || payload
+            .pointer("/claim_boundary/player_observed")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || payload
+            .pointer("/claim_boundary/effect_verified")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || payload
+            .pointer("/claim_boundary/current_track_verified")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || preflight
+            .get("recommended_next")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || !preflight
+            .get("record_present")
+            .is_some_and(|value| value.is_boolean() || value.is_null())
+        || !preflight
+            .get("lock_present")
+            .is_some_and(|value| value.is_boolean() || value.is_null())
+    {
+        return false;
+    }
+    if let Some(digest) = preflight.get("record_sha256").and_then(Value::as_str) {
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return false;
+        }
+    } else if !preflight
+        .get("record_sha256")
+        .is_some_and(Value::is_null)
+    {
+        return false;
+    }
+    let result_shape_ok = match verdict {
+        Some("verified") => {
+            exit_code == 0
+                && candidate_state
+                && outcome == Some("eligible")
+                && candidate == Some(true)
+                && blocked == Some(false)
+                && payload.get("recover").and_then(Value::as_str) == Some("proceed")
+                && payload.get("error").is_some_and(Value::is_null)
+                && preflight.get("same_id_retry_allowed").and_then(Value::as_bool)
+                    == Some(true)
+                && preflight
+                    .get("operation_id_disposition")
+                    .and_then(Value::as_str)
+                    == Some("reusable_same_request")
+        }
+        Some("error") => {
+            exit_code == 2
+                && blocked_state
+                && matches!(outcome, Some("blocked" | "indeterminate"))
+                && candidate == Some(false)
+                && blocked == Some(true)
+                && matches!(
+                    payload.get("recover").and_then(Value::as_str),
+                    Some("retry" | "replan")
+                )
+                && payload.pointer("/error/code").and_then(Value::as_str) == status
+        }
+        _ => false,
+    };
+    if !result_shape_ok {
+        return false;
+    }
+    match status {
+        Some("fresh_candidate") => {
+            preflight.get("record_present").and_then(Value::as_bool) == Some(false)
+                && preflight.get("observed_phase").is_some_and(Value::is_null)
+                && preflight.get("dispatch_count").and_then(Value::as_u64) == Some(0)
+                && preflight.get("expires_at").is_some_and(Value::is_null)
+                && preflight.get("remaining_secs").is_some_and(Value::is_null)
+                && preflight.get("terminal_verdict").is_some_and(Value::is_null)
+                && preflight.get("record_sha256").is_some_and(Value::is_null)
+                && preflight.get("lock_present").and_then(Value::as_bool).is_some()
+        }
+        Some("retryable_candidate") => {
+            app_control_preflight_existing_candidate_valid(preflight, "retryable", 0)
+                && preflight.get("terminal_verdict").is_some_and(Value::is_null)
+        }
+        Some("terminal_replay_candidate") => {
+            app_control_preflight_existing_candidate_valid(preflight, "terminal", 1)
+                && preflight.get("terminal_verdict").and_then(Value::as_str)
+                    == Some("verified")
+        }
+        Some("recovery_observation_candidate") => {
+            app_control_preflight_existing_candidate_valid(preflight, "dispatch_started", 1)
+                && preflight.get("terminal_verdict").is_some_and(Value::is_null)
+        }
+        Some("operation_lock_busy") => {
+            outcome == Some("indeterminate")
+                && payload.get("recover").and_then(Value::as_str) == Some("retry")
+                && preflight.get("record_present").is_some_and(Value::is_null)
+                && preflight.get("lock_present").and_then(Value::as_bool) == Some(true)
+                && preflight.get("observed_phase").is_some_and(Value::is_null)
+                && preflight.get("dispatch_count").is_some_and(Value::is_null)
+                && preflight.get("record_sha256").is_some_and(Value::is_null)
+                && preflight
+                    .get("operation_id_disposition")
+                    .and_then(Value::as_str)
+                    == Some("indeterminate_do_not_replace_automatically")
+                && preflight.get("same_id_retry_allowed").and_then(Value::as_bool)
+                    == Some(true)
+        }
+        Some("operation_expired") => {
+            app_control_preflight_existing_record_evidence_valid(preflight)
+                && preflight.get("operation_id_disposition").and_then(Value::as_str)
+                    == Some("expired")
+                && preflight.get("same_id_retry_allowed").and_then(Value::as_bool)
+                    == Some(false)
+        }
+        Some("idempotency_conflict") => {
+            app_control_preflight_existing_record_evidence_valid(preflight)
+                && preflight.get("operation_id_disposition").and_then(Value::as_str)
+                    == Some("conflicts_with_request")
+                && preflight.get("same_id_retry_allowed").and_then(Value::as_bool)
+                    == Some(false)
+        }
+        Some("terminal_operation_not_verified") => {
+            app_control_preflight_existing_record_evidence_valid(preflight)
+                && preflight.get("operation_id_disposition").and_then(Value::as_str)
+                    == Some("terminal_failure")
+                && preflight.get("same_id_retry_allowed").and_then(Value::as_bool)
+                    == Some(false)
+        }
+        Some("operation_record_invalid" | "operation_journal_unavailable") => {
+            preflight.get("operation_id_disposition").and_then(Value::as_str)
+                == Some("invalid_or_unavailable")
+                && preflight.get("same_id_retry_allowed").and_then(Value::as_bool)
+                    == Some(false)
+        }
+        _ => false,
+    }
+}
+
+fn app_control_preflight_existing_record_evidence_valid(
+    preflight: &serde_json::Map<String, Value>,
+) -> bool {
+    preflight.get("record_present").and_then(Value::as_bool) == Some(true)
+        && preflight.get("lock_present").and_then(Value::as_bool) == Some(true)
+        && preflight
+            .get("record_sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|digest| {
+                digest.len() == 64
+                    && digest
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+}
+
+fn app_control_preflight_existing_candidate_valid(
+    preflight: &serde_json::Map<String, Value>,
+    expected_phase: &str,
+    expected_dispatch_count: u64,
+) -> bool {
+    preflight.get("record_present").and_then(Value::as_bool) == Some(true)
+        && preflight.get("lock_present").and_then(Value::as_bool) == Some(true)
+        && preflight.get("observed_phase").and_then(Value::as_str) == Some(expected_phase)
+        && preflight.get("dispatch_count").and_then(Value::as_u64)
+            == Some(expected_dispatch_count)
+        && preflight
+            .get("expires_at")
+            .and_then(Value::as_f64)
+            .is_some_and(|value| value.is_finite() && value > 0.0)
+        && preflight
+            .get("remaining_secs")
+            .and_then(Value::as_f64)
+            .is_some_and(|value| value.is_finite() && value > 0.0)
+        && preflight
+            .get("record_sha256")
+            .and_then(Value::as_str)
+            .is_some()
 }
 
 fn app_control_source_contract_valid(

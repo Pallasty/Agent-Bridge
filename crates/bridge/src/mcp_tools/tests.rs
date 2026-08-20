@@ -6,6 +6,30 @@
 
 use super::*;
 
+static RUNTIME_ASSET_ADB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct ScopedTestEnvVar {
+    key: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl ScopedTestEnvVar {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for ScopedTestEnvVar {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 const T6_GATE_CEREMONY_TOOLS: &[&str] = &[
     "memory_biocortex_t6_influence_gate",
     "memory_biocortex_t6_candidate_expansion_review_packet",
@@ -12073,9 +12097,9 @@ async fn browser_lite_probe_missing_binary_is_structured_not_tool_error() {
 
 #[test]
 fn installed_runtime_script_path_uses_stable_asset_directory() {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().expect("runtime asset env lock");
-    let previous = std::env::var_os("AGENT_BRIDGE_RUNTIME_ASSET_DIR");
+    let _guard = RUNTIME_ASSET_ADB_ENV_LOCK
+        .lock()
+        .expect("runtime asset env lock");
     let temp_dir = std::env::temp_dir().join(format!(
         "ab-runtime-assets-test-{}-{}",
         std::process::id(),
@@ -12087,7 +12111,7 @@ fn installed_runtime_script_path_uses_stable_asset_directory() {
     std::fs::create_dir_all(&temp_dir).expect("mkdir runtime assets");
     let script = temp_dir.join("desktop_snapshot.py");
     std::fs::write(&script, "# stable runtime fixture\n").expect("write runtime asset");
-    std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
+    let _runtime_assets = ScopedTestEnvVar::set("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
 
     assert_eq!(
         installed_runtime_script_path("desktop_snapshot.py"),
@@ -12095,18 +12119,14 @@ fn installed_runtime_script_path_uses_stable_asset_directory() {
     );
     assert_eq!(installed_runtime_script_path("missing.py"), None);
 
-    match previous {
-        Some(value) => std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", value),
-        None => std::env::remove_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR"),
-    }
     let _ = std::fs::remove_dir_all(temp_dir);
 }
 
 #[test]
 fn desktop_invoke_prefers_deployed_asset_over_implicit_current_directory() {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().expect("runtime asset env lock");
-    let previous = std::env::var_os("AGENT_BRIDGE_RUNTIME_ASSET_DIR");
+    let _guard = RUNTIME_ASSET_ADB_ENV_LOCK
+        .lock()
+        .expect("runtime asset env lock");
     let temp_dir = std::env::temp_dir().join(format!(
         "ab-desktop-invoke-runtime-authority-{}-{}",
         std::process::id(),
@@ -12118,14 +12138,10 @@ fn desktop_invoke_prefers_deployed_asset_over_implicit_current_directory() {
     std::fs::create_dir_all(&temp_dir).expect("mkdir runtime assets");
     let script = temp_dir.join("desktop_invoke.py");
     std::fs::write(&script, "# deployed runtime fixture\n").expect("write runtime asset");
-    std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
+    let _runtime_assets = ScopedTestEnvVar::set("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
 
     assert_eq!(desktop_invoke_script_path(&json!({}), None), script);
 
-    match previous {
-        Some(value) => std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", value),
-        None => std::env::remove_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR"),
-    }
     let _ = std::fs::remove_dir_all(temp_dir);
 }
 
@@ -18124,6 +18140,22 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
     let actions = tool.input_schema["properties"]["action"]["enum"]
         .as_array()
         .expect("action enum");
+    for private_preflight_name in [
+        "preflight",
+        "operation_preflight",
+        "durable_operation_preflight",
+    ] {
+        assert!(
+            !actions.iter().any(|value| value == private_preflight_name),
+            "private durable-operation inspection leaked as public action {private_preflight_name}"
+        );
+        assert!(
+            tool.input_schema["properties"]
+                .get(private_preflight_name)
+                .is_none(),
+            "private durable-operation inspection leaked as public input {private_preflight_name}"
+        );
+    }
     for action in [
         "volume_get",
         "volume_up",
@@ -18173,6 +18205,440 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
             "unexpected raw control field {forbidden}"
         );
     }
+}
+
+fn app_control_fresh_preflight_kat() -> Value {
+    json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "fresh_candidate",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "next",
+        "read_only": true,
+        "preflight_only": true,
+        "preflight": {
+            "schema": "agent_bridge.app_control.operation_preflight.v0",
+            "outcome": "eligible",
+            "state": "fresh_candidate",
+            "operation_id": "episode-1",
+            "request": {
+                "schema": "agent_bridge.app_control.v0",
+                "action": "next",
+                "player_selector": "rhythmbox",
+                "operation_ttl_secs": 3600
+            },
+            "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+            "record_present": false,
+            "observed_phase": null,
+            "dispatch_count": 0,
+            "expires_at": null,
+            "terminal_verdict": null,
+            "observed_at_unix_seconds": 1700000000.25,
+            "remaining_secs": null,
+            "record_sha256": null,
+            "lock_present": false,
+            "candidate": true,
+            "blocked": false,
+            "advisory": true,
+            "must_revalidate": true,
+            "dispatch_authorized": false,
+            "reservation_created": false,
+            "operation_record_mutated": false,
+            "player_observed": false,
+            "effect_verified": false,
+            "operation_id_disposition": "reusable_same_request",
+            "same_id_retry_allowed": true,
+            "automatic_new_id_allowed": false,
+            "recommended_next": "proceed_to_connection_then_revalidate_under_exclusive_lock"
+        },
+        "claim_boundary": {
+            "authorizes_dispatch": false,
+            "reserves_operation_id": false,
+            "lock_held_at_return": false,
+            "state_unchanged_until_action": false,
+            "player_observed": false,
+            "effect_verified": false,
+            "current_track_verified": false
+        },
+        "error": null
+    })
+}
+
+fn app_control_blocked_preflight_kat(status: &str) -> Value {
+    let (disposition, recommended_next, observed_at, remaining_secs) = match status {
+        "operation_expired" => (
+            "expired",
+            "replan_from_current_state_without_automatic_actuation_or_id_replacement",
+            1700003600.25,
+            0.0,
+        ),
+        "idempotency_conflict" => (
+            "conflicts_with_request",
+            "resolve_the_original_request_binding_or_create_an_explicit_new_intent",
+            1700000000.25,
+            3599.75,
+        ),
+        other => panic!("unsupported blocked preflight KAT status {other}"),
+    };
+    json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": status,
+        "verdict": "error",
+        "recover": "replan",
+        "domain": "media",
+        "action": "next",
+        "read_only": true,
+        "preflight_only": true,
+        "preflight": {
+            "schema": "agent_bridge.app_control.operation_preflight.v0",
+            "outcome": "blocked",
+            "state": status,
+            "operation_id": "episode-1",
+            "request": {
+                "schema": "agent_bridge.app_control.v0",
+                "action": "next",
+                "player_selector": "rhythmbox",
+                "operation_ttl_secs": 3600
+            },
+            "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+            "record_present": true,
+            "observed_phase": "retryable",
+            "dispatch_count": 0,
+            "expires_at": 1700003600.0,
+            "terminal_verdict": null,
+            "observed_at_unix_seconds": observed_at,
+            "remaining_secs": remaining_secs,
+            "record_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lock_present": true,
+            "candidate": false,
+            "blocked": true,
+            "advisory": true,
+            "must_revalidate": true,
+            "dispatch_authorized": false,
+            "reservation_created": false,
+            "operation_record_mutated": false,
+            "player_observed": false,
+            "effect_verified": false,
+            "operation_id_disposition": disposition,
+            "same_id_retry_allowed": false,
+            "automatic_new_id_allowed": false,
+            "recommended_next": recommended_next
+        },
+        "claim_boundary": {
+            "authorizes_dispatch": false,
+            "reserves_operation_id": false,
+            "lock_held_at_return": false,
+            "state_unchanged_until_action": false,
+            "player_observed": false,
+            "effect_verified": false,
+            "current_track_verified": false
+        },
+        "error": {
+            "code": status,
+            "message": "durable operation preflight did not pass"
+        }
+    })
+}
+
+#[test]
+fn app_control_preflight_source_contract_accepts_exact_known_receipts() {
+    let fresh = app_control_fresh_preflight_kat();
+    assert_eq!(
+        app_control_operation_request_digest("next", Some("rhythmbox"), 3_600),
+        fresh["preflight"]["request_digest"]
+    );
+    assert!(app_control_preflight_source_contract_valid(
+        &fresh,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+        0,
+    ));
+    assert!(!app_control_preflight_source_contract_valid(
+        &fresh,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+        2,
+    ));
+
+    for status in ["operation_expired", "idempotency_conflict"] {
+        let blocked = app_control_blocked_preflight_kat(status);
+        assert!(
+            app_control_preflight_source_contract_valid(
+                &blocked,
+                "episode-1",
+                Some("rhythmbox"),
+                3_600,
+                2,
+            ),
+            "known blocked receipt {status} must satisfy the source contract"
+        );
+        assert!(
+            !app_control_preflight_source_contract_valid(
+                &blocked,
+                "episode-1",
+                Some("rhythmbox"),
+                3_600,
+                0,
+            ),
+            "known blocked receipt {status} must bind exit code 2"
+        );
+    }
+
+    let mut busy = fresh;
+    busy["status"] = json!("operation_lock_busy");
+    busy["verdict"] = json!("error");
+    busy["recover"] = json!("retry");
+    busy["preflight"]["outcome"] = json!("indeterminate");
+    busy["preflight"]["state"] = json!("operation_lock_busy");
+    busy["preflight"]["record_present"] = Value::Null;
+    busy["preflight"]["dispatch_count"] = Value::Null;
+    busy["preflight"]["lock_present"] = json!(true);
+    busy["preflight"]["candidate"] = json!(false);
+    busy["preflight"]["blocked"] = json!(true);
+    busy["preflight"]["operation_id_disposition"] =
+        json!("indeterminate_do_not_replace_automatically");
+    busy["preflight"]["recommended_next"] =
+        json!("retry_the_same_exact_request_after_the_current_holder_finishes");
+    busy["error"] = json!({
+        "code": "operation_lock_busy",
+        "message": "another process is handling this operation_id"
+    });
+    assert!(app_control_preflight_source_contract_valid(
+        &busy,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+        2,
+    ));
+    busy["preflight"]["operation_id_disposition"] = json!("reusable_same_request");
+    assert!(!app_control_preflight_source_contract_valid(
+        &busy,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+        2,
+    ));
+}
+
+#[test]
+fn app_control_preflight_source_contract_rejects_fresh_field_mutations() {
+    let fresh = app_control_fresh_preflight_kat();
+    let mutations = [
+        ("/schema", json!("agent_bridge.app_control.v1")),
+        ("/status", json!("retryable_candidate")),
+        ("/verdict", json!("error")),
+        ("/recover", json!("retry")),
+        ("/domain", json!("desktop")),
+        ("/action", json!("previous")),
+        ("/read_only", json!(false)),
+        ("/preflight_only", json!(false)),
+        (
+            "/preflight/schema",
+            json!("agent_bridge.app_control.operation_preflight.v1"),
+        ),
+        ("/preflight/outcome", json!("blocked")),
+        ("/preflight/state", json!("retryable_candidate")),
+        ("/preflight/operation_id", json!("episode-2")),
+        (
+            "/preflight/request/schema",
+            json!("agent_bridge.app_control.v1"),
+        ),
+        ("/preflight/request/action", json!("previous")),
+        ("/preflight/request/player_selector", json!("vlc")),
+        ("/preflight/request/operation_ttl_secs", json!(3601)),
+        ("/preflight/request_digest", json!("0".repeat(64))),
+        ("/preflight/record_present", json!(true)),
+        ("/preflight/observed_phase", json!("retryable")),
+        ("/preflight/dispatch_count", json!(1)),
+        ("/preflight/expires_at", json!(1700003600.0)),
+        ("/preflight/terminal_verdict", json!("verified")),
+        ("/preflight/observed_at_unix_seconds", json!(0.0)),
+        ("/preflight/remaining_secs", json!(3600.0)),
+        (
+            "/preflight/record_sha256",
+            json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        ),
+        ("/preflight/lock_present", json!("false")),
+        ("/preflight/candidate", json!(false)),
+        ("/preflight/blocked", json!(true)),
+        ("/preflight/advisory", json!(false)),
+        ("/preflight/must_revalidate", json!(false)),
+        ("/preflight/dispatch_authorized", json!(true)),
+        ("/preflight/reservation_created", json!(true)),
+        ("/preflight/operation_record_mutated", json!(true)),
+        ("/preflight/player_observed", json!(true)),
+        ("/preflight/effect_verified", json!(true)),
+        ("/preflight/operation_id_disposition", json!("expired")),
+        ("/preflight/same_id_retry_allowed", json!(false)),
+        ("/preflight/automatic_new_id_allowed", json!(true)),
+        ("/preflight/recommended_next", json!("")),
+        ("/claim_boundary/authorizes_dispatch", json!(true)),
+        ("/claim_boundary/reserves_operation_id", json!(true)),
+        ("/claim_boundary/lock_held_at_return", json!(true)),
+        ("/claim_boundary/state_unchanged_until_action", json!(true)),
+        ("/claim_boundary/player_observed", json!(true)),
+        ("/claim_boundary/effect_verified", json!(true)),
+        ("/claim_boundary/current_track_verified", json!(true)),
+        ("/error", json!({"code": "forged"})),
+    ];
+    let mut unexpectedly_accepted = Vec::new();
+    for (pointer, replacement) in mutations {
+        let mut forged = fresh.clone();
+        *forged
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("KAT lacks mutation target {pointer}")) = replacement;
+        if app_control_preflight_source_contract_valid(
+            &forged,
+            "episode-1",
+            Some("rhythmbox"),
+            3_600,
+            0,
+        ) {
+            unexpectedly_accepted.push(pointer);
+        }
+    }
+    assert!(
+        unexpectedly_accepted.is_empty(),
+        "source contract accepted forged fresh fields {unexpectedly_accepted:?}"
+    );
+}
+
+#[test]
+fn app_control_preflight_source_contract_rejects_blocked_receipt_forgery() {
+    let mut unexpectedly_accepted = Vec::new();
+    for status in ["operation_expired", "idempotency_conflict"] {
+        let valid = app_control_blocked_preflight_kat(status);
+        let mutations = [
+            ("/error/code", json!("operation_record_invalid")),
+            ("/preflight/request_digest", json!("0".repeat(64))),
+            ("/preflight/record_present", json!(false)),
+            ("/preflight/record_sha256", Value::Null),
+            ("/preflight/lock_present", json!(false)),
+            ("/preflight/candidate", json!(true)),
+            ("/preflight/blocked", json!(false)),
+            (
+                "/preflight/operation_id_disposition",
+                json!("reusable_same_request"),
+            ),
+            ("/preflight/same_id_retry_allowed", json!(true)),
+            ("/preflight/automatic_new_id_allowed", json!(true)),
+            ("/preflight/dispatch_authorized", json!(true)),
+            ("/preflight/reservation_created", json!(true)),
+        ];
+        for (pointer, replacement) in mutations {
+            let mut forged = valid.clone();
+            *forged
+                .pointer_mut(pointer)
+                .unwrap_or_else(|| panic!("KAT lacks mutation target {pointer}")) = replacement;
+            if app_control_preflight_source_contract_valid(
+                &forged,
+                "episode-1",
+                Some("rhythmbox"),
+                3_600,
+                2,
+            ) {
+                unexpectedly_accepted.push((status, pointer));
+            }
+        }
+    }
+    assert!(
+        unexpectedly_accepted.is_empty(),
+        "source contract accepted forged blocked fields {unexpectedly_accepted:?}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn advance_track_then_project_blocks_expired_operation_before_adb() {
+    let _env_lock = RUNTIME_ASSET_ADB_ENV_LOCK
+        .lock()
+        .expect("runtime asset and ADB env lock");
+    let temp = tempfile::tempdir().expect("preflight integration tempdir");
+    let marker = temp.path().join("adb-invoked.marker");
+    let adb = temp.path().join("adb-must-not-run");
+    let adb_source = format!(
+        "#!/usr/bin/env python3\nfrom pathlib import Path\nPath(r'''{}''').write_text('invoked', encoding='utf-8')\nraise SystemExit(99)\n",
+        marker.display()
+    );
+    tokio::fs::write(&adb, adb_source)
+        .await
+        .expect("write ADB sentinel");
+    let mut permissions = std::fs::metadata(&adb)
+        .expect("ADB sentinel metadata")
+        .permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o700);
+    std::fs::set_permissions(&adb, permissions).expect("make ADB sentinel executable");
+
+    let operation_id = "episode-expired";
+    let mut expired = app_control_blocked_preflight_kat("operation_expired");
+    expired["preflight"]["operation_id"] = json!(operation_id);
+    let receipt = serde_json::to_string(&expired).expect("serialize expired receipt");
+    let app_control = temp.path().join("app_control.py");
+    let app_control_source = format!(
+        r#"import sys
+assert sys.argv[sys.argv.index("--domain") + 1] == "media"
+assert sys.argv[sys.argv.index("--action") + 1] == "next"
+assert sys.argv[sys.argv.index("--operation-id") + 1] == "episode-expired"
+assert sys.argv[sys.argv.index("--operation-ttl-secs") + 1] == "3600"
+assert sys.argv[sys.argv.index("--player") + 1] == "rhythmbox"
+assert "--operation-preflight" in sys.argv
+print(r'''{receipt}''')
+raise SystemExit(2)
+"#
+    );
+    tokio::fs::write(&app_control, app_control_source)
+        .await
+        .expect("write installed app_control fixture");
+
+    let runtime_assets = ScopedTestEnvVar::set("AGENT_BRIDGE_RUNTIME_ASSET_DIR", temp.path());
+    let adb_env = ScopedTestEnvVar::set("AGENT_BRIDGE_ADB", &adb);
+    assert_eq!(resolve_adb_bin(), adb.to_string_lossy());
+
+    let out = AdvanceTrackThenProjectTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "operation_id": operation_id,
+                "bind": "192.168.50.2",
+                "player": "rhythmbox",
+                "operation_ttl_secs": 3600,
+                "timeout_ms": 1000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute bounded episode");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["last_completed_phase"], "inputs_validated");
+    assert_eq!(payload["error"]["phase"], "operation_preflight");
+    assert_eq!(payload["error"]["code"], "operation_expired");
+    assert_eq!(
+        payload["steps"]["operation_preflight"]["source_contract_ok"],
+        true
+    );
+    assert_eq!(
+        payload["steps"]["operation_preflight"]["status"],
+        "operation_expired"
+    );
+    assert!(payload["steps"]["projection_start"].is_null());
+    assert!(payload["steps"]["app_control"].is_null());
+    assert_eq!(payload["cleanup"]["attempted"], false);
+    assert_eq!(
+        payload["continuity"]["action_invocation_count_this_call"],
+        0
+    );
+    assert_eq!(payload["authority"]["media_actuation"]["invoked"], false);
+    assert_eq!(payload["authority"]["media_actuation"]["dispatched"], false);
+    assert!(
+        !marker.exists(),
+        "projection_start invoked ADB despite a known-expired durable operation"
+    );
+
+    drop(adb_env);
+    drop(runtime_assets);
 }
 
 #[tokio::test]

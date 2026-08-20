@@ -59,6 +59,98 @@ def make_media_run(tracks, calls, *, player="rhythmbox", discovery=True):
 
 
 class AppControlTests(unittest.TestCase):
+    def assert_preflight_receipt(
+        self,
+        mod,
+        payload,
+        *,
+        state,
+        candidate,
+        outcome=None,
+        error_code=None,
+    ):
+        self.assertEqual(payload["schema"], mod.SCHEMA)
+        self.assertTrue(payload["read_only"])
+        self.assertTrue(payload["preflight_only"])
+        preflight = payload["preflight"]
+        self.assertEqual(preflight["schema"], mod.OPERATION_PREFLIGHT_SCHEMA)
+        self.assertEqual(preflight["state"], state)
+        self.assertIs(preflight["candidate"], candidate)
+        self.assertIs(preflight["blocked"], not candidate)
+        self.assertEqual(
+            preflight["outcome"],
+            outcome or ("eligible" if candidate else "blocked"),
+        )
+        self.assertGreater(preflight["observed_at_unix_seconds"], 0)
+        self.assertTrue(preflight["advisory"])
+        self.assertTrue(preflight["must_revalidate"])
+        for key in (
+            "dispatch_authorized",
+            "reservation_created",
+            "operation_record_mutated",
+            "player_observed",
+            "effect_verified",
+            "automatic_new_id_allowed",
+        ):
+            self.assertIs(preflight[key], False, key)
+        self.assertTrue(payload["claim_boundary"])
+        self.assertTrue(
+            all(value is False for value in payload["claim_boundary"].values())
+        )
+        if candidate:
+            self.assertEqual(payload["verdict"], "verified")
+            self.assertEqual(payload["recover"], "proceed")
+            self.assertIsNone(payload["error"])
+        else:
+            self.assertEqual(payload["verdict"], "error")
+            self.assertIn(payload["recover"], ("retry", "replan"))
+            self.assertEqual(payload["error"]["code"], error_code or state)
+
+    @staticmethod
+    def create_operation_lock(mod, operation_id):
+        path = mod.operation_lock_path(operation_id)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+        return path
+
+    def write_operation_fixture(
+        self,
+        mod,
+        operation_id,
+        *,
+        phase,
+        dispatch_count,
+        player_selector="rhythmbox",
+        ttl=3600,
+        created_at=None,
+        player=None,
+        baseline=None,
+        payload=None,
+    ):
+        mod.ensure_operation_directory(mod.operation_directory())
+        self.create_operation_lock(mod, operation_id)
+        created_at = time.time() - 1 if created_at is None else created_at
+        request = mod.operation_request("next", player_selector, ttl)
+        digest = mod.operation_request_digest("next", player_selector, ttl)
+        record = mod.operation_record(
+            operation_id,
+            digest,
+            request,
+            created_at=created_at,
+            expires_at=created_at + ttl,
+            phase=phase,
+            dispatch_count=dispatch_count,
+            player=player,
+            baseline=baseline,
+            payload=payload,
+        )
+        record_path = mod.operation_record_path(operation_id)
+        mod.atomic_write_json(record_path, record)
+        return record_path, record
+
     def test_session_bus_hydration_replaces_stale_unix_socket(self):
         mod = load_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -591,6 +683,601 @@ class AppControlTests(unittest.TestCase):
             mod.list_players = original
         self.assertEqual(payload["error"]["code"], "invalid_volume")
         self.assertEqual(payload["recover"], "replan")
+
+    def test_operation_preflight_absent_is_candidate_without_mkdir_or_player(self):
+        mod = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            journal_dir = pathlib.Path(tmp) / "missing" / "operations"
+            with mock.patch.dict(
+                os.environ, {"AB_APP_CONTROL_OPERATION_DIR": str(journal_dir)}
+            ), mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "ensure_operation_directory",
+                side_effect=AssertionError("preflight must not mkdir"),
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not write a record"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id="preflight-absent",
+                    operation_preflight=True,
+                )
+            self.assertFalse(journal_dir.exists())
+
+        self.assert_preflight_receipt(
+            mod, payload, state="fresh_candidate", candidate=True
+        )
+        self.assertFalse(payload["preflight"]["record_present"])
+        self.assertEqual(payload["preflight"]["dispatch_count"], 0)
+        self.assertIsNone(payload["preflight"]["remaining_secs"])
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"],
+            "reusable_same_request",
+        )
+        self.assertTrue(payload["preflight"]["same_id_retry_allowed"])
+
+    def test_operation_preflight_cli_flag_is_backend_only_and_non_creating(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal_dir = pathlib.Path(tmp) / "not-created"
+            env = dict(os.environ)
+            env["AB_APP_CONTROL_OPERATION_DIR"] = str(journal_dir)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--action",
+                    "next",
+                    "--player",
+                    "rhythmbox",
+                    "--operation-id",
+                    "preflight-cli",
+                    "--operation-preflight",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+                timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(journal_dir.exists())
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["preflight"]["schema"],
+            "agent_bridge.app_control.operation_preflight.v0",
+        )
+        self.assertTrue(payload["preflight"]["candidate"])
+        self.assertFalse(payload["preflight"]["blocked"])
+
+    def test_operation_preflight_retryable_uses_read_only_snapshot(self):
+        mod = load_module()
+        operation_id = "preflight-retryable"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            record_path, _ = self.write_operation_fixture(
+                mod,
+                operation_id,
+                phase="retryable",
+                dispatch_count=0,
+            )
+            lock_path = mod.operation_lock_path(operation_id)
+            before_record = record_path.read_bytes()
+            before_lock = lock_path.read_bytes()
+            real_open = os.open
+            opened_flags = []
+
+            def read_only_open(path, flags, mode=0o777, *, dir_fd=None):
+                opened_flags.append(flags)
+                write_flags = (
+                    os.O_WRONLY
+                    | os.O_RDWR
+                    | os.O_CREAT
+                    | os.O_TRUNC
+                    | os.O_APPEND
+                )
+                self.assertEqual(flags & write_flags, 0)
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not write a record"),
+            ), mock.patch.object(mod.os, "open", side_effect=read_only_open):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+            self.assertGreaterEqual(len(opened_flags), 2)
+            self.assertEqual(record_path.read_bytes(), before_record)
+            self.assertEqual(lock_path.read_bytes(), before_lock)
+
+        self.assert_preflight_receipt(
+            mod, payload, state="retryable_candidate", candidate=True
+        )
+        self.assertTrue(payload["preflight"]["record_present"])
+        self.assertEqual(payload["preflight"]["observed_phase"], "retryable")
+        self.assertEqual(payload["preflight"]["dispatch_count"], 0)
+        self.assertGreater(payload["preflight"]["remaining_secs"], 0)
+        self.assertEqual(len(payload["preflight"]["record_sha256"]), 64)
+
+    def test_operation_preflight_verified_terminal_is_replay_candidate(self):
+        mod = load_module()
+        operation_id = "preflight-terminal"
+        calls = []
+        media_run = make_media_run(["/track/1", "/track/2"], calls)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            with mock.patch.object(mod, "run", side_effect=media_run), mock.patch.object(
+                mod.shutil, "which", return_value="/usr/bin/playerctl"
+            ):
+                first = mod.execute(
+                    "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                )
+            self.assertEqual(first["verdict"], "verified")
+            record_path = mod.operation_record_path(operation_id)
+            before = record_path.read_bytes()
+            calls.clear()
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not write a record"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+                replay = mod.execute(
+                    "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                )
+            self.assertEqual(record_path.read_bytes(), before)
+
+        self.assert_preflight_receipt(
+            mod, payload, state="terminal_replay_candidate", candidate=True
+        )
+        self.assertEqual(payload["preflight"]["observed_phase"], "terminal")
+        self.assertEqual(payload["preflight"]["terminal_verdict"], "verified")
+        self.assertEqual(payload["preflight"]["dispatch_count"], 1)
+        self.assertGreater(payload["preflight"]["remaining_secs"], 0)
+        self.assertTrue(replay["transaction"]["idempotent_replay"])
+        self.assertEqual(calls, [])
+
+    def test_operation_preflight_dispatch_started_is_recovery_candidate_without_observation(self):
+        mod = load_module()
+        operation_id = "preflight-recovery"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            record_path, _ = self.write_operation_fixture(
+                mod,
+                operation_id,
+                phase="dispatch_started",
+                dispatch_count=1,
+                player="rhythmbox",
+                baseline={"track_id": "/track/1"},
+            )
+            before = record_path.read_bytes()
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not observe player")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not terminalize recovery"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+            self.assertEqual(record_path.read_bytes(), before)
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="recovery_observation_candidate",
+            candidate=True,
+        )
+        self.assertEqual(payload["preflight"]["observed_phase"], "dispatch_started")
+        self.assertEqual(payload["preflight"]["dispatch_count"], 1)
+        self.assertGreater(payload["preflight"]["remaining_secs"], 0)
+        self.assertFalse(payload["preflight"]["player_observed"])
+
+    def test_operation_preflight_expired_blocks_with_honest_id_disposition(self):
+        mod = load_module()
+        operation_id = "preflight-expired"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            record_path, _ = self.write_operation_fixture(
+                mod,
+                operation_id,
+                phase="dispatch_started",
+                dispatch_count=1,
+                created_at=time.time() - 3601,
+                player="rhythmbox",
+                baseline={"track_id": "/track/1"},
+            )
+            before = record_path.read_bytes()
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not write a record"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+            self.assertEqual(record_path.read_bytes(), before)
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="operation_expired",
+            candidate=False,
+        )
+        self.assertEqual(payload["preflight"]["remaining_secs"], 0)
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"], "expired"
+        )
+        self.assertFalse(payload["preflight"]["same_id_retry_allowed"])
+        self.assertFalse(payload["preflight"]["automatic_new_id_allowed"])
+        self.assertIn(
+            "without_automatic_actuation_or_id_replacement",
+            payload["preflight"]["recommended_next"],
+        )
+
+    def test_operation_preflight_conflict_blocks_without_silent_new_identity(self):
+        mod = load_module()
+        operation_id = "preflight-conflict"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            record_path, _ = self.write_operation_fixture(
+                mod,
+                operation_id,
+                phase="retryable",
+                dispatch_count=0,
+                player_selector="spotify",
+            )
+            before = record_path.read_bytes()
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not write a record"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+            self.assertEqual(record_path.read_bytes(), before)
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="idempotency_conflict",
+            candidate=False,
+        )
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"],
+            "conflicts_with_request",
+        )
+        self.assertFalse(payload["preflight"]["same_id_retry_allowed"])
+        self.assertFalse(payload["preflight"]["automatic_new_id_allowed"])
+        self.assertIn(
+            "resolve_the_original_request_binding",
+            payload["preflight"]["recommended_next"],
+        )
+
+    def test_operation_preflight_malformed_record_is_blocked_and_unchanged(self):
+        mod = load_module()
+        operation_id = "preflight-malformed"
+        malformed = b'{"schema":"broken"'
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            mod.ensure_operation_directory(mod.operation_directory())
+            self.create_operation_lock(mod, operation_id)
+            record_path = mod.operation_record_path(operation_id)
+            record_path.write_bytes(malformed)
+            record_path.chmod(0o600)
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not repair a record"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+            self.assertEqual(record_path.read_bytes(), malformed)
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="operation_record_invalid",
+            candidate=False,
+        )
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"],
+            "invalid_or_unavailable",
+        )
+        self.assertFalse(payload["preflight"]["same_id_retry_allowed"])
+        self.assertFalse(payload["preflight"]["automatic_new_id_allowed"])
+
+    def test_operation_preflight_rejects_record_and_lock_symlinks(self):
+        for target_kind in ("record", "lock"):
+            with self.subTest(target_kind=target_kind):
+                mod = load_module()
+                operation_id = f"preflight-{target_kind}-symlink"
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                    os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+                ):
+                    mod.ensure_operation_directory(mod.operation_directory())
+                    target = pathlib.Path(tmp) / f"outside-{target_kind}"
+                    target.write_bytes(b"do not follow")
+                    target.chmod(0o600)
+                    record_path = mod.operation_record_path(operation_id)
+                    lock_path = mod.operation_lock_path(operation_id)
+                    if target_kind == "record":
+                        self.create_operation_lock(mod, operation_id)
+                        record_path.symlink_to(target)
+                    else:
+                        lock_path.symlink_to(target)
+                    with mock.patch.object(
+                        mod, "run", side_effect=AssertionError("must not call playerctl")
+                    ), mock.patch.object(
+                        mod,
+                        "atomic_write_json",
+                        side_effect=AssertionError("preflight must not write through symlink"),
+                    ):
+                        payload = mod.execute(
+                            "next",
+                            "rhythmbox",
+                            False,
+                            0.2,
+                            operation_id=operation_id,
+                            operation_preflight=True,
+                        )
+                    self.assertTrue(
+                        (record_path if target_kind == "record" else lock_path).is_symlink()
+                    )
+                    self.assertEqual(target.read_bytes(), b"do not follow")
+
+                self.assert_preflight_receipt(
+                    mod,
+                    payload,
+                    state="operation_record_invalid",
+                    candidate=False,
+                )
+
+    def test_operation_preflight_busy_lock_is_blocked_but_same_id_retryable(self):
+        mod = load_module()
+        operation_id = "preflight-busy"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            mod.ensure_operation_directory(mod.operation_directory())
+            lock_path = self.create_operation_lock(mod, operation_id)
+            lock_fd = os.open(lock_path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                before = lock_path.read_bytes()
+                with mock.patch.object(
+                    mod, "run", side_effect=AssertionError("must not call playerctl")
+                ), mock.patch.object(
+                    mod,
+                    "atomic_write_json",
+                    side_effect=AssertionError("preflight must not write a record"),
+                ):
+                    payload = mod.execute(
+                        "next",
+                        "rhythmbox",
+                        False,
+                        0.2,
+                        operation_id=operation_id,
+                        operation_preflight=True,
+                    )
+                self.assertEqual(lock_path.read_bytes(), before)
+            finally:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="operation_lock_busy",
+            candidate=False,
+            outcome="indeterminate",
+        )
+        self.assertEqual(payload["recover"], "retry")
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"],
+            "indeterminate_do_not_replace_automatically",
+        )
+        self.assertTrue(payload["preflight"]["same_id_retry_allowed"])
+        self.assertFalse(payload["preflight"]["automatic_new_id_allowed"])
+
+    def test_operation_preflight_unavailable_journal_has_observation_and_blocks_identity_use(self):
+        mod = load_module()
+        with mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": "relative-preflight-state"}
+        ), mock.patch.object(
+            mod, "run", side_effect=AssertionError("must not call playerctl")
+        ), mock.patch.object(
+            mod,
+            "ensure_operation_directory",
+            side_effect=AssertionError("preflight must not mkdir"),
+        ):
+            payload = mod.execute(
+                "next",
+                "rhythmbox",
+                False,
+                0.2,
+                operation_id="preflight-unavailable",
+                operation_preflight=True,
+            )
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="operation_journal_unavailable",
+            candidate=False,
+        )
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"],
+            "invalid_or_unavailable",
+        )
+        self.assertFalse(payload["preflight"]["same_id_retry_allowed"])
+        self.assertFalse(payload["preflight"]["automatic_new_id_allowed"])
+
+    def test_operation_preflight_terminal_failure_blocks_without_replaying_or_redispatching(self):
+        mod = load_module()
+        operation_id = "preflight-terminal-failure"
+        calls = []
+        media_run = make_media_run(["/track/1"], calls)
+
+        def failed_next(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-p", "rhythmbox", "next"]:
+                calls.append(argv)
+                return 1, "", "backend refused next"
+            return media_run(argv, env, timeout)
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            with mock.patch.object(mod, "run", side_effect=failed_next), mock.patch.object(
+                mod.shutil, "which", return_value="/usr/bin/playerctl"
+            ):
+                failed = mod.execute(
+                    "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                )
+            self.assertEqual(failed["verdict"], "error")
+            self.assertEqual(failed["transaction"]["dispatch_count"], 1)
+            record_path = mod.operation_record_path(operation_id)
+            before = record_path.read_bytes()
+            calls.clear()
+            with mock.patch.object(
+                mod, "run", side_effect=AssertionError("must not call playerctl")
+            ), mock.patch.object(
+                mod,
+                "atomic_write_json",
+                side_effect=AssertionError("preflight must not rewrite terminal receipt"),
+            ):
+                payload = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.2,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+            self.assertEqual(record_path.read_bytes(), before)
+
+        self.assert_preflight_receipt(
+            mod,
+            payload,
+            state="terminal_operation_not_verified",
+            candidate=False,
+        )
+        self.assertEqual(payload["preflight"]["dispatch_count"], 1)
+        self.assertEqual(payload["preflight"]["terminal_verdict"], "error")
+        self.assertEqual(
+            payload["preflight"]["operation_id_disposition"], "terminal_failure"
+        )
+        self.assertFalse(payload["preflight"]["same_id_retry_allowed"])
+        self.assertIn(
+            "reobserve_and_replan_without_automatic_new_id",
+            payload["preflight"]["recommended_next"],
+        )
+        self.assertEqual(calls, [])
+
+    def test_operation_preflight_is_advisory_and_execute_revalidates_toctou_conflict(self):
+        mod = load_module()
+        operation_id = "preflight-toctou"
+        with tempfile.TemporaryDirectory() as tmp:
+            journal_dir = pathlib.Path(tmp) / "operations"
+            with mock.patch.dict(
+                os.environ, {"AB_APP_CONTROL_OPERATION_DIR": str(journal_dir)}
+            ):
+                with mock.patch.object(
+                    mod, "run", side_effect=AssertionError("must not call playerctl")
+                ):
+                    candidate = mod.execute(
+                        "next",
+                        "rhythmbox",
+                        False,
+                        0.2,
+                        operation_id=operation_id,
+                        operation_preflight=True,
+                    )
+                self.assertFalse(journal_dir.exists())
+                record_path, _ = self.write_operation_fixture(
+                    mod,
+                    operation_id,
+                    phase="retryable",
+                    dispatch_count=0,
+                    player_selector="spotify",
+                )
+                before = record_path.read_bytes()
+                with mock.patch.object(
+                    mod, "run", side_effect=AssertionError("must revalidate before playerctl")
+                ):
+                    action = mod.execute(
+                        "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                    )
+                self.assertEqual(record_path.read_bytes(), before)
+
+        self.assert_preflight_receipt(
+            mod, candidate, state="fresh_candidate", candidate=True
+        )
+        self.assertFalse(candidate["claim_boundary"]["state_unchanged_until_action"])
+        self.assertFalse(candidate["preflight"]["dispatch_authorized"])
+        self.assertTrue(candidate["preflight"]["must_revalidate"])
+        self.assertEqual(action["error"]["code"], "idempotency_conflict")
+        self.assertEqual(action["transaction"]["dispatch_count"], 0)
 
     def test_durable_next_dispatches_exactly_once_and_writes_secure_receipt(self):
         mod = load_module()

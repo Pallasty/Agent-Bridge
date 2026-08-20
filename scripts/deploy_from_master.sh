@@ -94,6 +94,7 @@ MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 # Add a marker when a lane ships a distinctive capability string.
 SENTINELS=(
     "app_control.py"        # protocol-first application control router
+    "agent_bridge.app_control.operation_preflight.v0" # journal-only embodied episode admission
     "agent_bridge.mobile_projection_wait.v1" # exact Android draw-report receipt, never host-served inference
     "desktop_steer.py"      # steer control plane / cross-process injection (item 3)
     "desktop_action.py"     # computer-use: coordinate action
@@ -105,6 +106,14 @@ SENTINELS=(
     "browser_navigate"      # browser CDP surface
     "memory_save"           # core memory
     "forum_post"            # core forum
+)
+
+# These markers are required even on a first install or --use-binary deploy;
+# the ordinary superset gate only protects capabilities already present in the
+# live binary and therefore cannot establish a newly introduced binary/runtime
+# contract by itself.
+REQUIRED_NEW_BINARY_MARKERS=(
+    "agent_bridge.app_control.operation_preflight.v0"
 )
 
 DRY_RUN=0
@@ -261,6 +270,9 @@ for asset in "${RUNTIME_ASSETS[@]}"; do
     [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
         die "deploy-source runtime asset missing: $ASSET_SOURCE_ROOT/scripts/$asset"
 done
+grep -q 'agent_bridge.app_control.operation_preflight.v0' \
+    "$ASSET_SOURCE_ROOT/scripts/app_control.py" ||
+    die "deploy-source app_control missing durable operation preflight before live-state mutation: $ASSET_SOURCE_ROOT/scripts/app_control.py"
 
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
@@ -282,6 +294,10 @@ fi
 say
 say "=== feature gate (new binary must not drop any current capability) ==="
 new_markers="$(markers_in "$NEW_BIN")"
+for required_marker in "${REQUIRED_NEW_BINARY_MARKERS[@]}"; do
+    grep -qxF -- "$required_marker" <<< "$new_markers" ||
+        die "new binary missing required runtime-contract marker: $required_marker"
+done
 if [ -f "$REAL_PATH" ]; then
     cur_markers="$(markers_in "$REAL_PATH")"
     # markers present in current but missing in new = regression
@@ -455,7 +471,9 @@ grep -q '"playlist_activate"' "$APP_CONTROL_RUNTIME" ||
     die "post-deploy app_control contract missing playlist_activate: $APP_CONTROL_RUNTIME"
 grep -q 'agent_bridge.app_control.operation.v0' "$APP_CONTROL_RUNTIME" ||
     die "post-deploy app_control contract missing durable operation journal: $APP_CONTROL_RUNTIME"
-say "app_control action contract: OK (playlist_current, playlist_activate, durable operation v0)"
+grep -q 'agent_bridge.app_control.operation_preflight.v0' "$APP_CONTROL_RUNTIME" ||
+    die "post-deploy app_control contract missing durable operation preflight: $APP_CONTROL_RUNTIME"
+say "app_control action contract: OK (playlist_current, playlist_activate, durable operation + preflight v0)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086

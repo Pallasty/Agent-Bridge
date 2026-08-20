@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,9 +28,11 @@ from typing import Any, Callable, MutableMapping
 
 SCHEMA = "agent_bridge.app_control.v0"
 OPERATION_SCHEMA = "agent_bridge.app_control.operation.v0"
+OPERATION_PREFLIGHT_SCHEMA = "agent_bridge.app_control.operation_preflight.v0"
 DEFAULT_OPERATION_TTL_SECS = 3600
 MIN_OPERATION_TTL_SECS = 60
 MAX_OPERATION_TTL_SECS = 86400
+MAX_OPERATION_RECORD_BYTES = 256 * 1024
 OPERATION_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z", re.ASCII)
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
@@ -723,6 +726,40 @@ def read_operation_record(path: Path) -> dict[str, Any] | None:
     return value
 
 
+def read_operation_record_snapshot(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Read one bounded, owner-only regular record without following symlinks."""
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, None
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("operation record must be a regular file")
+        if metadata.st_uid != os.getuid():
+            raise ValueError("operation record must be owned by the current user")
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise ValueError("operation record mode must be 0600")
+        if metadata.st_size <= 0 or metadata.st_size > MAX_OPERATION_RECORD_BYTES:
+            raise ValueError("operation record size is outside the bounded range")
+        with os.fdopen(fd, "rb") as stream:
+            fd = -1
+            encoded = stream.read(MAX_OPERATION_RECORD_BYTES + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(encoded) > MAX_OPERATION_RECORD_BYTES:
+        raise ValueError("operation record exceeds the bounded read limit")
+    try:
+        value = json.loads(encoded.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("operation record is not valid UTF-8") from exc
+    if not isinstance(value, dict):
+        raise ValueError("operation record must be a JSON object")
+    return value, hashlib.sha256(encoded).hexdigest()
+
+
 def operation_transaction(
     operation_id: str,
     request_digest: str | None,
@@ -1082,6 +1119,521 @@ def recover_dispatch_started_operation(
     return payload
 
 
+def operation_preflight_payload(
+    operation_id: str,
+    request: dict[str, Any],
+    request_digest: str,
+    *,
+    state: str,
+    outcome: str,
+    recover: str,
+    record_present: bool | None,
+    observed_phase: str | None = None,
+    dispatch_count: int | None = None,
+    expires_at: float | None = None,
+    terminal_verdict: str | None = None,
+    observed_at: float | None = None,
+    remaining_secs: float | None = None,
+    record_sha256: str | None = None,
+    lock_present: bool | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any]:
+    """Return a read-only advisory receipt; it never authorizes dispatch."""
+    eligible = outcome == "eligible"
+    blocked = not eligible
+    if observed_at is None:
+        observed_at = time.time()
+    if eligible:
+        disposition = "reusable_same_request"
+        same_id_retry_allowed = True
+        recommended_next = "proceed_to_connection_then_revalidate_under_exclusive_lock"
+    elif state == "operation_lock_busy":
+        disposition = "indeterminate_do_not_replace_automatically"
+        same_id_retry_allowed = True
+        recommended_next = "retry_the_same_exact_request_after_the_current_holder_finishes"
+    elif state == "operation_expired":
+        disposition = "expired"
+        same_id_retry_allowed = False
+        recommended_next = "replan_from_current_state_without_automatic_actuation_or_id_replacement"
+    elif state == "idempotency_conflict":
+        disposition = "conflicts_with_request"
+        same_id_retry_allowed = False
+        recommended_next = "resolve_the_original_request_binding_or_create_an_explicit_new_intent"
+    elif state == "terminal_operation_not_verified":
+        disposition = "terminal_failure"
+        same_id_retry_allowed = False
+        recommended_next = (
+            "reobserve_and_replan_without_automatic_new_id"
+            if dispatch_count == 1
+            else "create_a_new_id_only_for_an_explicit_new_intent"
+        )
+    else:
+        disposition = "invalid_or_unavailable"
+        same_id_retry_allowed = False
+        recommended_next = "audit_or_repair_the_journal_without_deleting_or_replacing_the_id_automatically"
+    payload: dict[str, Any] = {
+        "schema": SCHEMA,
+        "status": state,
+        "verdict": "verified" if eligible else "error",
+        "recover": "proceed" if eligible else recover,
+        "domain": "media",
+        "action": "next",
+        "read_only": True,
+        "preflight_only": True,
+        "route": route_summary(False),
+        "preflight": {
+            "schema": OPERATION_PREFLIGHT_SCHEMA,
+            "outcome": outcome,
+            "state": state,
+            "operation_id": operation_id,
+            "request": request,
+            "request_digest": request_digest,
+            "record_present": record_present,
+            "observed_phase": observed_phase,
+            "dispatch_count": dispatch_count,
+            "expires_at": expires_at,
+            "terminal_verdict": terminal_verdict,
+            "observed_at_unix_seconds": observed_at,
+            "remaining_secs": remaining_secs,
+            "record_sha256": record_sha256,
+            "lock_present": lock_present,
+            "candidate": eligible,
+            "blocked": blocked,
+            "advisory": True,
+            "must_revalidate": True,
+            "dispatch_authorized": False,
+            "reservation_created": False,
+            "operation_record_mutated": False,
+            "player_observed": False,
+            "effect_verified": False,
+            "operation_id_disposition": disposition,
+            "same_id_retry_allowed": same_id_retry_allowed,
+            "automatic_new_id_allowed": False,
+            "recommended_next": recommended_next,
+        },
+        "claim_boundary": {
+            "authorizes_dispatch": False,
+            "reserves_operation_id": False,
+            "lock_held_at_return": False,
+            "state_unchanged_until_action": False,
+            "player_observed": False,
+            "effect_verified": False,
+            "current_track_verified": False,
+        },
+        "error": None,
+    }
+    if not eligible:
+        payload["error"] = {
+            "code": error_code or state,
+            "message": error_message or "durable operation preflight did not pass",
+        }
+    return payload
+
+
+def preflight_operation(
+    action: str,
+    player_selector: str | None,
+    dry_run: bool,
+    operation_id: Any,
+    operation_ttl_secs: int,
+) -> dict[str, Any]:
+    """Advisory journal inspection with no player access or durable record write.
+
+    This can reject an already-known conflict, expiry, malformed record, or
+    terminal failure before a caller creates a presentation session.  A pass is
+    never an execution lease: the mutating path must acquire its exclusive lock
+    and repeat every check after connection confirmation.
+    """
+    if not isinstance(operation_id, str) or OPERATION_ID_RE.fullmatch(operation_id) is None:
+        printable = operation_id if isinstance(operation_id, str) else str(operation_id)
+        return operation_preflight_payload(
+            printable,
+            operation_request(action, player_selector, operation_ttl_secs),
+            "",
+            state="invalid_operation_id",
+            outcome="blocked",
+            recover="replan",
+            record_present=False,
+            error_code="invalid_operation_id",
+            error_message="operation_id must be 1..128 ASCII alphanumeric or . _ : - characters",
+        )
+    if type(operation_ttl_secs) is not int or not (
+        MIN_OPERATION_TTL_SECS <= operation_ttl_secs <= MAX_OPERATION_TTL_SECS
+    ):
+        return operation_preflight_payload(
+            operation_id,
+            operation_request(action, player_selector, operation_ttl_secs),
+            "",
+            state="invalid_operation_ttl_secs",
+            outcome="blocked",
+            recover="replan",
+            record_present=False,
+            error_code="invalid_operation_ttl_secs",
+            error_message="operation_ttl_secs must be an integer from 60 through 86400",
+        )
+    request = operation_request(action, player_selector, operation_ttl_secs)
+    request_digest = operation_request_digest(action, player_selector, operation_ttl_secs)
+    if action != "next" or dry_run:
+        return operation_preflight_payload(
+            operation_id,
+            request,
+            request_digest,
+            state="unsupported_idempotent_operation",
+            outcome="blocked",
+            recover="replan",
+            record_present=False,
+            error_code="unsupported_idempotent_operation",
+            error_message="operation preflight is supported only for action=next with dry_run=false",
+        )
+
+    journal_dir = operation_directory()
+    if not journal_dir.is_absolute():
+        return operation_preflight_payload(
+            operation_id,
+            request,
+            request_digest,
+            state="operation_journal_unavailable",
+            outcome="blocked",
+            recover="replan",
+            record_present=False,
+            error_code="operation_journal_unavailable",
+            error_message="operation journal path must be absolute",
+        )
+    try:
+        try:
+            directory_metadata = os.lstat(journal_dir)
+        except FileNotFoundError:
+            directory_metadata = None
+        if directory_metadata is not None and (
+            not stat.S_ISDIR(directory_metadata.st_mode)
+            or directory_metadata.st_uid != os.getuid()
+            or stat.S_IMODE(directory_metadata.st_mode) != 0o700
+        ):
+            raise OSError(
+                "operation journal must be an owner-only 0700 directory without symlinks"
+            )
+    except OSError as exc:
+        return operation_preflight_payload(
+            operation_id,
+            request,
+            request_digest,
+            state="operation_journal_unavailable",
+            outcome="blocked",
+            recover="replan",
+            record_present=False,
+            error_code="operation_journal_unavailable",
+            error_message=str(exc),
+        )
+
+    record_path = operation_record_path(operation_id)
+    lock_path = operation_lock_path(operation_id)
+    lock_fd = -1
+    locked = False
+    lock_present = False
+    try:
+        try:
+            lock_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            lock_fd = os.open(lock_path, lock_flags)
+            lock_present = True
+        except FileNotFoundError:
+            lock_fd = -1
+        except OSError as exc:
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="operation_record_invalid",
+                outcome="blocked",
+                recover="replan",
+                record_present=None,
+                lock_present=True,
+                observed_at=time.time(),
+                error_code="operation_record_invalid",
+                error_message=f"operation lock cannot be opened safely: {exc}",
+            )
+        if lock_fd >= 0:
+            lock_metadata = os.fstat(lock_fd)
+            if (
+                not stat.S_ISREG(lock_metadata.st_mode)
+                or lock_metadata.st_uid != os.getuid()
+                or stat.S_IMODE(lock_metadata.st_mode) != 0o600
+            ):
+                return operation_preflight_payload(
+                    operation_id,
+                    request,
+                    request_digest,
+                    state="operation_record_invalid",
+                    outcome="blocked",
+                    recover="replan",
+                    record_present=None,
+                    lock_present=True,
+                    observed_at=time.time(),
+                    error_code="operation_record_invalid",
+                    error_message="operation lock must be an owner-only 0600 regular file",
+                )
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                locked = True
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                return operation_preflight_payload(
+                    operation_id,
+                    request,
+                    request_digest,
+                    state="operation_lock_busy",
+                    outcome="indeterminate",
+                    recover="retry",
+                    record_present=None,
+                    lock_present=True,
+                    observed_at=time.time(),
+                    error_code="operation_lock_busy",
+                    error_message="another process is handling this operation_id",
+                )
+        try:
+            existing, record_sha256 = read_operation_record_snapshot(record_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="operation_record_invalid",
+                outcome="blocked",
+                recover="replan",
+                record_present=True,
+                lock_present=lock_present,
+                observed_at=time.time(),
+                error_code="operation_record_invalid",
+                error_message=str(exc),
+            )
+        if existing is None:
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="fresh_candidate",
+                outcome="eligible",
+                recover="proceed",
+                record_present=False,
+                observed_phase=None,
+                dispatch_count=0,
+                observed_at=time.time(),
+                lock_present=lock_present,
+            )
+        if not lock_present:
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="operation_record_invalid",
+                outcome="blocked",
+                recover="replan",
+                record_present=True,
+                observed_at=time.time(),
+                record_sha256=record_sha256,
+                lock_present=False,
+                error_code="operation_record_invalid",
+                error_message="operation record exists without its stable lock file",
+            )
+
+        phase = existing.get("phase")
+        raw_dispatch_count = existing.get("dispatch_count")
+        reported_dispatch_count = (
+            raw_dispatch_count if type(raw_dispatch_count) is int else None
+        )
+        raw_expires_at = existing.get("expires_at")
+        reported_expires_at = (
+            float(raw_expires_at)
+            if type(raw_expires_at) in (int, float)
+            and not isinstance(raw_expires_at, bool)
+            and math.isfinite(float(raw_expires_at))
+            else None
+        )
+        observed_at = time.time()
+        remaining_secs = (
+            max(0.0, reported_expires_at - observed_at)
+            if reported_expires_at is not None
+            else None
+        )
+
+        def blocked(code: str, message: str, *, recover: str = "replan") -> dict[str, Any]:
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state=code,
+                outcome="indeterminate" if recover == "retry" else "blocked",
+                recover=recover,
+                record_present=True,
+                observed_phase=phase if isinstance(phase, str) else None,
+                dispatch_count=reported_dispatch_count,
+                expires_at=reported_expires_at,
+                observed_at=observed_at,
+                remaining_secs=remaining_secs,
+                record_sha256=record_sha256,
+                lock_present=True,
+                terminal_verdict=(
+                    existing.get("payload", {}).get("verdict")
+                    if isinstance(existing.get("payload"), dict)
+                    else None
+                ),
+                error_code=code,
+                error_message=message,
+            )
+
+        if existing.get("operation_id") != operation_id:
+            return blocked(
+                "operation_record_invalid",
+                "operation record identity does not match its filename",
+            )
+        if existing.get("request_digest") != request_digest:
+            return blocked(
+                "idempotency_conflict",
+                "operation_id is already bound to a different canonical request",
+            )
+        if existing.get("schema") != OPERATION_SCHEMA or existing.get("request") != request:
+            return blocked(
+                "operation_record_invalid",
+                "operation record canonical request binding is malformed",
+            )
+        if reported_dispatch_count not in (0, 1):
+            return blocked(
+                "operation_record_invalid",
+                "operation record dispatch_count must be 0 or 1",
+            )
+        if reported_expires_at is None:
+            return blocked(
+                "operation_record_invalid",
+                "operation record has no valid expires_at",
+            )
+        created_at = existing.get("created_at")
+        now = observed_at
+        if (
+            type(created_at) not in (int, float)
+            or isinstance(created_at, bool)
+            or not math.isfinite(float(created_at))
+            or float(created_at) > now
+            or not math.isclose(
+                reported_expires_at - float(created_at),
+                float(operation_ttl_secs),
+                rel_tol=0.0,
+                abs_tol=0.001,
+            )
+        ):
+            return blocked(
+                "operation_record_invalid",
+                "operation record has inconsistent TTL timestamps",
+            )
+        if now >= reported_expires_at:
+            return blocked(
+                "operation_expired",
+                "operation_id receipt has expired and cannot be executed again",
+            )
+        if phase == "terminal":
+            if not terminal_payload_valid(existing.get("payload"), existing, operation_id, request_digest):
+                return blocked(
+                    "operation_record_invalid",
+                    "terminal operation record has no admissible payload",
+                )
+            terminal_verdict = existing["payload"].get("verdict")
+            if terminal_verdict != "verified":
+                return blocked(
+                    "terminal_operation_not_verified",
+                    "terminal operation cannot make this embodied episode succeed",
+                )
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="terminal_replay_candidate",
+                outcome="eligible",
+                recover="proceed",
+                record_present=True,
+                observed_phase="terminal",
+                dispatch_count=reported_dispatch_count,
+                expires_at=reported_expires_at,
+                terminal_verdict="verified",
+                observed_at=observed_at,
+                remaining_secs=remaining_secs,
+                record_sha256=record_sha256,
+                lock_present=True,
+            )
+        if phase == "retryable" and reported_dispatch_count == 0:
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="retryable_candidate",
+                outcome="eligible",
+                recover="proceed",
+                record_present=True,
+                observed_phase="retryable",
+                dispatch_count=0,
+                expires_at=reported_expires_at,
+                observed_at=observed_at,
+                remaining_secs=remaining_secs,
+                record_sha256=record_sha256,
+                lock_present=True,
+            )
+        if phase == "dispatch_started" and reported_dispatch_count == 1:
+            player = existing.get("resolved_player") or existing.get("player")
+            baseline = existing.get("baseline")
+            if (
+                not isinstance(player, str)
+                or not player
+                or not isinstance(baseline, dict)
+                or not isinstance(baseline.get("track_id"), str)
+                or not baseline.get("track_id")
+            ):
+                return blocked(
+                    "operation_record_invalid",
+                    "dispatch_started record lacks an exact player or baseline track_id",
+                )
+            return operation_preflight_payload(
+                operation_id,
+                request,
+                request_digest,
+                state="recovery_observation_candidate",
+                outcome="eligible",
+                recover="proceed",
+                record_present=True,
+                observed_phase="dispatch_started",
+                dispatch_count=1,
+                expires_at=reported_expires_at,
+                observed_at=observed_at,
+                remaining_secs=remaining_secs,
+                record_sha256=record_sha256,
+                lock_present=True,
+            )
+        return blocked(
+            "operation_record_invalid",
+            f"unsupported operation phase/count: {phase!r}/{reported_dispatch_count!r}",
+        )
+    except OSError as exc:
+        return operation_preflight_payload(
+            operation_id,
+            request,
+            request_digest,
+            state="operation_journal_unavailable",
+            outcome="blocked",
+            recover="replan",
+            record_present=None,
+            lock_present=lock_present,
+            observed_at=time.time(),
+            error_code="operation_journal_unavailable",
+            error_message=str(exc),
+        )
+    finally:
+        if locked:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        if lock_fd >= 0:
+            os.close(lock_fd)
+
+
 def execute(
     action: str,
     player_selector: str | None,
@@ -1091,7 +1643,16 @@ def execute(
     playlist_id: str | None = None,
     operation_id: str | None = None,
     operation_ttl_secs: int = DEFAULT_OPERATION_TTL_SECS,
+    operation_preflight: bool = False,
 ) -> dict[str, Any]:
+    if operation_preflight:
+        return preflight_operation(
+            action,
+            player_selector,
+            dry_run,
+            operation_id,
+            operation_ttl_secs,
+        )
     if operation_id is None:
         return execute_once(
             action, player_selector, dry_run, verify_timeout, volume, playlist_id
@@ -1510,6 +2071,7 @@ def main() -> int:
     parser.add_argument("--playlist-id")
     parser.add_argument("--operation-id")
     parser.add_argument("--operation-ttl-secs", type=int, default=DEFAULT_OPERATION_TTL_SECS)
+    parser.add_argument("--operation-preflight", action="store_true")
     args = parser.parse_args()
     payload = execute(
         args.action,
@@ -1520,6 +2082,7 @@ def main() -> int:
         args.playlist_id,
         args.operation_id,
         args.operation_ttl_secs,
+        args.operation_preflight,
     )
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return 0 if payload.get("verdict") == "verified" else 2

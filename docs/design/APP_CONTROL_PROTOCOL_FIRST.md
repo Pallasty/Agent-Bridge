@@ -98,6 +98,27 @@ write/fsync/rename. Caller-selected `cwd` and `script_path` backends are
 rejected for durable operations at the MCP boundary so an operation cannot be
 silently rebound to another implementation.
 
+Before an embodied episode opens mobile UI, the installed backend also offers
+a private `--operation-preflight` mode. This is a bounded, journal-only
+admission snapshot, not a public `app_control` action. It does not create the
+journal directory or lock, write or normalize a record, inspect MPRIS, recover
+`dispatch_started`, reserve an ID, or authorize dispatch. Existing lock and
+record files are opened without following symlinks and checked for owner-only
+regular-file shape before the exact request, phase, dispatch count, TTL, and
+terminal receipt are classified.
+
+`fresh`, retryable count-zero, verified terminal replay, and structurally valid
+recovery states are only reported as candidates. Expired, conflicting,
+terminal-failure, busy, corrupt, or unavailable states fail before ADB is
+invoked. For existing candidates, the composition also requires enough TTL for
+the two bounded ADB windows inside projection start, the bounded connection
+wait, and the durable action's bounded pre-dispatch observation window, with a
+scheduling margin. The preflight lock is released before it returns, so its
+receipt explicitly says that it neither
+reserves the ID nor keeps state unchanged. The later mutating call still takes
+the exclusive per-ID lock and repeats the complete validation; this is the only
+authority boundary and remains safe if state changes after preflight.
+
 The mobile projection remains a reconstructible presentation tail. Updating
 the in-memory frame or flushing it to the TCP connection proves neither that
 the Android Activity accepted it nor that the UI drew it. The projection
@@ -121,21 +142,27 @@ authority.
 The tool accepts a caller-supplied `operation_id`; it never creates or replaces
 that identity. After validating every argument, it follows one fixed sequence:
 
-1. create a short-lived, one-shot projection session;
-2. obtain either explicit holder connection consent, or a clearly labelled
+1. run the private journal-only preflight and reject deterministic blockers
+   without opening mobile UI;
+2. create a short-lived, one-shot projection session;
+3. obtain either explicit holder connection consent, or a clearly labelled
    test-only authenticated auto-connection;
-3. call durable `app_control(next)` with the same operation ID;
-4. sync media through the exact resolved player in the durable receipt;
-5. require the projected track ID to equal the verified post-action track ID;
-6. wait for the companion's exact revision-and-digest draw report; and
-7. stop its owned projection session.
+4. call durable `app_control(next)` with the same operation ID and revalidate
+   under its exclusive lock;
+5. sync media through the exact resolved player in the durable receipt;
+6. require the projected track ID to equal the verified post-action track ID;
+7. wait for the companion's exact revision-and-digest draw report; and
+8. stop its owned projection session.
 
 The action journal is the only durable mutation authority. The projection
 session and composite execution are process-local and may be reconstructed.
-If execution stops after the media dispatch, a retry must reuse the same
-`operation_id`: app-control replays or read-only-recovers the action and never
-dispatches `next` twice, while the presentation tail may run again. Losing the
-operation ID is not recoverable automatically. A connection, media-sync, draw,
+If execution stops after the media dispatch while the record is still valid, a
+retry must reuse the same `operation_id`: app-control replays or
+read-only-recovers the action and never dispatches `next` twice, while the
+presentation tail may run again. Expired and terminal-failure records are not
+same-ID retry loops; they require a fresh current-state replan, and a new ID can
+only represent an explicit new intent rather than an automatic replacement.
+Losing the operation ID is not recoverable automatically. A connection, media-sync, draw,
 binding, or cleanup failure returns non-proceed evidence rather than inventing
 success. The episode does perform the one explicitly requested,
 journal-bounded media actuation; the projection grants no additional

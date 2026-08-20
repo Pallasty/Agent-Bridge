@@ -3401,6 +3401,160 @@ pub(super) fn advance_track_then_project_action_binding(
     })
 }
 
+fn advance_track_then_project_minimum_preaction_secs(
+    timeout_ms: u64,
+    verify_timeout_secs: f64,
+) -> f64 {
+    // Projection start can consume two caller-bounded ADB windows (device
+    // selection and Activity launch), followed by one connection-wait window.
+    // The durable action then has its own process budget before the journal's
+    // final pre-dispatch expiry check. Existing candidates need enough TTL for
+    // all four windows plus a small scheduling/clock margin. Fresh candidates
+    // begin their TTL only in the later exclusive action call and therefore do
+    // not need this check.
+    let action_timeout_ms =
+        app_control_process_timeout_ms(Some(timeout_ms.min(30_000)), verify_timeout_secs, true);
+    ((timeout_ms
+        .saturating_mul(3)
+        .saturating_add(action_timeout_ms)
+        .saturating_add(999))
+        / 1_000
+        + 5) as f64
+}
+
+pub(super) fn advance_track_then_project_preflight_valid(
+    payload: &Value,
+    operation_id: &str,
+    player_selector: Option<&str>,
+    operation_ttl_secs: u64,
+    minimum_remaining_secs: f64,
+) -> bool {
+    let Some(exit_code) = payload
+        .pointer("/mcp_wrapper/exit_code")
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+    else {
+        return false;
+    };
+    if payload
+        .pointer("/mcp_wrapper/source_contract_ok")
+        .and_then(Value::as_bool)
+        != Some(true)
+        || payload.pointer("/mcp_wrapper/mode").and_then(Value::as_str)
+            != Some("durable_operation_preflight")
+        || !app_control_preflight_source_contract_valid(
+            payload,
+            operation_id,
+            player_selector,
+            operation_ttl_secs,
+            exit_code,
+        )
+        || payload.get("verdict").and_then(Value::as_str) != Some("verified")
+        || payload
+            .pointer("/preflight/candidate")
+            .and_then(Value::as_bool)
+            != Some(true)
+        || payload
+            .pointer("/preflight/blocked")
+            .and_then(Value::as_bool)
+            != Some(false)
+    {
+        return false;
+    }
+    if payload.get("status").and_then(Value::as_str) == Some("fresh_candidate") {
+        return true;
+    }
+    let Some(observed_at) = payload
+        .pointer("/preflight/observed_at_unix_seconds")
+        .and_then(Value::as_f64)
+    else {
+        return false;
+    };
+    let Some(expires_at) = payload
+        .pointer("/preflight/expires_at")
+        .and_then(Value::as_f64)
+    else {
+        return false;
+    };
+    let Some(remaining_secs) = payload
+        .pointer("/preflight/remaining_secs")
+        .and_then(Value::as_f64)
+    else {
+        return false;
+    };
+    observed_at.is_finite()
+        && expires_at.is_finite()
+        && remaining_secs.is_finite()
+        && remaining_secs >= minimum_remaining_secs
+        && ((expires_at - observed_at) - remaining_secs).abs() <= 0.01
+}
+
+fn advance_track_then_project_preflight_ttl_window_too_short(
+    payload: &Value,
+    minimum_remaining_secs: f64,
+) -> bool {
+    payload.get("status").and_then(Value::as_str) != Some("fresh_candidate")
+        && payload
+            .pointer("/preflight/remaining_secs")
+            .and_then(Value::as_f64)
+            .is_some_and(|value| {
+                value.is_finite() && value >= 0.0 && value < minimum_remaining_secs
+            })
+}
+
+fn advance_track_then_project_action_failure_disposition(
+    payload: &Value,
+) -> (&'static str, bool, &'static str) {
+    let explicit = match payload.pointer("/error/code").and_then(Value::as_str) {
+        Some("operation_expired") => Some((
+            "operation_expired",
+            false,
+            "The operation_id expired after preflight; reobserve current media state and replan without automatic actuation or ID replacement.",
+        )),
+        Some("idempotency_conflict") => Some((
+            "idempotency_conflict",
+            false,
+            "Resolve the operation_id's original canonical request; do not silently retry this conflicting request or mint a replacement ID.",
+        )),
+        Some("operation_record_invalid") => Some((
+            "operation_record_invalid",
+            false,
+            "Audit or repair the durable journal; do not delete the record or substitute another operation_id automatically.",
+        )),
+        Some("operation_journal_unavailable") => Some((
+            "operation_journal_unavailable",
+            false,
+            "Audit or repair the durable journal; do not delete the record or substitute another operation_id automatically.",
+        )),
+        Some("operation_lock_busy") => Some((
+            "operation_lock_busy",
+            true,
+            "Retry only the exact same request and operation_id after the current journal holder finishes.",
+        )),
+        _ => None,
+    };
+    if let Some(disposition) = explicit {
+        return disposition;
+    }
+    if payload
+        .pointer("/transaction/phase")
+        .and_then(Value::as_str)
+        == Some("terminal")
+        && payload.get("verdict").and_then(Value::as_str) != Some("verified")
+    {
+        return (
+            "terminal_operation_not_verified",
+            false,
+            "The same operation_id can only replay this terminal failure; reobserve and replan without automatically creating a replacement ID.",
+        );
+    }
+    (
+        "durable_action_not_verified",
+        true,
+        "Reinvoke only with the exact same operation_id; never substitute a new identity automatically.",
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AdvanceTrackProjectionBinding {
     revision: u64,
@@ -3702,6 +3856,7 @@ struct AdvanceEpisodeState {
 impl AdvanceEpisodeState {
     fn new(args: &AdvanceTrackThenProjectArgs) -> Self {
         let steps = [
+            "operation_preflight",
             "projection_start",
             "connection",
             "app_control",
@@ -3731,7 +3886,20 @@ impl AdvanceEpisodeState {
                 "operation_id": args.operation_id,
                 "operation_ttl_secs": args.operation_ttl_secs,
                 "same_operation_id_required_for_retry": true,
+                "same_operation_id_retry_allowed_at_preflight": Value::Null,
+                "same_operation_id_sufficient_for_episode": Value::Null,
+                "automatic_new_id_allowed": false,
                 "new_operation_id_generated": false,
+                "operation_preflight_candidate": Value::Null,
+                "operation_preflight_state": Value::Null,
+                "operation_preflight_disposition": Value::Null,
+                "episode_admission_disposition": Value::Null,
+                "operation_revalidation_disposition": Value::Null,
+                "operation_preflight_minimum_remaining_secs":
+                    advance_track_then_project_minimum_preaction_secs(
+                        args.timeout_ms,
+                        args.verify_timeout_secs,
+                    ),
                 "action_invocation_count_this_call": 0,
                 "dispatch_count": Value::Null,
                 "idempotent_replay": Value::Null,
@@ -3764,12 +3932,27 @@ impl AdvanceEpisodeState {
     }
 
     fn fail(&mut self, phase: &str, code: &str, message: impl Into<String>) {
+        self.fail_with_retry(
+            phase,
+            code,
+            message,
+            "Reinvoke only with the exact same operation_id; never substitute a new identity automatically.",
+        );
+    }
+
+    fn fail_with_retry(
+        &mut self,
+        phase: &str,
+        code: &str,
+        message: impl Into<String>,
+        retry: impl Into<String>,
+    ) {
         if self.error.is_none() {
             self.error = Some(json!({
                 "phase": phase,
                 "code": code,
                 "message": message.into(),
-                "retry": "Reinvoke only with the exact same operation_id; never substitute a new identity automatically."
+                "retry": retry.into()
             }));
         }
     }
@@ -3899,6 +4082,7 @@ impl AdvanceTrackThenProjectTool {
                     ("after", "/after"),
                     ("verification", "/verification"),
                     ("transaction", "/transaction"),
+                    ("error", "/error"),
                     ("source_contract_ok", "/mcp_wrapper/source_contract_ok"),
                 ],
             ),
@@ -3934,10 +4118,22 @@ impl AdvanceTrackThenProjectTool {
         ) {
             Ok(binding) if !action_error => binding,
             Ok(_) | Err(_) => {
-                state.fail(
+                let (code, same_id_retry, guidance) =
+                    advance_track_then_project_action_failure_disposition(&action_payload);
+                state.continuity["same_operation_id_required_for_retry"] = json!(same_id_retry);
+                state.continuity["same_operation_id_sufficient_for_episode"] = json!(false);
+                state.continuity["operation_revalidation_disposition"] = json!(code);
+                state.continuity["warning"] = json!(guidance);
+                state.fail_with_retry(
                     "app_control",
-                    "durable_action_not_verified",
-                    "durable next receipt failed the exact source/operation/track-change contract",
+                    code,
+                    action_payload
+                        .pointer("/error/message")
+                        .and_then(Value::as_str)
+                        .unwrap_or(
+                            "durable next receipt failed the exact source/operation/track-change contract",
+                        ),
+                    guidance,
                 );
                 return;
             }
@@ -4106,11 +4302,26 @@ impl AdvanceTrackThenProjectTool {
             state.fresh_dispatch_verified,
             state.recovered_after_interruption,
         );
+        let recover = if verified {
+            "proceed"
+        } else if state
+            .error
+            .as_ref()
+            .and_then(|error| error.get("code"))
+            .and_then(Value::as_str)
+            == Some("operation_lock_busy")
+            && (state.cleanup["attempted"] == json!(false)
+                || state.cleanup["verified"] == json!(true))
+        {
+            "retry"
+        } else {
+            "replan"
+        };
         let payload = json!({
             "schema": ADVANCE_TRACK_THEN_PROJECT_SCHEMA,
             "status": if verified { "verified" } else { "error" },
             "verdict": if verified { "verified" } else { "error" },
-            "recover": if verified { "proceed" } else { "replan" },
+            "recover": recover,
             "operation_id": parsed.operation_id,
             "last_completed_phase": state.last_completed_phase,
             "steps": state.steps,
@@ -4135,6 +4346,7 @@ impl AdvanceTrackThenProjectTool {
             "operation_id": operation_id,
             "last_completed_phase": "none",
             "steps": {
+                "operation_preflight": Value::Null,
                 "projection_start": Value::Null,
                 "connection": Value::Null,
                 "app_control": Value::Null,
@@ -4158,6 +4370,9 @@ impl AdvanceTrackThenProjectTool {
                 "operation_id": operation_id,
                 "same_operation_id_required_for_retry": operation_id.is_some(),
                 "new_operation_id_generated": false,
+                "operation_preflight_candidate": Value::Null,
+                "operation_preflight_state": Value::Null,
+                "operation_preflight_disposition": Value::Null,
                 "action_invocation_count_this_call": 0,
                 "projection_session_process_local": true,
                 "presentation_may_repeat_on_retry": true
@@ -4196,7 +4411,7 @@ impl McpTool for AdvanceTrackThenProjectTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Run one fixed, bounded embodied-media episode: create an ephemeral consent-gated projection, verify its connection, execute durable at-most-once media next using the caller's operation_id, project the exact resulting track, wait for the Android Activity's exact revision+digest draw report, and stop the owned session. This is not a workflow runner. It accepts no arbitrary action, presentation, command, path, or callback. A draw report is neither human-observation nor pixel-verification evidence.".into(),
+            description: "Run one fixed, bounded embodied-media episode: first inspect the durable operation journal without actuation and reject known expiry/conflict before opening mobile UI; then create an ephemeral consent-gated projection, verify its connection, execute durable at-most-once media next using the caller's operation_id, project the exact resulting track, wait for the Android Activity's exact revision+digest draw report, and stop the owned session. Preflight is advisory only and the action revalidates under its exclusive lock. This is not a workflow runner. It accepts no arbitrary action, presentation, command, path, or callback. A draw report is neither human-observation nor pixel-verification evidence.".into(),
             input_schema: json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -4230,6 +4445,140 @@ impl McpTool for AdvanceTrackThenProjectTool {
             return Ok(self.validation_error(Some(&parsed.operation_id), error));
         }
         let mut state = AdvanceEpisodeState::new(&parsed);
+
+        let minimum_remaining_secs = advance_track_then_project_minimum_preaction_secs(
+            parsed.timeout_ms,
+            parsed.verify_timeout_secs,
+        );
+        let preflight_result = AppControlTool::new(self.hub.clone())
+            .preflight_durable_next(
+                &parsed.operation_id,
+                parsed.player.as_deref(),
+                parsed.operation_ttl_secs,
+                parsed.timeout_ms.min(30_000),
+            )
+            .await;
+        let preflight_error = preflight_result.is_error;
+        let Some(preflight_payload) = advance_track_then_project_result_json(&preflight_result)
+        else {
+            state.fail_with_retry(
+                "operation_preflight",
+                "operation_preflight_receipt_missing",
+                "durable operation preflight returned no JSON receipt",
+                "Do not start projection or invent a replacement operation_id; repair the installed preflight backend first.",
+            );
+            return Ok(self.final_result(&parsed, state));
+        };
+        state.steps.insert(
+            "operation_preflight".into(),
+            advance_episode_step(
+                &preflight_payload,
+                &[
+                    ("schema", "/preflight/schema"),
+                    ("status", "/status"),
+                    ("verdict", "/verdict"),
+                    ("recover", "/recover"),
+                    ("operation_id", "/preflight/operation_id"),
+                    ("request_digest", "/preflight/request_digest"),
+                    ("candidate", "/preflight/candidate"),
+                    ("blocked", "/preflight/blocked"),
+                    ("record_present", "/preflight/record_present"),
+                    ("observed_phase", "/preflight/observed_phase"),
+                    ("dispatch_count", "/preflight/dispatch_count"),
+                    ("expires_at", "/preflight/expires_at"),
+                    ("remaining_secs", "/preflight/remaining_secs"),
+                    ("record_sha256", "/preflight/record_sha256"),
+                    (
+                        "operation_id_disposition",
+                        "/preflight/operation_id_disposition",
+                    ),
+                    ("recommended_next", "/preflight/recommended_next"),
+                    ("claim_boundary", "/claim_boundary"),
+                    ("source_contract_ok", "/mcp_wrapper/source_contract_ok"),
+                ],
+            ),
+        );
+        if let Some(value) = preflight_payload.pointer("/preflight/candidate") {
+            state.continuity["operation_preflight_candidate"] = value.clone();
+        }
+        if let Some(value) = preflight_payload.get("status") {
+            state.continuity["operation_preflight_state"] = value.clone();
+        }
+        if let Some(value) = preflight_payload.pointer("/preflight/operation_id_disposition") {
+            state.continuity["operation_preflight_disposition"] = value.clone();
+        }
+        if let Some(value) = preflight_payload.pointer("/preflight/same_id_retry_allowed") {
+            state.continuity["same_operation_id_required_for_retry"] = value.clone();
+            state.continuity["same_operation_id_retry_allowed_at_preflight"] = value.clone();
+        }
+        if let Some(value) = preflight_payload.pointer("/preflight/automatic_new_id_allowed") {
+            state.continuity["automatic_new_id_allowed"] = value.clone();
+        }
+        if let Some(value) = preflight_payload.pointer("/preflight/recommended_next") {
+            state.continuity["warning"] = value.clone();
+        }
+        let source_candidate_valid = advance_track_then_project_preflight_valid(
+            &preflight_payload,
+            &parsed.operation_id,
+            parsed.player.as_deref(),
+            parsed.operation_ttl_secs,
+            0.0,
+        );
+        let preflight_admissible = advance_track_then_project_preflight_valid(
+            &preflight_payload,
+            &parsed.operation_id,
+            parsed.player.as_deref(),
+            parsed.operation_ttl_secs,
+            minimum_remaining_secs,
+        );
+        if preflight_error || !preflight_admissible {
+            let insufficient_ttl = source_candidate_valid
+                && advance_track_then_project_preflight_ttl_window_too_short(
+                    &preflight_payload,
+                    minimum_remaining_secs,
+                );
+            let code = preflight_payload
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .unwrap_or(if insufficient_ttl {
+                    "operation_preflight_ttl_window_too_short"
+                } else {
+                    "operation_preflight_not_admissible"
+                });
+            let message = preflight_payload
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or(if insufficient_ttl {
+                    "the durable operation record expires before the bounded projection start, connection, and action pre-dispatch windows can complete"
+                } else {
+                    "durable operation is not a safe candidate for this projection episode"
+                });
+            let guidance = if insufficient_ttl {
+                "Do not start projection or automatically replace the operation_id; reobserve current media state and replan the intent."
+            } else {
+                preflight_payload
+                    .pointer("/preflight/recommended_next")
+                    .and_then(Value::as_str)
+                    .unwrap_or(
+                        "Do not start projection or invent a replacement operation_id; reobserve and replan.",
+                    )
+            };
+            if insufficient_ttl {
+                state.continuity["same_operation_id_required_for_retry"] = json!(false);
+                state.continuity["same_operation_id_sufficient_for_episode"] = json!(false);
+                state.continuity["episode_admission_disposition"] = json!("ttl_window_too_short");
+                state.continuity["warning"] = json!(guidance);
+            } else if let Some(value) =
+                preflight_payload.pointer("/preflight/operation_id_disposition")
+            {
+                state.continuity["episode_admission_disposition"] = value.clone();
+            }
+            state.fail_with_retry("operation_preflight", code, message, guidance);
+            return Ok(self.final_result(&parsed, state));
+        }
+        state.continuity["same_operation_id_sufficient_for_episode"] = json!(true);
+        state.continuity["episode_admission_disposition"] = json!("admitted_candidate");
+        state.last_completed_phase = "operation_preflight_passed";
 
         let mut start_args = json!({
             "bind": parsed.bind,
@@ -4419,6 +4768,94 @@ impl McpTool for AdvanceTrackThenProjectTool {
 mod advance_track_then_project_unit_tests {
     use super::*;
 
+    fn result_payload(result: &ToolResult) -> Value {
+        let text = match result.content.first() {
+            Some(ContentBlock::Text { text }) => text,
+            other => panic!("expected JSON text result, got {other:?}"),
+        };
+        serde_json::from_str(text).expect("result JSON")
+    }
+
+    fn preflight_fixture(
+        operation_id: &str,
+        player: &str,
+        state: &str,
+        observed_at: f64,
+        remaining_secs: Option<f64>,
+    ) -> Value {
+        let record_present = state != "fresh_candidate";
+        let (phase, dispatch_count, terminal_verdict) = match state {
+            "fresh_candidate" => (Value::Null, json!(0), Value::Null),
+            "retryable_candidate" => (json!("retryable"), json!(0), Value::Null),
+            "terminal_replay_candidate" => (json!("terminal"), json!(1), json!("verified")),
+            "recovery_observation_candidate" => (json!("dispatch_started"), json!(1), Value::Null),
+            _ => panic!("unsupported fixture state"),
+        };
+        let expires_at = remaining_secs.map(|remaining| observed_at + remaining);
+        json!({
+            "schema": "agent_bridge.app_control.v0",
+            "status": state,
+            "verdict": "verified",
+            "recover": "proceed",
+            "domain": "media",
+            "action": "next",
+            "read_only": true,
+            "preflight_only": true,
+            "preflight": {
+                "schema": "agent_bridge.app_control.operation_preflight.v0",
+                "outcome": "eligible",
+                "candidate": true,
+                "blocked": false,
+                "state": state,
+                "operation_id": operation_id,
+                "request": {
+                    "schema": "agent_bridge.app_control.v0",
+                    "action": "next",
+                    "player_selector": player,
+                    "operation_ttl_secs": 3600
+                },
+                "request_digest": app_control_operation_request_digest(
+                    "next", Some(player), 3600
+                ),
+                "record_present": record_present,
+                "observed_phase": phase,
+                "dispatch_count": dispatch_count,
+                "expires_at": expires_at,
+                "terminal_verdict": terminal_verdict,
+                "observed_at_unix_seconds": observed_at,
+                "remaining_secs": remaining_secs,
+                "record_sha256": if record_present { json!("a".repeat(64)) } else { Value::Null },
+                "lock_present": record_present,
+                "advisory": true,
+                "must_revalidate": true,
+                "dispatch_authorized": false,
+                "reservation_created": false,
+                "operation_record_mutated": false,
+                "player_observed": false,
+                "effect_verified": false,
+                "operation_id_disposition": "reusable_same_request",
+                "same_id_retry_allowed": true,
+                "automatic_new_id_allowed": false,
+                "recommended_next": "proceed_to_connection_then_revalidate_under_exclusive_lock"
+            },
+            "claim_boundary": {
+                "authorizes_dispatch": false,
+                "reserves_operation_id": false,
+                "lock_held_at_return": false,
+                "state_unchanged_until_action": false,
+                "player_observed": false,
+                "effect_verified": false,
+                "current_track_verified": false
+            },
+            "error": Value::Null,
+            "mcp_wrapper": {
+                "mode": "durable_operation_preflight",
+                "exit_code": 0,
+                "source_contract_ok": true
+            }
+        })
+    }
+
     fn durable_action_fixture(
         operation_id: &str,
         player: &str,
@@ -4539,6 +4976,198 @@ mod advance_track_then_project_unit_tests {
                 "{invalid}"
             );
         }
+    }
+
+    #[test]
+    fn operation_preflight_is_advisory_exact_and_requires_sufficient_ttl() {
+        assert_eq!(
+            advance_track_then_project_minimum_preaction_secs(30_000, 2.0),
+            125.0
+        );
+        assert_eq!(
+            advance_track_then_project_minimum_preaction_secs(120_000, 10.0),
+            395.0
+        );
+        assert_eq!(
+            advance_track_then_project_minimum_preaction_secs(1_000, 10.0),
+            21.0
+        );
+        let fresh = preflight_fixture(
+            "episode-1",
+            "rhythmbox",
+            "fresh_candidate",
+            1_700_000_000.0,
+            None,
+        );
+        assert!(advance_track_then_project_preflight_valid(
+            &fresh,
+            "episode-1",
+            Some("rhythmbox"),
+            3600,
+            125.0
+        ));
+        let replay = preflight_fixture(
+            "episode-1",
+            "rhythmbox",
+            "terminal_replay_candidate",
+            1_700_000_000.0,
+            Some(126.0),
+        );
+        assert!(advance_track_then_project_preflight_valid(
+            &replay,
+            "episode-1",
+            Some("rhythmbox"),
+            3600,
+            125.0
+        ));
+        let mut near_expiry = replay.clone();
+        near_expiry["preflight"]["remaining_secs"] = json!(124.0);
+        near_expiry["preflight"]["expires_at"] = json!(1_700_000_124.0);
+        assert!(advance_track_then_project_preflight_ttl_window_too_short(
+            &near_expiry,
+            125.0
+        ));
+        assert!(!advance_track_then_project_preflight_valid(
+            &near_expiry,
+            "episode-1",
+            Some("rhythmbox"),
+            3600,
+            125.0
+        ));
+        assert!(!advance_track_then_project_preflight_ttl_window_too_short(
+            &fresh, 125.0
+        ));
+        assert!(!advance_track_then_project_preflight_ttl_window_too_short(
+            &replay, 125.0
+        ));
+        let recovery = preflight_fixture(
+            "episode-1",
+            "rhythmbox",
+            "recovery_observation_candidate",
+            1_700_000_000.0,
+            Some(126.0),
+        );
+        assert!(advance_track_then_project_preflight_valid(
+            &recovery,
+            "episode-1",
+            Some("rhythmbox"),
+            3600,
+            125.0
+        ));
+        let mut recovery_with_terminal_claim = recovery;
+        recovery_with_terminal_claim["preflight"]["terminal_verdict"] = json!("verified");
+        assert!(!advance_track_then_project_preflight_valid(
+            &recovery_with_terminal_claim,
+            "episode-1",
+            Some("rhythmbox"),
+            3600,
+            125.0
+        ));
+        for forged in [
+            {
+                let mut value = fresh.clone();
+                value["preflight"]["dispatch_authorized"] = json!(true);
+                value
+            },
+            {
+                let mut value = fresh.clone();
+                value["preflight"]["operation_id"] = json!("episode-2");
+                value
+            },
+            {
+                let mut value = fresh.clone();
+                value["claim_boundary"]["effect_verified"] = json!(true);
+                value
+            },
+            {
+                let mut value = fresh.clone();
+                value["mcp_wrapper"]["source_contract_ok"] = json!(false);
+                value
+            },
+        ] {
+            assert!(!advance_track_then_project_preflight_valid(
+                &forged,
+                "episode-1",
+                Some("rhythmbox"),
+                3600,
+                125.0
+            ));
+        }
+    }
+
+    #[test]
+    fn action_revalidation_failure_has_state_specific_retry_semantics() {
+        for (payload, expected_code, same_id_retry) in [
+            (
+                json!({"verdict": "error", "error": {"code": "operation_expired"}}),
+                "operation_expired",
+                false,
+            ),
+            (
+                json!({"verdict": "error", "error": {"code": "operation_expired"}, "transaction": {"phase": "terminal"}}),
+                "operation_expired",
+                false,
+            ),
+            (
+                json!({"verdict": "error", "error": {"code": "idempotency_conflict"}}),
+                "idempotency_conflict",
+                false,
+            ),
+            (
+                json!({"verdict": "error", "error": {"code": "discovery_failed"}, "transaction": {"phase": "terminal"}}),
+                "terminal_operation_not_verified",
+                false,
+            ),
+            (
+                json!({"verdict": "error", "error": {"code": "operation_lock_busy"}}),
+                "operation_lock_busy",
+                true,
+            ),
+        ] {
+            let (code, allowed, guidance) =
+                advance_track_then_project_action_failure_disposition(&payload);
+            assert_eq!(code, expected_code);
+            assert_eq!(allowed, same_id_retry);
+            assert!(!guidance.is_empty());
+        }
+    }
+
+    #[test]
+    fn lock_busy_is_retryable_only_when_no_cleanup_failure_exists() {
+        let parsed = AdvanceTrackThenProjectArgs::parse(&json!({
+            "operation_id": "episode-1",
+            "bind": "192.168.1.2",
+            "player": "rhythmbox"
+        }))
+        .expect("valid episode args");
+        let tool = AdvanceTrackThenProjectTool::new(Hub::builder().build());
+
+        let mut preflight_busy = AdvanceEpisodeState::new(&parsed);
+        preflight_busy.fail_with_retry(
+            "operation_preflight",
+            "operation_lock_busy",
+            "another process holds the operation lock",
+            "retry the exact same request",
+        );
+        assert_eq!(
+            result_payload(&tool.final_result(&parsed, preflight_busy))["recover"],
+            "retry"
+        );
+
+        let mut cleanup_failed = AdvanceEpisodeState::new(&parsed);
+        cleanup_failed.fail_with_retry(
+            "app_control",
+            "operation_lock_busy",
+            "another process holds the operation lock",
+            "retry the exact same request",
+        );
+        cleanup_failed.cleanup["attempted"] = json!(true);
+        cleanup_failed.cleanup["verified"] = json!(false);
+        cleanup_failed.cleanup["error"] = json!({"code": "projection_cleanup_failed"});
+        assert_eq!(
+            result_payload(&tool.final_result(&parsed, cleanup_failed))["recover"],
+            "replan"
+        );
     }
 
     #[test]
