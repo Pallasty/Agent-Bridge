@@ -2,8 +2,9 @@
 //!
 //! P0 remains read-only through [`crate::StateStore`]. P1A0 adds an explicit
 //! AGENT.md path binding and genesis admission, while P1A1 adds a controlled
-//! compare-and-swap commit and P1A2 adds a verified historical rollback through
-//! inherent [`crate::SqliteStore`] methods.
+//! compare-and-swap commit, P1A2 adds a verified historical rollback, P1A3
+//! adds proposal metadata, and P1A4 adds an unauthenticated review preflight
+//! through inherent [`crate::SqliteStore`] methods.
 //! Neither slice exposes an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,10 @@ pub const RESOURCE_CAS_ROLLBACK_SCOPE: &str =
 pub const RESOURCE_CHANGE_PROPOSAL_SCHEMA: &str = "agent_bridge.resource_change_proposal.v0";
 pub const RESOURCE_CHANGE_PROPOSAL_SCOPE: &str =
     "read_only_agent_md_candidate_hash_lineage_binding_and_diff_summary";
+pub const RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA: &str =
+    "agent_bridge.resource_change_proposal_review.v0";
+pub const RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE: &str =
+    "read_only_receipt_invariants_current_file_binding_and_complete_lineage";
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
@@ -198,6 +203,34 @@ pub struct AgentMdChangeProposalReceipt {
     pub resource_content_mutated: bool,
     pub lineage_mutated: bool,
     pub proposal_scope: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMdChangeProposalReview {
+    pub resource_id: String,
+    pub path: PathBuf,
+    pub proposal: AgentMdChangeProposalReceipt,
+    pub reviewed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdChangeProposalReviewReceipt {
+    pub schema: String,
+    pub proposal: AgentMdChangeProposalReceipt,
+    pub reviewed_at: i64,
+    pub status: String,
+    pub violations: Vec<String>,
+    pub receipt_invariants_verified: bool,
+    pub observed_state_current: bool,
+    pub source_authenticity_verified: bool,
+    pub candidate_content_available: bool,
+    pub semantic_review_performed: bool,
+    pub eligible_for_human_review: bool,
+    pub automatic_apply_allowed: bool,
+    pub proposal_only: bool,
+    pub resource_content_mutated: bool,
+    pub lineage_mutated: bool,
+    pub review_scope: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1461,6 +1494,253 @@ mod tests {
         assert_eq!(
             std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
             current
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reviews_current_proposal_without_mutating_file_or_lineage() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\nkeep this line\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .propose_agent_md_change(AgentMdChangeProposal {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                target_version: None,
+                proposed_content: b"# Stable profile\nreview this line\n".to_vec(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("proposal");
+
+        let receipt = store
+            .review_agent_md_change_proposal(AgentMdChangeProposalReview {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                proposal: proposal.clone(),
+                reviewed_at: 1_700_000_002,
+            })
+            .await
+            .expect("review proposal");
+
+        assert_eq!(receipt.schema, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA);
+        assert_eq!(receipt.proposal, proposal);
+        assert_eq!(receipt.reviewed_at, 1_700_000_002);
+        assert_eq!(receipt.status, "current_unverified");
+        assert!(receipt.violations.is_empty());
+        assert!(receipt.receipt_invariants_verified);
+        assert!(receipt.observed_state_current);
+        assert!(!receipt.source_authenticity_verified);
+        assert!(!receipt.candidate_content_available);
+        assert!(!receipt.semantic_review_performed);
+        assert!(!receipt.eligible_for_human_review);
+        assert!(!receipt.automatic_apply_allowed);
+        assert!(receipt.proposal_only);
+        assert!(!receipt.resource_content_mutated);
+        assert!(!receipt.lineage_mutated);
+        assert_eq!(receipt.review_scope, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE);
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            original
+        );
+        let report = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read lineage");
+        assert_eq!(report.records.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_marks_proposal_stale_after_lineage_advances() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        let current = b"# Current profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .propose_agent_md_change(AgentMdChangeProposal {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                target_version: None,
+                proposed_content: b"# Candidate profile\n".to_vec(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("proposal");
+        store
+            .commit_agent_md_cas(AgentMdCasCommit {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_content_sha256: resource_content_sha256(&original),
+                proposed_content: current.clone(),
+                observed_at: 1_700_000_002,
+            })
+            .await
+            .expect("advance lineage");
+
+        let receipt = store
+            .review_agent_md_change_proposal(AgentMdChangeProposalReview {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                proposal,
+                reviewed_at: 1_700_000_003,
+            })
+            .await
+            .expect("review stale proposal");
+
+        assert_eq!(receipt.status, "stale");
+        assert!(receipt.receipt_invariants_verified);
+        assert!(!receipt.observed_state_current);
+        assert!(!receipt.source_authenticity_verified);
+        assert!(!receipt.eligible_for_human_review);
+        assert!(!receipt.automatic_apply_allowed);
+        assert!(receipt
+            .violations
+            .contains(&"current_content_stale".to_string()));
+        assert!(receipt
+            .violations
+            .contains(&"lineage_head_stale".to_string()));
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read current AGENT.md"),
+            current
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_rejects_forged_proposal_mutation_claims() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let mut proposal = store
+            .propose_agent_md_change(AgentMdChangeProposal {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                target_version: None,
+                proposed_content: b"# Candidate profile\n".to_vec(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("proposal");
+        proposal.resource_content_mutated = true;
+
+        let receipt = store
+            .review_agent_md_change_proposal(AgentMdChangeProposalReview {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                proposal,
+                reviewed_at: 1_700_000_002,
+            })
+            .await
+            .expect("review forged proposal");
+
+        assert_eq!(receipt.status, "invalid");
+        assert!(!receipt.receipt_invariants_verified);
+        assert!(!receipt.observed_state_current);
+        assert!(!receipt.source_authenticity_verified);
+        assert!(!receipt.eligible_for_human_review);
+        assert!(receipt
+            .violations
+            .contains(&"proposal_mutation_boundary_violated".to_string()));
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            original
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_never_authenticates_self_consistent_candidate_metadata() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let mut proposal = store
+            .propose_agent_md_change(AgentMdChangeProposal {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                target_version: None,
+                proposed_content: b"# Candidate profile\n".to_vec(),
+                observed_at: 1_700_000_001,
+            })
+            .await
+            .expect("proposal");
+        let forged = b"# Forged but coherent\n";
+        proposal.proposed_content_sha256 = resource_content_sha256(forged);
+        proposal.proposed_bytes = forged.len() as u64;
+        proposal.proposed_lines = 1;
+        proposal.added_lines = 1;
+        proposal.removed_lines = 1;
+        proposal.changed_lines = 1;
+        proposal.content_changed = true;
+
+        let receipt = store
+            .review_agent_md_change_proposal(AgentMdChangeProposalReview {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                proposal,
+                reviewed_at: 1_700_000_002,
+            })
+            .await
+            .expect("review self-consistent metadata");
+
+        assert_eq!(receipt.status, "current_unverified");
+        assert!(receipt.receipt_invariants_verified);
+        assert!(receipt.observed_state_current);
+        assert!(!receipt.source_authenticity_verified);
+        assert!(!receipt.eligible_for_human_review);
+        assert!(!receipt.automatic_apply_allowed);
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            original
         );
     }
 

@@ -6,15 +6,18 @@ use crate::resource_lineage::{
     unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
     AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, AgentMdCasRollback,
     AgentMdCasRollbackReceipt, AgentMdChangeProposal, AgentMdChangeProposalReceipt,
-    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
-    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
-    RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CAS_ROLLBACK_SCHEMA,
-    RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CHANGE_PROPOSAL_SCHEMA, RESOURCE_CHANGE_PROPOSAL_SCOPE,
-    RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
+    AgentMdChangeProposalReview, AgentMdChangeProposalReviewReceipt, ResourceBindingRecord,
+    ResourceLineageReport, ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA,
+    RESOURCE_BASELINE_OBSERVATION_SCOPE, RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE,
+    RESOURCE_CAS_ROLLBACK_SCHEMA, RESOURCE_CAS_ROLLBACK_SCOPE,
+    RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE,
+    RESOURCE_CHANGE_PROPOSAL_SCHEMA, RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES,
+    RESOURCE_LINEAGE_MAX_ROWS,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::{
@@ -174,6 +177,78 @@ fn agent_md_line_diff(before: &[u8], after: &[u8]) -> (u64, u64, u64, u64, u64) 
         removed,
         changed,
     )
+}
+
+fn proposal_receipt_violations(
+    resource_id: &str,
+    proposal: &AgentMdChangeProposalReceipt,
+) -> Vec<String> {
+    let mut violations = BTreeSet::new();
+    if proposal.schema != RESOURCE_CHANGE_PROPOSAL_SCHEMA {
+        violations.insert("proposal_schema_mismatch".to_string());
+    }
+    if proposal.proposal_scope != RESOURCE_CHANGE_PROPOSAL_SCOPE {
+        violations.insert("proposal_scope_mismatch".to_string());
+    }
+    if proposal.binding.resource_id != resource_id
+        || proposal.current_version.resource_id != resource_id
+    {
+        violations.insert("resource_id_mismatch".to_string());
+    }
+    if proposal.binding.resource_kind != "agent_md"
+        || proposal.current_version.resource_kind != "agent_md"
+    {
+        violations.insert("resource_kind_mismatch".to_string());
+    }
+    if proposal.binding.binding_sha256 != resource_binding_sha256(&proposal.binding) {
+        violations.insert("binding_sha256_mismatch".to_string());
+    }
+    if proposal.current_version.record_sha256
+        != resource_version_record_sha256(&proposal.current_version)
+    {
+        violations.insert("current_version_record_sha256_mismatch".to_string());
+    }
+    if proposal.current_content_sha256 != proposal.current_version.content_sha256
+        || !is_lower_hex_sha256(&proposal.current_content_sha256)
+    {
+        violations.insert("current_content_sha256_mismatch".to_string());
+    }
+    if !is_lower_hex_sha256(&proposal.proposed_content_sha256) {
+        violations.insert("proposed_content_sha256_malformed".to_string());
+    }
+    if proposal.current_bytes == 0
+        || proposal.current_bytes > RESOURCE_CONTENT_MAX_BYTES
+        || proposal.proposed_bytes == 0
+        || proposal.proposed_bytes > RESOURCE_CONTENT_MAX_BYTES
+    {
+        violations.insert("content_size_out_of_bounds".to_string());
+    }
+    if proposal.changed_lines != proposal.added_lines.max(proposal.removed_lines) {
+        violations.insert("line_summary_inconsistent".to_string());
+    }
+    if proposal.content_changed
+        != (proposal.current_content_sha256 != proposal.proposed_content_sha256)
+    {
+        violations.insert("content_changed_inconsistent".to_string());
+    }
+    if !proposal.content_changed
+        && (proposal.current_bytes != proposal.proposed_bytes
+            || proposal.current_lines != proposal.proposed_lines
+            || proposal.added_lines != 0
+            || proposal.removed_lines != 0
+            || proposal.changed_lines != 0)
+    {
+        violations.insert("unchanged_content_summary_inconsistent".to_string());
+    }
+    if proposal.target_version.is_some() != proposal.target_content_hash_match.is_some()
+        || proposal.target_content_hash_match == Some(false)
+    {
+        violations.insert("target_hash_admission_inconsistent".to_string());
+    }
+    if !proposal.proposal_only || proposal.resource_content_mutated || proposal.lineage_mutated {
+        violations.insert("proposal_mutation_boundary_violated".to_string());
+    }
+    violations.into_iter().collect()
 }
 
 #[cfg(unix)]
@@ -2867,6 +2942,236 @@ impl SqliteStore {
     ) -> Result<AgentMdChangeProposalReceipt> {
         Err(Error::Backend(
             "propose_agent_md_change: O_NOFOLLOW file identity verification requires Unix".into(),
+        ))
+    }
+
+    /// SEPL P1A4 — re-admit a P1A3 receipt for human review.
+    ///
+    /// The candidate body is intentionally absent. This method verifies only
+    /// receipt invariants and whether the observed file, binding, and complete
+    /// lineage still match the receipt. P1A3 receipts have no persisted or
+    /// signed provenance, so even a current receipt remains unauthenticated
+    /// and is never admitted for human or automatic application.
+    #[cfg(unix)]
+    pub async fn review_agent_md_change_proposal(
+        &self,
+        request: AgentMdChangeProposalReview,
+    ) -> Result<AgentMdChangeProposalReviewReceipt> {
+        if request.resource_id.is_empty()
+            || request.resource_id.len() > 512
+            || request.resource_id.trim() != request.resource_id
+            || request.resource_id.chars().any(char::is_control)
+        {
+            return Err(Error::Backend(
+                "review_agent_md_change_proposal: resource_id must be 1..=512 visible characters without surrounding whitespace".into(),
+            ));
+        }
+        if request.reviewed_at < 0 {
+            return Err(Error::Backend(
+                "review_agent_md_change_proposal: reviewed_at must be non-negative".into(),
+            ));
+        }
+        if request.path.file_name().and_then(|name| name.to_str()) != Some("AGENT.md") {
+            return Err(Error::Backend(
+                "review_agent_md_change_proposal: target filename must be AGENT.md".into(),
+            ));
+        }
+
+        let requested_file = OpenedAgentMd::open(&request.path)
+            .map_err(|error| Error::Backend(format!("review_agent_md_change_proposal: {error}")))?;
+        let canonical_path_buf = std::fs::canonicalize(&request.path).map_err(|error| {
+            Error::Backend(format!(
+                "review_agent_md_change_proposal: canonicalize {}: {error}",
+                request.path.display()
+            ))
+        })?;
+        let mut opened_file = OpenedAgentMd::open(&canonical_path_buf)
+            .map_err(|error| Error::Backend(format!("review_agent_md_change_proposal: {error}")))?;
+        if requested_file.device != opened_file.device
+            || requested_file.inode != opened_file.inode
+            || resource_content_sha256(&requested_file.content)
+                != resource_content_sha256(&opened_file.content)
+        {
+            return Err(Error::Backend(
+                "review_agent_md_change_proposal: resource changed while resolving canonical path"
+                    .into(),
+            ));
+        }
+        let canonical_path = canonical_path_buf
+            .to_str()
+            .ok_or_else(|| {
+                Error::Backend(
+                    "review_agent_md_change_proposal: canonical path must be valid UTF-8".into(),
+                )
+            })?
+            .to_string();
+        if canonical_path.len() > 4096 {
+            return Err(Error::Backend(
+                "review_agent_md_change_proposal: canonical path exceeds 4096 bytes".into(),
+            ));
+        }
+
+        let initial_content_sha256 = resource_content_sha256(&opened_file.content);
+        let resource_id = request.resource_id;
+        let proposal = request.proposal;
+        let reviewed_at = request.reviewed_at;
+        let mut receipt_violations = proposal_receipt_violations(&resource_id, &proposal);
+        let receipt_invalid = !receipt_violations.is_empty();
+        let readback_path = PathBuf::from(&canonical_path);
+
+        self.conn
+            .call(move |connection| -> RusqliteResult<AgentMdChangeProposalReviewReceipt> {
+                let transaction = connection.transaction()?;
+                opened_file
+                    .verify_path_identity(&readback_path)
+                    .map_err(resource_baseline_sql_error)?;
+                let current_content = opened_file
+                    .readback(&readback_path)
+                    .map_err(resource_baseline_sql_error)?;
+                let current_content_sha256 = resource_content_sha256(&current_content);
+                if current_content_sha256 != initial_content_sha256 {
+                    receipt_violations.push("resource_changed_during_review".to_string());
+                }
+                if proposal.binding.canonical_path != canonical_path {
+                    receipt_violations.push("canonical_path_mismatch".to_string());
+                }
+                if proposal.current_content_sha256 != current_content_sha256 {
+                    receipt_violations.push("current_content_stale".to_string());
+                }
+                if proposal.current_bytes != current_content.len() as u64
+                    || proposal.current_lines
+                        != std::str::from_utf8(&current_content)
+                            .unwrap_or_default()
+                            .lines()
+                            .count() as u64
+                {
+                    receipt_violations.push("current_content_summary_mismatch".to_string());
+                }
+
+                let binding = transaction
+                    .query_row(
+                        "SELECT resource_id, resource_kind, canonical_path, bound_at, binding_sha256 \
+                         FROM resource_bindings WHERE resource_id=?1",
+                        [&resource_id],
+                        |row| {
+                            Ok(ResourceBindingRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                canonical_path: row.get(2)?,
+                                bound_at: row.get(3)?,
+                                binding_sha256: row.get(4)?,
+                            })
+                        },
+                    )
+                    .optional()?;
+                match binding {
+                    Some(binding) if binding == proposal.binding => {}
+                    Some(_) => receipt_violations.push("binding_stale".to_string()),
+                    None => receipt_violations.push("binding_missing".to_string()),
+                }
+
+                let head = transaction
+                    .query_row(
+                        "SELECT resource_id, resource_kind, version, content_sha256, \
+                                predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                         FROM resource_versions WHERE resource_id=?1 \
+                         ORDER BY version DESC LIMIT 1",
+                        [&resource_id],
+                        |row| {
+                            Ok(ResourceVersionRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                version: row.get::<_, i64>(2)? as u64,
+                                content_sha256: row.get(3)?,
+                                predecessor_version: row
+                                    .get::<_, Option<i64>>(4)?
+                                    .map(|value| value as u64),
+                                predecessor_record_sha256: row.get(5)?,
+                                observed_at: row.get(6)?,
+                                record_sha256: row.get(7)?,
+                            })
+                        },
+                    )
+                    .optional()?;
+                match head {
+                    Some(head) if head == proposal.current_version => {}
+                    Some(_) => receipt_violations.push("lineage_head_stale".to_string()),
+                    None => receipt_violations.push("lineage_head_missing".to_string()),
+                }
+
+                let lineage_records = {
+                    let mut statement = transaction.prepare(
+                        "SELECT resource_id, resource_kind, version, content_sha256, \
+                                predecessor_version, predecessor_record_sha256, observed_at, record_sha256 \
+                         FROM resource_versions WHERE resource_id=?1 ORDER BY version ASC",
+                    )?;
+                    let records = statement
+                        .query_map([&resource_id], |row| {
+                            Ok(ResourceVersionRecord {
+                                resource_id: row.get(0)?,
+                                resource_kind: row.get(1)?,
+                                version: row.get::<_, i64>(2)? as u64,
+                                content_sha256: row.get(3)?,
+                                predecessor_version: row
+                                    .get::<_, Option<i64>>(4)?
+                                    .map(|value| value as u64),
+                                predecessor_record_sha256: row.get(5)?,
+                                observed_at: row.get(6)?,
+                                record_sha256: row.get(7)?,
+                            })
+                        })?
+                        .collect::<RusqliteResult<Vec<_>>>()?;
+                    records
+                };
+                let lineage_report = validate_resource_lineage(&resource_id, lineage_records, false);
+                if lineage_report.status != "verified" {
+                    receipt_violations.push("lineage_not_verified".to_string());
+                }
+                transaction.commit()?;
+
+                receipt_violations.sort();
+                receipt_violations.dedup();
+                let observed_state_current = receipt_violations.is_empty();
+                let status = if receipt_invalid {
+                    "invalid"
+                } else if observed_state_current {
+                    "current_unverified"
+                } else {
+                    "stale"
+                };
+                Ok(AgentMdChangeProposalReviewReceipt {
+                    schema: RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA.to_string(),
+                    proposal,
+                    reviewed_at,
+                    status: status.to_string(),
+                    violations: receipt_violations,
+                    receipt_invariants_verified: !receipt_invalid,
+                    observed_state_current,
+                    source_authenticity_verified: false,
+                    candidate_content_available: false,
+                    semantic_review_performed: false,
+                    eligible_for_human_review: false,
+                    automatic_apply_allowed: false,
+                    proposal_only: true,
+                    resource_content_mutated: false,
+                    lineage_mutated: false,
+                    review_scope: RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE.to_string(),
+                })
+            })
+            .await
+            .map_err(|error| {
+                Error::Backend(format!("review_agent_md_change_proposal: {error}"))
+            })
+    }
+
+    #[cfg(not(unix))]
+    pub async fn review_agent_md_change_proposal(
+        &self,
+        _request: AgentMdChangeProposalReview,
+    ) -> Result<AgentMdChangeProposalReviewReceipt> {
+        Err(Error::Backend(
+            "review_agent_md_change_proposal: O_NOFOLLOW file identity verification requires Unix"
+                .into(),
         ))
     }
 
