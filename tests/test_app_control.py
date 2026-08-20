@@ -2326,6 +2326,7 @@ raise SystemExit(64)
                     "AB_APP_CONTROL_OPERATION_DIR": str(journal_dir),
                 }
             )
+            operation_id = "ab-episode-0123456789abcdef0123456789abcdef"
             argv = [
                 sys.executable,
                 str(SCRIPT),
@@ -2334,7 +2335,7 @@ raise SystemExit(64)
                 "--player",
                 "rhythmbox",
                 "--operation-id",
-                "sigkill-episode",
+                operation_id,
                 "--verify-timeout",
                 "4.0",
                 "--wrapper-contract-version",
@@ -2352,14 +2353,40 @@ raise SystemExit(64)
                 time.sleep(0.01)
             self.assertEqual(state["next_count"], 1)
             record_path = journal_dir / (
-                hashlib.sha256(b"sigkill-episode").hexdigest() + ".json"
+                hashlib.sha256(operation_id.encode("ascii")).hexdigest() + ".json"
             )
             interrupted_record = json.loads(record_path.read_text(encoding="utf-8"))
             self.assertEqual(interrupted_record["phase"], "dispatch_started")
             self.assertEqual(interrupted_record["dispatch_count"], 1)
 
+            index_script = SCRIPT.with_name("app-control-recovery-candidates.py")
+            discovered = subprocess.run(
+                [sys.executable, str(index_script), "--journal", str(journal_dir)],
+                capture_output=True, text=True, env=env, check=False, timeout=5,
+            )
+            self.assertEqual(discovered.returncode, 0, discovered.stderr)
+            handoff = json.loads(discovered.stdout)
+            self.assertEqual(handoff["candidate_count"], 1)
+            candidate = handoff["candidates"][0]
+            self.assertEqual(candidate["operation_id"], operation_id)
+            self.assertEqual(candidate["request"]["action"], "next")
+            self.assertEqual(candidate["request"]["player_selector"], "rhythmbox")
+            self.assertEqual(candidate["request"]["operation_ttl_secs"], 3600)
+            self.assertFalse(candidate["automatic_execution_allowed"])
+            record_sha_before_recovery = hashlib.sha256(record_path.read_bytes()).hexdigest()
+            self.assertEqual(candidate["record_sha256"], record_sha_before_recovery)
+
+            recovery_argv = [
+                sys.executable, str(SCRIPT), "--action", candidate["request"]["action"],
+                "--player", candidate["request"]["player_selector"],
+                "--operation-id", candidate["operation_id"],
+                "--operation-ttl-secs", str(candidate["request"]["operation_ttl_secs"]),
+                "--verify-timeout", "4.0",
+                "--wrapper-contract-version", "agent_bridge.app_control.wrapper_contract.v1",
+            ]
+
             recovered = subprocess.run(
-                argv, capture_output=True, text=True, env=env, check=False, timeout=5
+                recovery_argv, capture_output=True, text=True, env=env, check=False, timeout=5
             )
             self.assertEqual(recovered.returncode, 0, recovered.stderr)
             payload = json.loads(recovered.stdout)
@@ -2379,7 +2406,7 @@ raise SystemExit(64)
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["next_count"], 1)
             replayed = subprocess.run(
-                argv, capture_output=True, text=True, env=env, check=False, timeout=5
+                recovery_argv, capture_output=True, text=True, env=env, check=False, timeout=5
             )
             self.assertEqual(replayed.returncode, 0, replayed.stderr)
             replay_payload = json.loads(replayed.stdout)

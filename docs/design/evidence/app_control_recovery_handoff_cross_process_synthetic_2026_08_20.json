@@ -1,0 +1,35 @@
+{
+  "schema": "agent_bridge.app_control.recovery_handoff_cross_process_synthetic.v0",
+  "recorded_at": "2026-08-20T16:27:00Z",
+  "implementation_base": "ce392c6f",
+  "environment": {
+    "synthetic_player": true,
+    "temporary_owner_processes": true,
+    "temporary_owner_only_journal": true,
+    "real_rhythmbox_touched": false,
+    "mobile_projection_touched": false
+  },
+  "sequence": {
+    "process_a": "persist_dispatch_started_then_child_updates_fake_track_and_sigkills_parent",
+    "process_b": "read_only_candidate_index_discovers_exact_canonical_request",
+    "process_c": "same_id_recovery_observes_settled_track_without_next",
+    "process_d": "same_id_terminal_replay_without_backend_call"
+  },
+  "verified": {
+    "opaque_operation_id_discovered": true,
+    "candidate_record_sha_matches_dispatch_anchor": true,
+    "canonical_action_player_and_ttl_reused": true,
+    "recovery_predicate": "track_identity_changed_after_restart_settled",
+    "minimum_settlement_ms": 500,
+    "recovered_after_interruption": true,
+    "terminal_replay_idempotent": true,
+    "synthetic_external_next_count": 1
+  },
+  "claim_boundary": {
+    "real_mpris_recovery_proven": false,
+    "real_codex_restart_proven": false,
+    "owner_intent_currentness_proven": false,
+    "automatic_resume_authorized": false,
+    "mobile_delivery_proven": false
+  }
+}

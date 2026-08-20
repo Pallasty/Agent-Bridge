@@ -205,6 +205,15 @@ explicit same-request recovery decision without owner restatement. It is not a
 resume token or dispatch permit: the normal mutating path still takes the
 exclusive lock and revalidates the record, expiry, player and effect evidence.
 
+The source-local cross-process synthetic gate exercises the complete handoff:
+one process is killed after its fake `playerctl next` child changes state, a
+second process discovers the exact anchor and canonical request, a third
+recovers settled state without another `next`, and a fourth replays the
+terminal receipt. The fake external dispatch counter remains exactly one.
+This validates process and journal boundaries without touching real MPRIS or a
+phone; it does not establish current owner intent or authorize automatic live
+recovery.
+
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.
 The first durable action/replay plus authenticated mobile-delivery episode is
