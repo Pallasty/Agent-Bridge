@@ -1,0 +1,13 @@
+{
+  "schema": "agent_bridge.qwen3_tts.codec_linear_scope3_blind_ab_manifest.v1",
+  "status": "SCOPE3_BLIND_AB_READY_FOR_OWNER_REVIEW",
+  "blinding_intact": true,
+  "arm_identity_included": false,
+  "cases": [
+    {"order": 1, "case_id": "zh-long-technical-vivian", "files": ["zh-long-technical-vivian-A.wav", "zh-long-technical-vivian-B.wav"]},
+    {"order": 2, "case_id": "zh-mixed-english-supported", "files": ["zh-mixed-english-supported-A.wav", "zh-mixed-english-supported-B.wav"]},
+    {"order": 3, "case_id": "zh-warm-serena", "files": ["zh-warm-serena-A.wav", "zh-warm-serena-B.wav"]},
+    {"order": 4, "case_id": "zh-homophone-difficult", "files": ["zh-homophone-difficult-A.wav", "zh-homophone-difficult-B.wav"]}
+  ],
+  "review_fields": ["intelligibility", "naturalness", "artifacts_or_noise", "tail_clarity", "fatigue", "preference"]
+}

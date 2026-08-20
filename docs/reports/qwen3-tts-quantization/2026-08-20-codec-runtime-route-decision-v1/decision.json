@@ -1,0 +1,67 @@
+{
+  "authorization": {
+    "allows_checkpoint_rewrite": false,
+    "allows_custom_kernel_build": false,
+    "allows_deployment": false,
+    "allows_promotion": false,
+    "allows_runtime_wiring": false
+  },
+  "inputs": {
+    "coreml.json": {
+      "path": "inputs/coreml.json",
+      "sha256": "5e6cf4e5cfcbe2da768779b024d1d7fc6395620cb79e10e5b0d20682fe82cfea"
+    },
+    "e2e.json": {
+      "path": "inputs/e2e.json",
+      "sha256": "0ad226fa50f8860e095121e3e1510cb5d0d2b3b25bbc1b1b3e3362d060b01c75"
+    },
+    "packed.json": {
+      "path": "inputs/packed.json",
+      "sha256": "d3832531b695cd03a222750b80cd095b2e10866ba139d1bc480fd31d5397f732"
+    }
+  },
+  "reopen_requirements": [
+    "native_fused_kernel_or_equivalent_runtime_without_fp16_weight_retention",
+    "projected_model_memory_saving_fraction_at_least_0.05",
+    "full_frozen_corpus_runtime_coverage",
+    "end_to_end_latency_ratio_at_most_1.05",
+    "runtime_memory_delta_bytes_below_0",
+    "fresh_waveform_and_blind_listening_evidence"
+  ],
+  "routes": [
+    {
+      "decision": "reject",
+      "observed_max_latency_ratio": 1.017644163833269,
+      "observed_runtime_memory_delta_bytes": 12595200,
+      "reason": "original_fp16_weights_retained_and_sidecar_added",
+      "retained_fp16_scope_parameter_bytes": 25165824,
+      "route": "reversible_sidecar"
+    },
+    {
+      "decision": "reject",
+      "observed_max_module_slowdown": 12.691826771537194,
+      "reason": "packed_kernel_exceeds_latency_limit",
+      "route": "current_packed_mps_kernel"
+    },
+    {
+      "decision": "reject",
+      "observed_kernel_nrmse": 0.0028987820260226727,
+      "observed_latency_ratio": 3.4545671727927747,
+      "reason": "handoff_exceeds_latency_and_numeric_limits",
+      "route": "current_coreml_handoff"
+    },
+    {
+      "decision": "defer",
+      "reason": "scope_benefit_below_checkpoint_rewrite_minimum",
+      "route": "three_module_checkpoint_rewrite",
+      "theoretical_model_memory_saving_fraction": 0.003011107264004215
+    }
+  ],
+  "schema": "agent_bridge.qwen3_tts.codec_runtime_route_decision.v1",
+  "status": "PAUSE_CURRENT_CODEC_RUNTIME_ROUTES",
+  "thresholds": {
+    "max_kernel_nrmse": 0.002,
+    "max_latency_ratio": 1.05,
+    "minimum_model_memory_saving_fraction_for_checkpoint_rewrite": 0.05
+  }
+}

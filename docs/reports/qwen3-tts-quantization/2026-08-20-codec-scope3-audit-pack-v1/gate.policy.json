@@ -1,0 +1,18 @@
+{
+  "schema": "agent_bridge.tts_quantization_gate_policy.v1",
+  "required_case_count": 4,
+  "require_blind_listening_for_codec": true,
+  "resource_limits": {
+    "max_latency_ratio": 1.05,
+    "require_artifact_smaller": true,
+    "require_runtime_memory_nonincrease": true
+  },
+  "authorization": {
+    "allows_weight_writing": false,
+    "allows_checkpoint_rewrite": false,
+    "allows_audio_generation_or_playback": false,
+    "allows_runtime_wiring": false,
+    "allows_deployment": false,
+    "allows_promotion": false
+  }
+}

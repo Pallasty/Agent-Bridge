@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.qwen3_tts.codec_linear_scope3_blind_ab_owner_review.v1",
+  "status": "OWNER_REVIEW_COMPLETE_BLINDED_RESPONSES_SEALED",
+  "completed_cases": 4,
+  "total_cases": 4,
+  "blinding_intact": true,
+  "reviews": [
+    {
+      "case_id": "zh-long-technical-vivian",
+      "preference": "tie",
+      "intelligibility": "both_good",
+      "naturalness": "no_obvious_difference",
+      "artifacts_or_noise": "no_obvious_defect",
+      "timbre": "shared_bright_timbre",
+      "arm_identity_known": false
+    },
+    {
+      "case_id": "zh-mixed-english-supported",
+      "preference": "tie",
+      "intelligibility": "no_obvious_difference",
+      "naturalness": "no_obvious_difference",
+      "artifacts_or_noise": "no_obvious_defect",
+      "arm_identity_known": false
+    },
+    {
+      "case_id": "zh-warm-serena",
+      "preference": "tie",
+      "intelligibility": "both_clear",
+      "naturalness": "both_natural_and_soft",
+      "artifacts_or_noise": "none",
+      "arm_identity_known": false
+    },
+    {
+      "case_id": "zh-homophone-difficult",
+      "preference": "tie",
+      "intelligibility": "both_good",
+      "naturalness": "both_soft_and_pleasant",
+      "artifacts_or_noise": "no_obvious_defect",
+      "arm_identity_known": false
+    }
+  ],
+  "authorization": {"allows_unblinding": true, "allows_checkpoint_rewrite": false, "allows_runtime_wiring": false, "allows_deployment": false, "allows_promotion": false}
+}

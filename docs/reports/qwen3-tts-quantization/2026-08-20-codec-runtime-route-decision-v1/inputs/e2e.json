@@ -1,0 +1,24 @@
+{
+  "schema": "agent_bridge.qwen3_tts.codec_scope3_e2e_reduction.v1",
+  "status": "SCOPE3_RUNTIME_INTEGRATION_REJECTED_NO_END_TO_END_BENEFIT",
+  "arms": {
+    "fp16_sha256": "a193d21b1c101ed8e86ea3fa9993adba8e5af613a13651713376b8dd20902f15",
+    "scope3_q8_sha256": "8c6708ea58092e748d43f9f75c92083dc06970d655b2f929502105f8c5e1a5f4"
+  },
+  "cases": [
+    {"case_id": "zh-long-technical-vivian", "fp16_median_seconds": 13.108056208999187, "q8_median_seconds": 13.186206582999148, "q8_to_fp16_ratio": 1.0059620109003125, "fp16_median_rtf": 1.0639656013798042, "q8_median_rtf": 1.070308975892788},
+    {"case_id": "zh-mixed-english-supported", "fp16_median_seconds": 7.000175875000423, "q8_median_seconds": 7.123688125000626, "q8_to_fp16_ratio": 1.017644163833269, "fp16_median_rtf": 1.0670999809451864, "q8_median_rtf": 1.0859280678354615}
+  ],
+  "memory": {
+    "measurement": "mps_current_allocated_before_after_not_peak",
+    "fp16_steady_bytes": 4174496256,
+    "q8_steady_bytes": 4187091456,
+    "q8_minus_fp16_bytes": 12595200,
+    "sidecar_bytes": 12595968,
+    "original_fp16_scope_parameter_bytes_retained": 25165824,
+    "runtime_memory_reduction_observed": false
+  },
+  "loader": {"scope_module_count": 3, "calls_per_module": 6, "default_off": true, "hash_bound": true, "restores_instance_forward": true},
+  "gates": {"latency_must_not_regress": false, "runtime_memory_must_decrease": false},
+  "authorization": {"allows_runtime_wiring": false, "allows_checkpoint_rewrite": false, "allows_deployment": false, "allows_promotion": false}
+}
