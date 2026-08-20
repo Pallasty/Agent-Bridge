@@ -1,0 +1,71 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_pair_side_evidence.v0",
+  "pair_id": "embodied-media-pair-04",
+  "side": "baseline",
+  "observed_at": "2026-08-20T14:55:10Z",
+  "status": "BASELINE_VERIFIED_TRIAL_NOT_STARTED",
+  "preregistration": {
+    "commit": "640e4df5598ef9cf77830532e47fc537268c70a4",
+    "path": "docs/design/evidence/embodied_media_episode_dogfood_pair_04_preregistration_2026_08_20.json",
+    "registered_before_actuation": true
+  },
+  "runner": {
+    "commit": "8fbc8faa505fe31bd337ffbbb3b25d5cd45a1758",
+    "schema": "agent_bridge.embodied_media_episode_runner.v0",
+    "collector_schema": "agent_bridge.embodied_media_episode_collector_result.v0",
+    "cleanup_package": "dev.agentbridge.companion"
+  },
+  "normalized_result": {
+    "status": "VERIFIED_PRIVATE_RECEIPTS_NORMALIZED",
+    "operation_id_sha256": "2aae255e94329704d5d6cc6af6537263d533e8173ac010598d15edfab16f39e7",
+    "agent_orchestration_calls": 7,
+    "metrics": {
+      "owner_restatements": 0,
+      "manual_interventions": 0,
+      "failed_or_replanned_calls": 0,
+      "elapsed_ms": 4125
+    },
+    "evidence": {
+      "player_binding_verified": true,
+      "track_binding_verified": true,
+      "exact_draw_verified": true,
+      "cleanup_verified": true,
+      "reported_dispatch_count": 1,
+      "external_execution_repeated": false,
+      "before_track_id_sha256": "1a9ca00e2313febd2f2d6bea206603e6e7421bc1094bb7362491f73eef320e96",
+      "after_track_id_sha256": "04d5070776baba7eb9d0cf85e64ac644d3cc331da582f22e26b3221d0a431778",
+      "target_frame_sha256": "66a2fa2a648f85ca101e3e4c4fd440bea35a62ef06612d75dbfbf86c03907bb9"
+    }
+  },
+  "private_evidence_audit": {
+    "raw_receipt_count": 7,
+    "receipt_directory_mode": "0700",
+    "receipt_file_mode": "0600",
+    "receipt_manifest_sha256": "834f495b9cd377ce923b56157c7c9b7a6c1ed3e4fbd58d88d3eeebecd3ec038e",
+    "journal_record_sha256": "ec6ebe0097ef22fd27110b00247bc347c61b6e241627cfaa97f2756a7c0a89ad",
+    "journal_phase": "terminal",
+    "journal_dispatch_count": 1,
+    "current_track_matches_journal_after_at_audit": true,
+    "companion_process_absent_after_cleanup": true,
+    "raw_values_persisted_in_git": false
+  },
+  "pair_gate": {
+    "baseline_counts_as_verified_side": true,
+    "trial_started": false,
+    "pair_counts_in_three_pair_denominator": false,
+    "trial_may_start_only_after_this_evidence_is_committed": true,
+    "automatic_operation_id_replacement_allowed": false
+  },
+  "claim_boundary": {
+    "one_contract_bound_dispatch_reported_for_baseline_operation_id": true,
+    "global_dispatch_count_proven": false,
+    "exclusive_causation_proven": false,
+    "bounded_500ms_settlement_verified": true,
+    "long_lived_stability_proven": false,
+    "device_activity_draw_reported": true,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false,
+    "workflow_burden_reduction_observed": false,
+    "behavior_lift_proven": false
+  }
+}
