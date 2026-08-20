@@ -77,12 +77,13 @@ Implemented a small Android-first MCP surface in
   a short-lived title/text projection consent page. It returns no token and
   never presses the consent button or starts the companion service.
 - `mobile_projection_status`: inspect one session or recent sessions without
-  touching the device. It reports observed pulls and uses deliberately honest
-  lifecycle phases: an idle authenticated client is not called disconnected.
+  touching the device. It separates authenticated pulls, exact frames served,
+  and exact companion draw reports, and uses deliberately honest lifecycle
+  phases: an idle authenticated client is not called disconnected.
 - `mobile_projection_update`: replace title/text within an active consented
   session while preserving its endpoint, token, expiry, and zero-authority
-  boundary. Status distinguishes host-side revision update from authenticated
-  delivery of that revision to the device.
+  boundary. Status distinguishes host-side queueing, authenticated serving,
+  and an exact Activity draw report for that revision and frame digest.
 - `mobile_projection_stop`: stop the host listener early and force-stop the
   selected companion package, without starting any background service.
 - `mobile_apple_status`: read-only Apple mobile readiness probe for Xcode,
@@ -145,11 +146,26 @@ event, `connected_then_idle` intentionally does not claim one.
 
 The projection frame is now revisioned inside the same short-lived session.
 Updates do not reopen the Activity, extend TTL, change the token, or start a
-service. The listener reports both `current_revision` and
-`last_served_revision`; only equality (or a later served revision) proves that
-an authenticated device pull observed the current content. One in-flight poll
-may still receive the prior revision, so update itself returns
-`updated_awaiting_authenticated_pull` rather than claiming delivery.
+service. One in-flight poll may still receive the prior revision, so update
+itself returns a queued result rather than claiming delivery.
+
+The original bounded wait treated a successful host socket flush as though the
+device had observed the revision. That was too strong: at that point the
+Android network thread had only scheduled UI work on the main thread. The
+2026-08-19 protocol therefore separates `FrameServed` from
+`FrameRenderReported`. After validating and applying a frame, the companion
+waits for an Activity draw pass and sends an authenticated ABR1 report bound to
+the exact session, positive revision, and SHA-256 of the raw served frame.
+`mobile_projection_wait` v1 requires that exact pair. It does not use
+`last_served_revision >= target_revision`, and revision zero is invalid. A
+newer draw report cannot stand in for a skipped older revision.
+
+The resulting receipt means “the companion Activity reported drawing these
+exact bytes.” It deliberately fixes `human_observed=false` and
+`pixel_verified=false`: neither TCP delivery nor an app-originated draw report
+proves what a person saw or independently verifies display pixels. Manual
+connection is labelled holder consent; test-only auto-connect is only an
+authenticated test connection and is never promoted to consent.
 
 Physical-device acceptance on 2026-08-11 used serial
 `3K661F0178H00000`. After the holder pressed **Allow and connect**, status

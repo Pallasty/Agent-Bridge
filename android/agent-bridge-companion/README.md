@@ -34,6 +34,17 @@ ordered next actions. These are display-only fields: they do not create
 buttons, callbacks, or any actuation path. Clients that do not render the
 optional fields continue to display the original title and body.
 
+After an authenticated frame passes its schema, session, expiry, and
+zero-authority checks, the Activity applies all display fields and waits for a
+subsequent `DecorView` draw callback. Only then may it send the host an
+HMAC-bound `ABR1` report containing the exact raw-frame SHA-256 and revision.
+This is device-side evidence that Android traversed the view draw path, not a
+claim that a person saw the screen or that pixels were independently inspected.
+An identical revision/digest is idempotent; a network failure remains
+unacknowledged and may be retried by a later pull. Disconnect, destruction,
+expiry, invalid frames, and frames that never reach the draw callback do not
+initiate a report.
+
 While a person-approved projection session is in the foreground, the Activity
 also offers an explicit **Submit text** field. Submission is a device-originated
 observation, not `adb input text`: it is HMAC-bound to the same session, timestamp,

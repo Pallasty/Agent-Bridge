@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.speech.RecognizerIntent;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -46,6 +47,16 @@ public final class ProjectionActivity extends Activity {
     private EditText textInput;
     private TextView textSubmitState;
     private Button textSubmitButton;
+    private long connectionGeneration;
+    private long lastAppliedRevision = -1L;
+    private String lastAppliedFrameSha256;
+    private long lastAcknowledgedRevision = -1L;
+    private String lastAcknowledgedFrameSha256;
+    private RenderTicket pendingDraw;
+    private RenderTicket acknowledgementInFlight;
+    private View pendingDrawView;
+    private ViewTreeObserver.OnDrawListener pendingDrawListener;
+    private volatile Socket renderReportSocket;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -91,6 +102,7 @@ public final class ProjectionActivity extends Activity {
     }
 
     private void beginProjection() {
+        if (connected) return;
         try {
             long now = System.currentTimeMillis() / 1000L;
             ProjectionProtocol.validateSession(now, expiresAt);
@@ -100,6 +112,13 @@ public final class ProjectionActivity extends Activity {
             ProjectionProtocol.request(token, sessionId, now, "00000000000000000000000000000000");
         } catch (Exception error) { state.setText("Cannot connect: invalid or expired session"); return; }
         connected = true;
+        connectionGeneration++;
+        lastAppliedRevision = -1L;
+        lastAppliedFrameSha256 = null;
+        lastAcknowledgedRevision = -1L;
+        lastAcknowledgedFrameSha256 = null;
+        pendingDraw = null;
+        acknowledgementInFlight = null;
         LinearLayout panel = panel();
         heading = text("Connecting…", 24, Typeface.BOLD); panel.addView(heading);
         statusCard = text("", 18, Typeface.BOLD); statusCard.setVisibility(View.GONE); panel.addView(statusCard);
@@ -240,17 +259,23 @@ public final class ProjectionActivity extends Activity {
         if (System.currentTimeMillis() / 1000L >= expiresAt) { disconnect("Session expired"); return; }
         new Thread(new Runnable() { public void run() {
             try {
-                final String json = fetchFrame();
-                handler.post(new Runnable() { public void run() { showFrame(json); } });
+                final ProjectionProtocol.VerifiedFrame frame = fetchFrame();
+                handler.post(new Runnable() { public void run() { showFrame(frame); } });
             } catch (final Exception error) {
-                handler.post(new Runnable() { public void run() { if (connected) state.setText("Waiting for host…"); } });
+                handler.post(new Runnable() { public void run() {
+                    if (connected && lastAppliedRevision < 0L) state.setText("Waiting for host…");
+                } });
             } finally {
-                handler.postDelayed(new Runnable() { public void run() { poll(); } }, 2000L);
+                handler.post(new Runnable() { public void run() {
+                    if (connected) handler.postDelayed(new Runnable() {
+                        public void run() { poll(); }
+                    }, 2000L);
+                } });
             }
         } }, "AgentBridgeProjectionPull").start();
     }
 
-    private String fetchFrame() throws Exception {
+    private ProjectionProtocol.VerifiedFrame fetchFrame() throws Exception {
         long now = System.currentTimeMillis() / 1000L;
         byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
         String nonce = Hex.encode(nonceBytes);
@@ -262,41 +287,195 @@ public final class ProjectionActivity extends Activity {
             writer.write(request); writer.write("\n"); writer.flush();
             String response = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
             if (response == null) throw new IllegalArgumentException("empty projection response");
-            return ProjectionProtocol.verifyResponse(token, sessionId, now, nonce, response);
+            return ProjectionProtocol.verifyFrameResponse(token, sessionId, now, nonce, response);
         } finally { socket.close(); }
     }
 
-    private void showFrame(String json) {
+    private void showFrame(ProjectionProtocol.VerifiedFrame verifiedFrame) {
         if (!connected) return;
         try {
-            JSONObject frame = new JSONObject(json);
+            JSONObject frame = new JSONObject(verifiedFrame.rawJson);
+            long frameExpiresAt = frame.getLong("expires_at_unix_seconds");
+            long revision = frame.getLong("revision");
+            ProjectionProtocol.validateSession(System.currentTimeMillis() / 1000L, frameExpiresAt);
             if (!ProjectionProtocol.SCHEMA.equals(frame.getString("schema"))
                     || !sessionId.equals(frame.getString("session_id"))
-                    || frame.getLong("expires_at_unix_seconds") != expiresAt
+                    || frameExpiresAt != expiresAt
+                    || revision <= 0L
                     || frame.getBoolean("attention_authority")
                     || frame.getBoolean("memory_authority")
                     || frame.getBoolean("actuation_authority")) throw new IllegalArgumentException("invalid frame boundary");
-            heading.setText(frame.getString("title")); body.setText(frame.getString("body"));
-            String statusValue = frame.optString("status", "").trim();
-            statusCard.setText(statusValue.isEmpty() ? "" : "STATUS  ·  " + statusValue);
-            statusCard.setVisibility(statusValue.isEmpty() ? View.GONE : View.VISIBLE);
-            JSONArray actions = frame.optJSONArray("actions");
-            StringBuilder actionText = new StringBuilder();
-            if (actions != null) for (int i = 0; i < actions.length() && i < 6; i++) {
-                String action = actions.optString(i, "").trim();
-                if (!action.isEmpty()) actionText.append(actionText.length() == 0 ? "" : "\n\n")
-                        .append(i + 1).append(". ").append(action);
+            if (lastAppliedRevision > revision
+                    || (lastAppliedRevision == revision
+                    && lastAppliedFrameSha256 != null
+                    && !lastAppliedFrameSha256.equals(verifiedFrame.frameSha256)))
+                throw new IllegalArgumentException("projection revision identity mismatch");
+
+            boolean alreadyApplied = lastAppliedRevision == revision
+                    && verifiedFrame.frameSha256.equals(lastAppliedFrameSha256);
+            if (!alreadyApplied) {
+                heading.setText(frame.getString("title")); body.setText(frame.getString("body"));
+                String statusValue = frame.optString("status", "").trim();
+                statusCard.setText(statusValue.isEmpty() ? "" : "STATUS  ·  " + statusValue);
+                statusCard.setVisibility(statusValue.isEmpty() ? View.GONE : View.VISIBLE);
+                JSONArray actions = frame.optJSONArray("actions");
+                StringBuilder actionText = new StringBuilder();
+                if (actions != null) for (int i = 0; i < actions.length() && i < 6; i++) {
+                    String action = actions.optString(i, "").trim();
+                    if (!action.isEmpty()) actionText.append(actionText.length() == 0 ? "" : "\n\n")
+                            .append(i + 1).append(". ").append(action);
+                }
+                boolean hasActions = actionText.length() > 0;
+                actionsHeading.setVisibility(hasActions ? View.VISIBLE : View.GONE);
+                actionsBody.setText(actionText.toString());
+                actionsBody.setVisibility(hasActions ? View.VISIBLE : View.GONE);
+                state.setText(String.format(Locale.US,
+                        "Read-only · revision %d · disconnect anytime", revision));
+                lastAppliedRevision = revision;
+                lastAppliedFrameSha256 = verifiedFrame.frameSha256;
             }
-            boolean hasActions = actionText.length() > 0;
-            actionsHeading.setVisibility(hasActions ? View.VISIBLE : View.GONE);
-            actionsBody.setText(actionText.toString());
-            actionsBody.setVisibility(hasActions ? View.VISIBLE : View.GONE);
-            state.setText(String.format(Locale.US, "Read-only · revision %d · disconnect anytime", frame.getLong("revision")));
-        } catch (Exception error) { state.setText("Rejected invalid projection frame"); }
+
+            if (lastAcknowledgedRevision == revision
+                    && verifiedFrame.frameSha256.equals(lastAcknowledgedFrameSha256)) return;
+            RenderTicket ticket = new RenderTicket(
+                    connectionGeneration, revision, verifiedFrame.frameSha256);
+            if (ticket.sameFrame(pendingDraw) || ticket.sameFrame(acknowledgementInFlight)) return;
+            if (acknowledgementInFlight != null) return;
+            scheduleRenderReportAfterDraw(ticket);
+        } catch (Exception error) {
+            cancelPendingDraw();
+            state.setText("Rejected invalid projection frame");
+        }
     }
 
-    private void disconnect(String message) { connected = false; handler.removeCallbacksAndMessages(null); state.setText(message); primary.setEnabled(false); }
-    @Override protected void onDestroy() { connected = false; handler.removeCallbacksAndMessages(null); token = null; super.onDestroy(); }
+    private void scheduleRenderReportAfterDraw(final RenderTicket ticket) {
+        cancelPendingDraw();
+        if (!isActive(ticket)) return;
+        final View decor = getWindow().getDecorView();
+        final ViewTreeObserver.OnDrawListener listener = new ViewTreeObserver.OnDrawListener() {
+            private boolean observed;
+            public void onDraw() {
+                if (observed) return;
+                observed = true;
+                final ViewTreeObserver.OnDrawListener self = this;
+                decor.post(new Runnable() { public void run() {
+                    removeDrawListener(decor, self);
+                    if (pendingDraw != ticket) return;
+                    pendingDraw = null;
+                    pendingDrawView = null;
+                    pendingDrawListener = null;
+                    if (!isActive(ticket) || acknowledgementInFlight != null) return;
+                    acknowledgementInFlight = ticket;
+                    sendRenderReport(ticket);
+                } });
+            }
+        };
+        pendingDraw = ticket;
+        pendingDrawView = decor;
+        pendingDrawListener = listener;
+        decor.getViewTreeObserver().addOnDrawListener(listener);
+        decor.invalidate();
+    }
+
+    private void sendRenderReport(final RenderTicket ticket) {
+        new Thread(new Runnable() { public void run() {
+            Socket socket = new Socket();
+            renderReportSocket = socket;
+            try {
+                if (!isActive(ticket)) return;
+                final long now = System.currentTimeMillis() / 1000L;
+                byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
+                final String nonce = Hex.encode(nonceBytes);
+                final String request = ProjectionProtocol.renderReportRequest(
+                        token, sessionId, now, nonce, ticket.revision, ticket.frameSha256);
+                socket.connect(new InetSocketAddress(host, port), 2000);
+                socket.setSoTimeout(2000);
+                if (!isActive(ticket)) return;
+                BufferedWriter writer = new BufferedWriter(
+                        new OutputStreamWriter(socket.getOutputStream(), "UTF-8"));
+                writer.write(request); writer.write("\n"); writer.flush();
+                String response = new BufferedReader(
+                        new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
+                ProjectionProtocol.verifyRenderReportAck(token, sessionId, now, nonce,
+                        ticket.revision, ticket.frameSha256, response);
+                handler.post(new Runnable() { public void run() {
+                    if (acknowledgementInFlight == ticket) acknowledgementInFlight = null;
+                    if (!isActive(ticket)) return;
+                    lastAcknowledgedRevision = ticket.revision;
+                    lastAcknowledgedFrameSha256 = ticket.frameSha256;
+                } });
+            } catch (Exception error) {
+                handler.post(new Runnable() { public void run() {
+                    if (acknowledgementInFlight == ticket) acknowledgementInFlight = null;
+                } });
+            } finally {
+                try { socket.close(); } catch (Exception ignored) {}
+                if (renderReportSocket == socket) renderReportSocket = null;
+            }
+        } }, "AgentBridgeProjectionRenderedReport").start();
+    }
+
+    private boolean isActive(RenderTicket ticket) {
+        return connected && ticket != null && ticket.generation == connectionGeneration
+                && System.currentTimeMillis() / 1000L < expiresAt;
+    }
+
+    private void cancelPendingDraw() {
+        if (pendingDrawView != null && pendingDrawListener != null)
+            removeDrawListener(pendingDrawView, pendingDrawListener);
+        pendingDraw = null;
+        pendingDrawView = null;
+        pendingDrawListener = null;
+    }
+
+    private static void removeDrawListener(View view, ViewTreeObserver.OnDrawListener listener) {
+        ViewTreeObserver observer = view.getViewTreeObserver();
+        if (observer.isAlive()) observer.removeOnDrawListener(listener);
+    }
+
+    private void closeRenderReportSocket() {
+        Socket socket = renderReportSocket;
+        renderReportSocket = null;
+        if (socket != null) try { socket.close(); } catch (Exception ignored) {}
+    }
+
+    private static final class RenderTicket {
+        final long generation;
+        final long revision;
+        final String frameSha256;
+
+        RenderTicket(long generation, long revision, String frameSha256) {
+            this.generation = generation;
+            this.revision = revision;
+            this.frameSha256 = frameSha256;
+        }
+
+        boolean sameFrame(RenderTicket other) {
+            return other != null && revision == other.revision
+                    && frameSha256.equals(other.frameSha256);
+        }
+    }
+
+    private void disconnect(String message) {
+        connected = false;
+        connectionGeneration++;
+        cancelPendingDraw();
+        acknowledgementInFlight = null;
+        closeRenderReportSocket();
+        handler.removeCallbacksAndMessages(null);
+        state.setText(message);
+        primary.setEnabled(false);
+    }
+    @Override protected void onDestroy() {
+        connected = false;
+        connectionGeneration++;
+        cancelPendingDraw();
+        acknowledgementInFlight = null;
+        closeRenderReportSocket();
+        handler.removeCallbacksAndMessages(null);
+        token = null;
+        super.onDestroy();
+    }
     @Override public void onBackPressed() { disconnect("Disconnected by you"); super.onBackPressed(); }
 
     private LinearLayout panel() { LinearLayout p = new LinearLayout(this); p.setOrientation(LinearLayout.VERTICAL); p.setPadding(32, 32, 32, 32); return p; }

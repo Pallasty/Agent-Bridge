@@ -94,6 +94,7 @@ MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 # Add a marker when a lane ships a distinctive capability string.
 SENTINELS=(
     "app_control.py"        # protocol-first application control router
+    "agent_bridge.mobile_projection_wait.v1" # exact Android draw-report receipt, never host-served inference
     "desktop_steer.py"      # steer control plane / cross-process injection (item 3)
     "desktop_action.py"     # computer-use: coordinate action
     "desktop_invoke.py"     # computer-use: AT-SPI semantic invoke

@@ -98,19 +98,61 @@ write/fsync/rename. Caller-selected `cwd` and `script_path` backends are
 rejected for durable operations at the MCP boundary so an operation cannot be
 silently rebound to another implementation.
 
-The mobile projection remains a reconstructible presentation tail. After a
-verified media operation, callers may create or reuse a consent-gated mobile
-projection, call `mobile_projection_sync_media` with the exact `player` from
-the durable receipt, then pass `projection_update.revision` as
-`mobile_projection_wait.target_revision`. Updating the in-memory frame alone is
-not proof that the device displayed it, and a projection session is not part of
-the durable media-operation identity.
+The mobile projection remains a reconstructible presentation tail. Updating
+the in-memory frame or flushing it to the TCP connection proves neither that
+the Android Activity accepted it nor that the UI drew it. The projection
+protocol therefore reports three distinct stages: queued by the host, served
+to an authenticated client, and an exact `(session, revision, frame_sha256)`
+draw report sent by the companion after the Activity's main-thread draw pass.
+`mobile_projection_wait` v1 verifies only the final exact report; a later
+revision never proves that an earlier revision was drawn. This is app-originated
+device evidence, not proof that a human saw the display and not independent
+pixel verification.
+
+## `advance_track_then_project` episode
+
+`advance_track_then_project` is a deliberately narrow composition of the
+durable `next` operation and the consent-gated mobile presentation tail. It is
+available only in the explicit `codex-essential-mobile-projection` profile. It
+is not exposed by either `codex-essential` or `codex-mobile-projection` alone,
+because neither component profile should silently acquire the other's
+authority.
+
+The tool accepts a caller-supplied `operation_id`; it never creates or replaces
+that identity. After validating every argument, it follows one fixed sequence:
+
+1. create a short-lived, one-shot projection session;
+2. obtain either explicit holder connection consent, or a clearly labelled
+   test-only authenticated auto-connection;
+3. call durable `app_control(next)` with the same operation ID;
+4. sync media through the exact resolved player in the durable receipt;
+5. require the projected track ID to equal the verified post-action track ID;
+6. wait for the companion's exact revision-and-digest draw report; and
+7. stop its owned projection session.
+
+The action journal is the only durable mutation authority. The projection
+session and composite execution are process-local and may be reconstructed.
+If execution stops after the media dispatch, a retry must reuse the same
+`operation_id`: app-control replays or read-only-recovers the action and never
+dispatches `next` twice, while the presentation tail may run again. Losing the
+operation ID is not recoverable automatically. A connection, media-sync, draw,
+binding, or cleanup failure returns non-proceed evidence rather than inventing
+success. The episode does perform the one explicitly requested,
+journal-bounded media actuation; the projection grants no additional
+actuation, attention, memory, sensor, arbitrary mobile input, or
+background-service authority.
 
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.
 The first durable action/replay plus authenticated mobile-delivery episode is
 stored at
 `docs/design/evidence/app_control_embodied_media_episode_acceptance_2026_08_19.json`.
+That v0 artifact predates ABR1 and its field named
+`revision_observed_by_device` proves only the legacy authenticated host serve;
+it is preserved as historical evidence and must not be cited as an Activity
+draw report. The first exact draw-reported composite acceptance is stored
+separately at
+`docs/design/evidence/advance_track_then_project_acceptance_2026_08_19.json`.
 
 ## Extension rule
 

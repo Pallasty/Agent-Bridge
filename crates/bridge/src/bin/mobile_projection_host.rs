@@ -44,9 +44,21 @@ fn main() -> Result<()> {
     );
     while (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64) < expires {
         match session.serve_next(&frame, Duration::from_secs(1)) {
-            Ok(Some(ProjectionEvent::FramePulled { peer })) => {
-                eprintln!("served read-only frame to {peer}")
-            }
+            Ok(Some(ProjectionEvent::FrameServed {
+                peer,
+                revision,
+                frame_sha256,
+            })) => eprintln!(
+                "served read-only frame to {peer} revision={revision} digest={frame_sha256}"
+            ),
+            Ok(Some(ProjectionEvent::FrameRenderReported {
+                peer,
+                revision,
+                frame_sha256,
+                device_reported_at_unix_seconds,
+            })) => eprintln!(
+                "accepted render report from {peer} revision={revision} digest={frame_sha256} device_reported_at={device_reported_at_unix_seconds}"
+            ),
             Ok(Some(ProjectionEvent::TextSubmitted { peer, observation })) => eprintln!(
                 "accepted ephemeral text observation from {peer} submission_id={} digest={} chars={}",
                 observation.submission_id,

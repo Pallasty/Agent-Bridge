@@ -1819,17 +1819,41 @@ struct MobileProjectionRuntimeState {
     session_id: String,
     serial: String,
     endpoint: String,
+    auto_connect: bool,
     started_at: i64,
     expires_at: i64,
     frame: std::sync::RwLock<crate::mobile_projection::ProjectionFrame>,
     pulls: std::sync::atomic::AtomicU64,
     last_served_revision: std::sync::atomic::AtomicU64,
+    last_served_frame_sha256: std::sync::RwLock<Option<String>>,
+    served_frames: std::sync::RwLock<HashMap<u64, String>>,
+    render_reports: std::sync::RwLock<HashMap<u64, MobileProjectionRenderReport>>,
     last_pull_unix_seconds: std::sync::atomic::AtomicU64,
     text_submissions: std::sync::atomic::AtomicU64,
     latest_text_observation:
         std::sync::RwLock<Option<crate::mobile_projection::MobileTextObservation>>,
     stop_requested: std::sync::atomic::AtomicBool,
     ended: std::sync::atomic::AtomicBool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MobileProjectionRenderReport {
+    revision: u64,
+    frame_sha256: String,
+    device_reported_at_unix_seconds: i64,
+    host_received_at_unix_seconds: i64,
+}
+
+impl MobileProjectionRenderReport {
+    fn as_json(&self) -> Value {
+        json!({
+            "revision": self.revision,
+            "frame_sha256": self.frame_sha256,
+            "device_reported_at_unix_seconds": self.device_reported_at_unix_seconds,
+            "host_received_at_unix_seconds": self.host_received_at_unix_seconds,
+            "authenticated_exact_pair": true
+        })
+    }
 }
 
 fn mobile_projection_registry(
@@ -1850,11 +1874,15 @@ pub(super) fn mobile_projection_test_seed_state(
         session_id: session_id.into(),
         serial: "test-device".into(),
         endpoint: "http://127.0.0.1:1".into(),
+        auto_connect: false,
         started_at: now,
         expires_at: now + 60,
         frame: std::sync::RwLock::new(frame),
         pulls: std::sync::atomic::AtomicU64::new(1),
         last_served_revision: std::sync::atomic::AtomicU64::new(4),
+        last_served_frame_sha256: std::sync::RwLock::new(None),
+        served_frames: std::sync::RwLock::new(HashMap::new()),
+        render_reports: std::sync::RwLock::new(HashMap::new()),
         last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(now as u64),
         text_submissions: std::sync::atomic::AtomicU64::new(0),
         latest_text_observation: std::sync::RwLock::new(None),
@@ -1865,6 +1893,30 @@ pub(super) fn mobile_projection_test_seed_state(
         .lock()
         .unwrap()
         .insert(session_id.into(), state);
+}
+
+#[cfg(test)]
+pub(super) fn mobile_projection_test_record_draw_report(
+    session_id: &str,
+    revision: u64,
+    frame_sha256: &str,
+    device_reported_at_unix_seconds: i64,
+    host_received_at_unix_seconds: i64,
+) -> bool {
+    let registry = mobile_projection_registry().lock().unwrap();
+    let Some(state) = registry.get(session_id) else {
+        return false;
+    };
+    state.render_reports.write().unwrap().insert(
+        revision,
+        MobileProjectionRenderReport {
+            revision,
+            frame_sha256: frame_sha256.into(),
+            device_reported_at_unix_seconds,
+            host_received_at_unix_seconds,
+        },
+    );
+    true
 }
 
 #[cfg(test)]
@@ -1898,7 +1950,7 @@ pub(super) fn mobile_projection_phase(
     } else if ended || now >= expires_at {
         "expired"
     } else if pulls == 0 {
-        "awaiting_consent"
+        "awaiting_connection"
     } else if last_pull_unix_seconds.saturating_add(5) >= now.max(0) as u64 {
         "connected_recently"
     } else {
@@ -1919,7 +1971,28 @@ fn mobile_projection_snapshot(
     let ended = state.ended.load(Ordering::Relaxed);
     let frame = state.frame.read().unwrap();
     let current_revision = frame.revision;
+    let current_frame_sha256 = crate::mobile_projection::projection_frame_sha256(&frame).ok();
     let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
+    let last_served_frame_sha256 = state.last_served_frame_sha256.read().unwrap().clone();
+    let exact_current_draw_report = current_frame_sha256.as_deref().and_then(|digest| {
+        state
+            .render_reports
+            .read()
+            .unwrap()
+            .get(&current_revision)
+            .filter(|report| report.frame_sha256 == digest)
+            .cloned()
+    });
+    let current_revision_draw_reported = exact_current_draw_report.is_some();
+    let latest_draw_report = state
+        .render_reports
+        .read()
+        .unwrap()
+        .values()
+        .max_by_key(|report| report.host_received_at_unix_seconds)
+        .cloned();
+    let authenticated_pull_observed = pulls > 0;
+    let holder_confirmation_observed = authenticated_pull_observed && !state.auto_connect;
     let mut snapshot = json!({
         "session_id": state.session_id,
         "serial": state.serial,
@@ -1927,8 +2000,13 @@ fn mobile_projection_snapshot(
         "started_at_unix_seconds": state.started_at,
         "expires_at_unix_seconds": state.expires_at,
         "current_revision": current_revision,
+        "current_frame_sha256": current_frame_sha256,
         "last_served_revision": last_served_revision,
-        "current_revision_observed_by_device": last_served_revision >= current_revision,
+        "last_served_frame_sha256": last_served_frame_sha256,
+        "current_revision_observed_by_device": current_revision_draw_reported,
+        "current_revision_draw_reported_by_device": current_revision_draw_reported,
+        "current_draw_report": exact_current_draw_report.as_ref().map(MobileProjectionRenderReport::as_json),
+        "latest_draw_report": latest_draw_report.map(|report| report.as_json()),
         "title_chars": frame.title.chars().count(),
         "body_chars": frame.body.chars().count(),
         "status_present": frame.status.is_some(),
@@ -1936,7 +2014,11 @@ fn mobile_projection_snapshot(
         "phase": mobile_projection_phase(pulls, last_pull, stopped, ended, state.expires_at, now),
         "pull_count": pulls,
         "last_pull_unix_seconds": if last_pull == 0 { Value::Null } else { json!(last_pull) },
-        "consent_observed": pulls > 0,
+        "authenticated_pull_observed": authenticated_pull_observed,
+        "consent_observed": holder_confirmation_observed,
+        "holder_confirmation_observed": holder_confirmation_observed,
+        "auto_connect": state.auto_connect,
+        "confirmation_mode": if state.auto_connect { "test_only_auto_connect" } else { "holder_confirmation_required" },
         "text_submission_count": text_submissions,
         "latest_text_observation_available": text_submissions > 0,
         "text_retention": "in_memory_until_mcp_process_or_session_record_ends",
@@ -1944,7 +2026,13 @@ fn mobile_projection_snapshot(
         "listener_active": !stopped && !ended && now < state.expires_at,
         "stop_requested": stopped,
         "ended": ended,
-        "disconnect_inference": "connected_then_idle means pulls stopped or paused; without a signed device disconnect event it is not proof of explicit disconnect"
+        "disconnect_inference": "connected_then_idle means pulls stopped or paused; without a signed device disconnect event it is not proof of explicit disconnect",
+        "claim_boundary": {
+            "device_activity_draw_reported": current_revision_draw_reported,
+            "human_observed": false,
+            "pixel_verified": false,
+            "served_is_not_drawn": true
+        }
     });
     if include_text {
         snapshot["latest_text_observation"] =
@@ -2094,7 +2182,7 @@ pub(super) fn mobile_projection_start_pending_receipt(
 
 pub(super) fn mobile_projection_wait_outcome(
     pulls: u64,
-    last_served_revision: u64,
+    exact_draw_report_revision: u64,
     stop_requested: bool,
     ended: bool,
     expires_at: i64,
@@ -2108,8 +2196,10 @@ pub(super) fn mobile_projection_wait_outcome(
         return Some("expired_before_observation");
     }
     match target_revision {
-        Some(revision) if last_served_revision >= revision => Some("revision_observed_by_device"),
-        None if pulls > 0 => Some("consent_observed"),
+        Some(revision) if exact_draw_report_revision == revision => {
+            Some("revision_draw_reported_by_device")
+        }
+        None if pulls > 0 => Some("authenticated_connection_observed"),
         _ => None,
     }
 }
@@ -2272,6 +2362,14 @@ impl McpTool for MobileProjectionStartTool {
                 )))
             }
         };
+        let initial_frame_sha256 = match crate::mobile_projection::projection_frame_sha256(&frame) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "hash initial projection frame: {error:#}"
+                )))
+            }
+        };
 
         let bind_text = bind.to_string();
         let endpoint_port = endpoint.port().to_string();
@@ -2325,11 +2423,15 @@ impl McpTool for MobileProjectionStartTool {
             session_id: session_id.clone(),
             serial: serial.clone(),
             endpoint: endpoint.to_string(),
+            auto_connect,
             started_at: now,
             expires_at,
             frame: std::sync::RwLock::new(frame),
             pulls: std::sync::atomic::AtomicU64::new(0),
             last_served_revision: std::sync::atomic::AtomicU64::new(0),
+            last_served_frame_sha256: std::sync::RwLock::new(None),
+            served_frames: std::sync::RwLock::new(HashMap::new()),
+            render_reports: std::sync::RwLock::new(HashMap::new()),
             last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(0),
             text_submissions: std::sync::atomic::AtomicU64::new(0),
             latest_text_observation: std::sync::RwLock::new(None),
@@ -2354,15 +2456,45 @@ impl McpTool for MobileProjectionStartTool {
                     let frame = runtime_thread.frame.read().unwrap().clone();
                     if let Ok(Some(event)) = session.serve_next(&frame, Duration::from_secs(1)) {
                         match event {
-                            crate::mobile_projection::ProjectionEvent::FramePulled { .. } => {
+                            crate::mobile_projection::ProjectionEvent::FrameServed {
+                                revision,
+                                frame_sha256,
+                                ..
+                            } => {
                                 runtime_thread.pulls.fetch_add(1, Ordering::Relaxed);
                                 runtime_thread
                                     .last_served_revision
-                                    .store(frame.revision, Ordering::Relaxed);
+                                    .store(revision, Ordering::Relaxed);
+                                *runtime_thread.last_served_frame_sha256.write().unwrap() =
+                                    Some(frame_sha256.clone());
+                                let mut served = runtime_thread.served_frames.write().unwrap();
+                                if served.len() < 256 || served.contains_key(&revision) {
+                                    served.insert(revision, frame_sha256);
+                                }
                                 if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
                                     runtime_thread
                                         .last_pull_unix_seconds
                                         .store(duration.as_secs(), Ordering::Relaxed);
+                                }
+                            }
+                            crate::mobile_projection::ProjectionEvent::FrameRenderReported {
+                                revision,
+                                frame_sha256,
+                                device_reported_at_unix_seconds,
+                                ..
+                            } => {
+                                let host_received_at_unix_seconds = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|duration| duration.as_secs() as i64)
+                                    .unwrap_or(i64::MAX);
+                                let mut reports = runtime_thread.render_reports.write().unwrap();
+                                if reports.len() < 256 || reports.contains_key(&revision) {
+                                    reports.entry(revision).or_insert(MobileProjectionRenderReport {
+                                        revision,
+                                        frame_sha256,
+                                        device_reported_at_unix_seconds,
+                                        host_received_at_unix_seconds,
+                                    });
                                 }
                             }
                             crate::mobile_projection::ProjectionEvent::TextSubmitted {
@@ -2401,11 +2533,13 @@ impl McpTool for MobileProjectionStartTool {
             "endpoint": endpoint.to_string(),
             "expires_at_unix_seconds": expires_at,
             "ttl_seconds": ttl_seconds,
+            "frame_sha256": initial_frame_sha256,
             "activity_launch_duration_ms": launched.duration_ms,
             "token_exposed": false,
             "companion_service_started": false,
             "auto_connect": auto_connect,
             "display_confirmation_required": !auto_connect,
+            "confirmation_mode": if auto_connect { "test_only_auto_connect" } else { "holder_confirmation_required" },
             "replaced_prior_projection_activity": true,
             "replaced_prior_listener_count": replaced_listener_count,
             "authority": {
@@ -2592,7 +2726,7 @@ impl McpTool for MobileProjectionUpdateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Patch one active, already consent-gated projection session. Omitted presentation fields keep their current values; status:null and actions:null (or an empty array) explicitly clear those fields. At least one field must be supplied. The patch keeps the original endpoint, token, expiry, and zero-authority boundary; it does not reopen the Activity, extend TTL, start a service, or grant new authority. Delivery is confirmed separately when status reports the revision as served by an authenticated device pull.".into(),
+            description: "Patch one active projection session. Omitted presentation fields keep their current values; status:null and actions:null (or an empty array) explicitly clear those fields. At least one field must be supplied. The patch keeps the original endpoint, token, expiry, and zero-authority boundary; it does not reopen the Activity, extend TTL, start a service, or grant new authority. This only queues a revision. Delivery requires a separate exact revision+digest Activity draw report; an authenticated write/flush is not called drawn.".into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["session_id"],
@@ -2649,14 +2783,24 @@ impl McpTool for MobileProjectionUpdateTool {
             Err(error) => return Ok(ToolResult::error(error)),
         };
         let revision = updated.revision;
+        let frame_sha256 = match crate::mobile_projection::projection_frame_sha256(&updated) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "hash updated projection frame: {error:#}"
+                )))
+            }
+        };
         *frame = updated;
         let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
         Ok(ToolResult::json_text(&json!({
-            "status": "updated_awaiting_authenticated_pull",
+            "status": "updated_awaiting_device_draw_report",
             "session_id": state.session_id,
             "revision": revision,
+            "frame_sha256": frame_sha256,
             "changed_fields": changed_fields,
             "last_served_revision": last_served_revision,
+            "served_is_not_drawn": true,
             "expires_at_unix_seconds": state.expires_at,
             "ttl_extended": false,
             "activity_reopened": false,
@@ -2685,8 +2829,9 @@ impl McpTool for MobileProjectionStatusTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Read in-process mobile projection lifecycle state. Reports whether \
-                 consent was observed through authenticated pulls and whether the listener is \
+            description: "Read in-process mobile projection lifecycle state. Separately reports \
+                 authenticated pulls, manual holder confirmation versus test-only auto-connect, \
+                 exact Activity draw reports, and whether the listener is \
                  active. Passing an exact session_id also returns its latest foreground, \
                  user-submitted text observation; the session list exposes only availability \
                  metadata. An idle connection is reported honestly as ambiguous, not as proof \
@@ -2757,16 +2902,21 @@ impl McpTool for MobileProjectionWaitTool {
         ToolSchema {
             name: self.name().into(),
             description: "Wait for bounded, authenticated evidence that a projection received \
-                consent or that a requested revision was served to the device. A timeout only \
-                reports that no matching evidence arrived; it never infers rejection or an \
-                explicit disconnect. This read-only wait does not extend session TTL."
+                a holder-confirmed connection (or an explicitly labelled test-only auto \
+                connection), or that the Android Activity reported an onDraw after applying one \
+                exact revision+frame digest pair. A served frame is never called drawn. A draw \
+                report is neither human-observation nor pixel-verification evidence. A timeout \
+                never infers rejection or explicit disconnect. This read-only wait does not \
+                extend session TTL."
                 .into(),
             input_schema: json!({
                 "type": "object",
+                "additionalProperties": false,
                 "required": ["session_id"],
                 "properties": {
                     "session_id": { "type": "string" },
-                    "target_revision": { "type": "integer", "minimum": 1, "description": "Omit to wait for the first authenticated device pull (consent observation)." },
+                    "target_revision": { "type": "integer", "minimum": 1, "description": "Positive exact revision. Omit with target_frame_sha256 to wait for connection evidence." },
+                    "target_frame_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Required with target_revision. Exact lowercase SHA-256 of the raw served frame JSON." },
                     "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 120000, "default": 30000 }
                 }
             }),
@@ -2774,24 +2924,67 @@ impl McpTool for MobileProjectionWaitTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(arguments) = args.as_object() else {
+            return Ok(ToolResult::error("arguments must be an object"));
+        };
+        const ALLOWED: &[&str] = &[
+            "session_id",
+            "target_revision",
+            "target_frame_sha256",
+            "timeout_ms",
+        ];
+        if let Some(unknown) = arguments
+            .keys()
+            .find(|key| !ALLOWED.contains(&key.as_str()))
+        {
+            return Ok(ToolResult::error(format!("unknown argument '{unknown}'")));
+        }
         let Some(session_id) = args
             .get("session_id")
             .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
+            .filter(|value| !value.is_empty() && value.trim() == *value)
         else {
             return Ok(ToolResult::error("missing 'session_id'"));
         };
-        let target_revision = args.get("target_revision").and_then(Value::as_u64);
+        let target_revision = args
+            .get("target_revision")
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0);
         if args.get("target_revision").is_some() && target_revision.is_none() {
             return Ok(ToolResult::error("target_revision must be an integer >= 1"));
         }
-        let timeout_ms = args
-            .get("timeout_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(30_000);
-        if !(100..=120_000).contains(&timeout_ms) {
-            return Ok(ToolResult::error("timeout_ms must be in 100..=120000"));
-        }
+        let target_frame_sha256 = match args.get("target_frame_sha256") {
+            None if target_revision.is_none() => None,
+            Some(Value::String(value)) if target_revision.is_some() && lowercase_sha256(value) => {
+                Some(value.clone())
+            }
+            None => {
+                return Ok(ToolResult::error(
+                    "target_frame_sha256 is required with target_revision",
+                ))
+            }
+            Some(_) if target_revision.is_none() => {
+                return Ok(ToolResult::error(
+                    "target_frame_sha256 requires target_revision",
+                ))
+            }
+            Some(_) => {
+                return Ok(ToolResult::error(
+                    "target_frame_sha256 must be exactly 64 lowercase hexadecimal characters",
+                ))
+            }
+        };
+        let timeout_ms = match args.get("timeout_ms") {
+            None => 30_000,
+            Some(value) => match value.as_u64() {
+                Some(value) if (100..=120_000).contains(&value) => value,
+                _ => {
+                    return Ok(ToolResult::error(
+                        "timeout_ms must be an integer in 100..=120000",
+                    ))
+                }
+            },
+        };
         let state = {
             let registry = mobile_projection_registry().lock().unwrap();
             match registry.get(session_id) {
@@ -2804,11 +2997,40 @@ impl McpTool for MobileProjectionWaitTool {
             }
         };
         if let Some(revision) = target_revision {
-            let current_revision = state.frame.read().unwrap().revision;
+            let current_frame = state.frame.read().unwrap().clone();
+            let current_revision = current_frame.revision;
             if revision > current_revision {
                 return Ok(ToolResult::error(format!(
                     "target_revision {revision} is newer than current revision {current_revision}"
                 )));
+            }
+            let known_digest = if revision == current_revision {
+                crate::mobile_projection::projection_frame_sha256(&current_frame).ok()
+            } else {
+                state
+                    .served_frames
+                    .read()
+                    .unwrap()
+                    .get(&revision)
+                    .cloned()
+                    .or_else(|| {
+                        state
+                            .render_reports
+                            .read()
+                            .unwrap()
+                            .get(&revision)
+                            .map(|report| report.frame_sha256.clone())
+                    })
+            };
+            let Some(known_digest) = known_digest else {
+                return Ok(ToolResult::error(format!(
+                    "target revision {revision} has no locally bound frame digest"
+                )));
+            };
+            if target_frame_sha256.as_deref() != Some(known_digest.as_str()) {
+                return Ok(ToolResult::error(
+                    "target_frame_sha256 does not match the locally bound revision",
+                ));
             }
         }
 
@@ -2819,9 +3041,21 @@ impl McpTool for MobileProjectionWaitTool {
                 .duration_since(UNIX_EPOCH)
                 .map(|duration| duration.as_secs() as i64)
                 .unwrap_or(i64::MAX);
+            let exact_draw_report_revision = target_revision
+                .zip(target_frame_sha256.as_deref())
+                .and_then(|(revision, digest)| {
+                    state
+                        .render_reports
+                        .read()
+                        .unwrap()
+                        .get(&revision)
+                        .filter(|report| report.frame_sha256 == digest)
+                        .map(|report| report.revision)
+                })
+                .unwrap_or(0);
             if let Some(outcome) = mobile_projection_wait_outcome(
                 state.pulls.load(Ordering::Relaxed),
-                state.last_served_revision.load(Ordering::Relaxed),
+                exact_draw_report_revision,
                 state.stop_requested.load(Ordering::Relaxed),
                 state.ended.load(Ordering::Relaxed),
                 state.expires_at,
@@ -2839,13 +3073,64 @@ impl McpTool for MobileProjectionWaitTool {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs() as i64)
             .unwrap_or(i64::MAX);
-        Ok(ToolResult::json_text(&json!({
-            "status": outcome,
+        let status = if outcome == "authenticated_connection_observed" {
+            if state.auto_connect {
+                "test_only_authenticated_connection_observed"
+            } else {
+                "holder_consent_observed"
+            }
+        } else {
+            outcome
+        };
+        let (verdict, recover) = match status {
+            "holder_consent_observed"
+            | "test_only_authenticated_connection_observed"
+            | "revision_draw_reported_by_device" => ("verified", "proceed"),
+            "timeout_without_matching_evidence" => ("unmet", "retry"),
+            _ => ("error", "replan"),
+        };
+        let draw_report = target_revision
+            .zip(target_frame_sha256.as_deref())
+            .and_then(|(revision, digest)| {
+                state
+                    .render_reports
+                    .read()
+                    .unwrap()
+                    .get(&revision)
+                    .filter(|report| report.frame_sha256 == digest)
+                    .cloned()
+            })
+            .map(|report| report.as_json());
+        let verified_draw = status == "revision_draw_reported_by_device" && draw_report.is_some();
+        let payload = json!({
+            "schema": "agent_bridge.mobile_projection_wait.v1",
+            "status": status,
+            "verdict": verdict,
+            "recover": recover,
+            "session_id": state.session_id,
             "target_revision": target_revision,
+            "target_frame_sha256": target_frame_sha256,
+            "connection": {
+                "authenticated_pull_observed": state.pulls.load(std::sync::atomic::Ordering::Relaxed) > 0,
+                "holder_confirmation_observed": state.pulls.load(std::sync::atomic::Ordering::Relaxed) > 0 && !state.auto_connect,
+                "auto_connect": state.auto_connect,
+                "confirmation_mode": if state.auto_connect { "test_only_auto_connect" } else { "holder_confirmation_required" }
+            },
+            "draw_report": draw_report,
+            "exact_revision_and_digest_draw_reported": verified_draw,
             "waited_without_ttl_extension": true,
-            "timeout_is_not_rejection_or_disconnect": outcome == "timeout_without_matching_evidence",
+            "timeout_is_not_rejection_or_disconnect": status == "timeout_without_matching_evidence",
+            "claim_boundary": {
+                "device_activity_draw_reported": verified_draw,
+                "human_observed": false,
+                "pixel_verified": false,
+                "served_is_not_drawn": true
+            },
             "session": mobile_projection_snapshot(&state, now, true)
-        })))
+        });
+        let mut result = ToolResult::json_text(&payload);
+        result.is_error = verdict != "verified";
+        Ok(result)
     }
 }
 
@@ -2915,6 +3200,1564 @@ impl McpTool for MobileProjectionStopTool {
             "companion_service_started": false,
             "adb_force_stop": adb
         })))
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  One bounded embodied episode: durable next -> exact mobile draw report
+// ---------------------------------------------------------------------------
+
+const ADVANCE_TRACK_THEN_PROJECT_SCHEMA: &str = "agent_bridge.advance_track_then_project.v0";
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct AdvanceTrackThenProjectArgs {
+    operation_id: String,
+    bind: String,
+    player: Option<String>,
+    serial: Option<String>,
+    operation_ttl_secs: u64,
+    verify_timeout_secs: f64,
+    auto_connect: bool,
+    projection_ttl_seconds: u64,
+    timeout_ms: u64,
+}
+
+impl AdvanceTrackThenProjectArgs {
+    pub(super) fn parse(args: &Value) -> std::result::Result<Self, String> {
+        const ALLOWED: &[&str] = &[
+            "operation_id",
+            "bind",
+            "player",
+            "serial",
+            "operation_ttl_secs",
+            "verify_timeout_secs",
+            "auto_connect",
+            "projection_ttl_seconds",
+            "timeout_ms",
+        ];
+        let object = args
+            .as_object()
+            .ok_or_else(|| "arguments must be an object".to_string())?;
+        if let Some(unknown) = object.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
+            return Err(format!("unknown argument '{unknown}'"));
+        }
+
+        let operation_id = match object.get("operation_id") {
+            Some(Value::String(value))
+                if !value.is_empty()
+                    && value.trim() == value
+                    && value.len() <= 128
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)) =>
+            {
+                value.clone()
+            }
+            _ => {
+                return Err(
+                    "operation_id must match [A-Za-z0-9._:-]{1,128} without whitespace".into(),
+                )
+            }
+        };
+        let bind = match object.get("bind") {
+            Some(Value::String(value))
+                if !value.is_empty()
+                    && value.trim() == value
+                    && value.parse::<std::net::IpAddr>().is_ok() =>
+            {
+                value.clone()
+            }
+            _ => return Err("bind must be an exact IP address string".into()),
+        };
+        let exact_nonempty_string = |key: &str| -> std::result::Result<Option<String>, String> {
+            match object.get(key) {
+                None => Ok(None),
+                Some(Value::String(value))
+                    if !value.is_empty() && value.trim() == value && value.len() <= 256 =>
+                {
+                    Ok(Some(value.clone()))
+                }
+                Some(_) => Err(format!(
+                    "{key} must be a non-empty string of at most 256 bytes without surrounding whitespace"
+                )),
+            }
+        };
+        let player = exact_nonempty_string("player")?;
+        let serial = exact_nonempty_string("serial")?;
+        let operation_ttl_secs = match object.get("operation_ttl_secs") {
+            None => 3_600,
+            Some(value) => value
+                .as_u64()
+                .filter(|value| (60..=86_400).contains(value))
+                .ok_or_else(|| "operation_ttl_secs must be an integer in 60..=86400".to_string())?,
+        };
+        let verify_timeout_secs = match object.get("verify_timeout_secs") {
+            None => 2.0,
+            Some(value) => value
+                .as_f64()
+                .filter(|value| (0.1..=10.0).contains(value))
+                .ok_or_else(|| "verify_timeout_secs must be a number in 0.1..=10.0".to_string())?,
+        };
+        let auto_connect = match object.get("auto_connect") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err("auto_connect must be a boolean".into()),
+        };
+        let projection_ttl_seconds = match object.get("projection_ttl_seconds") {
+            None => 300,
+            Some(value) => value
+                .as_u64()
+                .filter(|value| (1..=600).contains(value))
+                .ok_or_else(|| {
+                    "projection_ttl_seconds must be an integer in 1..=600".to_string()
+                })?,
+        };
+        let timeout_ms = match object.get("timeout_ms") {
+            None => 30_000,
+            Some(value) => value
+                .as_u64()
+                .filter(|value| (1_000..=120_000).contains(value))
+                .ok_or_else(|| "timeout_ms must be an integer in 1000..=120000".to_string())?,
+        };
+        Ok(Self {
+            operation_id,
+            bind,
+            player,
+            serial,
+            operation_ttl_secs,
+            verify_timeout_secs,
+            auto_connect,
+            projection_ttl_seconds,
+            timeout_ms,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AdvanceTrackActionBinding {
+    player: String,
+    before_track_id: String,
+    after_track_id: String,
+    dispatch_count: u64,
+    idempotent_replay: bool,
+    recovered_after_interruption: bool,
+}
+
+pub(super) fn advance_track_then_project_action_binding(
+    payload: &Value,
+    operation_id: &str,
+    player_selector: Option<&str>,
+    operation_ttl_secs: u64,
+) -> std::result::Result<AdvanceTrackActionBinding, String> {
+    let exit_code = payload
+        .pointer("/mcp_wrapper/exit_code")
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or_else(|| "app_control receipt lacks MCP exit-code evidence".to_string())?;
+    if !app_control_source_contract_valid(
+        payload,
+        "media",
+        "next",
+        false,
+        Some(operation_id),
+        player_selector,
+        None,
+        None,
+        operation_ttl_secs,
+        exit_code,
+    ) {
+        return Err("durable app_control source contract did not verify".into());
+    }
+    let required = |pointer: &str, label: &str| {
+        payload
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| format!("app_control receipt lacks {label}"))
+    };
+    let player = required("/player", "resolved player")?;
+    let before_track_id = required("/before/track_id", "before track_id")?;
+    let after_track_id = required("/after/track_id", "after track_id")?;
+    if before_track_id == after_track_id {
+        return Err("app_control did not prove a track identity change".into());
+    }
+    let transaction = payload
+        .get("transaction")
+        .ok_or_else(|| "app_control receipt lacks durable transaction".to_string())?;
+    Ok(AdvanceTrackActionBinding {
+        player,
+        before_track_id,
+        after_track_id,
+        dispatch_count: transaction["dispatch_count"]
+            .as_u64()
+            .ok_or_else(|| "transaction lacks dispatch_count".to_string())?,
+        idempotent_replay: transaction["idempotent_replay"]
+            .as_bool()
+            .ok_or_else(|| "transaction lacks idempotent_replay".to_string())?,
+        recovered_after_interruption: transaction["recovered_after_interruption"]
+            .as_bool()
+            .ok_or_else(|| "transaction lacks recovered_after_interruption".to_string())?,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AdvanceTrackProjectionBinding {
+    revision: u64,
+    frame_sha256: String,
+    projected_track_id: String,
+}
+
+fn lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+pub(super) fn advance_track_then_project_sync_binding(
+    payload: &Value,
+    session_id: &str,
+    action: &AdvanceTrackActionBinding,
+) -> std::result::Result<AdvanceTrackProjectionBinding, String> {
+    if payload.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.mobile_projection_sync_media.v0")
+        || payload.get("status").and_then(Value::as_str) != Some("updated")
+        || payload.get("session_id").and_then(Value::as_str) != Some(session_id)
+    {
+        return Err("media sync receipt identity/status mismatch".into());
+    }
+    if payload
+        .pointer("/media_context/player")
+        .and_then(Value::as_str)
+        != Some(action.player.as_str())
+        || payload
+            .pointer("/app_control/player")
+            .and_then(Value::as_str)
+            != Some(action.player.as_str())
+        || payload
+            .pointer("/app_control/selection/selected_player")
+            .and_then(Value::as_str)
+            != Some(action.player.as_str())
+        || payload
+            .pointer("/app_control/action")
+            .and_then(Value::as_str)
+            != Some("playlist_current")
+        || payload
+            .pointer("/app_control/read_only")
+            .and_then(Value::as_bool)
+            != Some(true)
+        || payload
+            .pointer("/app_control/verdict")
+            .and_then(Value::as_str)
+            != Some("verified")
+    {
+        return Err("media sync did not bind the exact verified read-only player".into());
+    }
+    let projected_track_id = payload
+        .pointer("/media_context/track_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "media sync lacks projected track_id".to_string())?
+        .to_owned();
+    if projected_track_id != action.after_track_id {
+        return Err("projected track_id differs from the durable action after.track_id".into());
+    }
+    let update = payload
+        .get("projection_update")
+        .ok_or_else(|| "media sync lacks projection_update receipt".to_string())?;
+    if update.get("session_id").and_then(Value::as_str) != Some(session_id)
+        || !matches!(
+            update.get("status").and_then(Value::as_str),
+            Some("updated_awaiting_device_draw_report")
+        )
+        || !update
+            .get("changed_fields")
+            .and_then(Value::as_array)
+            .is_some_and(|fields| fields.iter().any(|field| field == "media_context"))
+    {
+        return Err("projection update did not bind the exact media-context revision".into());
+    }
+    let revision = update
+        .get("revision")
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "projection update lacks a positive revision".to_string())?;
+    let frame_sha256 = update
+        .get("frame_sha256")
+        .and_then(Value::as_str)
+        .filter(|value| lowercase_sha256(value))
+        .ok_or_else(|| "projection update lacks a canonical frame_sha256".to_string())?
+        .to_owned();
+    Ok(AdvanceTrackProjectionBinding {
+        revision,
+        frame_sha256,
+        projected_track_id,
+    })
+}
+
+pub(super) fn advance_track_then_project_connection_valid(
+    payload: &Value,
+    session_id: &str,
+    auto_connect: bool,
+) -> bool {
+    let expected_status = if auto_connect {
+        "test_only_authenticated_connection_observed"
+    } else {
+        "holder_consent_observed"
+    };
+    let expected_mode = if auto_connect {
+        "test_only_auto_connect"
+    } else {
+        "holder_confirmation_required"
+    };
+    payload.get("schema").and_then(Value::as_str) == Some("agent_bridge.mobile_projection_wait.v1")
+        && payload.get("status").and_then(Value::as_str) == Some(expected_status)
+        && payload.get("verdict").and_then(Value::as_str) == Some("verified")
+        && payload.get("recover").and_then(Value::as_str) == Some("proceed")
+        && payload.get("session_id").and_then(Value::as_str) == Some(session_id)
+        && payload.get("target_revision").is_some_and(Value::is_null)
+        && payload
+            .get("target_frame_sha256")
+            .is_some_and(Value::is_null)
+        && payload
+            .pointer("/connection/authenticated_pull_observed")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/connection/holder_confirmation_observed")
+            .and_then(Value::as_bool)
+            == Some(!auto_connect)
+        && payload
+            .pointer("/connection/auto_connect")
+            .and_then(Value::as_bool)
+            == Some(auto_connect)
+        && payload
+            .pointer("/connection/confirmation_mode")
+            .and_then(Value::as_str)
+            == Some(expected_mode)
+}
+
+pub(super) fn advance_track_then_project_draw_valid(
+    payload: &Value,
+    session_id: &str,
+    projection: &AdvanceTrackProjectionBinding,
+) -> bool {
+    payload.get("schema").and_then(Value::as_str) == Some("agent_bridge.mobile_projection_wait.v1")
+        && payload.get("status").and_then(Value::as_str) == Some("revision_draw_reported_by_device")
+        && payload.get("verdict").and_then(Value::as_str) == Some("verified")
+        && payload.get("recover").and_then(Value::as_str) == Some("proceed")
+        && payload.get("session_id").and_then(Value::as_str) == Some(session_id)
+        && payload.get("target_revision").and_then(Value::as_u64) == Some(projection.revision)
+        && payload.get("target_frame_sha256").and_then(Value::as_str)
+            == Some(projection.frame_sha256.as_str())
+        && payload
+            .pointer("/draw_report/revision")
+            .and_then(Value::as_u64)
+            == Some(projection.revision)
+        && payload
+            .pointer("/draw_report/frame_sha256")
+            .and_then(Value::as_str)
+            == Some(projection.frame_sha256.as_str())
+        && payload
+            .pointer("/draw_report/device_reported_at_unix_seconds")
+            .and_then(Value::as_i64)
+            .is_some_and(|value| value > 0)
+        && payload
+            .pointer("/draw_report/host_received_at_unix_seconds")
+            .and_then(Value::as_i64)
+            .is_some_and(|value| value > 0)
+        && payload
+            .pointer("/draw_report/authenticated_exact_pair")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .get("exact_revision_and_digest_draw_reported")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/claim_boundary/device_activity_draw_reported")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/claim_boundary/human_observed")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && payload
+            .pointer("/claim_boundary/pixel_verified")
+            .and_then(Value::as_bool)
+            == Some(false)
+}
+
+pub(super) fn advance_track_then_project_stop_valid(payload: &Value, session_id: &str) -> bool {
+    payload.get("status").and_then(Value::as_str) == Some("stop_requested")
+        && payload.get("session_id").and_then(Value::as_str) == Some(session_id)
+        && payload
+            .get("listener_stop_requested")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/adb_force_stop/exit_code")
+            .and_then(Value::as_i64)
+            == Some(0)
+}
+
+fn advance_track_then_project_result_json(result: &ToolResult) -> Option<Value> {
+    result.content.iter().find_map(|block| match block {
+        ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
+        _ => None,
+    })
+}
+
+fn mobile_projection_zero_authority() -> Value {
+    json!({
+        "attention": false,
+        "memory": false,
+        "sensor": false,
+        "actuation": false
+    })
+}
+
+fn advance_episode_authority(
+    action_invoked: bool,
+    trusted_dispatch_count: Option<u64>,
+    effect_verified: bool,
+    fresh_dispatch_verified: bool,
+    recovered_after_interruption: Option<bool>,
+) -> Value {
+    // A durable dispatch_count of one proves that the at-most-once budget was
+    // consumed before the crash boundary.  It does not, by itself, prove that
+    // playerctl reached the external player.  Only a fresh verified receipt can
+    // make that stronger claim; recovery deliberately keeps it indeterminate.
+    let dispatched = if fresh_dispatch_verified {
+        json!(true)
+    } else if !action_invoked || trusted_dispatch_count == Some(0) {
+        json!(false)
+    } else {
+        Value::Null
+    };
+    let dispatched_in_this_call = if fresh_dispatch_verified {
+        json!(true)
+    } else if !action_invoked || trusted_dispatch_count == Some(0) {
+        json!(false)
+    } else {
+        Value::Null
+    };
+    json!({
+        "media_actuation": {
+            "invoked": action_invoked,
+            "source": if action_invoked { "durable_app_control" } else { "none" },
+            "scope": "one_durable_next",
+            "dispatch_budget": 1,
+            "reported_dispatch_count": trusted_dispatch_count,
+            "durable_dispatch_budget_consumed": trusted_dispatch_count == Some(1),
+            "dispatched": dispatched,
+            "dispatched_in_this_call": dispatched_in_this_call,
+            "effect_verified": effect_verified,
+            "recovered_after_interruption": recovered_after_interruption,
+            "causal_attribution": if fresh_dispatch_verified {
+                "verified_fresh_dispatch_track_change"
+            } else if effect_verified && recovered_after_interruption == Some(true) {
+                "unknown_after_restart"
+            } else {
+                "not_verified"
+            }
+        },
+        "projection_grants": {
+            "attention": false,
+            "memory": false,
+            "sensor": false,
+            "actuation": false
+        },
+        "background_authority": false,
+        "arbitrary_mobile_control": false
+    })
+}
+
+fn advance_episode_step(payload: &Value, pointers: &[(&str, &str)]) -> Value {
+    let mut evidence = Map::new();
+    for (output_key, pointer) in pointers {
+        if let Some(value) = payload.pointer(pointer) {
+            evidence.insert((*output_key).into(), value.clone());
+        }
+    }
+    Value::Object(evidence)
+}
+
+struct AdvanceEpisodeState {
+    last_completed_phase: &'static str,
+    steps: Map<String, Value>,
+    binding: Value,
+    continuity: Value,
+    claim_boundary: Value,
+    cleanup: Value,
+    action_invoked: bool,
+    trusted_dispatch_count: Option<u64>,
+    effect_verified: bool,
+    fresh_dispatch_verified: bool,
+    recovered_after_interruption: Option<bool>,
+    error: Option<Value>,
+}
+
+impl AdvanceEpisodeState {
+    fn new(args: &AdvanceTrackThenProjectArgs) -> Self {
+        let steps = [
+            "projection_start",
+            "connection",
+            "app_control",
+            "sync",
+            "wait",
+            "stop",
+        ]
+        .into_iter()
+        .map(|key| (key.into(), Value::Null))
+        .collect();
+        Self {
+            last_completed_phase: "inputs_validated",
+            steps,
+            binding: json!({
+                "resolved_player": Value::Null,
+                "action_before_track_id": Value::Null,
+                "action_after_track_id": Value::Null,
+                "projected_track_id": Value::Null,
+                "target_revision": Value::Null,
+                "target_frame_sha256": Value::Null,
+                "player_exact_match": false,
+                "track_exact_match": false,
+                "revision_and_digest_exact_match": false
+            }),
+            continuity: json!({
+                "operation_id_caller_supplied": true,
+                "operation_id": args.operation_id,
+                "operation_ttl_secs": args.operation_ttl_secs,
+                "same_operation_id_required_for_retry": true,
+                "new_operation_id_generated": false,
+                "action_invocation_count_this_call": 0,
+                "dispatch_count": Value::Null,
+                "idempotent_replay": Value::Null,
+                "recovered_after_interruption": Value::Null,
+                "external_execution_repeated": Value::Null,
+                "projection_session_process_local": true,
+                "presentation_may_repeat_on_retry": true,
+                "warning": "If a retry is needed, reuse this exact operation_id while its durable record remains; this tool never invents a replacement identity."
+            }),
+            claim_boundary: json!({
+                "device_activity_draw_reported": false,
+                "human_observed": false,
+                "pixel_verified": false,
+                "meaning": "No exact Android Activity draw report has been verified yet."
+            }),
+            cleanup: json!({
+                "attempted": false,
+                "verified": false,
+                "listener_stop_requested": false,
+                "activity_force_stop_succeeded": false,
+                "error": Value::Null
+            }),
+            action_invoked: false,
+            trusted_dispatch_count: None,
+            effect_verified: false,
+            fresh_dispatch_verified: false,
+            recovered_after_interruption: None,
+            error: None,
+        }
+    }
+
+    fn fail(&mut self, phase: &str, code: &str, message: impl Into<String>) {
+        if self.error.is_none() {
+            self.error = Some(json!({
+                "phase": phase,
+                "code": code,
+                "message": message.into(),
+                "retry": "Reinvoke only with the exact same operation_id; never substitute a new identity automatically."
+            }));
+        }
+    }
+
+    fn failed(&self) -> bool {
+        self.error.is_some()
+    }
+}
+
+mobile_tool_struct!(AdvanceTrackThenProjectTool);
+
+impl AdvanceTrackThenProjectTool {
+    async fn run_started_episode(
+        &self,
+        parsed: &AdvanceTrackThenProjectArgs,
+        session_id: &str,
+        state: &mut AdvanceEpisodeState,
+        ctx: &ToolContext,
+    ) {
+        let connection_result = MobileProjectionWaitTool::new(self.hub.clone())
+            .execute(
+                json!({
+                    "session_id": session_id,
+                    "timeout_ms": parsed.timeout_ms
+                }),
+                ctx,
+            )
+            .await;
+        let (connection_error, connection_payload) = match connection_result {
+            Ok(result) => (
+                result.is_error,
+                advance_track_then_project_result_json(&result),
+            ),
+            Err(error) => {
+                state.fail("connection", "connection_wait_failed", error.to_string());
+                return;
+            }
+        };
+        let Some(connection_payload) = connection_payload else {
+            state.fail(
+                "connection",
+                "connection_receipt_missing",
+                "mobile_projection_wait returned no JSON receipt",
+            );
+            return;
+        };
+        state.steps.insert(
+            "connection".into(),
+            advance_episode_step(
+                &connection_payload,
+                &[
+                    ("schema", "/schema"),
+                    ("status", "/status"),
+                    ("verdict", "/verdict"),
+                    ("recover", "/recover"),
+                    ("session_id", "/session_id"),
+                    ("connection", "/connection"),
+                ],
+            ),
+        );
+        if connection_error
+            || !advance_track_then_project_connection_valid(
+                &connection_payload,
+                session_id,
+                parsed.auto_connect,
+            )
+        {
+            state.fail(
+                "connection",
+                "connection_not_verified",
+                if parsed.auto_connect {
+                    "no exact test-only authenticated connection evidence arrived before action"
+                } else {
+                    "no exact holder-consent connection evidence arrived before action"
+                },
+            );
+            return;
+        }
+        state.last_completed_phase = "connection_confirmed";
+
+        state.continuity["action_invocation_count_this_call"] = json!(1);
+        state.action_invoked = true;
+        let mut action_args = json!({
+            "domain": "media",
+            "action": "next",
+            "operation_id": parsed.operation_id,
+            "operation_ttl_secs": parsed.operation_ttl_secs,
+            "verify_timeout_secs": parsed.verify_timeout_secs,
+            "timeout_ms": parsed.timeout_ms.min(30_000)
+        });
+        if let Some(player) = &parsed.player {
+            action_args["player"] = json!(player);
+        }
+        let action_result = AppControlTool::new(self.hub.clone())
+            .execute(action_args, ctx)
+            .await;
+        let (action_error, action_payload) = match action_result {
+            Ok(result) => (
+                result.is_error,
+                advance_track_then_project_result_json(&result),
+            ),
+            Err(error) => {
+                state.fail("app_control", "app_control_failed", error.to_string());
+                return;
+            }
+        };
+        let Some(action_payload) = action_payload else {
+            state.fail(
+                "app_control",
+                "app_control_receipt_missing",
+                "app_control returned no JSON receipt",
+            );
+            return;
+        };
+        state.steps.insert(
+            "app_control".into(),
+            advance_episode_step(
+                &action_payload,
+                &[
+                    ("schema", "/schema"),
+                    ("status", "/status"),
+                    ("verdict", "/verdict"),
+                    ("recover", "/recover"),
+                    ("action", "/action"),
+                    ("player", "/player"),
+                    ("before", "/before"),
+                    ("after", "/after"),
+                    ("verification", "/verification"),
+                    ("transaction", "/transaction"),
+                    ("source_contract_ok", "/mcp_wrapper/source_contract_ok"),
+                ],
+            ),
+        );
+        if let Some(transaction) = action_payload.get("transaction") {
+            for key in [
+                "dispatch_count",
+                "idempotent_replay",
+                "recovered_after_interruption",
+                "external_execution_repeated",
+            ] {
+                if let Some(value) = transaction.get(key) {
+                    state.continuity[key] = value.clone();
+                }
+            }
+            if action_payload
+                .pointer("/mcp_wrapper/source_contract_ok")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                state.trusted_dispatch_count =
+                    transaction.get("dispatch_count").and_then(Value::as_u64);
+                state.recovered_after_interruption = transaction
+                    .get("recovered_after_interruption")
+                    .and_then(Value::as_bool);
+            }
+        }
+        let action = match advance_track_then_project_action_binding(
+            &action_payload,
+            &parsed.operation_id,
+            parsed.player.as_deref(),
+            parsed.operation_ttl_secs,
+        ) {
+            Ok(binding) if !action_error => binding,
+            Ok(_) | Err(_) => {
+                state.fail(
+                    "app_control",
+                    "durable_action_not_verified",
+                    "durable next receipt failed the exact source/operation/track-change contract",
+                );
+                return;
+            }
+        };
+        state.binding["resolved_player"] = json!(action.player);
+        state.binding["action_before_track_id"] = json!(action.before_track_id);
+        state.binding["action_after_track_id"] = json!(action.after_track_id);
+        state.binding["player_exact_match"] = json!(true);
+        state.continuity["dispatch_count"] = json!(action.dispatch_count);
+        state.continuity["idempotent_replay"] = json!(action.idempotent_replay);
+        state.continuity["recovered_after_interruption"] =
+            json!(action.recovered_after_interruption);
+        state.continuity["external_execution_repeated"] = json!(false);
+        state.effect_verified = true;
+        state.trusted_dispatch_count = Some(action.dispatch_count);
+        state.recovered_after_interruption = Some(action.recovered_after_interruption);
+        state.fresh_dispatch_verified =
+            !action.idempotent_replay && !action.recovered_after_interruption;
+        state.last_completed_phase = "track_advanced";
+
+        let sync_result = MobileProjectionSyncMediaTool::new(self.hub.clone())
+            .execute(
+                json!({
+                    "session_id": session_id,
+                    "player": action.player,
+                    "timeout_ms": parsed.timeout_ms.min(30_000)
+                }),
+                ctx,
+            )
+            .await;
+        let (sync_error, sync_payload) = match sync_result {
+            Ok(result) => (
+                result.is_error,
+                advance_track_then_project_result_json(&result),
+            ),
+            Err(error) => {
+                state.fail("sync", "media_sync_failed", error.to_string());
+                return;
+            }
+        };
+        let Some(sync_payload) = sync_payload else {
+            state.fail(
+                "sync",
+                "media_sync_receipt_missing",
+                "mobile_projection_sync_media returned no JSON receipt",
+            );
+            return;
+        };
+        state.steps.insert(
+            "sync".into(),
+            advance_episode_step(
+                &sync_payload,
+                &[
+                    ("schema", "/schema"),
+                    ("status", "/status"),
+                    ("session_id", "/session_id"),
+                    ("media_context", "/media_context"),
+                    ("app_control", "/app_control"),
+                    ("projection_update", "/projection_update"),
+                ],
+            ),
+        );
+        let projection = match advance_track_then_project_sync_binding(
+            &sync_payload,
+            session_id,
+            &action,
+        ) {
+            Ok(binding) if !sync_error => binding,
+            Ok(_) | Err(_) => {
+                state.fail(
+                    "sync",
+                    "media_projection_binding_mismatch",
+                    "sync receipt did not bind exact player, action after.track_id, revision, and frame digest",
+                );
+                return;
+            }
+        };
+        state.binding["projected_track_id"] = json!(projection.projected_track_id);
+        state.binding["target_revision"] = json!(projection.revision);
+        state.binding["target_frame_sha256"] = json!(projection.frame_sha256);
+        state.binding["track_exact_match"] = json!(true);
+        state.last_completed_phase = "media_synced";
+
+        let wait_result = MobileProjectionWaitTool::new(self.hub.clone())
+            .execute(
+                json!({
+                    "session_id": session_id,
+                    "target_revision": projection.revision,
+                    "target_frame_sha256": projection.frame_sha256,
+                    "timeout_ms": parsed.timeout_ms
+                }),
+                ctx,
+            )
+            .await;
+        let (wait_error, wait_payload) = match wait_result {
+            Ok(result) => (
+                result.is_error,
+                advance_track_then_project_result_json(&result),
+            ),
+            Err(error) => {
+                state.fail("wait", "draw_wait_failed", error.to_string());
+                return;
+            }
+        };
+        let Some(wait_payload) = wait_payload else {
+            state.fail(
+                "wait",
+                "draw_wait_receipt_missing",
+                "mobile_projection_wait returned no JSON draw receipt",
+            );
+            return;
+        };
+        state.steps.insert(
+            "wait".into(),
+            advance_episode_step(
+                &wait_payload,
+                &[
+                    ("schema", "/schema"),
+                    ("status", "/status"),
+                    ("verdict", "/verdict"),
+                    ("recover", "/recover"),
+                    ("session_id", "/session_id"),
+                    ("target_revision", "/target_revision"),
+                    ("target_frame_sha256", "/target_frame_sha256"),
+                    ("draw_report", "/draw_report"),
+                    ("claim_boundary", "/claim_boundary"),
+                ],
+            ),
+        );
+        if wait_error
+            || !advance_track_then_project_draw_valid(&wait_payload, session_id, &projection)
+        {
+            state.fail(
+                "wait",
+                "exact_draw_report_not_verified",
+                "a served, queued, later, or digest-mismatched frame does not prove this revision was drawn",
+            );
+            return;
+        }
+        state.binding["revision_and_digest_exact_match"] = json!(true);
+        state.claim_boundary = json!({
+            "device_activity_draw_reported": true,
+            "human_observed": false,
+            "pixel_verified": false,
+            "meaning": "The authenticated companion Activity reported an onDraw after applying this exact revision and frame digest; this is not human-observation or pixel-verification evidence."
+        });
+        state.last_completed_phase = "device_draw_reported";
+    }
+
+    fn final_result(
+        &self,
+        parsed: &AdvanceTrackThenProjectArgs,
+        state: AdvanceEpisodeState,
+    ) -> ToolResult {
+        let verified = !state.failed()
+            && state.last_completed_phase == "projection_stopped"
+            && state.cleanup["verified"] == json!(true)
+            && state.binding["player_exact_match"] == json!(true)
+            && state.binding["track_exact_match"] == json!(true)
+            && state.binding["revision_and_digest_exact_match"] == json!(true)
+            && state.claim_boundary["device_activity_draw_reported"] == json!(true);
+        let authority = advance_episode_authority(
+            state.action_invoked,
+            state.trusted_dispatch_count,
+            state.effect_verified,
+            state.fresh_dispatch_verified,
+            state.recovered_after_interruption,
+        );
+        let payload = json!({
+            "schema": ADVANCE_TRACK_THEN_PROJECT_SCHEMA,
+            "status": if verified { "verified" } else { "error" },
+            "verdict": if verified { "verified" } else { "error" },
+            "recover": if verified { "proceed" } else { "replan" },
+            "operation_id": parsed.operation_id,
+            "last_completed_phase": state.last_completed_phase,
+            "steps": state.steps,
+            "binding": state.binding,
+            "continuity": state.continuity,
+            "claim_boundary": state.claim_boundary,
+            "cleanup": state.cleanup,
+            "authority": authority,
+            "error": state.error
+        });
+        let mut result = ToolResult::json_text(&payload);
+        result.is_error = !verified;
+        result
+    }
+
+    fn validation_error(&self, operation_id: Option<&str>, message: String) -> ToolResult {
+        let payload = json!({
+            "schema": ADVANCE_TRACK_THEN_PROJECT_SCHEMA,
+            "status": "error",
+            "verdict": "error",
+            "recover": "replan",
+            "operation_id": operation_id,
+            "last_completed_phase": "none",
+            "steps": {
+                "projection_start": Value::Null,
+                "connection": Value::Null,
+                "app_control": Value::Null,
+                "sync": Value::Null,
+                "wait": Value::Null,
+                "stop": Value::Null
+            },
+            "binding": {
+                "resolved_player": Value::Null,
+                "action_before_track_id": Value::Null,
+                "action_after_track_id": Value::Null,
+                "projected_track_id": Value::Null,
+                "target_revision": Value::Null,
+                "target_frame_sha256": Value::Null,
+                "player_exact_match": false,
+                "track_exact_match": false,
+                "revision_and_digest_exact_match": false
+            },
+            "continuity": {
+                "operation_id_caller_supplied": operation_id.is_some(),
+                "operation_id": operation_id,
+                "same_operation_id_required_for_retry": operation_id.is_some(),
+                "new_operation_id_generated": false,
+                "action_invocation_count_this_call": 0,
+                "projection_session_process_local": true,
+                "presentation_may_repeat_on_retry": true
+            },
+            "claim_boundary": {
+                "device_activity_draw_reported": false,
+                "human_observed": false,
+                "pixel_verified": false
+            },
+            "cleanup": {
+                "attempted": false,
+                "verified": false,
+                "listener_stop_requested": false,
+                "activity_force_stop_succeeded": false,
+                "error": Value::Null
+            },
+            "authority": advance_episode_authority(false, None, false, false, None),
+            "error": {
+                "phase": "validation",
+                "code": "invalid_arguments",
+                "message": message
+            }
+        });
+        let mut result = ToolResult::json_text(&payload);
+        result.is_error = true;
+        result
+    }
+}
+
+#[async_trait]
+impl McpTool for AdvanceTrackThenProjectTool {
+    fn name(&self) -> &'static str {
+        "advance_track_then_project"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Run one fixed, bounded embodied-media episode: create an ephemeral consent-gated projection, verify its connection, execute durable at-most-once media next using the caller's operation_id, project the exact resulting track, wait for the Android Activity's exact revision+digest draw report, and stop the owned session. This is not a workflow runner. It accepts no arbitrary action, presentation, command, path, or callback. A draw report is neither human-observation nor pixel-verification evidence.".into(),
+            input_schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["operation_id", "bind"],
+                "properties": {
+                    "operation_id": {
+                        "type": "string", "minLength": 1, "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9._:-]+$",
+                        "description": "Caller-supplied durable identity. Retries must reuse this exact value; the tool never generates one."
+                    },
+                    "bind": {"type": "string", "description": "Exact private/link-local host IP reachable by the Android device."},
+                    "player": {"type": "string", "maxLength": 256, "description": "Optional app_control player selector; projection sync uses the exact resolved player from the durable action receipt."},
+                    "serial": {"type": "string", "maxLength": 256, "description": "ADB serial. Required when multiple online devices are connected."},
+                    "operation_ttl_secs": {"type": "integer", "minimum": 60, "maximum": 86400, "default": 3600},
+                    "verify_timeout_secs": {"type": "number", "minimum": 0.1, "maximum": 10.0, "default": 2.0},
+                    "auto_connect": {"type": "boolean", "default": false, "description": "Test-only authenticated connection; it is never reported as holder consent."},
+                    "projection_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 600, "default": 300},
+                    "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 120000, "default": 30000}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let operation_id_hint = args.get("operation_id").and_then(Value::as_str);
+        let parsed = match AdvanceTrackThenProjectArgs::parse(&args) {
+            Ok(value) => value,
+            Err(error) => return Ok(self.validation_error(operation_id_hint, error)),
+        };
+        if let Err(error) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(self.validation_error(Some(&parsed.operation_id), error));
+        }
+        let mut state = AdvanceEpisodeState::new(&parsed);
+
+        let mut start_args = json!({
+            "bind": parsed.bind,
+            "title": "媒体状态 · 等待切换",
+            "body": "连接确认后将切换到下一首，并投影经过验证的新曲目。",
+            "status": "等待连接确认",
+            "actions": [],
+            "auto_connect": parsed.auto_connect,
+            "ttl_seconds": parsed.projection_ttl_seconds,
+            "timeout_ms": parsed.timeout_ms
+        });
+        if let Some(serial) = &parsed.serial {
+            start_args["serial"] = json!(serial);
+        }
+        let start_result = match MobileProjectionStartTool::new(self.hub.clone())
+            .execute(start_args, ctx)
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                state.fail(
+                    "projection_start",
+                    "projection_start_failed",
+                    error.to_string(),
+                );
+                state.cleanup["error"] = json!({
+                    "code": "owned_session_not_identified",
+                    "message": "projection start failed before an owned session_id was returned"
+                });
+                return Ok(self.final_result(&parsed, state));
+            }
+        };
+        let Some(start_payload) = advance_track_then_project_result_json(&start_result) else {
+            state.fail(
+                "projection_start",
+                "projection_start_receipt_missing",
+                "mobile_projection_start returned no JSON receipt",
+            );
+            state.cleanup["error"] = json!({
+                "code": "owned_session_not_identified",
+                "message": "no session_id was available for cleanup"
+            });
+            return Ok(self.final_result(&parsed, state));
+        };
+        state.steps.insert(
+            "projection_start".into(),
+            advance_episode_step(
+                &start_payload,
+                &[
+                    ("status", "/status"),
+                    ("serial", "/serial"),
+                    ("session_id", "/session_id"),
+                    ("expires_at_unix_seconds", "/expires_at_unix_seconds"),
+                    ("frame_sha256", "/frame_sha256"),
+                    ("auto_connect", "/auto_connect"),
+                    ("confirmation_mode", "/confirmation_mode"),
+                    ("authority", "/authority"),
+                ],
+            ),
+        );
+        let Some(session_id) = start_payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+        else {
+            state.fail(
+                "projection_start",
+                "owned_session_not_identified",
+                "projection start returned no owned session_id; no action was invoked",
+            );
+            state.cleanup["error"] = json!({
+                "code": "owned_session_not_identified",
+                "message": "no session_id was available for cleanup"
+            });
+            return Ok(self.final_result(&parsed, state));
+        };
+        let expected_start_status = if parsed.auto_connect {
+            "awaiting_authenticated_pull"
+        } else {
+            "awaiting_device_consent"
+        };
+        if start_result.is_error
+            || start_payload.get("status").and_then(Value::as_str) != Some(expected_start_status)
+            || start_payload.get("auto_connect").and_then(Value::as_bool)
+                != Some(parsed.auto_connect)
+            || start_payload.get("authority") != Some(&mobile_projection_zero_authority())
+        {
+            state.fail(
+                "projection_start",
+                "projection_start_contract_mismatch",
+                "projection session was created but its start receipt failed the bounded contract",
+            );
+        } else {
+            state.last_completed_phase = "projection_started";
+            self.run_started_episode(&parsed, &session_id, &mut state, ctx)
+                .await;
+        }
+
+        // This cleanup is deliberately outside every ordinary post-start branch. A process kill
+        // can still interrupt it; the listener remains TTL-bounded and a later start replaces it.
+        state.cleanup["attempted"] = json!(true);
+        let stop_result = MobileProjectionStopTool::new(self.hub.clone())
+            .execute(
+                json!({
+                    "session_id": session_id,
+                    "timeout_ms": parsed.timeout_ms
+                }),
+                ctx,
+            )
+            .await;
+        match stop_result {
+            Ok(result) => {
+                if let Some(payload) = advance_track_then_project_result_json(&result) {
+                    state.steps.insert(
+                        "stop".into(),
+                        advance_episode_step(
+                            &payload,
+                            &[
+                                ("status", "/status"),
+                                ("session_id", "/session_id"),
+                                ("serial", "/serial"),
+                                ("listener_stop_requested", "/listener_stop_requested"),
+                                ("adb_force_stop", "/adb_force_stop"),
+                            ],
+                        ),
+                    );
+                    if result.is_error
+                        || !advance_track_then_project_stop_valid(&payload, &session_id)
+                    {
+                        state.cleanup["listener_stop_requested"] = json!(payload
+                            .get("listener_stop_requested")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false));
+                        state.cleanup["activity_force_stop_succeeded"] = json!(
+                            payload
+                                .pointer("/adb_force_stop/exit_code")
+                                .and_then(Value::as_i64)
+                                == Some(0)
+                        );
+                        state.cleanup["error"] = json!({
+                            "code": "projection_cleanup_not_verified",
+                            "message": "listener and companion Activity cleanup did not both verify"
+                        });
+                        state.fail(
+                            "stop",
+                            "projection_cleanup_not_verified",
+                            "listener and companion Activity cleanup did not both verify",
+                        );
+                    } else {
+                        state.cleanup = json!({
+                            "attempted": true,
+                            "verified": true,
+                            "listener_stop_requested": true,
+                            "activity_force_stop_succeeded": true,
+                            "error": Value::Null
+                        });
+                        if !state.failed() {
+                            state.last_completed_phase = "projection_stopped";
+                        }
+                    }
+                } else {
+                    state.cleanup["error"] = json!({
+                        "code": "projection_cleanup_receipt_missing",
+                        "message": "mobile_projection_stop returned no JSON receipt"
+                    });
+                    state.fail(
+                        "stop",
+                        "projection_cleanup_receipt_missing",
+                        "mobile_projection_stop returned no JSON receipt",
+                    );
+                }
+            }
+            Err(error) => {
+                state.cleanup["error"] = json!({
+                    "code": "projection_cleanup_failed",
+                    "message": error.to_string()
+                });
+                state.fail("stop", "projection_cleanup_failed", error.to_string());
+            }
+        }
+        Ok(self.final_result(&parsed, state))
+    }
+}
+
+#[cfg(test)]
+mod advance_track_then_project_unit_tests {
+    use super::*;
+
+    fn durable_action_fixture(
+        operation_id: &str,
+        player: &str,
+        before: &str,
+        after: &str,
+        idempotent_replay: bool,
+    ) -> Value {
+        json!({
+            "schema": "agent_bridge.app_control.v0",
+            "status": "verified",
+            "verdict": "verified",
+            "recover": "proceed",
+            "domain": "media",
+            "action": "next",
+            "read_only": false,
+            "player": player,
+            "selection": {"selector": player, "selected_player": player},
+            "before": {"player": player, "track_id": before},
+            "after": {"player": player, "track_id": after},
+            "dispatch": {
+                "status": "dispatched",
+                "rc": 0,
+                "argv": ["playerctl", "-p", player, "next"]
+            },
+            "verification": {"status": "verified", "predicate": "track_identity_changed"},
+            "transaction": {
+                "schema": "agent_bridge.app_control.operation.v0",
+                "operation_id": operation_id,
+                "request_digest": app_control_operation_request_digest("next", Some(player), 3600),
+                "phase": "verified",
+                "dispatch_count": 1,
+                "idempotent_replay": idempotent_replay,
+                "recovered_after_interruption": false,
+                "external_execution_repeated": false
+            },
+            "mcp_wrapper": {"exit_code": 0, "source_contract_ok": true}
+        })
+    }
+
+    fn sync_fixture(session_id: &str, player: &str, track_id: &str, digest: &str) -> Value {
+        json!({
+            "schema": "agent_bridge.mobile_projection_sync_media.v0",
+            "status": "updated",
+            "session_id": session_id,
+            "media_context": {"player": player, "track_id": track_id},
+            "app_control": {
+                "action": "playlist_current",
+                "read_only": true,
+                "verdict": "verified",
+                "player": player,
+                "selection": {"selected_player": player}
+            },
+            "projection_update": {
+                "status": "updated_awaiting_device_draw_report",
+                "session_id": session_id,
+                "revision": 2,
+                "frame_sha256": digest,
+                "changed_fields": ["title", "body", "media_context"]
+            }
+        })
+    }
+
+    fn draw_fixture(session_id: &str, revision: u64, digest: &str) -> Value {
+        json!({
+            "schema": "agent_bridge.mobile_projection_wait.v1",
+            "status": "revision_draw_reported_by_device",
+            "verdict": "verified",
+            "recover": "proceed",
+            "session_id": session_id,
+            "target_revision": revision,
+            "target_frame_sha256": digest,
+            "exact_revision_and_digest_draw_reported": true,
+            "draw_report": {
+                "revision": revision,
+                "frame_sha256": digest,
+                "device_reported_at_unix_seconds": 1_700_000_001_i64,
+                "host_received_at_unix_seconds": 1_700_000_002_i64,
+                "authenticated_exact_pair": true
+            },
+            "claim_boundary": {
+                "device_activity_draw_reported": true,
+                "human_observed": false,
+                "pixel_verified": false
+            }
+        })
+    }
+
+    #[test]
+    fn episode_args_are_fully_validated_before_side_effects() {
+        let valid = json!({
+            "operation_id": "episode:stable-1",
+            "bind": "192.168.1.2",
+            "player": "rhythmbox",
+            "serial": "device-1",
+            "operation_ttl_secs": 3600,
+            "verify_timeout_secs": 2.0,
+            "auto_connect": false,
+            "projection_ttl_seconds": 300,
+            "timeout_ms": 30000
+        });
+        let parsed = AdvanceTrackThenProjectArgs::parse(&valid).expect("valid args");
+        assert_eq!(parsed.operation_id, "episode:stable-1");
+        assert_eq!(parsed.player.as_deref(), Some("rhythmbox"));
+        for invalid in [
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "action": "previous"}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "cwd": "/tmp"}),
+            json!({"operation_id": "bad id", "bind": "192.168.1.2"}),
+            json!({"operation_id": "episode-1", "bind": "not-an-ip"}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "auto_connect": "true"}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "operation_ttl_secs": 59}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "verify_timeout_secs": 10.1}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "projection_ttl_seconds": 0}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "timeout_ms": null}),
+            json!({"operation_id": "episode-1", "bind": "192.168.1.2", "player": "x".repeat(257)}),
+        ] {
+            assert!(
+                AdvanceTrackThenProjectArgs::parse(&invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn durable_action_binding_requires_same_identity_player_and_track_change() {
+        let valid = durable_action_fixture("episode-1", "rhythmbox", "/track/1", "/track/2", false);
+        let binding =
+            advance_track_then_project_action_binding(&valid, "episode-1", Some("rhythmbox"), 3600)
+                .expect("valid durable action");
+        assert_eq!(binding.dispatch_count, 1);
+        assert_eq!(binding.after_track_id, "/track/2");
+        assert!(advance_track_then_project_action_binding(
+            &valid,
+            "episode-2",
+            Some("rhythmbox"),
+            3600
+        )
+        .is_err());
+        let mut wrong_player = valid.clone();
+        wrong_player["after"]["player"] = json!("vlc");
+        assert!(advance_track_then_project_action_binding(
+            &wrong_player,
+            "episode-1",
+            Some("rhythmbox"),
+            3600
+        )
+        .is_err());
+        let mut unchanged = valid;
+        unchanged["after"]["track_id"] = json!("/track/1");
+        assert!(advance_track_then_project_action_binding(
+            &unchanged,
+            "episode-1",
+            Some("rhythmbox"),
+            3600
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sync_binding_requires_exact_player_track_revision_and_digest() {
+        let action = AdvanceTrackActionBinding {
+            player: "rhythmbox".into(),
+            before_track_id: "/track/1".into(),
+            after_track_id: "/track/2".into(),
+            dispatch_count: 1,
+            idempotent_replay: false,
+            recovered_after_interruption: false,
+        };
+        let digest = "a".repeat(64);
+        let valid = sync_fixture("session-1", "rhythmbox", "/track/2", &digest);
+        let binding = advance_track_then_project_sync_binding(&valid, "session-1", &action)
+            .expect("valid sync");
+        assert_eq!(binding.revision, 2);
+        assert_eq!(binding.frame_sha256, digest);
+        for mutated in [
+            {
+                let mut value = valid.clone();
+                value["media_context"]["player"] = json!("vlc");
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["media_context"]["track_id"] = json!("/track/3");
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["projection_update"]["revision"] = json!(0);
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["projection_update"]["frame_sha256"] = json!("A".repeat(64));
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["projection_update"]["status"] = json!("updated_awaiting_authenticated_pull");
+                value
+            },
+        ] {
+            assert!(
+                advance_track_then_project_sync_binding(&mutated, "session-1", &action).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn connection_evidence_distinguishes_holder_from_test_only_auto_connect() {
+        let manual = json!({
+            "schema": "agent_bridge.mobile_projection_wait.v1",
+            "status": "holder_consent_observed",
+            "verdict": "verified",
+            "recover": "proceed",
+            "session_id": "session-1",
+            "target_revision": Value::Null,
+            "target_frame_sha256": Value::Null,
+            "connection": {
+                "authenticated_pull_observed": true,
+                "holder_confirmation_observed": true,
+                "auto_connect": false,
+                "confirmation_mode": "holder_confirmation_required"
+            }
+        });
+        assert!(advance_track_then_project_connection_valid(
+            &manual,
+            "session-1",
+            false
+        ));
+        assert!(!advance_track_then_project_connection_valid(
+            &manual,
+            "session-1",
+            true
+        ));
+        let mut automatic = manual;
+        automatic["status"] = json!("test_only_authenticated_connection_observed");
+        automatic["connection"]["holder_confirmation_observed"] = json!(false);
+        automatic["connection"]["auto_connect"] = json!(true);
+        automatic["connection"]["confirmation_mode"] = json!("test_only_auto_connect");
+        assert!(advance_track_then_project_connection_valid(
+            &automatic,
+            "session-1",
+            true
+        ));
+    }
+
+    #[test]
+    fn exact_draw_report_cannot_be_replaced_by_served_or_later_revision() {
+        let digest = "b".repeat(64);
+        let projection = AdvanceTrackProjectionBinding {
+            revision: 2,
+            frame_sha256: digest.clone(),
+            projected_track_id: "/track/2".into(),
+        };
+        let valid = draw_fixture("session-1", 2, &digest);
+        assert!(advance_track_then_project_draw_valid(
+            &valid,
+            "session-1",
+            &projection
+        ));
+        let mut later = draw_fixture("session-1", 3, &digest);
+        later["target_revision"] = json!(2);
+        assert!(!advance_track_then_project_draw_valid(
+            &later,
+            "session-1",
+            &projection
+        ));
+        let mut wrong_digest = valid.clone();
+        wrong_digest["draw_report"]["frame_sha256"] = json!("c".repeat(64));
+        assert!(!advance_track_then_project_draw_valid(
+            &wrong_digest,
+            "session-1",
+            &projection
+        ));
+        let served_only = json!({
+            "schema": "agent_bridge.mobile_projection_wait.v1",
+            "status": "timeout_without_matching_evidence",
+            "verdict": "unmet",
+            "recover": "retry",
+            "session_id": "session-1",
+            "target_revision": 2,
+            "target_frame_sha256": digest,
+            "draw_report": Value::Null,
+            "claim_boundary": {"device_activity_draw_reported": false, "human_observed": false, "pixel_verified": false}
+        });
+        assert!(!advance_track_then_project_draw_valid(
+            &served_only,
+            "session-1",
+            &projection
+        ));
+        assert_eq!(
+            mobile_projection_wait_outcome(1, 3, false, false, 100, Some(2), 50),
+            None,
+            "a draw report for r3 must not prove r2"
+        );
+        assert_eq!(
+            mobile_projection_wait_outcome(1, 2, false, false, 100, Some(2), 50),
+            Some("revision_draw_reported_by_device")
+        );
+    }
+
+    #[test]
+    fn cleanup_and_actuation_receipts_fail_closed_without_hiding_side_effects() {
+        let valid_stop = json!({
+            "status": "stop_requested",
+            "session_id": "session-1",
+            "listener_stop_requested": true,
+            "adb_force_stop": {"exit_code": 0}
+        });
+        assert!(advance_track_then_project_stop_valid(
+            &valid_stop,
+            "session-1"
+        ));
+        let mut failed_stop = valid_stop;
+        failed_stop["adb_force_stop"]["exit_code"] = json!(1);
+        assert!(!advance_track_then_project_stop_valid(
+            &failed_stop,
+            "session-1"
+        ));
+
+        let none = advance_episode_authority(false, None, false, false, None);
+        assert_eq!(none["media_actuation"]["invoked"], json!(false));
+        assert_eq!(none["media_actuation"]["dispatched"], json!(false));
+        let uncertain = advance_episode_authority(true, Some(1), false, false, None);
+        assert!(uncertain["media_actuation"]["dispatched"].is_null());
+        assert!(uncertain["media_actuation"]["dispatched_in_this_call"].is_null());
+        assert_eq!(
+            uncertain["media_actuation"]["effect_verified"],
+            json!(false)
+        );
+        let fresh = advance_episode_authority(true, Some(1), true, true, Some(false));
+        assert_eq!(
+            fresh["media_actuation"]["dispatched_in_this_call"],
+            json!(true)
+        );
+        let recovered = advance_episode_authority(true, Some(1), true, false, Some(true));
+        assert_eq!(
+            recovered["media_actuation"]["causal_attribution"],
+            "unknown_after_restart"
+        );
     }
 }
 

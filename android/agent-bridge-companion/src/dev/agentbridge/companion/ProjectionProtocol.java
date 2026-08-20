@@ -1,8 +1,12 @@
 package dev.agentbridge.companion;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -20,7 +24,17 @@ final class ProjectionProtocol {
 
     static String verifyResponse(String tokenHex, String sessionId, long unixSeconds,
             String nonce, String response) {
+        return verifyFrameResponse(tokenHex, sessionId, unixSeconds, nonce, response).rawJson;
+    }
+
+    /**
+     * Verifies the legacy ABP1 response while retaining the exact authenticated
+     * UTF-8 frame identity needed by the post-render ABR1 report.
+     */
+    static VerifiedFrame verifyFrameResponse(String tokenHex, String sessionId,
+            long unixSeconds, String nonce, String response) {
         validate(tokenHex, sessionId, nonce);
+        if (response == null) throw new IllegalArgumentException("empty projection response");
         String[] fields = response.trim().split(" ", -1);
         if (fields.length != 3 || !"OK".equals(fields[0]) || !isLowerHex(fields[2], 64))
             throw new IllegalArgumentException("invalid projection response");
@@ -31,7 +45,33 @@ final class ProjectionProtocol {
             throw new IllegalArgumentException("invalid projection response MAC");
         byte[] payload = decodeBase64NoPad(fields[1]);
         if (payload.length > 16384) throw new IllegalArgumentException("projection frame too large");
-        return new String(payload, UTF_8);
+        return new VerifiedFrame(decodeUtf8Strict(payload), Hex.encode(sha256(payload)), payload);
+    }
+
+    static String renderReportRequest(String tokenHex, String sessionId, long unixSeconds,
+            String nonce, long revision, String frameSha256) {
+        validateRenderReport(tokenHex, sessionId, nonce, revision, frameSha256);
+        String canonical = "ABR1\n" + sessionId + "\n" + unixSeconds + "\n" + nonce
+                + "\n" + revision + "\n" + frameSha256;
+        return "ABR1 " + sessionId + " " + unixSeconds + " " + nonce + " " + revision
+                + " " + frameSha256 + " " + Hex.encode(hmac(Hex.decode(tokenHex), canonical));
+    }
+
+    static void verifyRenderReportAck(String tokenHex, String sessionId, long unixSeconds,
+            String nonce, long revision, String frameSha256, String response) {
+        validateRenderReport(tokenHex, sessionId, nonce, revision, frameSha256);
+        if (response == null) throw new IllegalArgumentException("empty render acknowledgement");
+        String[] fields = response.trim().split(" ", -1);
+        if (fields.length != 4 || !"RENDERED".equals(fields[0])
+                || !canonicalRevision(fields[1], revision)
+                || !isLowerHex(fields[2], 64)
+                || !isLowerHex(fields[3], 64)
+                || !constantTimeEquals(Hex.decode(frameSha256), Hex.decode(fields[2])))
+            throw new IllegalArgumentException("invalid render acknowledgement");
+        String canonical = "ABR1R\n" + sessionId + "\n" + unixSeconds + "\n" + nonce
+                + "\n" + revision + "\n" + frameSha256;
+        if (!constantTimeEquals(hmac(Hex.decode(tokenHex), canonical), Hex.decode(fields[3])))
+            throw new IllegalArgumentException("invalid render acknowledgement MAC");
     }
 
     static void validateSession(long now, long expiresAt) {
@@ -46,6 +86,23 @@ final class ProjectionProtocol {
         if (!isLowerHex(nonce, 32)) throw new IllegalArgumentException("invalid projection nonce");
     }
 
+    private static void validateRenderReport(String tokenHex, String sessionId, String nonce,
+            long revision, String frameSha256) {
+        validate(tokenHex, sessionId, nonce);
+        if (revision <= 0L) throw new IllegalArgumentException("invalid projection revision");
+        if (!isLowerHex(frameSha256, 64))
+            throw new IllegalArgumentException("invalid projection frame digest");
+    }
+
+    private static boolean canonicalRevision(String value, long expected) {
+        if (value == null || !value.matches("0|[1-9][0-9]*")) return false;
+        try {
+            return Long.parseLong(value) == expected && value.equals(Long.toString(expected));
+        } catch (NumberFormatException error) {
+            return false;
+        }
+    }
+
     private static boolean isLowerHex(String value, int length) {
         return value != null && value.length() == length && value.matches("[0-9a-f]+$");
     }
@@ -57,6 +114,25 @@ final class ProjectionProtocol {
             return mac.doFinal(value.getBytes(UTF_8));
         } catch (GeneralSecurityException error) {
             throw new IllegalStateException("HmacSHA256 unavailable", error);
+        }
+    }
+
+    private static byte[] sha256(byte[] value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value);
+        } catch (GeneralSecurityException error) {
+            throw new IllegalStateException("SHA-256 unavailable", error);
+        }
+    }
+
+    private static String decodeUtf8Strict(byte[] value) {
+        try {
+            return UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(value)).toString();
+        } catch (CharacterCodingException error) {
+            throw new IllegalArgumentException("projection frame is not UTF-8", error);
         }
     }
 
@@ -84,6 +160,20 @@ final class ProjectionProtocol {
         if (bits > 0 && (buffer & ((1 << bits) - 1)) != 0)
             throw new IllegalArgumentException("non-canonical projection payload encoding");
         return output.toByteArray();
+    }
+
+    static final class VerifiedFrame {
+        final String rawJson;
+        final String frameSha256;
+        private final byte[] rawJsonUtf8;
+
+        private VerifiedFrame(String rawJson, String frameSha256, byte[] rawJsonUtf8) {
+            this.rawJson = rawJson;
+            this.frameSha256 = frameSha256;
+            this.rawJsonUtf8 = rawJsonUtf8.clone();
+        }
+
+        byte[] rawJsonUtf8() { return rawJsonUtf8.clone(); }
     }
 
     private ProjectionProtocol() {}

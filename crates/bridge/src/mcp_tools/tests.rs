@@ -1590,6 +1590,7 @@ fn codex_essential_exposes_mobile_readonly_bridge_tools() {
         "mobile_projection_update",
         "mobile_projection_sync_media",
         "mobile_projection_stop",
+        "advance_track_then_project",
         "mobile_install_apk",
         "mobile_launch_app",
         "mobile_click",
@@ -1607,7 +1608,7 @@ fn mobile_projection_wait_reports_only_observed_or_terminal_facts() {
     );
     assert_eq!(
         mobile_projection_wait_outcome(1, 1, false, false, 200, None, 150),
-        Some("consent_observed")
+        Some("authenticated_connection_observed")
     );
     assert_eq!(
         mobile_projection_wait_outcome(1, 1, false, false, 200, Some(2), 150),
@@ -1615,7 +1616,7 @@ fn mobile_projection_wait_reports_only_observed_or_terminal_facts() {
     );
     assert_eq!(
         mobile_projection_wait_outcome(2, 2, false, false, 200, Some(2), 150),
-        Some("revision_observed_by_device")
+        Some("revision_draw_reported_by_device")
     );
     assert_eq!(
         mobile_projection_wait_outcome(2, 2, true, false, 200, Some(2), 150),
@@ -2086,7 +2087,7 @@ fn mobile_debug_bundle_permissions_are_private() {
 fn mobile_projection_phase_is_honest_about_idle_and_terminal_states() {
     assert_eq!(
         mobile_projection_phase(0, 0, false, false, 200, 100),
-        "awaiting_consent"
+        "awaiting_connection"
     );
     assert_eq!(
         mobile_projection_phase(2, 98, false, false, 200, 100),
@@ -2104,6 +2105,151 @@ fn mobile_projection_phase_is_honest_about_idle_and_terminal_states() {
         mobile_projection_phase(2, 98, false, true, 200, 100),
         "expired"
     );
+}
+
+#[tokio::test]
+async fn mobile_projection_wait_requires_exact_positive_revision_and_draw_digest() {
+    let unique = format!(
+        "wait-v1-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let frame = crate::mobile_projection::ProjectionFrame::new(
+        &unique,
+        2,
+        now + 60,
+        "Exact draw",
+        "revision two",
+    )
+    .expect("test frame");
+    let digest = crate::mobile_projection::projection_frame_sha256(&frame)
+        .expect("canonical frame digest");
+    mobile_projection_test_seed_state(&unique, now, frame);
+    assert!(mobile_projection_test_record_draw_report(
+        &unique,
+        2,
+        &digest,
+        now,
+        now
+    ));
+
+    let tool = MobileProjectionWaitTool::new(Hub::builder().build());
+    let exact = tool
+        .execute(
+            json!({
+                "session_id": unique,
+                "target_revision": 2,
+                "target_frame_sha256": digest,
+                "timeout_ms": 100
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("exact wait receipt");
+    assert!(!exact.is_error);
+    let exact = result_text_as_json(&exact);
+    assert_eq!(exact["schema"], "agent_bridge.mobile_projection_wait.v1");
+    assert_eq!(exact["verdict"], "verified");
+    assert_eq!(exact["status"], "revision_draw_reported_by_device");
+    assert_eq!(exact["draw_report"]["revision"], 2);
+    assert_eq!(exact["exact_revision_and_digest_draw_reported"], true);
+    assert_eq!(exact["claim_boundary"]["human_observed"], false);
+    assert_eq!(exact["claim_boundary"]["pixel_verified"], false);
+
+    for (arguments, expected_error) in [
+        (
+            json!({"session_id": unique, "target_revision": 0, "target_frame_sha256": "a".repeat(64)}),
+            "target_revision must be an integer >= 1",
+        ),
+        (
+            json!({"session_id": unique, "target_revision": 2}),
+            "target_frame_sha256 is required",
+        ),
+        (
+            json!({"session_id": unique, "target_frame_sha256": "a".repeat(64)}),
+            "target_frame_sha256 requires target_revision",
+        ),
+        (
+            json!({"session_id": unique, "target_revision": 2, "target_frame_sha256": "A".repeat(64)}),
+            "64 lowercase hexadecimal",
+        ),
+        (
+            json!({"session_id": unique, "target_revision": 2, "target_frame_sha256": "b".repeat(64)}),
+            "does not match the locally bound revision",
+        ),
+    ] {
+        let rejected = tool
+            .execute(arguments, &ToolContext::default())
+            .await
+            .expect("fail-closed wait result");
+        assert!(rejected.is_error);
+        assert!(result_text(&rejected).contains(expected_error));
+    }
+    mobile_projection_test_remove_state(&unique);
+}
+
+#[tokio::test]
+async fn mobile_projection_wait_does_not_upgrade_served_or_later_draw_evidence() {
+    let unique = format!(
+        "wait-v1-negative-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let frame = crate::mobile_projection::ProjectionFrame::new(
+        &unique,
+        2,
+        now + 60,
+        "No inferred draw",
+        "served is not drawn",
+    )
+    .expect("test frame");
+    let digest = crate::mobile_projection::projection_frame_sha256(&frame)
+        .expect("canonical frame digest");
+    mobile_projection_test_seed_state(&unique, now, frame);
+    assert!(mobile_projection_test_record_draw_report(
+        &unique,
+        3,
+        &"c".repeat(64),
+        now,
+        now
+    ));
+
+    let tool = MobileProjectionWaitTool::new(Hub::builder().build());
+    let unmet = tool
+        .execute(
+            json!({
+                "session_id": unique,
+                "target_revision": 2,
+                "target_frame_sha256": digest,
+                "timeout_ms": 100
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bounded unmet receipt");
+    assert!(unmet.is_error);
+    let unmet = result_text_as_json(&unmet);
+    assert_eq!(unmet["verdict"], "unmet");
+    assert_eq!(unmet["recover"], "retry");
+    assert_eq!(unmet["status"], "timeout_without_matching_evidence");
+    assert!(unmet["draw_report"].is_null());
+    assert_eq!(unmet["exact_revision_and_digest_draw_reported"], false);
+    assert_eq!(unmet["claim_boundary"]["device_activity_draw_reported"], false);
+    mobile_projection_test_remove_state(&unique);
 }
 
 #[test]
@@ -8225,6 +8371,7 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
         "mobile_input_text",
         "mobile_screenshot",
         "mobile_ui_snapshot",
+        "advance_track_then_project",
     ] {
         assert!(
             !mobile.includes(Tier::Niche, tool),
@@ -8237,6 +8384,7 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
         "mobile_projection_start",
         "mobile_projection_update",
         "mobile_projection_stop",
+        "advance_track_then_project",
     ] {
         assert!(
             !lean.includes(Tier::Niche, tool),
@@ -8287,6 +8435,11 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
 fn codex_essential_mobile_projection_preserves_essential_surface() {
     let combined =
         ToolPolicy::from_values(Some("codex-essential-mobile-projection"), None, None, None);
+    let essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let mobile = ToolPolicy::from_values(Some("codex-mobile-projection"), None, None, None);
+    assert!(combined.extras().contains(&"advance_track_then_project"));
+    assert!(!essential.extras().contains(&"advance_track_then_project"));
+    assert!(!mobile.extras().contains(&"advance_track_then_project"));
     let schemas = build_registry_with_policy(Hub::builder().build(), combined).list();
     let names: std::collections::HashSet<_> =
         schemas.iter().map(|schema| schema.name.as_str()).collect();
@@ -8319,12 +8472,41 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
         "mobile_projection_update",
         "mobile_projection_sync_media",
         "mobile_projection_stop",
+        "advance_track_then_project",
     ] {
         assert!(
             schemas.iter().any(|schema| schema.name == tool),
             "schema missing {tool}"
         );
     }
+    let episode = schemas
+        .iter()
+        .find(|schema| schema.name == "advance_track_then_project")
+        .expect("bounded media/projection episode schema");
+    assert_eq!(episode.input_schema["additionalProperties"], false);
+    assert_eq!(
+        episode.input_schema["required"],
+        json!(["operation_id", "bind"])
+    );
+    for forbidden in [
+        "action",
+        "session_id",
+        "title",
+        "body",
+        "actions",
+        "cwd",
+        "script_path",
+        "command",
+        "callback",
+    ] {
+        assert!(
+            episode.input_schema["properties"].get(forbidden).is_none(),
+            "composite must not expose generic escape hatch {forbidden}"
+        );
+    }
+    assert!(episode.input_schema["properties"]["auto_connect"]["description"]
+        .as_str()
+        .is_some_and(|description| description.contains("Test-only")));
 }
 
 #[test]
@@ -8481,6 +8663,7 @@ fn host_surface_gates_device_and_credential_families() {
             "android_adb",
             &[
                 "mobile_click",
+                "advance_track_then_project",
                 "mobile_current_focus",
                 "mobile_debug_bundle",
                 "mobile_health",

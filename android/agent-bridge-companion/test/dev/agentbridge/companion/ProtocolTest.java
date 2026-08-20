@@ -27,12 +27,59 @@ public final class ProtocolTest {
         String payload = Base64.getEncoder().withoutPadding().encodeToString(
                 "{\"schema\":\"agent_bridge.mobile_projection.frame.v1\"}".getBytes(Charset.forName("UTF-8")));
         String responseMac = hmac(token, "ABP1R\n" + projectionSession + "\n" + now + "\n" + nonce + "\n" + payload);
-        String decoded = ProjectionProtocol.verifyResponse(token, projectionSession, now, nonce,
-                "OK " + payload + " " + responseMac);
-        check(decoded.contains(ProjectionProtocol.SCHEMA));
+        String projectionResponse = "OK " + payload + " " + responseMac;
+        ProjectionProtocol.VerifiedFrame verifiedFrame = ProjectionProtocol.verifyFrameResponse(
+                token, projectionSession, now, nonce, projectionResponse);
+        check(verifiedFrame.rawJson.contains(ProjectionProtocol.SCHEMA));
+        check(verifiedFrame.rawJson.equals(new String(
+                verifiedFrame.rawJsonUtf8(), Charset.forName("UTF-8"))));
+        check(verifiedFrame.frameSha256.equals(
+                "9cca83a4561232783196fc8a3f5361ef7bd1d41fdfe04700e49b662dae527adb"));
+        check(ProjectionProtocol.verifyResponse(token, projectionSession, now, nonce,
+                projectionResponse).equals(verifiedFrame.rawJson));
         boolean rejected = false;
         try { ProjectionProtocol.verifyResponse(token, projectionSession, now, nonce,
                 "OK " + payload + " " + repeat("00", 32)); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
+        String invalidUtf8Payload = "wyg";
+        String invalidUtf8Mac = hmac(token, "ABP1R\n" + projectionSession + "\n" + now
+                + "\n" + nonce + "\n" + invalidUtf8Payload);
+        rejected = false;
+        try { ProjectionProtocol.verifyFrameResponse(token, projectionSession, now, nonce,
+                "OK " + invalidUtf8Payload + " " + invalidUtf8Mac); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
+        long revision = 7L;
+        String renderRequest = ProjectionProtocol.renderReportRequest(token, projectionSession,
+                now, nonce, revision, verifiedFrame.frameSha256);
+        check(renderRequest.equals("ABR1 projection-1 1700000000 "
+                + "0123456789abcdef0123456789abcdef 7 "
+                + "9cca83a4561232783196fc8a3f5361ef7bd1d41fdfe04700e49b662dae527adb "
+                + "b81cd8e26188dfeaff025cb2d840e657d2308eeaf234f5a693394922c93e9545"));
+        String renderAck = "RENDERED 7 " + verifiedFrame.frameSha256 + " "
+                + "3d49253c3b4ca929eaafc2b567ba065081ae87917a0f431fd136f6a89b57b8c6";
+        ProjectionProtocol.verifyRenderReportAck(token, projectionSession, now, nonce,
+                revision, verifiedFrame.frameSha256, renderAck);
+        rejected = false;
+        try { ProjectionProtocol.verifyRenderReportAck(token, projectionSession, now, nonce,
+                revision, verifiedFrame.frameSha256, renderAck.replace("RENDERED 7", "RENDERED 07")); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
+        rejected = false;
+        try { ProjectionProtocol.verifyRenderReportAck(token, projectionSession, now, nonce,
+                revision, repeat("00", 32), renderAck); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
+        rejected = false;
+        try { ProjectionProtocol.verifyRenderReportAck(token, projectionSession, now, nonce,
+                revision, verifiedFrame.frameSha256,
+                "RENDERED 7 " + verifiedFrame.frameSha256 + " " + repeat("00", 32)); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
+        rejected = false;
+        try { ProjectionProtocol.renderReportRequest(token, projectionSession, now, nonce,
+                0L, verifiedFrame.frameSha256); }
         catch (IllegalArgumentException expected) { rejected = true; }
         check(rejected);
         ProjectionProtocol.validateSession(now, now + 600L);

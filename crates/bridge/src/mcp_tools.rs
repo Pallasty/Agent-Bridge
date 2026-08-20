@@ -48682,7 +48682,8 @@ enum ToolSet {
     /// session. It keeps codex-lean read tools and adds only mobile projection
     /// lifecycle tools; it never widens to install/click/input controls.
     CodexMobileProjection,
-    /// Codex essential surface plus the explicit, bounded mobile projection lane.
+    /// Codex essential plus the bounded projection lane and their one explicitly
+    /// reviewed, at-most-once media-to-device episode.
     CodexEssentialMobileProjection,
     /// Codex lean plus the explicitly gated, one-shot ModelScope ABot runtime.
     CodexModelScopeAbot,
@@ -48767,6 +48768,7 @@ impl ToolSet {
                 .flat_map(|g| g.iter().copied())
                 .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
                 .chain(CODEX_MOBILE_PROJECTION_EXTRAS.iter().copied())
+                .chain(CODEX_ESSENTIAL_MOBILE_EPISODE_EXTRAS.iter().copied())
                 .collect(),
             Self::CodexModelScopeAbot => CODEX_MODELSCOPE_ABOT_EXTRAS.to_vec(),
             Self::CodexA2ui => vec!["a2ui_preview"],
@@ -48855,6 +48857,7 @@ impl ToolPolicy {
             ToolSet::CodexEssentialMobileProjection => {
                 codex_essential_tool(tier, tool_name)
                     || CODEX_MOBILE_PROJECTION_EXTRAS.contains(&tool_name)
+                    || CODEX_ESSENTIAL_MOBILE_EPISODE_EXTRAS.contains(&tool_name)
             }
             ToolSet::CodexModelScopeAbot => {
                 codex_lean_tool(tool_name) || CODEX_MODELSCOPE_ABOT_EXTRAS.contains(&tool_name)
@@ -49109,6 +49112,11 @@ const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
     "mobile_projection_sync_media",
     "mobile_projection_stop",
 ];
+
+/// Cross-capability episode that deliberately combines one durable media
+/// mutation with the bounded projection lane.  Keep it out of both component
+/// profiles: only the explicit combined profile may acquire this actuation.
+const CODEX_ESSENTIAL_MOBILE_EPISODE_EXTRAS: &[&str] = &["advance_track_then_project"];
 
 /// Explicit one-shot ABot-World lane. The runtime tool owns its BrowserBackend
 /// lifecycle internally, so raw browser_* controls remain outside this surface.
@@ -52793,6 +52801,13 @@ pub(crate) fn build_registry_with_policy_surface(
         surface.android_adb,
         Tier::Niche,
         Arc::new(MobileProjectionStopTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(AdvanceTrackThenProjectTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
