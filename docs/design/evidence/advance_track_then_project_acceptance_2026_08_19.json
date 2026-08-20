@@ -1,0 +1,121 @@
+{
+  "schema": "agent_bridge.advance_track_then_project.acceptance.v0",
+  "date": "2026-08-19",
+  "host": "local-linux-sway",
+  "implementation_commit": "471960529f6a17e8a97701eb01e383c8492b25b1",
+  "live_tested_equivalent_pre_rebase_commit": "83c03784271c89da1277bb49f2e13d59a2aa0d74",
+  "source_equivalence": "The Android, projection protocol, MCP episode, documentation, and deploy-sentinel paths are byte-identical between the live-tested pre-rebase commit and implementation_commit; the rebase added only the independent store proposal-review commit.",
+  "runtime": {
+    "binary": "/Data/CascadeProjects/agent-bridge/target/debug/agent-bridge",
+    "build": "ab-bridge agent-bridge binary built from live_tested_equivalent_pre_rebase_commit with no default features; the shipped implementation paths are byte-identical at implementation_commit",
+    "toolset": "codex-essential-mobile-projection",
+    "store": "isolated temporary SQLite store; no production-memory write",
+    "app_control_runtime_sha256": "400997572e1ae15d355bac0816f39c4b0a18cc20cdb34b9434f4b421647e28c9",
+    "player": "rhythmbox"
+  },
+  "android_companion": {
+    "serial": "3K661F0178H00000",
+    "model": "PKW110",
+    "package": "dev.agentbridge.companion",
+    "version_code": 3,
+    "version_name": "0.3.0",
+    "apk_sha256": "62adfcd98f64c383d324d414855feb8ad71105ea2e7f679c43229a15fabca0db",
+    "signer_certificate_sha256": "ebcd0970f09f2d5818f84ab738971827f5af8ba9482d5087ae2fcd821cb8b655",
+    "signature_schemes_verified": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "connection_mode": "test_only_auto_connect",
+    "holder_confirmation_observed": false
+  },
+  "operation": {
+    "operation_id": "p2-live-20260819-0515",
+    "request_digest": "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2",
+    "action": "next",
+    "before_track_id": "/org/mpris/MediaPlayer2/Track/2558",
+    "before_title": "A Greater Good (No Choir)",
+    "after_track_id": "/org/mpris/MediaPlayer2/Track/1295",
+    "after_title": "Michael.Bolton-.[Only.A.Woman.Like.You].专辑.(FLAC)",
+    "dispatch_count": 1,
+    "source_contract_ok": true
+  },
+  "first_process": {
+    "composite_verdict": "verified",
+    "last_completed_phase": "projection_stopped",
+    "projection_session_id": "mcp-1787202931-cccf56b960d7",
+    "target_revision": 2,
+    "target_frame_sha256": "6e7c8b537f78a97b0ffdbb447ee331a6f20c8a26d17a8f40cf13155e75a8b2b3",
+    "draw_report": {
+      "revision": 2,
+      "frame_sha256": "6e7c8b537f78a97b0ffdbb447ee331a6f20c8a26d17a8f40cf13155e75a8b2b3",
+      "device_reported_at_unix_seconds": 1787202934,
+      "host_received_at_unix_seconds": 1787202934,
+      "authenticated_exact_pair": true
+    },
+    "idempotent_replay": false,
+    "recovered_after_interruption": false,
+    "dispatched_in_this_call": true,
+    "projected_track_id": "/org/mpris/MediaPlayer2/Track/1295",
+    "cleanup_verified": true
+  },
+  "fresh_mcp_process_same_id_replay": {
+    "composite_verdict": "verified",
+    "last_completed_phase": "projection_stopped",
+    "projection_session_id": "mcp-1787202985-328ce34fc878",
+    "target_revision": 2,
+    "target_frame_sha256": "12495a88dfbb2b5135224cd1c51156d105804009dc4d5f171f56bfe11b1e4569",
+    "draw_report": {
+      "revision": 2,
+      "frame_sha256": "12495a88dfbb2b5135224cd1c51156d105804009dc4d5f171f56bfe11b1e4569",
+      "device_reported_at_unix_seconds": 1787202987,
+      "host_received_at_unix_seconds": 1787202987,
+      "authenticated_exact_pair": true
+    },
+    "idempotent_replay": true,
+    "external_execution_repeated": false,
+    "dispatched_in_this_call": null,
+    "observed_track_id_after_replay": "/org/mpris/MediaPlayer2/Track/1295",
+    "projected_track_id": "/org/mpris/MediaPlayer2/Track/1295",
+    "cleanup_verified": true
+  },
+  "postcondition": {
+    "track_id_unchanged_across_fresh_process_replay": true,
+    "playlist_name": "Allin1.m3u",
+    "playback_status_after_episode": "Playing",
+    "projection_activity_force_stopped_after_each_receipt": true,
+    "previous_foreground_activity_restored": true
+  },
+  "verification": {
+    "rust_mobile_projection_tests": "31 passed",
+    "rust_composite_tests": "6 passed",
+    "rust_app_control_tests": "7 passed",
+    "python_app_control_tests": "43 passed",
+    "rust_tool_policy_tests": "13 passed",
+    "rust_semantic_bus_fixture_tests": "3 passed",
+    "android_protocol_tests": "passed",
+    "deploy_regressions": [
+      "audio-adapter-parity passed",
+      "pinned-assets passed",
+      "postbuild-race passed"
+    ],
+    "cargo_check": "ab-bridge lib passed",
+    "git_diff_check": "passed"
+  },
+  "claim_boundary": {
+    "media_effect": "The first receipt proves one fresh durable next dispatch and a strict track-id change. The fresh-process replay proves the same durable operation was reused and the external track did not advance again.",
+    "projection_effect": "Each receipt proves that the authenticated companion Activity reported an onDraw for the exact session, positive revision, and raw-frame SHA-256 pair.",
+    "not_claimed": [
+      "human observation",
+      "independent pixel verification",
+      "persistent projection-session continuity",
+      "general workflow or arbitrary mobile-control authority"
+    ],
+    "projection_authority": {
+      "attention": false,
+      "memory": false,
+      "sensor": false,
+      "actuation": false
+    }
+  }
+}
