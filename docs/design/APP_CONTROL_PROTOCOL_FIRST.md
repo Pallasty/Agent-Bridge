@@ -204,6 +204,10 @@ recomputes the request digest. This is enough for a new instance to prepare an
 explicit same-request recovery decision without owner restatement. It is not a
 resume token or dispatch permit: the normal mutating path still takes the
 exclusive lock and revalidates the record, expiry, player and effect evidence.
+The scanner also accepts a bounded `minimum_recovery_secs` budget (default five
+seconds). A record with less remaining TTL is reported only as a hashed blocked
+record, never as an eligible candidate; “not expired” is not treated as enough
+time to recover.
 
 The source-local cross-process synthetic gate exercises the complete handoff:
 one process is killed after its fake `playerctl next` child changes state, a

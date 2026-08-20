@@ -37,13 +37,15 @@ def _secure_file(fd: int, mode: int) -> bool:
     return stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.getuid() and stat.S_IMODE(metadata.st_mode) == mode
 
 
-def discover(directory: Path, *, now: float | None = None) -> dict[str, Any]:
+def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs: float = 5.0) -> dict[str, Any]:
     now = time.time() if now is None else now
     result: dict[str, Any] = {
         "schema": SCHEMA, "status": "verified", "verdict": "verified", "recover": "proceed",
         "read_only": True, "observed_at_unix_seconds": now,
         "journal_path_sha256": hashlib.sha256(str(directory).encode()).hexdigest(),
         "candidate_count": 0, "candidates": [], "skipped_count": 0,
+        "blocked_count": 0, "blocked_operation_id_sha256": [],
+        "minimum_recovery_secs": minimum_recovery_secs,
         "scan_complete": True, "media_observed": False, "action_invoked": False,
         "automatic_recovery_authorized": False,
     }
@@ -101,12 +103,17 @@ def discover(directory: Path, *, now: float | None = None) -> dict[str, Any]:
                     or record.get("request_digest") != canonical_digest
                 ):
                     result["skipped_count"] += 1; continue
+                remaining_secs = max(0.0, float(expires_at) - now)
+                if remaining_secs < minimum_recovery_secs:
+                    result["blocked_count"] += 1
+                    result["blocked_operation_id_sha256"].append(hashlib.sha256(operation_id.encode("ascii")).hexdigest())
+                    continue
                 result["candidates"].append({
                     "operation_id": operation_id,
                     "request": canonical_request,
                     "request_digest": canonical_digest,
                     "expires_at": float(expires_at),
-                    "remaining_secs": max(0.0, float(expires_at) - now),
+                    "remaining_secs": remaining_secs,
                     "phase": "dispatch_started", "dispatch_count": 1,
                     "record_sha256": hashlib.sha256(raw).hexdigest(),
                     "discovery_only": True, "revalidation_required": True,
@@ -134,12 +141,16 @@ def discover(directory: Path, *, now: float | None = None) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal", required=True)
+    parser.add_argument("--minimum-recovery-secs", type=float, default=5.0)
     args = parser.parse_args()
     directory = Path(args.journal)
     if not directory.is_absolute():
         print(json.dumps({"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "read_only": True, "error": {"code": "journal_path_not_absolute"}}, separators=(",", ":")))
         return 3
-    result = discover(directory)
+    if not (0.0 <= args.minimum_recovery_secs <= 86400.0):
+        print(json.dumps({"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "read_only": True, "error": {"code": "invalid_minimum_recovery_secs"}}, separators=(",", ":")))
+        return 3
+    result = discover(directory, minimum_recovery_secs=args.minimum_recovery_secs)
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0 if result["verdict"] == "verified" else 3
 

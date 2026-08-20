@@ -85,6 +85,20 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
                 self.assertEqual(INDEX.discover(self.directory, now=1100.0)["candidate_count"], 0)
                 for path in self.directory.iterdir(): path.unlink()
 
+    def test_unexpired_but_insufficient_window_is_blocked(self):
+        self.write_candidate(expires_at=1103.0)
+        result = INDEX.discover(self.directory, now=1100.0, minimum_recovery_secs=5.0)
+        self.assertEqual(result["candidate_count"], 0)
+        self.assertEqual(result["blocked_count"], 1)
+        self.assertEqual(len(result["blocked_operation_id_sha256"]), 1)
+        self.assertEqual(result["minimum_recovery_secs"], 5.0)
+
+    def test_sufficient_window_remains_candidate(self):
+        self.write_candidate(expires_at=1106.0)
+        result = INDEX.discover(self.directory, now=1100.0, minimum_recovery_secs=5.0)
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["blocked_count"], 0)
+
     def test_unsafe_or_corrupt_journal_fails_entire_scan_closed(self):
         record_path, _ = self.write_candidate()
         record_path.write_text("{")

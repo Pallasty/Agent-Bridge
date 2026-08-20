@@ -16,6 +16,8 @@
     "unexpired_required": true,
     "exact_canonical_request_and_digest_required": true,
     "original_player_selector_and_ttl_required": true,
+    "minimum_recovery_window_is_explicit": true,
+    "insufficient_window_is_blocked": true,
     "owner_only_journal_required": true,
     "shared_nonblocking_lock_required": true
   },
