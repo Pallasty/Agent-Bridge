@@ -1,0 +1,67 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_owner_review.v0",
+  "review_id": "embodied-media-owner-review-20260820-01",
+  "reviewed_at": "2026-08-20T15:12:00Z",
+  "aggregate": {
+    "scorecard_commit": "d3da14a82fb9861c39247eef22de041cd73596eb",
+    "scorecard_decision": "READY_FOR_OWNER_REVIEW",
+    "target_paired_real_tasks": 3,
+    "useful_paired_real_tasks": 3,
+    "workflow_burden_regressions": 0,
+    "safety_failures": 0,
+    "contract_failures": 0,
+    "incomplete_records": 0,
+    "agent_orchestration_calls_saved_per_pair": [5, 5, 5],
+    "behavior_lift_proven": false,
+    "runtime_influence_allowed": false
+  },
+  "decision": {
+    "status": "CONDITIONAL_ADOPT_BOUNDED_MEDIA_EPISODE",
+    "adopted_scope": "advance_track_then_project_with_durable_same_id_recovery",
+    "operator_burden_result": "three preregistered pairs each reduced visible orchestration from 7 calls to 2",
+    "automatic_rollout": false,
+    "automatic_cross_domain_expansion": false,
+    "new_runtime_authority_granted": false,
+    "requires_explicit_owner_approval_for_next_scope": true
+  },
+  "evidence_boundary": {
+    "global_dispatch_count_proven": false,
+    "exclusive_causation_proven": false,
+    "long_lived_stability_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false,
+    "behavior_lift_proven": false,
+    "sample_scope": "three pairs, one Rhythmbox player, one Android companion, one host/device topology",
+    "pair_01_and_pair_02_in_denominator": false
+  },
+  "operating_constraints": {
+    "public_tool_surface_unchanged": true,
+    "operation_id_and_settlement_contract_unchanged": true,
+    "same_id_recovery_required": true,
+    "exact_draw_and_cleanup_required": true,
+    "private_raw_receipts_required": true,
+    "no_background_polling": true,
+    "no_implicit_ui_fallback": true,
+    "no_automatic_new_operation_id": true,
+    "new_live_pair_requires_preregistration": true
+  },
+  "next_scope": {
+    "status": "DESIGN_ONLY_PENDING_OWNER_APPROVAL",
+    "candidate": "mac_window_focus_then_ax_verify",
+    "implementation_authorized": false,
+    "live_execution_authorized": false,
+    "required_before_start": [
+      "explicit_owner_approval",
+      "separate capability-specific preregistration",
+      "new bounded collector and runner contract",
+      "fresh failure and cleanup matrix",
+      "no reuse of media operation IDs or denominator"
+    ]
+  },
+  "claim_boundary": {
+    "this_is_a_product_decision": false,
+    "this_is_behavior_lift": false,
+    "this_is_general_workflow_authority": false,
+    "this_authorizes_cross_domain_runtime_influence": false
+  }
+}

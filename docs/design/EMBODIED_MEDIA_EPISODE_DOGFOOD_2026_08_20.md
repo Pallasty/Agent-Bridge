@@ -206,3 +206,13 @@ does not prove global dispatch counts, exclusive causation, long-lived
 stability, human observation, or pixel verification. No new runtime influence,
 cross-domain expansion, or automatic product decision is authorized by this
 aggregate; those require an explicit owner review.
+
+## Owner-review boundary
+
+The versioned review record at
+`docs/design/evidence/embodied_media_episode_dogfood_owner_review_2026_08_20.json`
+records a conditional adoption of this bounded media episode only. It does not
+authorize rollout, new runtime authority, background polling, or a new live
+pair. The next candidate, if explicitly approved, is a design-only
+`mac_window_focus_then_ax_verify` exercise with its own collector, runner,
+preregistration, denominator, and failure matrix.
