@@ -8,6 +8,10 @@ PREREGISTRATION = (
     ROOT
     / "docs/design/evidence/macos_ax_focus_continuity_design_preregistration_2026_08_20.json"
 )
+IMPLEMENTATION = (
+    ROOT
+    / "docs/design/evidence/macos_ax_focus_continuity_offline_implementation_2026_08_20.json"
+)
 
 
 class MacosAxFocusContinuityDesignTests(unittest.TestCase):
@@ -123,6 +127,45 @@ class MacosAxFocusContinuityDesignTests(unittest.TestCase):
         self.assertNotIn("window_title", self.raw)
         self.assertNotIn("AXIdentifier=", self.raw)
         self.assertNotIn("bundle_id=com.", self.raw)
+
+
+class MacosAxFocusContinuityImplementationEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.value = json.loads(IMPLEMENTATION.read_text(encoding="utf-8"))
+
+    def test_offline_authority_does_not_expand_runtime_or_live_scope(self):
+        self.assertEqual(
+            self.value["schema"],
+            "agent_bridge.macos_ax_focus_continuity_offline_implementation.v0",
+        )
+        self.assertEqual(
+            self.value["design_commit"],
+            "55d0c8a2777a654c5fb72b7a01e210b649972382",
+        )
+        authority = self.value["authority"]
+        self.assertTrue(authority["offline_implementation_authorized"])
+        self.assertFalse(authority["live_mac_action_authorized"])
+        self.assertFalse(authority["deployment_authorized"])
+        self.assertFalse(authority["public_tool_expansion_authorized"])
+        self.assertFalse(self.value["implementation"]["public_mcp_tool_added"])
+        self.assertFalse(self.value["implementation"]["runtime_asset_added"])
+
+    def test_journal_and_state_machine_pin_at_most_once_recovery(self):
+        journal = self.value["journal_contract"]
+        self.assertEqual(journal["maximum_dispatch_count"], 1)
+        self.assertTrue(journal["nonblocking_exclusive_flock"])
+        self.assertTrue(journal["atomic_replace_and_fsync"])
+        self.assertTrue(journal["terminal_receipt_validated_before_replay"])
+        state = self.value["state_machine"]
+        self.assertEqual(state["phases"], ["prepared", "dispatch_started", "terminal"])
+        self.assertTrue(state["dispatch_started_recovery_read_only"])
+        self.assertFalse(state["dispatch_started_may_redispatch"])
+        self.assertFalse(state["terminal_replay_calls_tools"])
+
+    def test_offline_evidence_makes_no_live_or_general_claim(self):
+        self.assertEqual(self.value["offline_tests"]["runner_and_design_tests_passed"], 23)
+        for value in self.value["claim_boundary"].values():
+            self.assertIs(value, False)
 
 
 if __name__ == "__main__":

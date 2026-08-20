@@ -1,0 +1,60 @@
+{
+  "schema": "agent_bridge.macos_ax_focus_continuity_offline_implementation.v0",
+  "implemented_at": "2026-08-20T15:45:16Z",
+  "design_commit": "55d0c8a2777a654c5fb72b7a01e210b649972382",
+  "authority": {
+    "offline_implementation_authorized": true,
+    "live_mac_action_authorized": false,
+    "deployment_authorized": false,
+    "public_tool_expansion_authorized": false
+  },
+  "implementation": {
+    "collector": "scripts/macos-ax-focus-continuity-collector.py",
+    "runner": "scripts/macos-ax-focus-continuity-runner.py",
+    "public_mcp_tool_added": false,
+    "runtime_asset_added": false,
+    "existing_focus_transaction_reused": true,
+    "existing_independent_verifier_reused": true,
+    "existing_embodiment_lease_reused": true
+  },
+  "journal_contract": {
+    "schema": "agent_bridge.macos_ax_focus_continuity_operation.v0",
+    "caller_operation_id_required": true,
+    "hashed_filename": true,
+    "directory_mode": "0700",
+    "record_and_lock_mode": "0600",
+    "nonblocking_exclusive_flock": true,
+    "atomic_replace_and_fsync": true,
+    "maximum_dispatch_count": 1,
+    "terminal_receipt_validated_before_replay": true
+  },
+  "state_machine": {
+    "phases": [
+      "prepared",
+      "dispatch_started",
+      "terminal"
+    ],
+    "prepared_may_retry_admission": true,
+    "dispatch_started_recovery_read_only": true,
+    "dispatch_started_may_redispatch": false,
+    "terminal_replay_calls_tools": false,
+    "recovery_causal_attribution": "unknown_after_interruption"
+  },
+  "offline_tests": {
+    "runner_and_design_tests_passed": 23,
+    "registered_response_loss_covered": true,
+    "same_id_no_redispatch_covered": true,
+    "lease_cleanup_required_before_terminal": true,
+    "prepared_resume_covered": true,
+    "ttl_conflict_corruption_and_lock_busy_covered": true,
+    "forged_terminal_replay_rejected": true
+  },
+  "claim_boundary": {
+    "live_mac_action_performed": false,
+    "mac_eligibility_established": false,
+    "cross_process_live_recovery_proven": false,
+    "exclusive_causation_proven": false,
+    "workflow_burden_reduction_proven": false,
+    "general_computer_use_proven": false
+  }
+}

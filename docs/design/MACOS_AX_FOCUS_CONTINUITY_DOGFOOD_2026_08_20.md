@@ -91,3 +91,25 @@ review. They do not prove general computer-use skill, exclusive causation,
 pixel correctness, human observation, cross-app navigation, or safe replay of
 content-changing actions. No implementation or live execution is authorized
 until the design preregistration and its closed validator are merged.
+
+## Offline implementation gate
+
+After the design gate merged, the owner authorized the next bounded candidate.
+The first implementation remains private and source-local:
+
+- `macos-ax-focus-continuity-collector.py` validates complete two-window probe,
+  admission, focus-transaction, recovery-verifier, and terminal receipts;
+- `macos-ax-focus-continuity-runner.py` owns an operation-ID-hashed, 0700/0600,
+  flock-serialized and fsync/rename-persisted journal;
+- a fresh invocation may call the focus transaction once only after persisting
+  `dispatch_started` with `dispatch_count=1`;
+- registered response loss leaves that record nonterminal, releases the lease,
+  and returns `retry` without claiming the effect;
+- a later same-ID invocation calls only `macos_ax_verify(window_focused)` and
+  records `causal_attribution=unknown_after_interruption` on success; and
+- terminal replay performs no MCP calls and rejects malformed stored receipts.
+
+The runner is not a public MCP tool and is not a deployed runtime asset. This
+implementation gate does not authorize a real Mac focus action. Read-only Mac
+eligibility inspection, live fault injection, paired measurement, and rollout
+remain distinct owner gates.
