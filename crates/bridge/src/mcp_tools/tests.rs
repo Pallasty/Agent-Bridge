@@ -18585,6 +18585,7 @@ assert sys.argv[sys.argv.index("--operation-id") + 1] == "episode-expired"
 assert sys.argv[sys.argv.index("--operation-ttl-secs") + 1] == "3600"
 assert sys.argv[sys.argv.index("--player") + 1] == "rhythmbox"
 assert "--operation-preflight" in sys.argv
+assert sys.argv[sys.argv.index("--wrapper-contract-version") + 1] == "agent_bridge.app_control.wrapper_contract.v1"
 print(r'''{receipt}''')
 raise SystemExit(2)
 "#
@@ -18662,6 +18663,7 @@ assert sys.argv[sys.argv.index("--domain") + 1] == "media"
 assert sys.argv[sys.argv.index("--action") + 1] == "next"
 assert sys.argv[sys.argv.index("--player") + 1] == "rhythmbox"
 assert "--dry-run" not in sys.argv
+assert sys.argv[sys.argv.index("--wrapper-contract-version") + 1] == "agent_bridge.app_control.wrapper_contract.v1"
 print(json.dumps({
   "schema": "agent_bridge.app_control.v0", "status": "verified",
   "verdict": "verified", "recover": "proceed", "domain": "media", "action": "next",
@@ -18697,6 +18699,49 @@ print(json.dumps({
     assert_ne!(payload["before"]["track_id"], payload["after"]["track_id"]);
     assert_eq!(payload["mcp_wrapper"]["tool"], "app_control");
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn app_control_new_wrapper_with_old_runtime_fails_before_mutation() {
+    let temp = tempfile::tempdir().expect("old runtime tempdir");
+    let script = temp.path().join("app_control.py");
+    let marker = temp.path().join("mutation.marker");
+    let source = format!(
+        r#"#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+p = argparse.ArgumentParser()
+p.add_argument("--domain")
+p.add_argument("--action", required=True)
+p.add_argument("--player")
+p.add_argument("--verify-timeout")
+p.parse_args()
+Path(r'''{}''').write_text("mutated", encoding="utf-8")
+"#,
+        marker.display()
+    );
+    tokio::fs::write(&script, source)
+        .await
+        .expect("write old runtime fixture");
+
+    let out = AppControlTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "action": "next",
+                "player": "rhythmbox",
+                "script_path": script.to_string_lossy(),
+                "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute against old runtime");
+    assert!(out.is_error);
+    assert_eq!(result_text_as_json(&out)["error"]["code"], "invalid_json");
+    assert!(
+        !marker.exists(),
+        "old runtime crossed its argparse boundary before rejecting the new wrapper marker"
+    );
 }
 
 #[tokio::test]

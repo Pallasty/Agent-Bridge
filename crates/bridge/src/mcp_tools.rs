@@ -11091,6 +11091,9 @@ pub struct AppControlTool {
     _hub: Hub,
 }
 
+const APP_CONTROL_WRAPPER_CONTRACT_SCHEMA: &str =
+    "agent_bridge.app_control.wrapper_contract.v1";
+
 impl AppControlTool {
     pub fn new(hub: Hub) -> Self {
         Self { _hub: hub }
@@ -11130,7 +11133,9 @@ impl AppControlTool {
             .arg(operation_id)
             .arg("--operation-ttl-secs")
             .arg(operation_ttl_secs.to_string())
-            .arg("--operation-preflight");
+            .arg("--operation-preflight")
+            .arg("--wrapper-contract-version")
+            .arg(APP_CONTROL_WRAPPER_CONTRACT_SCHEMA);
         if let Some(player) = player_selector {
             cmd.arg("--player").arg(player);
         }
@@ -11564,6 +11569,24 @@ impl McpTool for AppControlTool {
             .arg(&action)
             .arg("--verify-timeout")
             .arg(verify_timeout.to_string());
+        if !dry_run
+            && matches!(
+                action.as_str(),
+                "next"
+                    | "previous"
+                    | "play"
+                    | "pause"
+                    | "play_pause"
+                    | "stop"
+                    | "volume_up"
+                    | "volume_down"
+                    | "volume_set"
+                    | "playlist_activate"
+            )
+        {
+            cmd.arg("--wrapper-contract-version")
+                .arg(APP_CONTROL_WRAPPER_CONTRACT_SCHEMA);
+        }
         if let Some(volume) = requested_volume {
             cmd.arg("--volume").arg(volume.to_string());
         }

@@ -15,11 +15,11 @@ ADAPTER_PATH="$ROOT/share/audio_embody.py"
 RUNTIME_ASSET_DIR="$ROOT/lib/agent-bridge/scripts"
 mkdir -p "$INSTALL_DIR"
 cp "$(type -P true)" "$ROOT/new-agent-bridge"
-printf '\nagent_bridge.app_control.operation_preflight.v0\nagent_bridge.app_control.track_settlement.v0\n' \
+printf '\nagent_bridge.app_control.operation_preflight.v0\nagent_bridge.app_control.track_settlement.v0\nagent_bridge.app_control.wrapper_contract.v1\n' \
     >> "$ROOT/new-agent-bridge"
 
 # A --use-binary caller can provide a new binary from one source snapshot and
-# runtime assets from another. The settlement marker must reject that mismatch
+# runtime assets from another. The wrapper handshake marker must reject that mismatch
 # before touching any live binary/runtime file, not only during postflight.
 STALE_ROOT="$ROOT/stale-source"
 mkdir -p "$STALE_ROOT" "$STALE_ROOT/config" \
@@ -28,7 +28,7 @@ cp -a "$SCRIPT_DIR" "$STALE_ROOT/scripts"
 cp "$SCRIPT_DIR/../config/omnivoice-canary.json" "$STALE_ROOT/config/"
 cp "$SCRIPT_DIR/../docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json" \
     "$STALE_ROOT/docs/reports/tts-comparison/"
-sed -i '/agent_bridge\.app_control\.track_settlement\.v0/d' \
+sed -i '/agent_bridge\.app_control\.wrapper_contract\.v1/d' \
     "$STALE_ROOT/scripts/app_control.py"
 NEGATIVE_INSTALL="$ROOT/negative/bin"
 NEGATIVE_ADAPTER="$ROOT/negative/share/audio_embody.py"
@@ -83,5 +83,6 @@ grep -q '"playlist_activate"' "$RUNTIME_ASSET_DIR/app_control.py"
 grep -q 'agent_bridge.app_control.operation.v0' "$RUNTIME_ASSET_DIR/app_control.py"
 grep -q 'agent_bridge.app_control.operation_preflight.v0' "$RUNTIME_ASSET_DIR/app_control.py"
 grep -q 'agent_bridge.app_control.track_settlement.v0' "$RUNTIME_ASSET_DIR/app_control.py"
+grep -q 'agent_bridge.app_control.wrapper_contract.v1' "$RUNTIME_ASSET_DIR/app_control.py"
 
 printf 'PASS: deploy keeps binary, audio adapter, and runtime scripts at repository parity\n'

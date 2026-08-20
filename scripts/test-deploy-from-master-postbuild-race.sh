@@ -78,7 +78,7 @@ master_sha="$(git --git-dir="$AB_DEPLOY_RACE_TEST_REMOTE" rev-parse refs/heads/m
 source_file="$AB_DEPLOY_RACE_TEST_ROOT/fake-agent-bridge.c"
 cat > "$source_file" <<EOF
 #include <stdio.h>
-int main(void) { puts("agent-bridge test ${master_sha} agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0"); return 0; }
+int main(void) { puts("agent-bridge test ${master_sha} agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0 agent_bridge.app_control.wrapper_contract.v1"); return 0; }
 EOF
 mkdir -p "$CARGO_TARGET_DIR/release"
 "$AB_DEPLOY_RACE_TEST_CC" "$source_file" -o "$CARGO_TARGET_DIR/release/agent-bridge"

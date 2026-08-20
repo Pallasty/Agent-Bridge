@@ -30,6 +30,7 @@ SCHEMA = "agent_bridge.app_control.v0"
 OPERATION_SCHEMA = "agent_bridge.app_control.operation.v0"
 OPERATION_PREFLIGHT_SCHEMA = "agent_bridge.app_control.operation_preflight.v0"
 TRACK_SETTLEMENT_SCHEMA = "agent_bridge.app_control.track_settlement.v0"
+WRAPPER_CONTRACT_SCHEMA = "agent_bridge.app_control.wrapper_contract.v1"
 DEFAULT_OPERATION_TTL_SECS = 3600
 MIN_OPERATION_TTL_SECS = 60
 MAX_OPERATION_TTL_SECS = 86400
@@ -43,6 +44,10 @@ ACTIONS = (
     "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get",
     "playlist_list", "playlist_current", "playlist_activate",
 )
+MUTATING_ACTIONS = frozenset({
+    "next", "previous", "play", "pause", "play_pause", "stop",
+    "volume_up", "volume_down", "volume_set", "playlist_activate",
+})
 PLAYERCTL_ACTION = {
     "next": "next",
     "previous": "previous",
@@ -2409,7 +2414,28 @@ def main() -> int:
     parser.add_argument("--operation-id")
     parser.add_argument("--operation-ttl-secs", type=int, default=DEFAULT_OPERATION_TTL_SECS)
     parser.add_argument("--operation-preflight", action="store_true")
+    parser.add_argument("--wrapper-contract-version")
     args = parser.parse_args()
+    contract_required = args.operation_preflight or (
+        not args.dry_run and args.action in MUTATING_ACTIONS
+    )
+    if contract_required and args.wrapper_contract_version != WRAPPER_CONTRACT_SCHEMA:
+        payload = {
+            "schema": SCHEMA,
+            "status": "error",
+            "verdict": "error",
+            "recover": "replan",
+            "domain": args.domain,
+            "action": args.action,
+            "read_only": True,
+            "error": {
+                "code": "wrapper_contract_mismatch",
+                "message": "mutating app_control calls require an exact wrapper/runtime contract handshake",
+                "expected": WRAPPER_CONTRACT_SCHEMA,
+            },
+        }
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        return 2
     payload = execute(
         args.action,
         args.player,

@@ -1,0 +1,49 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_pair_aborted.v0",
+  "pair_id": "embodied-media-pair-01",
+  "audited_at": "2026-08-20T13:29:55Z",
+  "preregistration_commit": "58f287ee83e7cc9effa8fcbe4e25d24ba85534a6",
+  "preregistration_path": "docs/design/evidence/embodied_media_episode_dogfood_pair_01_preregistration_2026_08_20.json",
+  "status": "ABORTED_NOT_ENROLLED",
+  "reason": "wrapper_runtime_contract_mismatch_after_mutation",
+  "private_bindings": {
+    "baseline_operation_id_sha256": "9ca511d9f1ce9a126418d7ef680f6ffa9a94b59d6615f2783bdd97a3aae2c0d4",
+    "trial_operation_id_sha256": "ce9414d784f5b1fab7ba34f292b5a7df8593f59f1cab463aba03ced2b64d3274",
+    "trial_operation_used": false,
+    "raw_values_persisted": false
+  },
+  "observed": {
+    "baseline_pending_reported_contract_bound_dispatch": true,
+    "baseline_pending_dispatch_count": 1,
+    "baseline_recovery_backend_terminalized_verified": true,
+    "baseline_recovery_reported_dispatch_field_present": false,
+    "baseline_recovery_reported_external_execution_repeated": false,
+    "baseline_wrapper_result": "source_contract_mismatch",
+    "diagnostic_replay_wrapper_result": "source_contract_mismatch",
+    "diagnostic_replay_reported_external_execution_repeated": false,
+    "journal_terminal_record_sha256": "df141fdd62320db7b92635cee974eae7ef00bc65c776d53fd4aca2aa0e4267a4",
+    "projection_started": false,
+    "trial_started": false
+  },
+  "runtime_surface": {
+    "operation_journal_used_secure_configured_directory": false,
+    "operation_journal_used_default_home_directory": true,
+    "observed_owner_only_permissions": false,
+    "connector_process_identity_persisted": false,
+    "raw_rpc_receipts_persisted": false
+  },
+  "gate_effect": {
+    "counts_as_paired_success": false,
+    "counts_in_three_pair_denominator": false,
+    "must_remain_in_operational_history": true,
+    "blocks_new_live_collection_until_action_before_version_handshake_is_deployed": true
+  },
+  "claim_boundary": {
+    "exactly_one_global_next_dispatch_proven": false,
+    "exclusive_causation_proven": false,
+    "wrapper_process_version_proven": false,
+    "device_draw_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false
+  }
+}

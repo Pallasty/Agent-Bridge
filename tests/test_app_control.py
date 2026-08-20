@@ -798,6 +798,8 @@ class AppControlTests(unittest.TestCase):
                     "--operation-id",
                     "preflight-cli",
                     "--operation-preflight",
+                    "--wrapper-contract-version",
+                    "agent_bridge.app_control.wrapper_contract.v1",
                 ],
                 capture_output=True,
                 text=True,
@@ -814,6 +816,56 @@ class AppControlTests(unittest.TestCase):
         )
         self.assertTrue(payload["preflight"]["candidate"])
         self.assertFalse(payload["preflight"]["blocked"])
+
+    def test_mutating_cli_requires_exact_wrapper_contract_before_side_effects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            playerctl = bin_dir / "playerctl"
+            marker = root / "playerctl-called"
+            playerctl.write_text(
+                "#!/bin/sh\ntouch \"$APP_CONTROL_TEST_MARKER\"\nexit 99\n",
+                encoding="utf-8",
+            )
+            playerctl.chmod(0o755)
+            for supplied in (None, "agent_bridge.app_control.wrapper_contract.v0"):
+                journal_dir = root / ("journal-missing" if supplied is None else "journal-wrong")
+                env = dict(os.environ)
+                env.update({
+                    "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+                    "APP_CONTROL_TEST_MARKER": str(marker),
+                    "AB_APP_CONTROL_OPERATION_DIR": str(journal_dir),
+                })
+                argv = [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--action", "next",
+                    "--player", "rhythmbox",
+                    "--operation-id", "contract-gated",
+                ]
+                if supplied is not None:
+                    argv.extend(["--wrapper-contract-version", supplied])
+                result = subprocess.run(
+                    argv, capture_output=True, text=True, env=env, check=False, timeout=5
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["error"]["code"], "wrapper_contract_mismatch")
+                self.assertTrue(payload["read_only"])
+                self.assertFalse(marker.exists())
+                self.assertFalse(journal_dir.exists())
+
+    def test_read_only_cli_remains_compatible_without_wrapper_contract(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--action", "discover", "--dry-run"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        payload = json.loads(result.stdout)
+        self.assertNotEqual(payload.get("error", {}).get("code"), "wrapper_contract_mismatch")
 
     def test_operation_preflight_retryable_uses_read_only_snapshot(self):
         mod = load_module()
@@ -2285,6 +2337,8 @@ raise SystemExit(64)
                 "sigkill-episode",
                 "--verify-timeout",
                 "4.0",
+                "--wrapper-contract-version",
+                "agent_bridge.app_control.wrapper_contract.v1",
             ]
             crashed = subprocess.run(
                 argv, capture_output=True, text=True, env=env, check=False, timeout=5

@@ -90,3 +90,14 @@ Pair 01 was preregistered before actuation at
 It compares the seven agent-visible calls of manual bounded recovery/projection
 orchestration with two calls using the composite. Operation IDs, ADB serial,
 and bind address are represented only by SHA-256 in that artifact.
+
+Pair 01 was aborted and is not enrolled in the three-pair denominator. Its
+mandatory failure record is
+`docs/design/evidence/embodied_media_episode_dogfood_pair_01_aborted_2026_08_20.json`.
+The durable backend reported one dispatch and later settled recovery without a
+second dispatch, but the MCP wrapper rejected the recovered receipt after the
+media mutation. The connector also used the unsafe default journal instead of
+the configured secure journal. This exposed a wrapper/runtime version-pairing
+gap, not a failed track-settlement predicate. New live collection remains
+blocked until the action-before-version handshake is merged and deployed and a
+fresh MCP process proves the secure journal environment before actuation.
