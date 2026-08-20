@@ -53,6 +53,8 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         self.assertTrue(result["candidates"][0]["revalidation_required"])
         self.assertFalse(result["candidates"][0]["automatic_execution_allowed"])
         self.assertFalse(result["action_invoked"]); self.assertFalse(result["media_observed"])
+        self.assertEqual(result["admission"], "eligible_candidate_present")
+        self.assertEqual(result["recover"], "proceed")
         self.assertEqual(before, (record_path.read_bytes(), lock_path.read_bytes(), record_path.stat().st_mtime_ns))
 
     def test_expired_terminal_and_nonopaque_ids_are_not_candidates(self):
@@ -92,12 +94,20 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         self.assertEqual(result["blocked_count"], 1)
         self.assertEqual(len(result["blocked_operation_id_sha256"]), 1)
         self.assertEqual(result["minimum_recovery_secs"], 5.0)
+        self.assertEqual(result["admission"], "blocked_insufficient_recovery_window")
+        self.assertEqual(result["recover"], "replan")
 
     def test_sufficient_window_remains_candidate(self):
         self.write_candidate(expires_at=1106.0)
         result = INDEX.discover(self.directory, now=1100.0, minimum_recovery_secs=5.0)
         self.assertEqual(result["candidate_count"], 1)
         self.assertEqual(result["blocked_count"], 0)
+
+    def test_empty_scan_is_not_a_recovery_admission(self):
+        result = INDEX.discover(self.directory, now=1100.0)
+        self.assertEqual(result["candidate_count"], 0)
+        self.assertEqual(result["admission"], "no_recovery_candidate")
+        self.assertEqual(result["recover"], "replan")
 
     def test_unsafe_or_corrupt_journal_fails_entire_scan_closed(self):
         record_path, _ = self.write_candidate()

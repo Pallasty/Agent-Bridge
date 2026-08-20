@@ -208,6 +208,10 @@ The scanner also accepts a bounded `minimum_recovery_secs` budget (default five
 seconds). A record with less remaining TTL is reported only as a hashed blocked
 record, never as an eligible candidate; “not expired” is not treated as enough
 time to recover.
+Scan integrity is separate from admission: a complete empty scan and a scan
+containing only blocked near-expiry records both retain `verdict=verified` for
+the read operation but return `recover=replan`. Only a non-empty eligible
+candidate set may return `recover=proceed`.
 
 The source-local cross-process synthetic gate exercises the complete handoff:
 one process is killed after its fake `playerctl next` child changes state, a

@@ -131,6 +131,15 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                 if record_fd >= 0: os.close(record_fd)
                 if lock_fd >= 0: os.close(lock_fd)
         result["candidate_count"] = len(result["candidates"])
+        if result["candidate_count"]:
+            result["admission"] = "eligible_candidate_present"
+            result["recover"] = "proceed"
+        elif result["blocked_count"]:
+            result["admission"] = "blocked_insufficient_recovery_window"
+            result["recover"] = "replan"
+        else:
+            result["admission"] = "no_recovery_candidate"
+            result["recover"] = "replan"
         return result
     except OSError:
         result.update(status="error", verdict="error", recover="replan", scan_complete=False)

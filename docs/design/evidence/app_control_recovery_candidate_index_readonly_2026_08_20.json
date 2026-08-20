@@ -8,6 +8,8 @@
     "records_seen": 12,
     "candidate_count": 0,
     "skipped_count": 12,
+    "admission": "no_recovery_candidate",
+    "recover": "replan",
     "journal_manifest_unchanged": true,
     "media_observed": false,
     "action_invoked": false,
