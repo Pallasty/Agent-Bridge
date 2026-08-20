@@ -2,19 +2,22 @@
 
 use crate::resource_lineage::{
     is_lower_hex_sha256, migrate_or_verify as migrate_or_verify_resource_lineage,
-    persisted_proposal_record_sha256, resource_binding_sha256, resource_content_sha256,
-    resource_version_record_sha256, unavailable_resource_lineage, validate_resource_lineage,
-    AgentMdBaselineAdmission, AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt,
-    AgentMdCasRollback, AgentMdCasRollbackReceipt, AgentMdChangeProposal,
-    AgentMdChangeProposalReceipt, AgentMdChangeProposalReview, AgentMdChangeProposalReviewReceipt,
-    AgentMdPersistedProposalArtifact, AgentMdPersistedProposalCreate, ResourceBindingRecord,
-    ResourceLineageReport, ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA,
-    RESOURCE_BASELINE_OBSERVATION_SCOPE, RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE,
-    RESOURCE_CAS_ROLLBACK_SCHEMA, RESOURCE_CAS_ROLLBACK_SCOPE,
-    RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE,
-    RESOURCE_CHANGE_PROPOSAL_SCHEMA, RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES,
-    RESOURCE_LINEAGE_MAX_ROWS, RESOURCE_PERSISTED_PROPOSAL_SCHEMA,
-    RESOURCE_PERSISTED_PROPOSAL_SCOPE,
+    persisted_proposal_record_sha256, proposal_review_observation_record_sha256,
+    resource_binding_sha256, resource_content_sha256, resource_version_record_sha256,
+    unavailable_resource_lineage, validate_resource_lineage, AgentMdBaselineAdmission,
+    AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt, AgentMdCasRollback,
+    AgentMdCasRollbackReceipt, AgentMdChangeProposal, AgentMdChangeProposalReceipt,
+    AgentMdChangeProposalReview, AgentMdChangeProposalReviewReceipt,
+    AgentMdPersistedProposalArtifact, AgentMdPersistedProposalCreate,
+    AgentMdProposalReviewObservationArtifact, AgentMdProposalReviewObservationCreate,
+    ResourceBindingRecord, ResourceLineageReport, ResourceVersionRecord,
+    RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
+    RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CAS_ROLLBACK_SCHEMA,
+    RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA,
+    RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE, RESOURCE_CHANGE_PROPOSAL_SCHEMA,
+    RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
+    RESOURCE_PERSISTED_PROPOSAL_SCHEMA, RESOURCE_PERSISTED_PROPOSAL_SCOPE,
+    RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA, RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
@@ -3470,6 +3473,258 @@ impl SqliteStore {
             )
             .await
             .map_err(|error| Error::Backend(format!("read_persisted_agent_md_proposal: {error}")))
+    }
+
+    /// SEPL P1A6 — persist an untrusted review observation over a P1A5 artifact.
+    ///
+    /// This records caller-supplied disposition metadata. It does not
+    /// authenticate the reviewer, grant semantic authority, or authorize an
+    /// apply path.
+    pub async fn create_agent_md_proposal_review_observation(
+        &self,
+        request: AgentMdProposalReviewObservationCreate,
+    ) -> Result<AgentMdProposalReviewObservationArtifact> {
+        if request.reviewer_id.is_empty()
+            || request.reviewer_id.len() > 256
+            || request.reviewer_id.trim() != request.reviewer_id
+            || request.reviewer_id.chars().any(char::is_control)
+        {
+            return Err(Error::Backend(
+                "create_agent_md_proposal_review_observation: reviewer_id must be 1..=256 visible characters without surrounding whitespace".into(),
+            ));
+        }
+        if request.reviewed_at < 0 {
+            return Err(Error::Backend(
+                "create_agent_md_proposal_review_observation: reviewed_at must be non-negative"
+                    .into(),
+            ));
+        }
+        if !matches!(
+            request.disposition.as_str(),
+            "accept_candidate" | "reject_candidate" | "defer"
+        ) {
+            return Err(Error::Backend(
+                "create_agent_md_proposal_review_observation: disposition must be accept_candidate, reject_candidate, or defer".into(),
+            ));
+        }
+        if request.reason.is_empty()
+            || request.reason.len() > 4096
+            || request.reason.trim() != request.reason
+            || request.reason.chars().any(char::is_control)
+        {
+            return Err(Error::Backend(
+                "create_agent_md_proposal_review_observation: reason must be 1..=4096 visible characters without surrounding whitespace".into(),
+            ));
+        }
+
+        let proposal = self
+            .read_persisted_agent_md_proposal(&request.proposal_id)
+            .await?;
+        let proposal_id = proposal.proposal_id;
+        let proposal_record_sha256 = proposal.record_sha256;
+        let reviewer_id = request.reviewer_id;
+        let reviewed_at = request.reviewed_at;
+        let disposition = request.disposition;
+        let reason = request.reason;
+        let record_sha256 = proposal_review_observation_record_sha256(
+            &proposal_id,
+            &reviewer_id,
+            reviewed_at,
+            &disposition,
+            &reason,
+            &proposal_record_sha256,
+        );
+        let review_id = record_sha256.clone();
+        let insert_review_id = review_id.clone();
+
+        self.conn
+            .call(move |connection| -> RusqliteResult<()> {
+                let transaction = connection.transaction()?;
+                let (
+                    stored_resource_id,
+                    stored_producer_id,
+                    stored_proposed_at,
+                    stored_current_content,
+                    stored_candidate_content,
+                    stored_proposal_json,
+                    current_proposal_hash,
+                ): (String, String, i64, Vec<u8>, Vec<u8>, String, String) = transaction
+                    .query_row(
+                        "SELECT resource_id, producer_id, proposed_at, current_content,
+                                candidate_content, proposal_receipt_json, record_sha256
+                         FROM resource_change_proposals WHERE proposal_id=?1",
+                        [&proposal_id],
+                        |row| {
+                            Ok((
+                                row.get(0)?,
+                                row.get(1)?,
+                                row.get(2)?,
+                                row.get(3)?,
+                                row.get(4)?,
+                                row.get(5)?,
+                                row.get(6)?,
+                            ))
+                        },
+                    )
+                    .optional()?
+                    .ok_or_else(|| resource_baseline_sql_error("persisted proposal is missing"))?;
+                let stored_proposal: AgentMdChangeProposalReceipt =
+                    serde_json::from_str(&stored_proposal_json).map_err(|error| {
+                        resource_baseline_sql_error(format!(
+                            "persisted proposal receipt is invalid JSON: {error}"
+                        ))
+                    })?;
+                let recomputed_proposal_hash = persisted_proposal_record_sha256(
+                    &stored_resource_id,
+                    &stored_producer_id,
+                    stored_proposed_at,
+                    &stored_current_content,
+                    &stored_candidate_content,
+                    &stored_proposal,
+                );
+                if current_proposal_hash != proposal_record_sha256
+                    || recomputed_proposal_hash != proposal_record_sha256
+                {
+                    return Err(resource_baseline_sql_error(
+                        "persisted proposal changed before review observation insert",
+                    ));
+                }
+                transaction.execute(
+                    "INSERT OR IGNORE INTO resource_proposal_review_observations (
+                        review_id, proposal_id, reviewer_id, reviewed_at, disposition,
+                        reason, proposal_record_sha256, record_sha256
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        &insert_review_id,
+                        &proposal_id,
+                        &reviewer_id,
+                        reviewed_at,
+                        &disposition,
+                        &reason,
+                        &proposal_record_sha256,
+                        &record_sha256,
+                    ],
+                )?;
+                transaction.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(|error| {
+                Error::Backend(format!(
+                    "create_agent_md_proposal_review_observation: {error}"
+                ))
+            })?;
+
+        self.read_agent_md_proposal_review_observation(&review_id)
+            .await
+    }
+
+    /// SEPL P1A6 — verify and read one persisted review observation.
+    pub async fn read_agent_md_proposal_review_observation(
+        &self,
+        review_id: &str,
+    ) -> Result<AgentMdProposalReviewObservationArtifact> {
+        if !is_lower_hex_sha256(review_id) {
+            return Err(Error::Backend(
+                "read_agent_md_proposal_review_observation: review_id must be a lowercase SHA-256"
+                    .into(),
+            ));
+        }
+        let requested_id = review_id.to_string();
+        let row =
+            self.conn
+                .call(
+                    move |connection| -> RusqliteResult<(
+                        String,
+                        String,
+                        i64,
+                        String,
+                        String,
+                        String,
+                        String,
+                    )> {
+                        connection
+                            .query_row(
+                                "SELECT proposal_id, reviewer_id, reviewed_at, disposition, reason,
+                                proposal_record_sha256, record_sha256
+                         FROM resource_proposal_review_observations WHERE review_id=?1",
+                                [&requested_id],
+                                |row| {
+                                    Ok((
+                                        row.get(0)?,
+                                        row.get(1)?,
+                                        row.get(2)?,
+                                        row.get(3)?,
+                                        row.get(4)?,
+                                        row.get(5)?,
+                                        row.get(6)?,
+                                    ))
+                                },
+                            )
+                            .optional()?
+                            .ok_or_else(|| {
+                                resource_baseline_sql_error("review observation is missing")
+                            })
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    Error::Backend(format!(
+                        "read_agent_md_proposal_review_observation: {error}"
+                    ))
+                })?;
+        let (
+            proposal_id,
+            reviewer_id,
+            reviewed_at,
+            disposition,
+            reason,
+            proposal_record_sha256,
+            record_sha256,
+        ) = row;
+        let expected = proposal_review_observation_record_sha256(
+            &proposal_id,
+            &reviewer_id,
+            reviewed_at,
+            &disposition,
+            &reason,
+            &proposal_record_sha256,
+        );
+        if expected != review_id || record_sha256 != review_id {
+            return Err(Error::Backend(
+                "read_agent_md_proposal_review_observation: persisted record hash mismatch".into(),
+            ));
+        }
+        let proposal = self.read_persisted_agent_md_proposal(&proposal_id).await?;
+        if proposal.record_sha256 != proposal_record_sha256
+            || !proposal.persistence_integrity_verified
+        {
+            return Err(Error::Backend(
+                "read_agent_md_proposal_review_observation: proposal integrity mismatch".into(),
+            ));
+        }
+        Ok(AgentMdProposalReviewObservationArtifact {
+            schema: RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA.to_string(),
+            review_id: review_id.to_string(),
+            proposal_id,
+            reviewer_id,
+            reviewed_at,
+            disposition,
+            reason,
+            proposal_record_sha256,
+            record_sha256,
+            persistence_integrity_verified: true,
+            proposal_integrity_verified: true,
+            reviewer_identity_authenticated: false,
+            human_review_claimed: true,
+            human_review_authenticated: false,
+            source_authenticity_verified: false,
+            semantic_review_authority_granted: false,
+            automatic_apply_allowed: false,
+            resource_content_mutated: false,
+            lineage_mutated: false,
+            artifact_scope: RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE.to_string(),
+        })
     }
 
     #[cfg(unix)]

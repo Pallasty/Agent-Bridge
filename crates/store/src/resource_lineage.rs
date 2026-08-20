@@ -38,11 +38,19 @@ pub const RESOURCE_PERSISTED_PROPOSAL_SCOPE: &str =
     "sqlite_persisted_candidate_receipt_and_domain_separated_record_hash";
 pub const RESOURCE_PERSISTED_PROPOSAL_HASH_DOMAIN: &str =
     "agent-bridge/sepl/resource-persisted-proposal/v0";
+pub const RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA: &str =
+    "agent_bridge.resource_proposal_review_observation.v0";
+pub const RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE: &str =
+    "persisted_untrusted_review_observation_only";
+pub const RESOURCE_PROPOSAL_REVIEW_OBSERVATION_HASH_DOMAIN: &str =
+    "agent-bridge/sepl/resource-proposal-review-observation/v0";
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
 const RESOURCE_BINDINGS_MIGRATION_META_KEY: &str = "resource_bindings.migration_sha256";
 const RESOURCE_PROPOSALS_MIGRATION_META_KEY: &str = "resource_proposals.migration_sha256";
+const RESOURCE_PROPOSAL_REVIEWS_MIGRATION_META_KEY: &str =
+    "resource_proposal_reviews.migration_sha256";
 
 pub(crate) const RESOURCE_VERSIONS_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS resource_versions (
@@ -98,6 +106,23 @@ CREATE TABLE IF NOT EXISTS resource_change_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_resource_change_proposals_resource_proposed
     ON resource_change_proposals(resource_id, proposed_at DESC);
+"#;
+
+pub(crate) const RESOURCE_PROPOSAL_REVIEWS_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS resource_proposal_review_observations (
+    review_id              TEXT    NOT NULL PRIMARY KEY CHECK (length(review_id) = 64),
+    proposal_id            TEXT    NOT NULL CHECK (length(proposal_id) = 64),
+    reviewer_id            TEXT    NOT NULL CHECK (length(reviewer_id) BETWEEN 1 AND 256),
+    reviewed_at            INTEGER NOT NULL CHECK (typeof(reviewed_at) = 'integer' AND reviewed_at >= 0),
+    disposition            TEXT    NOT NULL CHECK (disposition IN ('accept_candidate', 'reject_candidate', 'defer')),
+    reason                 TEXT    NOT NULL CHECK (length(reason) BETWEEN 1 AND 4096),
+    proposal_record_sha256 TEXT    NOT NULL CHECK (length(proposal_record_sha256) = 64),
+    record_sha256          TEXT    NOT NULL CHECK (length(record_sha256) = 64),
+    UNIQUE (record_sha256),
+    FOREIGN KEY (proposal_id) REFERENCES resource_change_proposals(proposal_id)
+);
+CREATE INDEX IF NOT EXISTS idx_resource_proposal_review_observations_proposal_reviewed
+    ON resource_proposal_review_observations(proposal_id, reviewed_at DESC);
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -284,6 +309,39 @@ pub struct AgentMdPersistedProposalArtifact {
     pub artifact_scope: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMdProposalReviewObservationCreate {
+    pub proposal_id: String,
+    pub reviewer_id: String,
+    pub reviewed_at: i64,
+    pub disposition: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdProposalReviewObservationArtifact {
+    pub schema: String,
+    pub review_id: String,
+    pub proposal_id: String,
+    pub reviewer_id: String,
+    pub reviewed_at: i64,
+    pub disposition: String,
+    pub reason: String,
+    pub proposal_record_sha256: String,
+    pub record_sha256: String,
+    pub persistence_integrity_verified: bool,
+    pub proposal_integrity_verified: bool,
+    pub reviewer_identity_authenticated: bool,
+    pub human_review_claimed: bool,
+    pub human_review_authenticated: bool,
+    pub source_authenticity_verified: bool,
+    pub semantic_review_authority_granted: bool,
+    pub automatic_apply_allowed: bool,
+    pub resource_content_mutated: bool,
+    pub lineage_mutated: bool,
+    pub artifact_scope: String,
+}
+
 pub fn persisted_proposal_record_sha256(
     resource_id: &str,
     producer_id: &str,
@@ -305,6 +363,28 @@ pub fn persisted_proposal_record_sha256(
     let receipt =
         serde_json::to_vec(proposal).expect("proposal receipt serialization is infallible");
     update_framed(&mut hasher, &receipt);
+    hex_digest(hasher.finalize())
+}
+
+pub fn proposal_review_observation_record_sha256(
+    proposal_id: &str,
+    reviewer_id: &str,
+    reviewed_at: i64,
+    disposition: &str,
+    reason: &str,
+    proposal_record_sha256: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        RESOURCE_PROPOSAL_REVIEW_OBSERVATION_HASH_DOMAIN.as_bytes(),
+    );
+    update_framed(&mut hasher, proposal_id.as_bytes());
+    update_framed(&mut hasher, reviewer_id.as_bytes());
+    update_framed(&mut hasher, &reviewed_at.to_be_bytes());
+    update_framed(&mut hasher, disposition.as_bytes());
+    update_framed(&mut hasher, reason.as_bytes());
+    update_framed(&mut hasher, proposal_record_sha256.as_bytes());
     hex_digest(hasher.finalize())
 }
 
@@ -356,6 +436,16 @@ fn proposals_migration_sha256() -> String {
     hex_digest(hasher.finalize())
 }
 
+fn proposal_reviews_migration_sha256() -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        b"agent-bridge/sepl/resource-proposal-reviews-migration/v0",
+    );
+    update_framed(&mut hasher, RESOURCE_PROPOSAL_REVIEWS_SCHEMA.as_bytes());
+    hex_digest(hasher.finalize())
+}
+
 fn schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!(
         "resource_versions schema mismatch: {}",
@@ -373,6 +463,13 @@ fn bindings_schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
 fn proposals_schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!(
         "resource_change_proposals schema mismatch: {}",
+        message.into()
+    ))
+}
+
+fn proposal_reviews_schema_mismatch(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(format!(
+        "resource_proposal_review_observations schema mismatch: {}",
         message.into()
     ))
 }
@@ -475,6 +572,7 @@ pub(crate) fn migrate_or_verify(connection: &rusqlite::Connection) -> rusqlite::
     }
     migrate_or_verify_bindings(connection)?;
     migrate_or_verify_proposals(connection)?;
+    migrate_or_verify_proposal_reviews(connection)?;
     Ok(())
 }
 
@@ -659,6 +757,105 @@ fn migrate_or_verify_proposals(connection: &rusqlite::Connection) -> rusqlite::R
             connection.execute_batch(
                 "ROLLBACK TO sepl_resource_proposals_migration; RELEASE sepl_resource_proposals_migration;",
             )?;
+            Err(error)
+        }
+    }
+}
+
+fn migrate_or_verify_proposal_reviews(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    connection.execute_batch("SAVEPOINT sepl_resource_proposal_reviews_migration")?;
+    let result = (|| {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='resource_proposal_review_observations')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            connection.execute_batch(RESOURCE_PROPOSAL_REVIEWS_SCHEMA)?;
+        }
+        let mut statement =
+            connection.prepare("PRAGMA table_info('resource_proposal_review_observations')")?;
+        let columns = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let expected = vec![
+            ("review_id".to_string(), "TEXT".to_string(), 1, 1),
+            ("proposal_id".to_string(), "TEXT".to_string(), 1, 0),
+            ("reviewer_id".to_string(), "TEXT".to_string(), 1, 0),
+            ("reviewed_at".to_string(), "INTEGER".to_string(), 1, 0),
+            ("disposition".to_string(), "TEXT".to_string(), 1, 0),
+            ("reason".to_string(), "TEXT".to_string(), 1, 0),
+            (
+                "proposal_record_sha256".to_string(),
+                "TEXT".to_string(),
+                1,
+                0,
+            ),
+            ("record_sha256".to_string(), "TEXT".to_string(), 1, 0),
+        ];
+        if columns != expected {
+            return Err(proposal_reviews_schema_mismatch("column identity"));
+        }
+        let table_sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='resource_proposal_review_observations'",
+            [],
+            |row| row.get(0),
+        )?;
+        let expected_table_sql = RESOURCE_PROPOSAL_REVIEWS_SCHEMA
+            .split_once(';')
+            .map(|(table, _)| table)
+            .ok_or_else(|| proposal_reviews_schema_mismatch("embedded table DDL"))?;
+        if canonical_schema_sql(&table_sql) != canonical_schema_sql(expected_table_sql) {
+            return Err(proposal_reviews_schema_mismatch("table DDL identity"));
+        }
+        connection.execute_batch(RESOURCE_PROPOSAL_REVIEWS_SCHEMA)?;
+        let index_sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_resource_proposal_review_observations_proposal_reviewed'",
+            [],
+            |row| row.get(0),
+        )?;
+        let expected_index_sql = RESOURCE_PROPOSAL_REVIEWS_SCHEMA
+            .split_once(';')
+            .map(|(_, index)| index.trim().trim_end_matches(';'))
+            .ok_or_else(|| proposal_reviews_schema_mismatch("embedded index DDL"))?;
+        if canonical_schema_sql(&index_sql) != canonical_schema_sql(expected_index_sql) {
+            return Err(proposal_reviews_schema_mismatch("index DDL identity"));
+        }
+        let expected_digest = proposal_reviews_migration_sha256();
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_meta(key, value) VALUES (?1, ?2)",
+            rusqlite::params![
+                RESOURCE_PROPOSAL_REVIEWS_MIGRATION_META_KEY,
+                expected_digest
+            ],
+        )?;
+        let stored: String = connection.query_row(
+            "SELECT value FROM schema_meta WHERE key=?1",
+            [RESOURCE_PROPOSAL_REVIEWS_MIGRATION_META_KEY],
+            |row| row.get(0),
+        )?;
+        if stored != proposal_reviews_migration_sha256() {
+            return Err(proposal_reviews_schema_mismatch("migration digest"));
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => connection.execute_batch("RELEASE sepl_resource_proposal_reviews_migration"),
+        Err(error) => {
+            if let Err(rollback_error) = connection.execute_batch(
+                "ROLLBACK TO sepl_resource_proposal_reviews_migration; RELEASE sepl_resource_proposal_reviews_migration;",
+            ) {
+                return Err(proposal_reviews_schema_mismatch(format!(
+                    "{error}; migration rollback failed: {rollback_error}"
+                )));
+            }
             Err(error)
         }
     }
@@ -1010,6 +1207,25 @@ mod tests {
             )
             .expect("query proposal migration digest");
         assert_eq!(proposal_digest, proposals_migration_sha256());
+        let review_objects: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN (
+                    'resource_proposal_review_observations',
+                    'idx_resource_proposal_review_observations_proposal_reviewed'
+                )",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query review observation schema");
+        assert_eq!(review_objects, 2);
+        let review_digest: String = connection
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key='resource_proposal_reviews.migration_sha256'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query review observation migration digest");
+        assert_eq!(review_digest, proposal_reviews_migration_sha256());
     }
 
     #[tokio::test]
@@ -1024,7 +1240,9 @@ mod tests {
         let connection = rusqlite::Connection::open(&database).expect("open raw database");
         connection
             .execute_batch(
-                "DROP INDEX idx_resource_change_proposals_resource_proposed;
+                "DROP INDEX idx_resource_proposal_review_observations_proposal_reviewed;
+                 DROP TABLE resource_proposal_review_observations;
+                 DROP INDEX idx_resource_change_proposals_resource_proposed;
                  DROP TABLE resource_change_proposals;
                  DROP INDEX idx_resource_bindings_path;
                  DROP TABLE resource_bindings;
@@ -1033,7 +1251,8 @@ mod tests {
                  WHERE key IN (
                      'resource_lineage.migration_sha256',
                      'resource_bindings.migration_sha256',
-                     'resource_proposals.migration_sha256'
+                     'resource_proposals.migration_sha256',
+                     'resource_proposal_reviews.migration_sha256'
                  );",
             )
             .expect("rewind P0 and P1A0 rungs");
@@ -1155,6 +1374,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn incompatible_existing_proposal_reviews_table_fails_closed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let initial = SqliteStore::open(&database).await.expect("initial open");
+        drop(initial);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute_batch(
+                "DROP INDEX idx_resource_proposal_review_observations_proposal_reviewed;
+                 DROP TABLE resource_proposal_review_observations;
+                 DELETE FROM schema_meta WHERE key='resource_proposal_reviews.migration_sha256';
+                 CREATE TABLE resource_proposal_review_observations (review_id TEXT PRIMARY KEY);",
+            )
+            .expect("install incompatible review observations table");
+        drop(connection);
+
+        let error = SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("incompatible review observations table must fail");
+        assert!(error
+            .to_string()
+            .contains("resource_proposal_review_observations schema mismatch"));
+    }
+
+    #[tokio::test]
     async fn bindings_migration_failure_rolls_back_partial_ddl() {
         let directory = tempfile::tempdir().expect("tempdir");
         let database = directory.path().join("state.db");
@@ -1234,6 +1479,47 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count proposal migration digest");
+        assert_eq!(table_count, 0);
+        assert_eq!(digest_count, 0);
+    }
+
+    #[tokio::test]
+    async fn proposal_reviews_migration_failure_rolls_back_partial_ddl() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let initial = SqliteStore::open(&database).await.expect("initial open");
+        drop(initial);
+        let connection = rusqlite::Connection::open(&database).expect("open raw database");
+        connection
+            .execute_batch(
+                "DROP INDEX idx_resource_proposal_review_observations_proposal_reviewed;
+                 DROP TABLE resource_proposal_review_observations;
+                 DELETE FROM schema_meta WHERE key='resource_proposal_reviews.migration_sha256';
+                 CREATE TABLE idx_resource_proposal_review_observations_proposal_reviewed (collision TEXT);",
+            )
+            .expect("install review-index name collision");
+        drop(connection);
+
+        SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("colliding review index must fail migration");
+
+        let connection = rusqlite::Connection::open(&database).expect("reopen raw database");
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='resource_proposal_review_observations'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count review table");
+        let digest_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_meta WHERE key='resource_proposal_reviews.migration_sha256'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count review migration digest");
         assert_eq!(table_count, 0);
         assert_eq!(digest_count, 0);
     }
@@ -2159,6 +2445,203 @@ mod tests {
             .await
             .expect_err("tampering must fail closed");
         assert!(error.to_string().contains("record hash mismatch"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_observation_is_content_addressed_untrusted_and_non_mutating() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md.clone(),
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: b"# Candidate\n".to_vec(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create proposal");
+        let make_request = || AgentMdProposalReviewObservationCreate {
+            proposal_id: proposal.proposal_id.clone(),
+            reviewer_id: "owner-label:test".to_string(),
+            reviewed_at: 1_700_000_002,
+            disposition: "accept_candidate".to_string(),
+            reason: "Candidate is coherent enough for later authenticated review.".to_string(),
+        };
+
+        let first = store
+            .create_agent_md_proposal_review_observation(make_request())
+            .await
+            .expect("create review observation");
+        let second = store
+            .create_agent_md_proposal_review_observation(make_request())
+            .await
+            .expect("idempotent review observation");
+        assert_eq!(first, second);
+        assert_eq!(first.schema, RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA);
+        assert_eq!(first.review_id, first.record_sha256);
+        assert_eq!(first.proposal_record_sha256, proposal.record_sha256);
+        assert!(first.persistence_integrity_verified);
+        assert!(first.proposal_integrity_verified);
+        assert!(first.human_review_claimed);
+        assert!(!first.reviewer_identity_authenticated);
+        assert!(!first.human_review_authenticated);
+        assert!(!first.source_authenticity_verified);
+        assert!(!first.semantic_review_authority_granted);
+        assert!(!first.automatic_apply_allowed);
+        assert!(!first.resource_content_mutated);
+        assert!(!first.lineage_mutated);
+        assert_eq!(
+            std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
+            original
+        );
+        let lineage = store
+            .resource_lineage_read("agent-profile", 32)
+            .await
+            .expect("read unchanged lineage");
+        assert_eq!(lineage.records.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn review_observation_read_rejects_row_and_proposal_tampering() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("state.db");
+        let agent_md = directory.path().join("AGENT.md");
+        let original = b"# Stable profile\n".to_vec();
+        std::fs::write(&agent_md, &original).expect("write AGENT.md");
+        let store = SqliteStore::open(&database).await.expect("open store");
+        store
+            .admit_agent_md_baseline(AgentMdBaselineAdmission {
+                resource_id: "agent-profile".to_string(),
+                path: agent_md.clone(),
+                observed_at: 1_700_000_000,
+            })
+            .await
+            .expect("admit baseline");
+        let proposal = store
+            .create_persisted_agent_md_proposal(AgentMdPersistedProposalCreate {
+                proposal: AgentMdChangeProposal {
+                    resource_id: "agent-profile".to_string(),
+                    path: agent_md,
+                    expected_current_content_sha256: Some(resource_content_sha256(&original)),
+                    target_version: None,
+                    proposed_content: b"# Candidate\n".to_vec(),
+                    observed_at: 1_700_000_001,
+                },
+                producer_id: "codex:test".to_string(),
+            })
+            .await
+            .expect("create proposal");
+        let review = store
+            .create_agent_md_proposal_review_observation(AgentMdProposalReviewObservationCreate {
+                proposal_id: proposal.proposal_id.clone(),
+                reviewer_id: "owner-label:test".to_string(),
+                reviewed_at: 1_700_000_002,
+                disposition: "defer".to_string(),
+                reason: "Need another pass.".to_string(),
+            })
+            .await
+            .expect("create review observation");
+        drop(store);
+        let connection = rusqlite::Connection::open(&database).expect("open raw fixture db");
+        connection
+            .execute(
+                "UPDATE resource_proposal_review_observations SET reason='tampered' WHERE review_id=?1",
+                [&review.review_id],
+            )
+            .expect("tamper review fixture");
+        drop(connection);
+        let reopened = SqliteStore::open(&database).await.expect("reopen store");
+        let error = reopened
+            .read_agent_md_proposal_review_observation(&review.review_id)
+            .await
+            .expect_err("review tampering must fail closed");
+        assert!(error.to_string().contains("record hash mismatch"));
+
+        drop(reopened);
+        let connection = rusqlite::Connection::open(&database).expect("reopen raw fixture db");
+        connection
+            .execute(
+                "UPDATE resource_proposal_review_observations SET reason=?1 WHERE review_id=?2",
+                rusqlite::params![review.reason, review.review_id],
+            )
+            .expect("restore review fixture");
+        connection
+            .execute(
+                "UPDATE resource_change_proposals SET candidate_content=?1 WHERE proposal_id=?2",
+                rusqlite::params![b"# Tampered\n".as_slice(), proposal.proposal_id],
+            )
+            .expect("tamper proposal fixture");
+        drop(connection);
+        let reopened = SqliteStore::open(&database)
+            .await
+            .expect("reopen store again");
+        let error = reopened
+            .read_agent_md_proposal_review_observation(&review.review_id)
+            .await
+            .expect_err("referenced proposal tampering must fail closed");
+        assert!(error.to_string().contains("record hash mismatch"));
+    }
+
+    #[tokio::test]
+    async fn review_observation_rejects_invalid_caller_metadata() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&directory.path().join("state.db"))
+            .await
+            .expect("open store");
+        for request in [
+            AgentMdProposalReviewObservationCreate {
+                proposal_id: "a".repeat(64),
+                reviewer_id: " reviewer".to_string(),
+                reviewed_at: 1,
+                disposition: "defer".to_string(),
+                reason: "reason".to_string(),
+            },
+            AgentMdProposalReviewObservationCreate {
+                proposal_id: "a".repeat(64),
+                reviewer_id: "reviewer".to_string(),
+                reviewed_at: -1,
+                disposition: "defer".to_string(),
+                reason: "reason".to_string(),
+            },
+            AgentMdProposalReviewObservationCreate {
+                proposal_id: "a".repeat(64),
+                reviewer_id: "reviewer".to_string(),
+                reviewed_at: 1,
+                disposition: "approve_and_apply".to_string(),
+                reason: "reason".to_string(),
+            },
+            AgentMdProposalReviewObservationCreate {
+                proposal_id: "a".repeat(64),
+                reviewer_id: "reviewer".to_string(),
+                reviewed_at: 1,
+                disposition: "defer".to_string(),
+                reason: "".to_string(),
+            },
+        ] {
+            store
+                .create_agent_md_proposal_review_observation(request)
+                .await
+                .expect_err("invalid caller metadata must fail before proposal lookup");
+        }
     }
 
     #[cfg(unix)]
