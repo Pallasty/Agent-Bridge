@@ -9,16 +9,28 @@ MPRIS read that verifies the requested effect.
 from __future__ import annotations
 
 import argparse
+import copy
+import errno
+import fcntl
+import hashlib
 import json
+import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
-from typing import Any, MutableMapping
+from typing import Any, Callable, MutableMapping
 
 SCHEMA = "agent_bridge.app_control.v0"
+OPERATION_SCHEMA = "agent_bridge.app_control.operation.v0"
+DEFAULT_OPERATION_TTL_SECS = 3600
+MIN_OPERATION_TTL_SECS = 60
+MAX_OPERATION_TTL_SECS = 86400
+OPERATION_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z", re.ASCII)
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
     "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get",
@@ -164,9 +176,24 @@ def select_player_for_action(
     return None, "ambiguous_player", selection
 
 
-def playlist_call(player: str, method: str, args: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+def playlist_argv(player: str, method: str, args: list[str]) -> list[str]:
     bus = f"org.mpris.MediaPlayer2.{player}"
-    return run(["gdbus", "call", "--session", "--dest", bus, "--object-path", MPRIS_PLAYLIST_PATH, "--method", method, *args], env)
+    return [
+        "gdbus",
+        "call",
+        "--session",
+        "--dest",
+        bus,
+        "--object-path",
+        MPRIS_PLAYLIST_PATH,
+        "--method",
+        method,
+        *args,
+    ]
+
+
+def playlist_call(player: str, method: str, args: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+    return run(playlist_argv(player, method, args), env)
 
 
 def list_playlists(player: str, env: dict[str, str]) -> tuple[list[dict[str, str]], dict[str, Any] | None]:
@@ -280,6 +307,29 @@ def effect_verified(action: str, before: dict[str, Any], after: dict[str, Any]) 
     return False, "unsupported_effect"
 
 
+def strict_track_id_changed(
+    action: str, before: dict[str, Any], after: dict[str, Any]
+) -> tuple[bool, str]:
+    """Verify a durable relative-track action from strict MPRIS identities only.
+
+    Artist/title fields may update before the player's track identifier.  They
+    are useful presentation metadata, but cannot prove that a relative action
+    advanced to a different track across a restart boundary.
+    """
+    if action != "next":
+        return False, "unsupported_durable_effect"
+    before_id = before.get("track_id")
+    after_id = after.get("track_id")
+    return (
+        isinstance(before_id, str)
+        and bool(before_id)
+        and isinstance(after_id, str)
+        and bool(after_id)
+        and before_id != after_id,
+        "track_identity_changed",
+    )
+
+
 def route_summary(selected: bool) -> dict[str, Any]:
     return {
         "policy": "protocol_api_then_semantic_ui_then_vision",
@@ -297,7 +347,19 @@ def route_summary(selected: bool) -> dict[str, Any]:
     }
 
 
-def execute(action: str, player_selector: str | None, dry_run: bool, verify_timeout: float, volume: float | None = None, playlist_id: str | None = None) -> dict[str, Any]:
+def execute_once(
+    action: str,
+    player_selector: str | None,
+    dry_run: bool,
+    verify_timeout: float,
+    volume: float | None = None,
+    playlist_id: str | None = None,
+    *,
+    before_dispatch: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+    effect_check: Callable[
+        [str, dict[str, Any], dict[str, Any]], tuple[bool, str]
+    ] = effect_verified,
+) -> dict[str, Any]:
     started = time.monotonic()
     # Validate caller-supplied parameters before probing the optional backend.
     # This keeps malformed requests deterministic on machines without MPRIS and
@@ -358,11 +420,49 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             return {"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "missing_playlist_id", "message": "playlist_activate requires exact playlist object path"}}
         if playlist_id not in {item["id"] for item in playlists}:
             return {"schema": SCHEMA, "status": "target_unavailable", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "playlist_not_found", "playlist_id": playlist_id}}
+        if dry_run:
+            planned_argv = playlist_argv(
+                player,
+                "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist",
+                [playlist_id],
+            )
+            return {
+                "schema": SCHEMA,
+                "status": "planned",
+                "verdict": "verified",
+                "recover": "proceed",
+                "domain": "media",
+                "action": action,
+                "read_only": True,
+                "player": player,
+                "selection": selection,
+                "playlist_id": playlist_id,
+                "playlists": playlists,
+                "route": route_summary(True),
+                "dispatch": {
+                    "status": "not_dispatched_dry_run",
+                    "method": "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist",
+                    "argv": planned_argv,
+                },
+                "verification": {"status": "not_run", "reason": "dry_run"},
+            }
         before, before_error = observe(player, env)
         if before is None:
             return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": before_error or {"code": "observation_failed"}}
         preserve_nonplaying = before.get("playback_status") in ("Paused", "Stopped")
-        rc, out, err = playlist_call(player, "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist", [playlist_id], env)
+        activation_argv = playlist_argv(
+            player,
+            "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist",
+            [playlist_id],
+        )
+        rc, out, err = run(activation_argv, env)
+        activation_dispatch = {
+            "status": "dispatched" if rc == 0 else "failed",
+            "rc": rc,
+            "argv": activation_argv,
+            "stdout": out,
+            "stderr": err,
+        }
         if rc != 0:
             return {"schema": SCHEMA, "status": "action_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": {"code": "playlist_activation_failed", "rc": rc, "message": err or out}}
         deadline = time.monotonic() + verify_timeout
@@ -396,7 +496,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
         elif verified and preserve_nonplaying:
             preservation_verified = activation_status != "Playing"
         verified = verified and preservation_verified
-        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "selection": selection, "playlist_id": playlist_id, "route": route_summary(True), "before": before, "active_playlist": active_playlist, "after": after, "playback_preservation": {"required": preserve_nonplaying, "before_status": before.get("playback_status"), "after_activation_status": activation_status, "status": "verified" if preservation_verified else "unmet", "pause_dispatch": pause_dispatch}, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
+        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "read_only": False, "player": player, "selection": selection, "playlist_id": playlist_id, "route": route_summary(True), "before": before, "dispatch": activation_dispatch, "active_playlist": active_playlist, "after": after, "playback_preservation": {"required": preserve_nonplaying, "before_status": before.get("playback_status"), "after_activation_status": activation_status, "status": "verified" if preservation_verified else "unmet", "pause_dispatch": pause_dispatch}, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
     before, error = observe(player, env)
     if error or before is None:
         return {
@@ -466,6 +566,18 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
     argv = ["playerctl", "-p", player, "volume", f"{target:.3f}"] if target is not None else ["playerctl", "-p", player, PLAYERCTL_ACTION[action]]
     if target is not None:
         before["requested_volume"] = target
+    if before_dispatch is not None:
+        preparation_error = before_dispatch({
+            "action": action,
+            "argv": argv,
+            "before": before,
+            "env": env,
+            "player": player,
+            "selection": selection,
+            "session_env_restored": sorted(restored),
+        })
+        if preparation_error is not None:
+            return preparation_error
     rc, out, err = run(argv, env)
     dispatch = {"status": "dispatched" if rc == 0 else "failed", "rc": rc, "argv": argv,
                 "stdout": out, "stderr": err}
@@ -486,7 +598,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
         candidate, observation_error = observe(player, env)
         if candidate is not None:
             after = candidate
-            verified, predicate = effect_verified(action, before, after)
+            verified, predicate = effect_check(action, before, after)
             if verified:
                 break
         if time.monotonic() >= deadline:
@@ -504,6 +616,889 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
     }
 
 
+def operation_directory(env: MutableMapping[str, str] | None = None) -> Path:
+    source = os.environ if env is None else env
+    configured = source.get("AB_APP_CONTROL_OPERATION_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    state_home = source.get("XDG_STATE_HOME")
+    base = Path(state_home).expanduser() if state_home else Path.home() / ".local" / "state"
+    return base / "agent-bridge" / "app_control_operations"
+
+
+def operation_record_path(
+    operation_id: str, env: MutableMapping[str, str] | None = None
+) -> Path:
+    key = hashlib.sha256(operation_id.encode("ascii")).hexdigest()
+    return operation_directory(env) / f"{key}.json"
+
+
+def operation_lock_path(
+    operation_id: str, env: MutableMapping[str, str] | None = None
+) -> Path:
+    key = hashlib.sha256(operation_id.encode("ascii")).hexdigest()
+    return operation_directory(env) / f"{key}.lock"
+
+
+def operation_request(
+    action: str, player_selector: str | None, operation_ttl_secs: int
+) -> dict[str, Any]:
+    return {
+        "schema": SCHEMA,
+        "action": action,
+        "player_selector": player_selector,
+        "operation_ttl_secs": operation_ttl_secs,
+    }
+
+
+def operation_request_digest(
+    action: str, player_selector: str | None, operation_ttl_secs: int
+) -> str:
+    canonical = json.dumps(
+        operation_request(action, player_selector, operation_ttl_secs),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def ensure_operation_directory(path: Path) -> None:
+    if not path.is_absolute():
+        raise OSError("operation journal path must be absolute")
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink() or not path.is_dir():
+        raise OSError(f"operation journal is not a directory: {path}")
+    os.chmod(path, 0o700)
+
+
+def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    """Durably replace one journal record without exposing a partial JSON file."""
+    encoded = (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    fd = -1
+    temporary = ""
+    try:
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            fd = -1
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = ""
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_fd = os.open(path.parent, directory_flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
+
+def read_operation_record(path: Path) -> dict[str, Any] | None:
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None
+    try:
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            fd = -1
+            value = json.load(stream)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if not isinstance(value, dict):
+        raise ValueError("operation record must be a JSON object")
+    return value
+
+
+def operation_transaction(
+    operation_id: str,
+    request_digest: str | None,
+    *,
+    phase: str,
+    dispatch_count: int,
+    idempotent_replay: bool,
+    recovered_after_interruption: bool,
+    expires_at: float | None,
+) -> dict[str, Any]:
+    return {
+        "schema": OPERATION_SCHEMA,
+        "operation_id": operation_id,
+        "request_digest": request_digest,
+        "phase": phase,
+        "dispatch_count": dispatch_count,
+        "idempotent_replay": idempotent_replay,
+        "recovered_after_interruption": recovered_after_interruption,
+        "external_execution_repeated": False,
+        "expires_at": expires_at,
+    }
+
+
+def with_operation_transaction(
+    payload: dict[str, Any], transaction: dict[str, Any]
+) -> dict[str, Any]:
+    result = copy.deepcopy(payload)
+    result["transaction"] = transaction
+    return result
+
+
+def operation_error(
+    action: str,
+    operation_id: Any,
+    request_digest: str | None,
+    code: str,
+    message: str,
+    *,
+    phase: str = "rejected",
+    dispatch_count: int = 0,
+    expires_at: float | None = None,
+    recover: str = "replan",
+    status: str = "error",
+    recovered_after_interruption: bool = False,
+) -> dict[str, Any]:
+    printable_id = operation_id if isinstance(operation_id, str) else str(operation_id)
+    return {
+        "schema": SCHEMA,
+        "status": status,
+        "verdict": "error",
+        "recover": recover,
+        "domain": "media",
+        "action": action,
+        "route": route_summary(False),
+        "error": {"code": code, "message": message},
+        "transaction": operation_transaction(
+            printable_id,
+            request_digest,
+            phase=phase,
+            dispatch_count=dispatch_count,
+            idempotent_replay=False,
+            recovered_after_interruption=recovered_after_interruption,
+            expires_at=expires_at,
+        ),
+    }
+
+
+def operation_record(
+    operation_id: str,
+    request_digest: str,
+    request: dict[str, Any],
+    *,
+    created_at: float,
+    expires_at: float,
+    phase: str,
+    dispatch_count: int,
+    player: str | None = None,
+    baseline: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "schema": OPERATION_SCHEMA,
+        "operation_id": operation_id,
+        "request_digest": request_digest,
+        "request": request,
+        "phase": phase,
+        "dispatch_count": dispatch_count,
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "player": player,
+        "resolved_player": player,
+        "baseline": baseline,
+    }
+    if payload is not None:
+        record["payload"] = payload
+    return record
+
+
+def terminal_record_from(
+    base_record: dict[str, Any], payload: dict[str, Any], dispatch_count: int
+) -> dict[str, Any]:
+    record = copy.deepcopy(base_record)
+    record["phase"] = "terminal"
+    record["dispatch_count"] = dispatch_count
+    if record.get("player") is None and isinstance(payload.get("player"), str):
+        record["player"] = payload["player"]
+        record["resolved_player"] = payload["player"]
+    if record.get("baseline") is None and isinstance(payload.get("before"), dict):
+        record["baseline"] = payload["before"]
+    record["payload"] = payload
+    return record
+
+
+def replay_terminal_operation(
+    record: dict[str, Any], operation_id: str, request_digest: str
+) -> dict[str, Any]:
+    payload = record.get("payload")
+    if not terminal_payload_valid(
+        payload,
+        record,
+        operation_id,
+        request_digest,
+    ):
+        stored_request = record.get("request")
+        recorded_action = (
+            str(stored_request.get("action", "next"))
+            if isinstance(stored_request, dict)
+            else "next"
+        )
+        return operation_error(
+            recorded_action,
+            operation_id,
+            request_digest,
+            "operation_record_invalid",
+            "terminal operation record has no admissible payload",
+            phase="terminal",
+            dispatch_count=int(record.get("dispatch_count", 0)),
+            expires_at=record.get("expires_at"),
+        )
+    previous_transaction = payload.get("transaction")
+    recovered = bool(
+        isinstance(previous_transaction, dict)
+        and previous_transaction.get("recovered_after_interruption")
+    )
+    return with_operation_transaction(
+        payload,
+        operation_transaction(
+            operation_id,
+            request_digest,
+            phase="verified" if payload.get("verdict") == "verified" else "terminal",
+            dispatch_count=int(record.get("dispatch_count", 0)),
+            idempotent_replay=True,
+            recovered_after_interruption=recovered,
+            expires_at=record.get("expires_at"),
+        ),
+    )
+
+
+def terminal_payload_valid(
+    payload: Any,
+    record: Any,
+    operation_id: str,
+    request_digest: str,
+) -> bool:
+    """Validate a stored receipt before allowing it to become a replay result."""
+    if not isinstance(payload, dict) or not isinstance(record, dict):
+        return False
+    request = record.get("request")
+    dispatch_count = record.get("dispatch_count")
+    expires_at = record.get("expires_at")
+    baseline = record.get("baseline")
+    recorded_player = record.get("resolved_player") or record.get("player")
+    if (
+        record.get("schema") != OPERATION_SCHEMA
+        or record.get("operation_id") != operation_id
+        or record.get("request_digest") != request_digest
+        or record.get("phase") != "terminal"
+        or not isinstance(request, dict)
+        or request.get("schema") != SCHEMA
+        or request.get("action") != "next"
+        or type(dispatch_count) is not int
+        or dispatch_count not in (0, 1)
+        or type(expires_at) not in (int, float)
+        or isinstance(expires_at, bool)
+        or not math.isfinite(float(expires_at))
+    ):
+        return False
+    verdict = payload.get("verdict")
+    recover = payload.get("recover")
+    transaction = payload.get("transaction")
+    if (
+        payload.get("schema") != SCHEMA
+        or payload.get("domain") != "media"
+        or payload.get("action") != request.get("action")
+        or not isinstance(payload.get("status"), str)
+        or verdict not in ("verified", "unmet", "error")
+        or not isinstance(transaction, dict)
+        or transaction.get("schema") != OPERATION_SCHEMA
+        or transaction.get("operation_id") != operation_id
+        or transaction.get("request_digest") != request_digest
+        or type(transaction.get("dispatch_count")) is not int
+        or transaction.get("dispatch_count") != dispatch_count
+        or transaction.get("external_execution_repeated") is not False
+        or transaction.get("idempotent_replay") is not False
+        or type(transaction.get("recovered_after_interruption")) is not bool
+        or type(transaction.get("expires_at")) not in (int, float)
+        or isinstance(transaction.get("expires_at"), bool)
+        or not math.isfinite(float(transaction["expires_at"]))
+        or float(transaction["expires_at"]) != float(expires_at)
+    ):
+        return False
+    if verdict != "verified":
+        if (
+            recover not in ("retry", "replan")
+            or (dispatch_count == 1 and recover != "replan")
+            or transaction.get("phase") not in (
+                "retryable",
+                "terminal",
+                "indeterminate",
+                "journal_write_failed",
+                "dispatch_started",
+            )
+        ):
+            return False
+        if dispatch_count == 1:
+            return (
+                isinstance(recorded_player, str)
+                and bool(recorded_player)
+                and isinstance(baseline, dict)
+                and payload.get("player") == recorded_player
+                and payload.get("before") == baseline
+            )
+        return True
+    if (
+        payload.get("status") != "verified"
+        or recover != "proceed"
+        or dispatch_count != 1
+        or transaction.get("phase") != "verified"
+        or payload.get("read_only") is not False
+        or not isinstance(payload.get("verification"), dict)
+        or payload["verification"].get("status") != "verified"
+    ):
+        return False
+    before = payload.get("before")
+    after = payload.get("after")
+    selection = payload.get("selection")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    if (
+        not isinstance(recorded_player, str)
+        or not recorded_player
+        or payload.get("player") != recorded_player
+        or not isinstance(selection, dict)
+        or selection.get("selected_player") != recorded_player
+        or selection.get("selector") != request.get("player_selector")
+        or not isinstance(baseline, dict)
+        or before != baseline
+    ):
+        return False
+    changed, _ = strict_track_id_changed("next", before, after)
+    if not changed:
+        return False
+    recovered = transaction["recovered_after_interruption"]
+    predicate = payload["verification"].get("predicate")
+    if recovered:
+        return (
+            predicate == "track_identity_changed_after_restart"
+            and payload.get("causal_attribution") == "unknown_after_restart"
+            and payload.get("dispatch") is None
+        )
+    dispatch = payload.get("dispatch")
+    return (
+        predicate == "track_identity_changed"
+        and isinstance(dispatch, dict)
+        and dispatch.get("status") == "dispatched"
+        and type(dispatch.get("rc")) is int
+        and dispatch.get("rc") == 0
+        and dispatch.get("argv")
+        == ["playerctl", "-p", recorded_player, "next"]
+    )
+
+
+def recover_dispatch_started_operation(
+    record: dict[str, Any], operation_id: str, request_digest: str
+) -> dict[str, Any]:
+    """Resolve an interrupted next operation by observation, never by re-dispatch."""
+    player = record.get("resolved_player") or record.get("player")
+    baseline = record.get("baseline")
+    expires_at = record.get("expires_at")
+    dispatch_count = int(record.get("dispatch_count", 1))
+    env = dict(os.environ)
+    restored = hydrate_session_bus(env)
+    after: dict[str, Any] | None = None
+    observation_error: dict[str, Any] | None = None
+    reason: str | None = None
+    if not isinstance(player, str) or not player:
+        reason = "persisted_player_missing"
+    elif not isinstance(baseline, dict) or not isinstance(baseline.get("track_id"), str) or not baseline.get("track_id"):
+        reason = "baseline_track_id_missing"
+    else:
+        after, observation_error = observe(player, env)
+        if after is None:
+            reason = "observation_failed"
+        elif not isinstance(after.get("track_id"), str) or not after.get("track_id"):
+            reason = "current_track_id_missing"
+        elif after["track_id"] == baseline["track_id"]:
+            reason = "track_id_unchanged"
+
+    verified = reason is None
+    transaction = operation_transaction(
+        operation_id,
+        request_digest,
+        phase="verified" if verified else "indeterminate",
+        dispatch_count=dispatch_count,
+        idempotent_replay=False,
+        recovered_after_interruption=True,
+        expires_at=expires_at,
+    )
+    payload: dict[str, Any] = {
+        "schema": SCHEMA,
+        "status": "verified" if verified else "indeterminate",
+        "verdict": "verified" if verified else "error",
+        "recover": "proceed" if verified else "replan",
+        "domain": "media",
+        "action": "next",
+        "read_only": False,
+        "player": player,
+        "selection": {
+            "policy": "persisted_exact_player",
+            "selector": (
+                record.get("request", {}).get("player_selector")
+                if isinstance(record.get("request"), dict)
+                else None
+            ),
+            "selected_player": player,
+        },
+        "route": route_summary(isinstance(player, str) and bool(player)),
+        "before": baseline,
+        "after": after,
+        "causal_attribution": "unknown_after_restart",
+        "verification": {
+            "status": "verified" if verified else "indeterminate",
+            "predicate": "track_identity_changed_after_restart",
+            "causal_attribution": "unknown_after_restart",
+            "observation_error": observation_error,
+            "reason": reason,
+        },
+        "session_env_restored": sorted(restored),
+        "transaction": transaction,
+    }
+    if not verified:
+        payload["error"] = {
+            "code": "operation_outcome_indeterminate",
+            "message": "interrupted operation cannot be safely attributed or repeated",
+            "reason": reason,
+        }
+    return payload
+
+
+def execute(
+    action: str,
+    player_selector: str | None,
+    dry_run: bool,
+    verify_timeout: float,
+    volume: float | None = None,
+    playlist_id: str | None = None,
+    operation_id: str | None = None,
+    operation_ttl_secs: int = DEFAULT_OPERATION_TTL_SECS,
+) -> dict[str, Any]:
+    if operation_id is None:
+        return execute_once(
+            action, player_selector, dry_run, verify_timeout, volume, playlist_id
+        )
+
+    if not isinstance(operation_id, str) or OPERATION_ID_RE.fullmatch(operation_id) is None:
+        return operation_error(
+            action,
+            operation_id,
+            None,
+            "invalid_operation_id",
+            "operation_id must be 1..128 ASCII alphanumeric or . _ : - characters",
+        )
+    if type(operation_ttl_secs) is not int or not (
+        MIN_OPERATION_TTL_SECS <= operation_ttl_secs <= MAX_OPERATION_TTL_SECS
+    ):
+        return operation_error(
+            action,
+            operation_id,
+            None,
+            "invalid_operation_ttl_secs",
+            "operation_ttl_secs must be an integer from 60 through 86400",
+        )
+    request = operation_request(action, player_selector, operation_ttl_secs)
+    request_digest = operation_request_digest(action, player_selector, operation_ttl_secs)
+    if action != "next" or dry_run:
+        return operation_error(
+            action,
+            operation_id,
+            request_digest,
+            "unsupported_idempotent_operation",
+            "operation_id is supported only for action=next with dry_run=false",
+        )
+
+    journal_dir = operation_directory()
+    record_path = operation_record_path(operation_id)
+    lock_path = operation_lock_path(operation_id)
+    try:
+        ensure_operation_directory(journal_dir)
+    except OSError as exc:
+        return operation_error(
+            action,
+            operation_id,
+            request_digest,
+            "operation_journal_unavailable",
+            str(exc),
+        )
+
+    lock_fd = -1
+    locked = False
+    try:
+        lock_flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        lock_fd = os.open(lock_path, lock_flags, 0o600)
+        os.fchmod(lock_fd, 0o600)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+            return operation_error(
+                action,
+                operation_id,
+                request_digest,
+                "operation_lock_busy",
+                "another process is handling this operation_id",
+                phase="lock_busy",
+                recover="retry",
+            )
+
+        try:
+            existing = read_operation_record(record_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return operation_error(
+                action,
+                operation_id,
+                request_digest,
+                "operation_record_invalid",
+                str(exc),
+                phase="journal_error",
+            )
+
+        now = time.time()
+        created_at = now
+        expires_at = created_at + operation_ttl_secs
+        base_record = operation_record(
+            operation_id,
+            request_digest,
+            request,
+            created_at=created_at,
+            expires_at=expires_at,
+            phase="fresh",
+            dispatch_count=0,
+        )
+        if existing is not None:
+            if existing.get("operation_id") != operation_id:
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_record_invalid",
+                    "operation record identity does not match its filename",
+                    phase="journal_error",
+                )
+            if existing.get("request_digest") != request_digest:
+                reported_dispatch_count = existing.get("dispatch_count")
+                if type(reported_dispatch_count) is not int:
+                    reported_dispatch_count = 0
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "idempotency_conflict",
+                    "operation_id is already bound to a different canonical request",
+                    phase=str(existing.get("phase", "journal_error")),
+                    dispatch_count=reported_dispatch_count,
+                    expires_at=existing.get("expires_at"),
+                )
+            if existing.get("schema") != OPERATION_SCHEMA or existing.get("request") != request:
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_record_invalid",
+                    "operation record canonical request binding is malformed",
+                    phase="journal_error",
+                )
+            dispatch_count = existing.get("dispatch_count")
+            if type(dispatch_count) is not int or dispatch_count not in (0, 1):
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_record_invalid",
+                    "operation record dispatch_count must be 0 or 1",
+                    phase="journal_error",
+                )
+            expires_at = existing.get("expires_at")
+            if type(expires_at) not in (int, float) or not math.isfinite(float(expires_at)):
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_record_invalid",
+                    "operation record has no valid expires_at",
+                    phase="journal_error",
+                    dispatch_count=dispatch_count,
+                )
+            recorded_created_at = existing.get("created_at")
+            if (
+                type(recorded_created_at) not in (int, float)
+                or not math.isfinite(float(recorded_created_at))
+                or float(recorded_created_at) > now
+                or not math.isclose(
+                    float(expires_at) - float(recorded_created_at),
+                    float(operation_ttl_secs),
+                    rel_tol=0.0,
+                    abs_tol=0.001,
+                )
+            ):
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_record_invalid",
+                    "operation record has inconsistent TTL timestamps",
+                    phase="journal_error",
+                    dispatch_count=dispatch_count,
+                )
+            if now >= float(expires_at):
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_expired",
+                    "operation_id receipt has expired and cannot be executed again",
+                    phase=str(existing.get("phase", "expired")),
+                    dispatch_count=dispatch_count,
+                    expires_at=float(expires_at),
+                )
+            phase = existing.get("phase")
+            if phase == "terminal":
+                return replay_terminal_operation(existing, operation_id, request_digest)
+            if phase == "retryable":
+                if dispatch_count != 0:
+                    return operation_error(
+                        action,
+                        operation_id,
+                        request_digest,
+                        "operation_record_invalid",
+                        "retryable operation record must have dispatch_count=0",
+                        phase="journal_error",
+                        dispatch_count=dispatch_count,
+                        expires_at=float(expires_at),
+                    )
+                created_at = float(recorded_created_at)
+                expires_at = float(expires_at)
+                base_record = operation_record(
+                    operation_id,
+                    request_digest,
+                    request,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                    phase="fresh",
+                    dispatch_count=0,
+                )
+            elif phase != "dispatch_started":
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_record_invalid",
+                    f"unsupported operation phase: {phase!r}",
+                    phase="journal_error",
+                    dispatch_count=dispatch_count,
+                    expires_at=float(expires_at),
+                )
+            else:
+                if dispatch_count != 1:
+                    return operation_error(
+                        action,
+                        operation_id,
+                        request_digest,
+                        "operation_record_invalid",
+                        "dispatch_started operation record must have dispatch_count=1",
+                        phase="journal_error",
+                        dispatch_count=dispatch_count,
+                        expires_at=float(expires_at),
+                    )
+
+                recovered_payload = recover_dispatch_started_operation(
+                    existing, operation_id, request_digest
+                )
+                terminal = terminal_record_from(
+                    existing, recovered_payload, dispatch_count
+                )
+                try:
+                    atomic_write_json(record_path, terminal)
+                except OSError as exc:
+                    failed = operation_error(
+                        action,
+                        operation_id,
+                        request_digest,
+                        "journal_write_failed",
+                        f"could not persist recovered terminal receipt: {exc}",
+                        phase="dispatch_started",
+                        dispatch_count=dispatch_count,
+                        expires_at=float(expires_at),
+                        status="indeterminate",
+                        recovered_after_interruption=True,
+                    )
+                    failed["recovered_result"] = recovered_payload
+                    return failed
+                return recovered_payload
+        prepared = False
+        preparation_write_failed = False
+
+        def persist_dispatch_started(context: dict[str, Any]) -> dict[str, Any] | None:
+            nonlocal base_record, prepared, preparation_write_failed
+            before = context["before"]
+            player = context["player"]
+            if not isinstance(before.get("track_id"), str) or not before.get("track_id"):
+                return {
+                    "schema": SCHEMA,
+                    "status": "observation_failed",
+                    "verdict": "error",
+                    "recover": "replan",
+                    "domain": "media",
+                    "action": action,
+                    "player": player,
+                    "selection": context["selection"],
+                    "route": route_summary(True),
+                    "before": before,
+                    "dispatch": {
+                        "status": "not_dispatched_missing_baseline",
+                        "argv": context["argv"],
+                    },
+                    "error": {
+                        "code": "missing_baseline_track_id",
+                        "message": "durable next requires a non-empty baseline track_id",
+                    },
+                }
+            if time.time() >= expires_at:
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "operation_expired",
+                    "operation expired before its dispatch budget could be consumed",
+                    phase="terminal",
+                    dispatch_count=0,
+                    expires_at=expires_at,
+                )
+            base_record = operation_record(
+                operation_id,
+                request_digest,
+                request,
+                created_at=created_at,
+                expires_at=expires_at,
+                phase="dispatch_started",
+                dispatch_count=1,
+                player=player,
+                baseline=before,
+            )
+            try:
+                atomic_write_json(record_path, base_record)
+            except OSError as exc:
+                preparation_write_failed = True
+                return operation_error(
+                    action,
+                    operation_id,
+                    request_digest,
+                    "journal_write_failed",
+                    f"could not persist dispatch_started before dispatch: {exc}",
+                    phase="journal_write_failed",
+                    dispatch_count=0,
+                    expires_at=expires_at,
+                )
+            prepared = True
+            return None
+
+        result = execute_once(
+            action,
+            player_selector,
+            dry_run,
+            verify_timeout,
+            volume,
+            playlist_id,
+            before_dispatch=persist_dispatch_started,
+            effect_check=strict_track_id_changed,
+        )
+        if preparation_write_failed:
+            return result
+
+        if prepared and result.get("verdict") != "verified":
+            result["recover"] = "replan"
+
+        dispatch_count = 1 if prepared else 0
+        retryable = (
+            not prepared
+            and result.get("verdict") != "verified"
+            and result.get("recover") == "retry"
+        )
+        transaction = operation_transaction(
+            operation_id,
+            request_digest,
+            phase=(
+                "verified"
+                if result.get("verdict") == "verified"
+                else "retryable" if retryable else "terminal"
+            ),
+            dispatch_count=dispatch_count,
+            idempotent_replay=False,
+            recovered_after_interruption=False,
+            expires_at=expires_at,
+        )
+        result = with_operation_transaction(result, transaction)
+        terminal = (
+            operation_record(
+                operation_id,
+                request_digest,
+                request,
+                created_at=created_at,
+                expires_at=expires_at,
+                phase="retryable",
+                dispatch_count=0,
+                payload=result,
+            )
+            if retryable
+            else terminal_record_from(base_record, result, dispatch_count)
+        )
+        try:
+            atomic_write_json(record_path, terminal)
+        except OSError as exc:
+            failed = operation_error(
+                action,
+                operation_id,
+                request_digest,
+                "journal_write_failed",
+                f"could not persist terminal receipt: {exc}",
+                phase="dispatch_started" if prepared else "journal_write_failed",
+                dispatch_count=dispatch_count,
+                expires_at=expires_at,
+                status="indeterminate" if prepared else "error",
+            )
+            failed["execution_result"] = result
+            return failed
+        return result
+    except OSError as exc:
+        return operation_error(
+            action,
+            operation_id,
+            request_digest,
+            "operation_journal_unavailable",
+            str(exc),
+            phase="journal_error",
+        )
+    finally:
+        if locked:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        if lock_fd >= 0:
+            os.close(lock_fd)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", choices=("media",), default="media")
@@ -513,8 +1508,19 @@ def main() -> int:
     parser.add_argument("--verify-timeout", type=float, default=2.0)
     parser.add_argument("--volume", type=float)
     parser.add_argument("--playlist-id")
+    parser.add_argument("--operation-id")
+    parser.add_argument("--operation-ttl-secs", type=int, default=DEFAULT_OPERATION_TTL_SECS)
     args = parser.parse_args()
-    payload = execute(args.action, args.player, args.dry_run, min(max(args.verify_timeout, 0.1), 10.0), args.volume, args.playlist_id)
+    payload = execute(
+        args.action,
+        args.player,
+        args.dry_run,
+        min(max(args.verify_timeout, 0.1), 10.0),
+        args.volume,
+        args.playlist_id,
+        args.operation_id,
+        args.operation_ttl_secs,
+    )
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return 0 if payload.get("verdict") == "verified" else 2
 

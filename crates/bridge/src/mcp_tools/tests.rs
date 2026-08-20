@@ -8289,6 +8289,7 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
         "memory_search",
         "memory_save",
         "forum_read",
+        "app_control",
         "mobile_projection_status",
         "mobile_projection_wait",
         "mobile_projection_start",
@@ -16792,6 +16793,7 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
         .find(|schema| schema.name == "app_control")
         .expect("app_control schema");
     assert_eq!(tool.input_schema["required"], json!(["action"]));
+    assert_eq!(tool.input_schema["additionalProperties"], json!(false));
     assert_eq!(
         tool.input_schema["properties"]["domain"]["enum"],
         json!(["media"])
@@ -16823,6 +16825,17 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
         tool.input_schema["properties"]["volume"]["maximum"],
         json!(1.0)
     );
+    assert_eq!(
+        tool.input_schema["properties"]["operation_id"]["pattern"],
+        json!("^[A-Za-z0-9._:-]+$")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["operation_ttl_secs"]["minimum"],
+        json!(60)
+    );
+    assert!(tool.input_schema["properties"]["operation_id"]["description"]
+        .as_str()
+        .is_some_and(|description| description.contains("never dispatches next a second time")));
     for forbidden in [
         "command",
         "method",
@@ -16863,8 +16876,13 @@ assert "--dry-run" not in sys.argv
 print(json.dumps({
   "schema": "agent_bridge.app_control.v0", "status": "verified",
   "verdict": "verified", "recover": "proceed", "domain": "media", "action": "next",
+  "read_only": False, "player": "rhythmbox",
+  "selection": {"selector": "rhythmbox", "selected_player": "rhythmbox"},
+  "dispatch": {"status": "dispatched", "rc": 0,
+               "argv": ["playerctl", "-p", "rhythmbox", "next"]},
   "route": {"selected": {"backend": "mpris_playerctl", "layer": "application_protocol"}},
-  "before": {"track_id": "/track/1"}, "after": {"track_id": "/track/2"},
+  "before": {"player": "rhythmbox", "track_id": "/track/1"},
+  "after": {"player": "rhythmbox", "track_id": "/track/2"},
   "verification": {"status": "verified", "predicate": "track_identity_changed"}
 }))
 "#,
@@ -16905,6 +16923,90 @@ async fn app_control_rejects_raw_or_unknown_control_before_exec() {
             json!({"action": "volume_set", "volume": 1.1}),
             "invalid_volume",
         ),
+        (
+            json!({"action": "next", "operation_id": "bad id"}),
+            "invalid_operation_id",
+        ),
+        (
+            json!({"action": "next", "operation_ttl_secs": 3600}),
+            "operation_id_required",
+        ),
+        (
+            json!({"action": "pause", "operation_id": "episode-1"}),
+            "durable_action_not_supported",
+        ),
+        (
+            json!({"action": "next", "operation_id": "episode-1", "dry_run": true}),
+            "durable_dry_run_not_supported",
+        ),
+        (
+            json!({"action": "next", "operation_id": "episode-1", "cwd": "/tmp"}),
+            "durable_operation_requires_installed_backend",
+        ),
+        (
+            json!({"action": "next", "operation_idd": "episode-1"}),
+            "unknown_argument",
+        ),
+        (
+            json!({"action": "next", "dry_rnu": true}),
+            "unknown_argument",
+        ),
+        (
+            json!({"action": "next", "dry_run": "true"}),
+            "invalid_dry_run",
+        ),
+        (
+            json!({"action": "next", "player": 7}),
+            "invalid_player",
+        ),
+        (
+            json!({"action": "next", "domain": 7}),
+            "invalid_domain",
+        ),
+        (
+            json!({"action": "next", "operation_id": null}),
+            "invalid_operation_id",
+        ),
+        (
+            json!({"action": "next", "dry_run": null}),
+            "invalid_dry_run",
+        ),
+        (
+            json!({"action": "next", "volume": "0.5"}),
+            "invalid_volume",
+        ),
+        (
+            json!({"action": "playlist_activate", "playlist_id": 7}),
+            "invalid_playlist_id",
+        ),
+        (
+            json!({"action": "playlist_activate", "playlist_id": " /playlist/1"}),
+            "invalid_playlist_id",
+        ),
+        (
+            json!({"action": "next", "verify_timeout_secs": "2"}),
+            "invalid_verify_timeout_secs",
+        ),
+        (
+            json!({"action": "next", "verify_timeout_secs": 10.1}),
+            "invalid_verify_timeout_secs",
+        ),
+        (
+            json!({"action": "next", "timeout_ms": null}),
+            "invalid_timeout_ms",
+        ),
+        (
+            json!({"action": "next", "timeout_ms": 999}),
+            "invalid_timeout_ms",
+        ),
+        (
+            json!({"action": "next", "cwd": 7}),
+            "invalid_cwd",
+        ),
+        (
+            json!({"action": "next", "script_path": false}),
+            "invalid_script_path",
+        ),
     ] {
         let out = tool
             .execute(args, &ToolContext::default())
@@ -16913,6 +17015,497 @@ async fn app_control_rejects_raw_or_unknown_control_before_exec() {
         assert!(out.is_error);
         assert_eq!(result_text_as_json(&out)["error"]["code"], code);
     }
+}
+
+#[test]
+fn app_control_source_contract_binds_exit_action_and_durable_operation_evidence() {
+    let request_digest = app_control_operation_request_digest("next", Some("rhythmbox"), 3_600);
+    let fresh = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "verified",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "next",
+        "read_only": false,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythmbox", "selected_player": "rhythmbox"},
+        "before": {"player": "rhythmbox", "track_id": "/track/1"},
+        "after": {"player": "rhythmbox", "track_id": "/track/2"},
+        "dispatch": {"status": "dispatched", "rc": 0,
+                     "argv": ["playerctl", "-p", "rhythmbox", "next"]},
+        "verification": {"status": "verified", "predicate": "track_identity_changed"},
+        "transaction": {
+            "schema": "agent_bridge.app_control.operation.v0",
+            "operation_id": "episode-1",
+            "request_digest": request_digest,
+            "phase": "verified",
+            "dispatch_count": 1,
+            "idempotent_replay": false,
+            "recovered_after_interruption": false,
+            "external_execution_repeated": false
+        }
+    });
+    assert!(app_control_source_contract_valid(
+        &fresh,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+    assert!(!app_control_source_contract_valid(
+        &fresh,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        2,
+    ));
+    assert!(!app_control_source_contract_valid(
+        &fresh,
+        "media",
+        "previous",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut wrong_argv = fresh.clone();
+    wrong_argv["dispatch"]["argv"] =
+        json!(["playerctl", "-p", "rhythmbox", "previous"]);
+    assert!(!app_control_source_contract_valid(
+        &wrong_argv,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut replay_without_dispatch = fresh.clone();
+    replay_without_dispatch.as_object_mut().unwrap().remove("dispatch");
+    replay_without_dispatch["transaction"]["idempotent_replay"] = json!(true);
+    assert!(!app_control_source_contract_valid(
+        &replay_without_dispatch,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut recovered = fresh.clone();
+    recovered.as_object_mut().unwrap().remove("dispatch");
+    recovered["verification"]["predicate"] = json!("track_identity_changed_after_restart");
+    recovered["verification"]["causal_attribution"] = json!("unknown_after_restart");
+    recovered["causal_attribution"] = json!("unknown_after_restart");
+    recovered["transaction"]["recovered_after_interruption"] = json!(true);
+    assert!(app_control_source_contract_valid(
+        &recovered,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut recovered_with_dispatch = recovered.clone();
+    recovered_with_dispatch["dispatch"] = json!({
+        "status": "dispatched", "rc": 0,
+        "argv": ["playerctl", "-p", "rhythmbox", "next"]
+    });
+    assert!(!app_control_source_contract_valid(
+        &recovered_with_dispatch,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut forged = recovered;
+    forged["transaction"]["external_execution_repeated"] = json!(true);
+    assert!(!app_control_source_contract_valid(
+        &forged,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut wrong_request = fresh.clone();
+    wrong_request["transaction"]["request_digest"] = json!("0".repeat(64));
+    assert!(!app_control_source_contract_valid(
+        &wrong_request,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut weak_identity = fresh.clone();
+    weak_identity["after"]["track_id"] = weak_identity["before"]["track_id"].clone();
+    assert!(!app_control_source_contract_valid(
+        &weak_identity,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut wrong_selector_echo = fresh.clone();
+    wrong_selector_echo["selection"]["selector"] = json!("vlc");
+    assert!(!app_control_source_contract_valid(
+        &wrong_selector_echo,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let mut wrong_evidence_player = fresh;
+    wrong_evidence_player["after"]["player"] = json!("vlc");
+    assert!(!app_control_source_contract_valid(
+        &wrong_evidence_player,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+}
+
+#[test]
+fn app_control_source_contract_binds_legacy_verified_evidence_and_dry_run_plans() {
+    let valid = |payload: &Value,
+                 action: &str,
+                 dry_run: bool,
+                 volume: Option<f64>,
+                 playlist_id: Option<&str>| {
+        app_control_source_contract_valid(
+            payload,
+            "media",
+            action,
+            dry_run,
+            None,
+            Some("rhythm"),
+            volume,
+            playlist_id,
+            3_600,
+            0,
+        )
+    };
+    let next = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "verified",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "next",
+        "read_only": false,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "before": {"player": "rhythmbox", "track_id": "/track/1"},
+        "after": {"player": "rhythmbox", "track_id": "/track/2"},
+        "dispatch": {
+            "status": "dispatched", "rc": 0,
+            "argv": ["playerctl", "-p", "rhythmbox", "next"]
+        },
+        "verification": {"status": "verified", "predicate": "track_identity_changed"}
+    });
+    assert!(valid(&next, "next", false, None, None));
+
+    let mut null_identity = next.clone();
+    null_identity["after"]["track_id"] = Value::Null;
+    assert!(!valid(&null_identity, "next", false, None, None));
+    let mut wrong_selector = next.clone();
+    wrong_selector["selection"]["selector"] = json!("vlc");
+    assert!(!valid(&wrong_selector, "next", false, None, None));
+    let mut wrong_player = next.clone();
+    wrong_player["after"]["player"] = json!("vlc");
+    assert!(!valid(&wrong_player, "next", false, None, None));
+    let mut wrong_argv = next;
+    wrong_argv["dispatch"]["argv"] = json!(["playerctl", "-p", "rhythmbox", "previous"]);
+    assert!(!valid(&wrong_argv, "next", false, None, None));
+
+    let play = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "verified",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "play",
+        "read_only": false,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "before": {"player": "rhythmbox", "playback_status": "Paused"},
+        "after": {"player": "rhythmbox", "playback_status": "Playing"},
+        "dispatch": {
+            "status": "dispatched", "rc": 0,
+            "argv": ["playerctl", "-p", "rhythmbox", "play"]
+        },
+        "verification": {"status": "verified", "predicate": "playback_status_is_playing"}
+    });
+    assert!(valid(&play, "play", false, None, None));
+    let mut play_without_after = play.clone();
+    play_without_after.as_object_mut().unwrap().remove("after");
+    assert!(!valid(&play_without_after, "play", false, None, None));
+
+    let volume_set = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "verified",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "volume_set",
+        "read_only": false,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "before": {"player": "rhythmbox", "volume": 0.5, "requested_volume": 0.42},
+        "after": {"player": "rhythmbox", "volume": 0.42},
+        "dispatch": {
+            "status": "dispatched", "rc": 0,
+            "argv": ["playerctl", "-p", "rhythmbox", "volume", "0.420"]
+        },
+        "verification": {"status": "verified", "predicate": "volume_is_requested"}
+    });
+    assert!(valid(&volume_set, "volume_set", false, Some(0.42), None));
+    assert!(!valid(&volume_set, "volume_set", false, Some(0.4), None));
+
+    let playlist_id = "/org/mpris/MediaPlayer2/Playlist/1";
+    let playlist_activate = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "verified",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "playlist_activate",
+        "read_only": false,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "playlist_id": playlist_id,
+        "before": {"player": "rhythmbox", "playback_status": "Paused"},
+        "after": {"player": "rhythmbox", "playback_status": "Paused"},
+        "dispatch": {
+            "status": "dispatched", "rc": 0,
+            "argv": [
+                "gdbus", "call", "--session", "--dest",
+                "org.mpris.MediaPlayer2.rhythmbox", "--object-path",
+                "/org/mpris/MediaPlayer2", "--method",
+                "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist", playlist_id
+            ]
+        },
+        "active_playlist": {"active": true, "id": playlist_id, "name": "Mix"},
+        "playback_preservation": {"status": "verified"},
+        "verification": {
+            "status": "verified", "predicate": "playlist_active_id_matches_target"
+        }
+    });
+    assert!(valid(
+        &playlist_activate,
+        "playlist_activate",
+        false,
+        None,
+        Some(playlist_id),
+    ));
+    let mut playlist_without_argv = playlist_activate.clone();
+    playlist_without_argv["dispatch"].as_object_mut().unwrap().remove("argv");
+    assert!(!valid(
+        &playlist_without_argv,
+        "playlist_activate",
+        false,
+        None,
+        Some(playlist_id),
+    ));
+    let mut playlist_without_after = playlist_activate;
+    playlist_without_after.as_object_mut().unwrap().remove("after");
+    assert!(!valid(
+        &playlist_without_after,
+        "playlist_activate",
+        false,
+        None,
+        Some(playlist_id),
+    ));
+
+    let dry_next = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "planned",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "next",
+        "read_only": true,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "before": {"player": "rhythmbox", "track_id": "/track/1"},
+        "dispatch": {
+            "status": "not_dispatched_dry_run",
+            "argv": ["playerctl", "-p", "rhythmbox", "next"]
+        },
+        "verification": {"status": "not_run", "reason": "dry_run"}
+    });
+    assert!(valid(&dry_next, "next", true, None, None));
+    let mut dry_next_without_before = dry_next.clone();
+    dry_next_without_before.as_object_mut().unwrap().remove("before");
+    assert!(!valid(&dry_next_without_before, "next", true, None, None));
+    let mut dry_next_wrong_argv = dry_next;
+    dry_next_wrong_argv["dispatch"]["argv"] = json!(["playerctl", "next"]);
+    assert!(!valid(&dry_next_wrong_argv, "next", true, None, None));
+
+    let dry_volume = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "planned",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "volume_set",
+        "read_only": true,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "before": {"player": "rhythmbox", "volume": 0.5},
+        "dispatch": {
+            "status": "not_dispatched_dry_run",
+            "argv": ["playerctl", "-p", "rhythmbox", "volume", "0.420"]
+        },
+        "verification": {"status": "not_run", "reason": "dry_run"}
+    });
+    assert!(valid(&dry_volume, "volume_set", true, Some(0.42), None));
+    assert!(!valid(&dry_volume, "volume_set", true, Some(0.4), None));
+
+    let dry_playlist = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "planned",
+        "verdict": "verified",
+        "recover": "proceed",
+        "domain": "media",
+        "action": "playlist_activate",
+        "read_only": true,
+        "player": "rhythmbox",
+        "selection": {"selector": "rhythm", "selected_player": "rhythmbox"},
+        "playlist_id": playlist_id,
+        "playlists": [{"id": playlist_id, "name": "Mix"}],
+        "before": {"player": "rhythmbox", "playback_status": "Paused"},
+        "dispatch": {
+            "status": "not_dispatched_dry_run",
+            "argv": [
+                "gdbus", "call", "--session", "--dest",
+                "org.mpris.MediaPlayer2.rhythmbox", "--object-path",
+                "/org/mpris/MediaPlayer2", "--method",
+                "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist", playlist_id
+            ]
+        },
+        "verification": {"status": "not_run", "reason": "dry_run"}
+    });
+    assert!(valid(
+        &dry_playlist,
+        "playlist_activate",
+        true,
+        None,
+        Some(playlist_id),
+    ));
+    assert!(!valid(
+        &dry_playlist,
+        "playlist_activate",
+        true,
+        None,
+        Some("/wrong"),
+    ));
+}
+
+#[test]
+fn app_control_source_contract_rejects_verified_nonzero_and_allows_structured_unmet() {
+    let verified = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "verdict": "verified",
+        "domain": "media",
+        "action": "next"
+    });
+    assert!(!app_control_source_contract_valid(
+        &verified, "media", "next", false, None, None, None, None, 3_600, 2,
+    ));
+    assert!(!app_control_source_contract_valid(
+        &verified, "media", "next", false, None, None, None, None, 3_600, 0,
+    ));
+    let unmet = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "verdict": "unmet",
+        "recover": "replan",
+        "domain": "media",
+        "action": "next"
+    });
+    assert!(app_control_source_contract_valid(
+        &unmet, "media", "next", false, None, None, None, None, 3_600, 2,
+    ));
+}
+
+#[test]
+fn app_control_durable_timeout_and_request_digest_are_deterministic() {
+    assert_eq!(app_control_process_timeout_ms(None, 2.0, true), 15_000);
+    assert_eq!(app_control_process_timeout_ms(Some(1_000), 10.0, true), 13_000);
+    assert_eq!(app_control_process_timeout_ms(Some(20_000), 10.0, true), 20_000);
+    assert_eq!(app_control_process_timeout_ms(Some(60_000), 10.0, true), 30_000);
+    assert_eq!(app_control_process_timeout_ms(Some(1_000), 10.0, false), 1_000);
+    assert_eq!(
+        app_control_operation_request_digest("next", Some("rhythmbox"), 3_600),
+        "603628e4869d22b32e4dd0ada16c74951f524e64d92aedd3a046b64a012b06a2"
+    );
+    assert_eq!(
+        app_control_operation_request_digest("next", Some("播放器"), 3_600),
+        "64f3322acd1ecf05fcdef9435dae907ebd772ad6ce51a093c4a2672895dcd1a5"
+    );
 }
 
 #[test]

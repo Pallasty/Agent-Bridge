@@ -64,6 +64,7 @@ git clone -q "$REMOTE" "$REPO"
 # deploy copies these dirty markers; the correct deploy copies detached master.
 printf '%s\n' '# DIRTY_CALLER_ADAPTER' > "$REPO/scripts/audio_embody.py"
 printf '%s\n' '# DIRTY_CALLER_SNAPSHOT' > "$REPO/scripts/desktop_snapshot.py"
+printf '%s\n' '# DIRTY_CALLER_APP_CONTROL' > "$REPO/scripts/app_control.py"
 
 cat > "$FAKE_BIN/cargo" <<'FAKE_CARGO'
 #!/usr/bin/env bash
@@ -103,7 +104,7 @@ for asset in config/omnivoice-canary.json \
     git -C "$REPO" show "origin/master:$asset" > "$expected"
     cmp -s "$expected" "$TEST_ROOT/$asset" || fail "$asset came from dirty caller"
 done
-for asset in desktop_action.py desktop_confirm_store.py desktop_grant.py \
+for asset in app_control.py desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
     macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
     vision_grounding_ocr.py; do
@@ -114,5 +115,7 @@ done
 grep -q DIRTY_CALLER "$ADAPTER_PATH" && fail "dirty adapter marker deployed"
 grep -q DIRTY_CALLER "$RUNTIME_ASSET_DIR/desktop_snapshot.py" &&
     fail "dirty snapshot marker deployed"
+grep -q DIRTY_CALLER "$RUNTIME_ASSET_DIR/app_control.py" &&
+    fail "dirty app_control marker deployed"
 
 printf '%s\n' "pinned-master-runtime-assets-ok"

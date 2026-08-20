@@ -65,6 +65,47 @@ A successful command exit is dispatch evidence only. The transaction reports
 predicate. A timeout or unchanged state returns `unmet` with a recovery hint;
 it is not promoted to success.
 
+## Durable `next` operation slice
+
+`operation_id` opts the relative `next` action into a narrow, local
+at-most-once journal. This is the first embodied task-continuity slice; it is
+not a general workflow runtime and it does not change calls that omit the
+field.
+
+The backend binds the identifier to the canonical mutation request
+(`action`, exact caller-supplied player selector, and TTL), an exact resolved player, a
+non-empty baseline MPRIS track ID, and a short TTL. The verification timeout is
+an execution-policy budget rather than mutation identity, so it is deliberately
+excluded from the request digest. Before calling
+`playerctl next`, it atomically persists `phase=dispatch_started` and consumes
+the operation's one-dispatch budget. A second process with the same operation
+and request therefore either replays a completed receipt or performs a
+read-only observation. It never dispatches `next` again.
+
+If the first process disappears after dispatch but before its terminal receipt:
+
+- a different strict track ID proves that the requested outcome is currently
+  satisfied, so recovery may return `verified` while keeping
+  `causal_attribution=unknown_after_restart`;
+- the same, missing, or unreadable track identity is indeterminate and returns
+  `replan` without another dispatch;
+- a changed request digest, expired operation, unavailable journal, or busy
+  per-operation lock fails closed before mutation.
+
+The journal lives at an absolute path under the user's state directory with a private directory,
+hashed filenames, per-operation `flock`, 0600 records, and atomic
+write/fsync/rename. Caller-selected `cwd` and `script_path` backends are
+rejected for durable operations at the MCP boundary so an operation cannot be
+silently rebound to another implementation.
+
+The mobile projection remains a reconstructible presentation tail. After a
+verified media operation, callers may create or reuse a consent-gated mobile
+projection, call `mobile_projection_sync_media` with the exact `player` from
+the durable receipt, then pass `projection_update.revision` as
+`mobile_projection_wait.target_revision`. Updating the in-memory frame alone is
+not proof that the device displayed it, and a projection session is not part of
+the durable media-operation identity.
+
 The first live Rhythmbox acceptance receipt is stored at
 `docs/design/evidence/app_control_rhythmbox_acceptance_2026_08_12.json`.
 

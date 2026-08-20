@@ -450,7 +450,9 @@ grep -q '"playlist_current"' "$APP_CONTROL_RUNTIME" ||
     die "post-deploy app_control contract missing playlist_current: $APP_CONTROL_RUNTIME"
 grep -q '"playlist_activate"' "$APP_CONTROL_RUNTIME" ||
     die "post-deploy app_control contract missing playlist_activate: $APP_CONTROL_RUNTIME"
-say "app_control action contract: OK (playlist_current, playlist_activate)"
+grep -q 'agent_bridge.app_control.operation.v0' "$APP_CONTROL_RUNTIME" ||
+    die "post-deploy app_control contract missing durable operation journal: $APP_CONTROL_RUNTIME"
+say "app_control action contract: OK (playlist_current, playlist_activate, durable operation v0)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086

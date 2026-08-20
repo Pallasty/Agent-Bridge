@@ -44,5 +44,6 @@ for asset in app_control.py desktop_action.py desktop_confirm_store.py desktop_g
 done
 grep -q '"playlist_current"' "$RUNTIME_ASSET_DIR/app_control.py"
 grep -q '"playlist_activate"' "$RUNTIME_ASSET_DIR/app_control.py"
+grep -q 'agent_bridge.app_control.operation.v0' "$RUNTIME_ASSET_DIR/app_control.py"
 
 printf 'PASS: deploy keeps binary, audio adapter, and runtime scripts at repository parity\n'

@@ -8389,6 +8389,7 @@ impl McpTool for AppControlTool {
                 .into(),
             input_schema: json!({
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                     "domain": {"type": "string", "enum": ["media"], "default": "media"},
                     "action": {
@@ -8407,6 +8408,20 @@ impl McpTool for AppControlTool {
                         "type": "string",
                         "description": "Exact MPRIS playlist object path returned by playlist_list; required by playlist_activate."
                     },
+                    "operation_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9._:-]+$",
+                        "description": "Optional durable at-most-once identity for action=next. The installed backend journals the exact request before dispatch; replay or restart recovery never dispatches next a second time. First slice only: incompatible with dry_run, cwd, or script_path."
+                    },
+                    "operation_ttl_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 86400,
+                        "default": 3600,
+                        "description": "TTL for a durable operation_id. Expired operations fail closed and require a new identity; ignored requests are rejected rather than silently changing the journal contract."
+                    },
                     "dry_run": {
                         "type": "boolean", "default": false,
                         "description": "Discover the route and read current state without dispatching the action."
@@ -8424,6 +8439,31 @@ impl McpTool for AppControlTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        const ARGUMENTS: &[&str] = &[
+            "domain",
+            "action",
+            "player",
+            "volume",
+            "playlist_id",
+            "operation_id",
+            "operation_ttl_secs",
+            "dry_run",
+            "verify_timeout_secs",
+            "cwd",
+            "script_path",
+            "timeout_ms",
+        ];
+        if let Some(arguments) = args.as_object() {
+            if let Some(unknown) = arguments
+                .keys()
+                .find(|key| !ARGUMENTS.contains(&key.as_str()))
+            {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "unknown_argument", "argument": unknown}),
+                ));
+            }
+        }
         let action = match required_str_arg(&args, "action") {
             Ok(value) => value,
             Err(message) => {
@@ -8456,35 +8496,210 @@ impl McpTool for AppControlTool {
                 "code": "unsupported_action", "action": action
             })));
         }
-        let domain = args.get("domain").and_then(Value::as_str).unwrap_or("media");
+        let domain = match args.get("domain") {
+            None => "media",
+            Some(Value::String(value)) if !value.trim().is_empty() => value.as_str(),
+            Some(_) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "invalid_domain"}),
+                ))
+            }
+        };
         if domain != "media" {
             return Ok(app_control_error("replan", json!({
                 "code": "unsupported_domain", "domain": domain
             })));
         }
-        let timeout_ms = args
-            .get("timeout_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(15_000)
-            .clamp(1_000, 30_000);
-        let verify_timeout = args
-            .get("verify_timeout_secs")
-            .and_then(Value::as_f64)
-            .unwrap_or(2.0)
-            .clamp(0.1, 10.0);
-        if action == "volume_set"
-            && !args
-                .get("volume")
-                .and_then(Value::as_f64)
-                .is_some_and(|value| (0.0..=1.0).contains(&value))
-        {
+        let dry_run = match args.get("dry_run") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "invalid_dry_run"}),
+                ))
+            }
+        };
+        let operation_id = match args.get("operation_id") {
+            None => None,
+            Some(Value::String(value)) => {
+                let value = value.trim();
+                if value.is_empty()
+                    || args.get("operation_id").and_then(Value::as_str) != Some(value)
+                    || value.chars().count() > 128
+                    || !value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+                {
+                    return Ok(app_control_error(
+                        "replan",
+                        json!({"code": "invalid_operation_id"}),
+                    ));
+                }
+                Some(value.to_string())
+            }
+            Some(_) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "invalid_operation_id"}),
+                ))
+            }
+        };
+        let operation_ttl_secs = match args.get("operation_ttl_secs") {
+            None => 3_600_u64,
+            Some(value) => match value.as_u64() {
+                Some(value) if (60..=86_400).contains(&value) => value,
+                _ => {
+                    return Ok(app_control_error(
+                        "replan",
+                        json!({"code": "invalid_operation_ttl_secs"}),
+                    ))
+                }
+            },
+        };
+        if operation_id.is_none() && args.get("operation_ttl_secs").is_some() {
+            return Ok(app_control_error(
+                "replan",
+                json!({
+                    "code": "operation_id_required",
+                    "message": "operation_ttl_secs requires operation_id"
+                }),
+            ));
+        }
+        let player_selector = match args.get("player") {
+            None => None,
+            Some(Value::String(value)) => {
+                let value = value.trim();
+                if value.is_empty() {
+                    return Ok(app_control_error(
+                        "replan",
+                        json!({"code": "invalid_player"}),
+                    ));
+                }
+                Some(value)
+            }
+            Some(_) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "invalid_player"}),
+                ))
+            }
+        };
+        if operation_id.is_some() {
+            if action != "next" {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({
+                        "code": "durable_action_not_supported",
+                        "message": "the v0 durable operation slice supports action=next only"
+                    }),
+                ));
+            }
+            if dry_run {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({
+                        "code": "durable_dry_run_not_supported",
+                        "message": "omit operation_id for a read-only dry run"
+                    }),
+                ));
+            }
+            if args.get("cwd").is_some() || args.get("script_path").is_some() {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({
+                        "code": "durable_operation_requires_installed_backend",
+                        "message": "durable operations cannot use caller-selected backend paths"
+                    }),
+                ));
+            }
+        }
+        let verify_timeout = match args.get("verify_timeout_secs") {
+            None => 2.0,
+            Some(value) => match value.as_f64() {
+                Some(value) if (0.1..=10.0).contains(&value) => value,
+                _ => {
+                    return Ok(app_control_error(
+                        "replan",
+                        json!({"code": "invalid_verify_timeout_secs"}),
+                    ))
+                }
+            },
+        };
+        let requested_timeout_ms = match args.get("timeout_ms") {
+            None => None,
+            Some(value) => match value.as_u64() {
+                Some(value) if (1_000..=30_000).contains(&value) => Some(value),
+                _ => {
+                    return Ok(app_control_error(
+                        "replan",
+                        json!({"code": "invalid_timeout_ms"}),
+                    ))
+                }
+            },
+        };
+        let timeout_ms = app_control_process_timeout_ms(
+            requested_timeout_ms,
+            verify_timeout,
+            operation_id.is_some(),
+        );
+        let requested_volume = match args.get("volume") {
+            None => None,
+            Some(value) => match value.as_f64() {
+                Some(value) if (0.0..=1.0).contains(&value) => Some(value),
+                _ => {
+                    return Ok(app_control_error(
+                        "replan",
+                        json!({"code": "invalid_volume", "message": "volume must be numeric in [0.0, 1.0]"}),
+                    ))
+                }
+            },
+        };
+        if action == "volume_set" && requested_volume.is_none() {
             return Ok(app_control_error(
                 "replan",
                 json!({"code": "invalid_volume", "message": "volume_set requires volume in [0.0, 1.0]"}),
             ));
         }
-        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
-        let script = app_control_script_path(&args, cwd.as_ref());
+        let requested_playlist_id = match args.get("playlist_id") {
+            None => None,
+            Some(Value::String(value))
+                if !value.is_empty() && value.trim() == value.as_str() =>
+            {
+                Some(value.as_str())
+            }
+            Some(_) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "invalid_playlist_id"}),
+                ))
+            }
+        };
+        let cwd = match args.get("cwd") {
+            None => None,
+            Some(Value::String(value)) => Some(PathBuf::from(value)),
+            Some(_) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "invalid_cwd"}),
+                ))
+            }
+        };
+        if args
+            .get("script_path")
+            .is_some_and(|value| !value.is_string())
+        {
+            return Ok(app_control_error(
+                "replan",
+                json!({"code": "invalid_script_path"}),
+            ));
+        }
+        let script = if operation_id.is_some() {
+            app_control_durable_script_path()
+        } else {
+            app_control_script_path(&args, cwd.as_ref())
+        };
         if !script.exists() {
             return Ok(app_control_error("replan", json!({
                 "code": "script_missing", "message": format!("app_control.py not found at {}", script.display())
@@ -8504,21 +8719,21 @@ impl McpTool for AppControlTool {
             .arg(&action)
             .arg("--verify-timeout")
             .arg(verify_timeout.to_string());
-        if let Some(volume) = args.get("volume").and_then(Value::as_f64) {
+        if let Some(volume) = requested_volume {
             cmd.arg("--volume").arg(volume.to_string());
         }
-        if let Some(playlist_id) = args.get("playlist_id").and_then(Value::as_str) {
+        if let Some(playlist_id) = requested_playlist_id {
             cmd.arg("--playlist-id").arg(playlist_id);
         }
-        if let Some(player) = args
-            .get("player")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
+        if let Some(player) = player_selector {
             cmd.arg("--player").arg(player);
         }
-        let dry_run = args.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        if let Some(operation_id) = operation_id.as_deref() {
+            cmd.arg("--operation-id")
+                .arg(operation_id)
+                .arg("--operation-ttl-secs")
+                .arg(operation_ttl_secs.to_string());
+        }
         if dry_run {
             cmd.arg("--dry-run");
         }
@@ -8555,18 +8770,581 @@ impl McpTool for AppControlTool {
                 "stdout": stdout, "stderr": stderr
             }))),
         };
+        let exit_code = output.status.code().unwrap_or(-1);
+        let source_contract_ok = app_control_source_contract_valid(
+            &payload,
+            domain,
+            &action,
+            dry_run,
+            operation_id.as_deref(),
+            player_selector,
+            requested_volume,
+            requested_playlist_id,
+            operation_ttl_secs,
+            exit_code,
+        );
         if let Some(object) = payload.as_object_mut() {
             object.insert("mcp_wrapper".into(), json!({
                 "tool": self.name(), "duration_ms": duration_ms,
-                "exit_code": output.status.code().unwrap_or(-1), "stderr": stderr,
-                "truncated": stdout_truncated || stderr_truncated
+                "exit_code": exit_code, "stderr": stderr,
+                "truncated": stdout_truncated || stderr_truncated,
+                "source_contract_ok": source_contract_ok,
+                "operation_id_bound": operation_id.is_some()
             }));
+        }
+        if !source_contract_ok {
+            return Ok(app_control_error("replan", json!({
+                "code": "source_contract_mismatch",
+                "exit_code": exit_code,
+                "source": payload
+            })));
         }
         let verified = payload.get("verdict").and_then(Value::as_str) == Some("verified");
         let mut result = ToolResult::json_text(&payload);
         result.is_error = !verified;
         Ok(result)
     }
+}
+
+fn app_control_source_contract_valid(
+    payload: &Value,
+    domain: &str,
+    action: &str,
+    dry_run: bool,
+    operation_id: Option<&str>,
+    player_selector: Option<&str>,
+    requested_volume: Option<f64>,
+    requested_playlist_id: Option<&str>,
+    operation_ttl_secs: u64,
+    exit_code: i32,
+) -> bool {
+    let verdict = payload.get("verdict").and_then(Value::as_str);
+    let base_ok = payload.get("schema").and_then(Value::as_str)
+        == Some("agent_bridge.app_control.v0")
+        && payload.get("domain").and_then(Value::as_str) == Some(domain)
+        && payload.get("action").and_then(Value::as_str) == Some(action)
+        && matches!(verdict, Some("verified" | "unmet" | "error"))
+        && match verdict {
+            Some("verified") => exit_code == 0,
+            Some("unmet" | "error") => exit_code == 2,
+            _ => false,
+        };
+    if !base_ok {
+        return false;
+    }
+    if verdict != Some("verified") {
+        if !matches!(
+            payload.get("recover").and_then(Value::as_str),
+            Some("retry" | "replan")
+        ) {
+            return false;
+        }
+    } else if payload.get("recover").and_then(Value::as_str) != Some("proceed") {
+        return false;
+    }
+    let Some(operation_id) = operation_id else {
+        return verdict != Some("verified")
+            || app_control_verified_claim_valid(
+                payload,
+                action,
+                dry_run,
+                player_selector,
+                requested_volume,
+                requested_playlist_id,
+            );
+    };
+    if dry_run || action != "next" {
+        return false;
+    }
+    let transaction = match payload.get("transaction") {
+        Some(Value::Object(transaction)) => transaction,
+        _ => return false,
+    };
+    let expected_request_digest =
+        app_control_operation_request_digest(action, player_selector, operation_ttl_secs);
+    if transaction.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.app_control.operation.v0")
+        || transaction.get("operation_id").and_then(Value::as_str) != Some(operation_id)
+        || transaction.get("request_digest").and_then(Value::as_str)
+            != Some(expected_request_digest.as_str())
+        || transaction.get("external_execution_repeated").and_then(Value::as_bool) != Some(false)
+    {
+        return false;
+    }
+    let Some(dispatch_count) = transaction.get("dispatch_count").and_then(Value::as_u64) else {
+        return false;
+    };
+    if dispatch_count > 1
+        || transaction
+            .get("idempotent_replay")
+            .and_then(Value::as_bool)
+            .is_none()
+        || transaction
+            .get("recovered_after_interruption")
+            .and_then(Value::as_bool)
+            .is_none()
+    {
+        return false;
+    }
+    if verdict != Some("verified") {
+        return matches!(payload.get("recover").and_then(Value::as_str), Some("retry" | "replan"))
+            && matches!(
+                transaction.get("phase").and_then(Value::as_str),
+                Some(
+                    "rejected"
+                        | "lock_busy"
+                        | "journal_error"
+                        | "retryable"
+                        | "terminal"
+                        | "indeterminate"
+                        | "journal_write_failed"
+                        | "dispatch_started"
+                )
+            );
+    }
+    if transaction.get("phase").and_then(Value::as_str) != Some("verified")
+        || dispatch_count != 1
+    {
+        return false;
+    }
+    if payload.get("read_only").and_then(Value::as_bool) != Some(false)
+        || payload
+            .get("verification")
+            .and_then(|value| value.get("status"))
+            .and_then(Value::as_str)
+            != Some("verified")
+    {
+        return false;
+    }
+    let predicate = payload
+        .get("verification")
+        .and_then(|value| value.get("predicate"))
+        .and_then(Value::as_str);
+    if !matches!(
+        predicate,
+        Some("track_identity_changed" | "track_identity_changed_after_restart")
+    ) {
+        return false;
+    }
+    let recovered = transaction["recovered_after_interruption"]
+        .as_bool()
+        .unwrap_or(false);
+    let Some(player) = payload
+        .get("player")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    if payload.pointer("/selection/selected_player").and_then(Value::as_str) != Some(player)
+        || !app_control_selector_echo_valid(payload, player_selector)
+        || payload.pointer("/before/player").and_then(Value::as_str) != Some(player)
+        || payload.pointer("/after/player").and_then(Value::as_str) != Some(player)
+    {
+        return false;
+    }
+    let before_track_id = payload
+        .pointer("/before/track_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    let after_track_id = payload
+        .pointer("/after/track_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    if before_track_id.is_none()
+        || after_track_id.is_none()
+        || before_track_id == after_track_id
+    {
+        return false;
+    }
+    let fresh_dispatch = payload
+        .get("dispatch")
+        .and_then(Value::as_object)
+        .is_some_and(|dispatch| {
+            dispatch.get("status").and_then(Value::as_str) == Some("dispatched")
+                && dispatch.get("rc").and_then(Value::as_i64) == Some(0)
+                && dispatch.get("argv") == Some(&json!(["playerctl", "-p", player, "next"]))
+        });
+    match predicate {
+        Some("track_identity_changed") => !recovered && fresh_dispatch,
+        Some("track_identity_changed_after_restart") => {
+            recovered
+                && payload.get("dispatch").is_none()
+                && payload.get("causal_attribution").and_then(Value::as_str)
+                    == Some("unknown_after_restart")
+                && payload
+                    .pointer("/verification/causal_attribution")
+                    .and_then(Value::as_str)
+                    == Some("unknown_after_restart")
+        }
+        _ => false,
+    }
+}
+
+fn app_control_verified_claim_valid(
+    payload: &Value,
+    action: &str,
+    dry_run: bool,
+    player_selector: Option<&str>,
+    requested_volume: Option<f64>,
+    requested_playlist_id: Option<&str>,
+) -> bool {
+    if action == "discover" {
+        return payload.get("read_only").and_then(Value::as_bool) == Some(true)
+            && payload
+                .pointer("/capabilities/available")
+                .and_then(Value::as_bool)
+                == Some(true)
+            && payload
+                .pointer("/capabilities/players")
+                .is_some_and(Value::is_array);
+    }
+
+    let Some(player) = payload
+        .get("player")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    if payload.pointer("/selection/selected_player").and_then(Value::as_str) != Some(player)
+        || !app_control_selector_echo_valid(payload, player_selector)
+    {
+        return false;
+    }
+
+    let read_only_predicate = match action {
+        "volume_get" => Some("volume_observed"),
+        "state_get" => Some("player_state_observed"),
+        "position_get" => Some("media_position_observed"),
+        "playlist_list" => Some("playlist_catalog_observed"),
+        "playlist_current" => Some("active_playlist_observed"),
+        _ => None,
+    };
+    let verification_status = payload
+        .pointer("/verification/status")
+        .and_then(Value::as_str);
+    let predicate = payload
+        .pointer("/verification/predicate")
+        .and_then(Value::as_str);
+    if let Some(expected) = read_only_predicate {
+        if payload.get("read_only").and_then(Value::as_bool) != Some(true)
+            || verification_status != Some("verified")
+            || predicate != Some(expected)
+        {
+            return false;
+        }
+        return match action {
+            "volume_get" => {
+                payload.pointer("/before/player").and_then(Value::as_str) == Some(player)
+                    && payload.pointer("/before/volume").and_then(Value::as_f64).is_some()
+            }
+            "state_get" => {
+                payload.pointer("/before/player").and_then(Value::as_str) == Some(player)
+                    && payload
+                        .pointer("/before/playback_status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| !value.is_empty())
+            }
+            "position_get" => {
+                payload.pointer("/before/player").and_then(Value::as_str) == Some(player)
+                    && payload.pointer("/before/position_available").and_then(Value::as_bool)
+                    == Some(true)
+                    && payload.pointer("/before/position_seconds").and_then(Value::as_f64).is_some()
+                    && payload.pointer("/before/duration_seconds").and_then(Value::as_f64).is_some()
+            }
+            "playlist_list" => payload
+                .get("playlists")
+                .and_then(Value::as_array)
+                .is_some_and(|items| {
+                    items.iter().all(|item| {
+                        item.get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| !value.is_empty())
+                            && item.get("name").and_then(Value::as_str).is_some()
+                    })
+                }),
+            "playlist_current" => payload
+                .get("active_playlist")
+                .and_then(Value::as_object)
+                .is_some_and(|active| match active.get("active").and_then(Value::as_bool) {
+                    Some(true) => active
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| !value.is_empty()),
+                    Some(false) => active.get("id").is_none_or(Value::is_null),
+                    None => false,
+                }),
+            _ => false,
+        };
+    }
+
+    if dry_run {
+        if payload.get("read_only").and_then(Value::as_bool) != Some(true)
+            || payload.pointer("/dispatch/status").and_then(Value::as_str)
+                != Some("not_dispatched_dry_run")
+            || verification_status != Some("not_run")
+        {
+            return false;
+        }
+        let dispatch_argv = payload.pointer("/dispatch/argv");
+        let before_player_matches =
+            payload.pointer("/before/player").and_then(Value::as_str) == Some(player);
+        return match action {
+            "next" | "previous" | "play" | "pause" | "stop" => {
+                before_player_matches
+                    && dispatch_argv == Some(&json!(["playerctl", "-p", player, action]))
+            }
+            "play_pause" => {
+                before_player_matches
+                    && dispatch_argv
+                        == Some(&json!(["playerctl", "-p", player, "play-pause"]))
+            }
+            "volume_up" | "volume_down" => {
+                before_player_matches
+                    && payload
+                        .pointer("/before/volume")
+                        .and_then(Value::as_f64)
+                        .is_some_and(|before| {
+                            let planned = if action == "volume_up" {
+                                before + 0.05
+                            } else {
+                                before - 0.05
+                            }
+                            .clamp(0.0, 1.0);
+                            dispatch_argv
+                                == Some(&json!([
+                                    "playerctl",
+                                    "-p",
+                                    player,
+                                    "volume",
+                                    format!("{planned:.3}")
+                                ]))
+                        })
+            }
+            "volume_set" => {
+                before_player_matches
+                    && requested_volume.is_some_and(|target| {
+                        dispatch_argv
+                            == Some(&json!([
+                                "playerctl",
+                                "-p",
+                                player,
+                                "volume",
+                                format!("{target:.3}")
+                            ]))
+                    })
+            }
+            "playlist_activate" => requested_playlist_id.is_some_and(|playlist_id| {
+                payload.get("playlist_id").and_then(Value::as_str) == Some(playlist_id)
+                    && payload
+                        .get("playlists")
+                        .and_then(Value::as_array)
+                        .is_some_and(|playlists| {
+                            playlists.iter().any(|playlist| {
+                                playlist.get("id").and_then(Value::as_str) == Some(playlist_id)
+                            })
+                        })
+                    && dispatch_argv
+                        == Some(&app_control_playlist_activate_argv(player, playlist_id))
+            }),
+            _ => false,
+        };
+    }
+
+    let expected_predicate = match action {
+        "next" | "previous" => "track_identity_changed",
+        "play" => "playback_status_is_playing",
+        "pause" => "playback_status_is_paused",
+        "play_pause" => "playback_status_changed",
+        "stop" => "playback_status_is_stopped",
+        "volume_up" | "volume_down" => "volume_changed_in_requested_direction",
+        "volume_set" => "volume_is_requested",
+        "playlist_activate" => "playlist_active_id_matches_target",
+        _ => return false,
+    };
+    if payload.get("read_only").and_then(Value::as_bool) != Some(false)
+        || payload.pointer("/dispatch/status").and_then(Value::as_str) != Some("dispatched")
+        || payload.pointer("/dispatch/rc").and_then(Value::as_i64) != Some(0)
+        || verification_status != Some("verified")
+        || predicate != Some(expected_predicate)
+        || payload.pointer("/before/player").and_then(Value::as_str) != Some(player)
+        || payload.pointer("/after/player").and_then(Value::as_str) != Some(player)
+    {
+        return false;
+    }
+    let dispatch_argv = payload.pointer("/dispatch/argv");
+    let before = payload.get("before").and_then(Value::as_object);
+    let after = payload.get("after").and_then(Value::as_object);
+    match action {
+        "next" | "previous" => {
+            let (Some(before), Some(after)) = (before, after) else {
+                return false;
+            };
+            let before_track_id = before
+                .get("track_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty());
+            let after_track_id = after
+                .get("track_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty());
+            dispatch_argv == Some(&json!(["playerctl", "-p", player, action]))
+                && before_track_id.is_some()
+                && after_track_id.is_some()
+                && before_track_id != after_track_id
+        }
+        "play" | "pause" | "stop" => {
+            let command = action;
+            let expected_status = match action {
+                "play" => "Playing",
+                "pause" => "Paused",
+                "stop" => "Stopped",
+                _ => unreachable!(),
+            };
+            dispatch_argv == Some(&json!(["playerctl", "-p", player, command]))
+                && payload
+                    .pointer("/after/playback_status")
+                    .and_then(Value::as_str)
+                    == Some(expected_status)
+        }
+        "play_pause" => {
+            let before_status = payload
+                .pointer("/before/playback_status")
+                .and_then(Value::as_str);
+            let after_status = payload
+                .pointer("/after/playback_status")
+                .and_then(Value::as_str);
+            dispatch_argv == Some(&json!(["playerctl", "-p", player, "play-pause"]))
+                && before_status.is_some_and(app_control_playback_status_valid)
+                && after_status.is_some_and(app_control_playback_status_valid)
+                && before_status != after_status
+        }
+        "volume_up" | "volume_down" | "volume_set" => {
+            let argv = dispatch_argv.and_then(Value::as_array);
+            let Some(argv) = argv else {
+                return false;
+            };
+            if argv.len() != 5
+                || argv[0] != "playerctl"
+                || argv[1] != "-p"
+                || argv[2] != player
+                || argv[3] != "volume"
+            {
+                return false;
+            }
+            let Some(commanded) = argv[4].as_str().and_then(|value| value.parse::<f64>().ok())
+            else {
+                return false;
+            };
+            let before_volume = payload.pointer("/before/volume").and_then(Value::as_f64);
+            let after_volume = payload.pointer("/after/volume").and_then(Value::as_f64);
+            let (Some(before_volume), Some(after_volume)) = (before_volume, after_volume) else {
+                return false;
+            };
+            match action {
+                "volume_set" => requested_volume.is_some_and(|target| {
+                    (commanded - target).abs() <= 0.001
+                        && payload.pointer("/before/requested_volume").and_then(Value::as_f64)
+                            == Some(target)
+                        && (after_volume - target).abs() <= 0.01
+                }),
+                "volume_up" => {
+                    let target = (before_volume + 0.05).clamp(0.0, 1.0);
+                    (commanded - target).abs() <= 0.001
+                        && after_volume > before_volume + 0.001
+                }
+                "volume_down" => {
+                    let target = (before_volume - 0.05).clamp(0.0, 1.0);
+                    (commanded - target).abs() <= 0.001
+                        && after_volume < before_volume - 0.001
+                }
+                _ => false,
+            }
+        }
+        "playlist_activate" => requested_playlist_id.is_some_and(|playlist_id| {
+            dispatch_argv == Some(&app_control_playlist_activate_argv(player, playlist_id))
+                && payload.get("playlist_id").and_then(Value::as_str) == Some(playlist_id)
+                && payload.pointer("/active_playlist/active").and_then(Value::as_bool)
+                    == Some(true)
+                && payload.pointer("/active_playlist/id").and_then(Value::as_str)
+                    == Some(playlist_id)
+                && payload
+                    .pointer("/after/playback_status")
+                    .and_then(Value::as_str)
+                    .is_some_and(app_control_playback_status_valid)
+                && payload
+                    .pointer("/playback_preservation/status")
+                    .and_then(Value::as_str)
+                    == Some("verified")
+        }),
+        _ => false,
+    }
+}
+
+fn app_control_selector_echo_valid(payload: &Value, player_selector: Option<&str>) -> bool {
+    match player_selector {
+        Some(selector) => {
+            payload.pointer("/selection/selector").and_then(Value::as_str) == Some(selector)
+        }
+        None => payload
+            .pointer("/selection/selector")
+            .is_some_and(Value::is_null),
+    }
+}
+
+fn app_control_playback_status_valid(status: &str) -> bool {
+    matches!(status, "Playing" | "Paused" | "Stopped")
+}
+
+fn app_control_playlist_activate_argv(player: &str, playlist_id: &str) -> Value {
+    json!([
+        "gdbus",
+        "call",
+        "--session",
+        "--dest",
+        format!("org.mpris.MediaPlayer2.{player}"),
+        "--object-path",
+        "/org/mpris/MediaPlayer2",
+        "--method",
+        "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist",
+        playlist_id
+    ])
+}
+
+fn app_control_operation_request_digest(
+    action: &str,
+    player_selector: Option<&str>,
+    operation_ttl_secs: u64,
+) -> String {
+    let canonical_request = BTreeMap::from([
+        ("action", json!(action)),
+        ("operation_ttl_secs", json!(operation_ttl_secs)),
+        ("player_selector", json!(player_selector)),
+        ("schema", json!("agent_bridge.app_control.v0")),
+    ]);
+    let canonical = serde_json::to_vec(&canonical_request)
+        .expect("app_control operation request is serializable");
+    format!("{:x}", Sha256::digest(canonical))
+}
+
+fn app_control_process_timeout_ms(
+    requested_timeout_ms: Option<u64>,
+    verify_timeout_secs: f64,
+    durable: bool,
+) -> u64 {
+    let requested = requested_timeout_ms.unwrap_or(15_000).clamp(1_000, 30_000);
+    if !durable {
+        return requested;
+    }
+    let minimum = (verify_timeout_secs * 1_000.0).ceil() as u64 + 3_000;
+    requested.max(minimum).min(30_000)
+}
+
+fn app_control_durable_script_path() -> PathBuf {
+    installed_runtime_script_path("app_control.py").unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app_control.py")
+    })
 }
 
 fn app_control_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
