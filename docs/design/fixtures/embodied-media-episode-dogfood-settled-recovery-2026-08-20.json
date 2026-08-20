@@ -1,0 +1,49 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_dogfood.v0",
+  "trial_id": "settled-recovery-20260820-01",
+  "preregistered": true,
+  "task": {
+    "real_task": true,
+    "operator_attested_real_task": true,
+    "task_kind": "settled_next_then_exact_projection",
+    "intent_declared_before_action": true
+  },
+  "baseline": {
+    "available": false,
+    "owner_restatements": null,
+    "manual_interventions": null
+  },
+  "trial": {
+    "operator_burden_measured": false,
+    "owner_restatements": null,
+    "manual_interventions": null,
+    "separate_invocations_reported": 3,
+    "process_identity_proven": false,
+    "operation_id_replacements": 0,
+    "contract_bound_dispatches_reported": 1,
+    "external_execution_repeated_reported": false,
+    "recovered_after_interruption": true,
+    "bounded_settlement_verified": true,
+    "device_draw_reported": true,
+    "cleanup_verified": true
+  },
+  "safety": {
+    "implicit_ui_fallback": false,
+    "background_authority_granted": false,
+    "arbitrary_mobile_control_granted": false,
+    "sensitive_content_retained": false
+  },
+  "evidence": {
+    "normalized_receipt_sha256": "sha256:040d806ae624272da74cecda5c65bf75a845d404ded04525049948492a8b63b7",
+    "implementation_commit": "git:4a2849830c240228119378e68aedc6c7497a9b7a",
+    "evidence_commit": "git:a6236b4d9d723e8d6a0c388083f7ffcdf519b202"
+  },
+  "claim_boundary": {
+    "behavior_lift_proven": false,
+    "global_dispatch_count_proven": false,
+    "exclusive_causation_proven": false,
+    "long_lived_stability_proven": false,
+    "human_observation_proven": false,
+    "pixel_verification_proven": false
+  }
+}

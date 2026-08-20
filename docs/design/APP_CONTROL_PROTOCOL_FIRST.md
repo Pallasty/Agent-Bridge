@@ -198,6 +198,13 @@ draw report. The first exact draw-reported composite acceptance is stored
 separately at
 `docs/design/evidence/advance_track_then_project_acceptance_2026_08_19.json`.
 
+Repeated product value is evaluated separately from protocol correctness. The
+metadata-only, code-locked three-pair dogfood gate is documented in
+`docs/design/EMBODIED_MEDIA_EPISODE_DOGFOOD_2026_08_20.md`. It measures observed
+owner restatements and manual interventions without retaining prompts, track
+metadata, device identifiers, or operation IDs, and it never authorizes runtime
+influence.
+
 ## Extension rule
 
 Add a new domain only as a typed adapter with:
