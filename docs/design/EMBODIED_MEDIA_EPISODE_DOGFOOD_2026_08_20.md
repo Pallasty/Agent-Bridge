@@ -162,3 +162,22 @@ receipt creation, and fixed fallback argv. These tests authorize a later Pair
 03 preregistration; they do not themselves preregister it or authorize a media
 action. A live pair still requires a fresh preregistration record and a new MCP
 process on the deployed, version-paired runtime.
+
+## Pair 03 result
+
+Pair 03 was preregistered before either side, then executed exclusively through
+the bounded runner. Both sides independently reported one contract-bound
+dispatch, settled-track binding, an exact device revision-and-digest draw, and
+verified cleanup. The baseline required seven agent-visible calls; the trial
+required two. Owner restatements, manual interventions, and failed or replanned
+calls remained zero on both sides. Elapsed time improved from 4064ms to 3306ms,
+but remains descriptive only.
+
+The closed scorecard therefore classifies Pair 03 as
+`PASS_USEFUL_PAIRED_TASK`: five agent orchestration calls were avoided without a
+gating-metric regression. This is the first enrolled paired success toward the
+predeclared target of three. It is workflow-burden evidence, not behavior lift,
+global dispatch proof, exclusive causation, long-lived stability, human
+observation, or pixel verification. Pair 01 and Pair 02 remain operational
+history but remain outside the denominator because each was aborted before a
+complete pair existed.
