@@ -76,21 +76,35 @@ The backend binds the identifier to the canonical mutation request
 (`action`, exact caller-supplied player selector, and TTL), an exact resolved player, a
 non-empty baseline MPRIS track ID, and a short TTL. The verification timeout is
 an execution-policy budget rather than mutation identity, so it is deliberately
-excluded from the request digest. Before calling
-`playerctl next`, it atomically persists `phase=dispatch_started` and consumes
-the operation's one-dispatch budget. A second process with the same operation
-and request therefore either replays a completed receipt or performs a
-read-only observation. It never dispatches `next` again.
+excluded from the request digest. Before calling `playerctl next`, it atomically
+persists `phase=dispatch_started` and consumes the operation's one-dispatch
+budget. A changed track is not immediately terminal: the backend requires
+three exact observations of the same non-baseline track ID spanning at least
+500 ms before it writes a verified terminal receipt. This bounded settlement
+evidence shows that the selected MPRIS identity stopped changing during that
+window; it does not prove long-lived stability or exclude another MPRIS
+controller as a cause. A second process with the same operation and request
+therefore either replays a completed receipt or performs a read-only
+observation. It never dispatches `next` again.
 
 If the first process disappears after dispatch but before its terminal receipt:
 
-- a different strict track ID proves that the requested outcome is currently
-  satisfied, so recovery may return `verified` while keeping
+- three matching non-baseline observations spanning at least 500 ms prove the
+  bounded postcondition, so recovery may return `verified` while keeping
   `causal_attribution=unknown_after_restart`;
-- the same, missing, or unreadable track identity is indeterminate and returns
-  `replan` without another dispatch;
+- an unchanged, missing, unreadable, or still-changing identity remains
+  `phase=dispatch_started`, returns a structured pending/retry disposition, and
+  requires the exact same operation ID for another read-only observation;
 - a changed request digest, expired operation, unavailable journal, or busy
   per-operation lock fails closed before mutation.
+
+An unexpired `dispatch_started` record is therefore a recoverable pending
+receipt, not a failed operation and never a reason to spend a second dispatch.
+Legacy terminal receipts that predate settlement evidence fail closed for the
+settled-track contract; they are neither upgraded from current state nor
+silently rewritten. A fresh in-process settled result may report temporal
+`verified_fresh_dispatch_track_change` attribution, but that label still does
+not prove exclusive causation in the presence of external MPRIS actors.
 
 The journal lives at an absolute path under the user's state directory with a private directory,
 hashed filenames, per-operation `flock`, 0600 records, and atomic
@@ -159,9 +173,12 @@ session and composite execution are process-local and may be reconstructed.
 If execution stops after the media dispatch while the record is still valid, a
 retry must reuse the same `operation_id`: app-control replays or
 read-only-recovers the action and never dispatches `next` twice, while the
-presentation tail may run again. Expired and terminal-failure records are not
-same-ID retry loops; they require a fresh current-state replan, and a new ID can
-only represent an explicit new intent rather than an automatic replacement.
+presentation tail may run again. A structured pending receipt with
+`phase=dispatch_started` and `dispatch_count=1` has the same continuity rule:
+retry the exact same ID for settlement observation, never generically replan
+it as a fresh actuation. Expired and terminal-failure records are not same-ID
+retry loops; they require a fresh current-state replan, and a new ID can only
+represent an explicit new intent rather than an automatic replacement.
 Losing the operation ID is not recoverable automatically. A connection, media-sync, draw,
 binding, or cleanup failure returns non-proceed evidence rather than inventing
 success. The episode does perform the one explicitly requested,

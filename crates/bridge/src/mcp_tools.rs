@@ -11917,6 +11917,239 @@ fn app_control_preflight_existing_candidate_valid(
             .is_some()
 }
 
+fn app_control_settled_track_evidence_valid(
+    verification: &serde_json::Map<String, Value>,
+    after_track_id: &str,
+) -> bool {
+    let Some(settlement) = verification.get("settlement").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(observed_count) = settlement
+        .get("observed_consecutive_observations")
+        .and_then(Value::as_u64)
+    else {
+        return false;
+    };
+    let Some(observed_stable_ms) = settlement.get("observed_stable_ms").and_then(Value::as_u64)
+    else {
+        return false;
+    };
+    let Some(polls) = verification.get("polls").and_then(Value::as_u64) else {
+        return false;
+    };
+
+    settlement.get("schema").and_then(Value::as_str)
+        == Some("agent_bridge.app_control.track_settlement.v0")
+        && settlement.get("candidate_track_id").and_then(Value::as_str) == Some(after_track_id)
+        && settlement
+            .get("required_consecutive_observations")
+            .and_then(Value::as_u64)
+            == Some(3)
+        && observed_count >= 3
+        && settlement.get("required_stable_ms").and_then(Value::as_u64) == Some(500)
+        && observed_stable_ms >= 500
+        && settlement.get("settled").and_then(Value::as_bool) == Some(true)
+        && polls >= observed_count
+}
+
+fn app_control_pending_track_evidence_valid(
+    payload: &Value,
+    transaction: &serde_json::Map<String, Value>,
+    player_selector: Option<&str>,
+) -> bool {
+    if payload.get("status").and_then(Value::as_str) != Some("indeterminate")
+        || payload.get("verdict").and_then(Value::as_str) != Some("error")
+        || payload.get("recover").and_then(Value::as_str) != Some("retry")
+        || payload.get("read_only").and_then(Value::as_bool) != Some(false)
+        || transaction.get("phase").and_then(Value::as_str) != Some("dispatch_started")
+        || transaction.get("dispatch_count").and_then(Value::as_u64) != Some(1)
+        || transaction.get("idempotent_replay").and_then(Value::as_bool) != Some(false)
+        || payload.pointer("/error/code").and_then(Value::as_str)
+            != Some("operation_effect_not_settled")
+        || !payload
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| !message.is_empty())
+    {
+        return false;
+    }
+
+    let Some(player) = payload
+        .get("player")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let Some(before_track_id) = payload
+        .pointer("/before/track_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    if payload.pointer("/selection/selected_player").and_then(Value::as_str) != Some(player)
+        || !app_control_selector_echo_valid(payload, player_selector)
+        || payload.pointer("/before/player").and_then(Value::as_str) != Some(player)
+        || payload.pointer("/after/player").and_then(Value::as_str) != Some(player)
+    {
+        return false;
+    }
+
+    let Some(verification) = payload.get("verification").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(reason) = verification.get("reason").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(polls) = verification.get("polls").and_then(Value::as_u64) else {
+        return false;
+    };
+    if polls == 0
+        || verification.get("status").and_then(Value::as_str) != Some("indeterminate")
+        || verification.get("predicate").and_then(Value::as_str)
+            != Some("track_identity_change_not_settled")
+        || payload.pointer("/error/reason").and_then(Value::as_str) != Some(reason)
+    {
+        return false;
+    }
+    let observation_error_valid = match reason {
+        "observation_failed" => verification
+            .get("observation_error")
+            .is_some_and(Value::is_object),
+        "track_id_unchanged" | "current_track_id_missing" | "track_settlement_pending" => {
+            verification
+                .get("observation_error")
+                .is_some_and(Value::is_null)
+        }
+        _ => false,
+    };
+    if !observation_error_valid {
+        return false;
+    }
+
+    let Some(settlement) = verification.get("settlement").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(observed_count) = settlement
+        .get("observed_consecutive_observations")
+        .and_then(Value::as_u64)
+    else {
+        return false;
+    };
+    let Some(observed_stable_ms) = settlement.get("observed_stable_ms").and_then(Value::as_u64)
+    else {
+        return false;
+    };
+    if settlement.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.app_control.track_settlement.v0")
+        || settlement
+            .get("required_consecutive_observations")
+            .and_then(Value::as_u64)
+            != Some(3)
+        || settlement.get("required_stable_ms").and_then(Value::as_u64) != Some(500)
+        || settlement.get("settled").and_then(Value::as_bool) != Some(false)
+        || polls < observed_count
+    {
+        return false;
+    }
+    let candidate_valid = match reason {
+        "track_settlement_pending" => settlement
+            .get("candidate_track_id")
+            .and_then(Value::as_str)
+            .filter(|candidate| !candidate.is_empty() && *candidate != before_track_id)
+            .is_some_and(|candidate| {
+                observed_count >= 1
+                    && payload.pointer("/after/track_id").and_then(Value::as_str)
+                        == Some(candidate)
+            }),
+        "track_id_unchanged" => {
+            settlement
+                .get("candidate_track_id")
+                .is_some_and(Value::is_null)
+                && observed_count == 0
+                && observed_stable_ms == 0
+                && payload.pointer("/after/track_id").and_then(Value::as_str)
+                    == Some(before_track_id)
+        }
+        "current_track_id_missing" => {
+            settlement
+                .get("candidate_track_id")
+                .is_some_and(Value::is_null)
+                && observed_count == 0
+                && observed_stable_ms == 0
+                && payload.pointer("/after/track_id").is_some_and(Value::is_null)
+        }
+        "observation_failed" => {
+            settlement
+                .get("candidate_track_id")
+                .is_some_and(Value::is_null)
+                && observed_count == 0
+                && observed_stable_ms == 0
+        }
+        _ => false,
+    };
+    if !candidate_valid {
+        return false;
+    }
+
+    let recovered = transaction
+        .get("recovered_after_interruption")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if recovered {
+        payload.get("dispatch").is_none()
+            && payload.get("causal_attribution").and_then(Value::as_str)
+                == Some("unknown_after_restart")
+            && verification
+                .get("causal_attribution")
+                .and_then(Value::as_str)
+                == Some("unknown_after_restart")
+    } else {
+        payload
+            .get("dispatch")
+            .and_then(Value::as_object)
+            .is_some_and(|dispatch| {
+                dispatch.get("status").and_then(Value::as_str) == Some("dispatched")
+                    && dispatch.get("rc").and_then(Value::as_i64) == Some(0)
+                    && dispatch.get("argv")
+                        == Some(&json!(["playerctl", "-p", player, "next"]))
+            })
+            && payload.get("causal_attribution").is_none()
+            && verification.get("causal_attribution").is_none()
+    }
+}
+
+fn app_control_expired_dispatch_started_valid(
+    payload: &Value,
+    transaction: &serde_json::Map<String, Value>,
+) -> bool {
+    payload.get("status").and_then(Value::as_str) == Some("error")
+        && payload.get("verdict").and_then(Value::as_str) == Some("error")
+        && payload.get("recover").and_then(Value::as_str) == Some("replan")
+        && payload.pointer("/error/code").and_then(Value::as_str) == Some("operation_expired")
+        && payload
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| !message.is_empty())
+        && payload.pointer("/error/reason").is_none()
+        && transaction.get("phase").and_then(Value::as_str) == Some("dispatch_started")
+        && transaction.get("dispatch_count").and_then(Value::as_u64) == Some(1)
+        && transaction.get("idempotent_replay").and_then(Value::as_bool) == Some(false)
+        && transaction
+            .get("expires_at")
+            .and_then(Value::as_f64)
+            .is_some_and(|value| value.is_finite() && value > 0.0)
+        && payload.get("read_only").is_none()
+        && payload.get("player").is_none()
+        && payload.get("selection").is_none()
+        && payload.get("before").is_none()
+        && payload.get("after").is_none()
+        && payload.get("dispatch").is_none()
+        && payload.get("verification").is_none()
+        && payload.get("causal_attribution").is_none()
+}
+
 fn app_control_source_contract_valid(
     payload: &Value,
     domain: &str,
@@ -11998,9 +12231,23 @@ fn app_control_source_contract_valid(
         return false;
     }
     if verdict != Some("verified") {
-        return matches!(payload.get("recover").and_then(Value::as_str), Some("retry" | "replan"))
+        let recover = payload.get("recover").and_then(Value::as_str);
+        let phase = transaction.get("phase").and_then(Value::as_str);
+        let error_code = payload.pointer("/error/code").and_then(Value::as_str);
+        if error_code == Some("operation_effect_not_settled") {
+            return app_control_pending_track_evidence_valid(
+                payload,
+                transaction,
+                player_selector,
+            );
+        }
+        if phase == Some("dispatch_started") {
+            return error_code == Some("operation_expired")
+                && app_control_expired_dispatch_started_valid(payload, transaction);
+        }
+        return matches!(recover, Some("retry" | "replan"))
             && matches!(
-                transaction.get("phase").and_then(Value::as_str),
+                phase,
                 Some(
                     "rejected"
                         | "lock_busy"
@@ -12009,11 +12256,12 @@ fn app_control_source_contract_valid(
                         | "terminal"
                         | "indeterminate"
                         | "journal_write_failed"
-                        | "dispatch_started"
                 )
             );
     }
-    if transaction.get("phase").and_then(Value::as_str) != Some("verified")
+    if payload.get("status").and_then(Value::as_str) != Some("verified")
+        || payload.get("error").is_some()
+        || transaction.get("phase").and_then(Value::as_str) != Some("verified")
         || dispatch_count != 1
     {
         return false;
@@ -12027,13 +12275,20 @@ fn app_control_source_contract_valid(
     {
         return false;
     }
-    let predicate = payload
-        .get("verification")
-        .and_then(|value| value.get("predicate"))
-        .and_then(Value::as_str);
+    let Some(verification) = payload.get("verification").and_then(Value::as_object) else {
+        return false;
+    };
+    if !verification.get("reason").is_some_and(Value::is_null)
+        || !verification
+            .get("observation_error")
+            .is_some_and(Value::is_null)
+    {
+        return false;
+    }
+    let predicate = verification.get("predicate").and_then(Value::as_str);
     if !matches!(
         predicate,
-        Some("track_identity_changed" | "track_identity_changed_after_restart")
+        Some("track_identity_changed_settled" | "track_identity_changed_after_restart_settled")
     ) {
         return false;
     }
@@ -12068,6 +12323,12 @@ fn app_control_source_contract_valid(
     {
         return false;
     }
+    if !app_control_settled_track_evidence_valid(
+        verification,
+        after_track_id.expect("non-empty after track id checked above"),
+    ) {
+        return false;
+    }
     let fresh_dispatch = payload
         .get("dispatch")
         .and_then(Value::as_object)
@@ -12075,10 +12336,15 @@ fn app_control_source_contract_valid(
             dispatch.get("status").and_then(Value::as_str) == Some("dispatched")
                 && dispatch.get("rc").and_then(Value::as_i64) == Some(0)
                 && dispatch.get("argv") == Some(&json!(["playerctl", "-p", player, "next"]))
-        });
+    });
     match predicate {
-        Some("track_identity_changed") => !recovered && fresh_dispatch,
-        Some("track_identity_changed_after_restart") => {
+        Some("track_identity_changed_settled") => {
+            !recovered
+                && fresh_dispatch
+                && payload.get("causal_attribution").is_none()
+                && verification.get("causal_attribution").is_none()
+        }
+        Some("track_identity_changed_after_restart_settled") => {
             recovered
                 && payload.get("dispatch").is_none()
                 && payload.get("causal_attribution").and_then(Value::as_str)

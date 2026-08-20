@@ -3368,6 +3368,9 @@ pub(super) fn advance_track_then_project_action_binding(
     ) {
         return Err("durable app_control source contract did not verify".into());
     }
+    if payload.get("verdict").and_then(Value::as_str) != Some("verified") {
+        return Err("durable app_control effect is not verified".into());
+    }
     let required = |pointer: &str, label: &str| {
         payload
             .pointer(pointer)
@@ -3506,6 +3509,23 @@ fn advance_track_then_project_action_failure_disposition(
     payload: &Value,
 ) -> (&'static str, bool, &'static str) {
     let explicit = match payload.pointer("/error/code").and_then(Value::as_str) {
+        Some("operation_effect_not_settled")
+            if payload.get("recover").and_then(Value::as_str) == Some("retry")
+                && payload
+                    .pointer("/transaction/phase")
+                    .and_then(Value::as_str)
+                    == Some("dispatch_started")
+                && payload
+                    .pointer("/transaction/dispatch_count")
+                    .and_then(Value::as_u64)
+                    == Some(1) =>
+        {
+            Some((
+                "operation_effect_not_settled",
+                true,
+                "Retry only the exact same operation_id for bounded settlement observation; its one-dispatch budget is already consumed and must not be repeated.",
+            ))
+        }
         Some("operation_expired") => Some((
             "operation_expired",
             false,
@@ -4302,14 +4322,20 @@ impl AdvanceTrackThenProjectTool {
             state.fresh_dispatch_verified,
             state.recovered_after_interruption,
         );
-        let recover = if verified {
-            "proceed"
-        } else if state
+        let retryable_continuity_error = state
             .error
             .as_ref()
             .and_then(|error| error.get("code"))
             .and_then(Value::as_str)
-            == Some("operation_lock_busy")
+            .is_some_and(|code| {
+                code == "operation_lock_busy"
+                    || (code == "operation_effect_not_settled"
+                        && state.trusted_dispatch_count == Some(1)
+                        && state.continuity["same_operation_id_required_for_retry"] == json!(true))
+            });
+        let recover = if verified {
+            "proceed"
+        } else if retryable_continuity_error
             && (state.cleanup["attempted"] == json!(false)
                 || state.cleanup["verified"] == json!(true))
         {
@@ -4880,7 +4906,22 @@ mod advance_track_then_project_unit_tests {
                 "rc": 0,
                 "argv": ["playerctl", "-p", player, "next"]
             },
-            "verification": {"status": "verified", "predicate": "track_identity_changed"},
+            "verification": {
+                "status": "verified",
+                "predicate": "track_identity_changed_settled",
+                "polls": 3,
+                "reason": null,
+                "observation_error": null,
+                "settlement": {
+                    "schema": "agent_bridge.app_control.track_settlement.v0",
+                    "candidate_track_id": after,
+                    "required_consecutive_observations": 3,
+                    "observed_consecutive_observations": 3,
+                    "required_stable_ms": 500,
+                    "observed_stable_ms": 500,
+                    "settled": true
+                }
+            },
             "transaction": {
                 "schema": "agent_bridge.app_control.operation.v0",
                 "operation_id": operation_id,
@@ -5123,6 +5164,16 @@ mod advance_track_then_project_unit_tests {
                 "operation_lock_busy",
                 true,
             ),
+            (
+                json!({
+                    "verdict": "error",
+                    "recover": "retry",
+                    "error": {"code": "operation_effect_not_settled"},
+                    "transaction": {"phase": "dispatch_started", "dispatch_count": 1}
+                }),
+                "operation_effect_not_settled",
+                true,
+            ),
         ] {
             let (code, allowed, guidance) =
                 advance_track_then_project_action_failure_disposition(&payload);
@@ -5133,7 +5184,7 @@ mod advance_track_then_project_unit_tests {
     }
 
     #[test]
-    fn lock_busy_is_retryable_only_when_no_cleanup_failure_exists() {
+    fn continuity_retry_is_allowed_only_when_no_cleanup_failure_exists() {
         let parsed = AdvanceTrackThenProjectArgs::parse(&json!({
             "operation_id": "episode-1",
             "bind": "192.168.1.2",
@@ -5152,6 +5203,26 @@ mod advance_track_then_project_unit_tests {
         assert_eq!(
             result_payload(&tool.final_result(&parsed, preflight_busy))["recover"],
             "retry"
+        );
+
+        let mut settlement_pending = AdvanceEpisodeState::new(&parsed);
+        settlement_pending.fail_with_retry(
+            "app_control",
+            "operation_effect_not_settled",
+            "the consumed operation is still settling",
+            "retry only the exact same operation_id",
+        );
+        settlement_pending.trusted_dispatch_count = Some(1);
+        settlement_pending.continuity["same_operation_id_required_for_retry"] = json!(true);
+        settlement_pending.continuity["operation_revalidation_disposition"] =
+            json!("operation_effect_not_settled");
+        settlement_pending.cleanup["attempted"] = json!(true);
+        settlement_pending.cleanup["verified"] = json!(true);
+        let pending_payload = result_payload(&tool.final_result(&parsed, settlement_pending));
+        assert_eq!(pending_payload["recover"], "retry");
+        assert_eq!(
+            pending_payload["continuity"]["same_operation_id_required_for_retry"],
+            json!(true)
         );
 
         let mut cleanup_failed = AdvanceEpisodeState::new(&parsed);
@@ -5198,6 +5269,48 @@ mod advance_track_then_project_unit_tests {
         unchanged["after"]["track_id"] = json!("/track/1");
         assert!(advance_track_then_project_action_binding(
             &unchanged,
+            "episode-1",
+            Some("rhythmbox"),
+            3600
+        )
+        .is_err());
+
+        let mut pending =
+            durable_action_fixture("episode-1", "rhythmbox", "/track/1", "/track/2", false);
+        pending["status"] = json!("indeterminate");
+        pending["verdict"] = json!("error");
+        pending["recover"] = json!("retry");
+        pending["error"] = json!({
+            "code": "operation_effect_not_settled",
+            "message": "next was dispatched once, but the changed track is still settling",
+            "reason": "track_settlement_pending"
+        });
+        pending["verification"]["status"] = json!("indeterminate");
+        pending["verification"]["predicate"] =
+            json!("track_identity_change_not_settled");
+        pending["verification"]["polls"] = json!(1);
+        pending["verification"]["reason"] = json!("track_settlement_pending");
+        pending["verification"]["observation_error"] = Value::Null;
+        pending["verification"]["settlement"]["observed_consecutive_observations"] =
+            json!(1);
+        pending["verification"]["settlement"]["observed_stable_ms"] = json!(0);
+        pending["verification"]["settlement"]["settled"] = json!(false);
+        pending["transaction"]["phase"] = json!("dispatch_started");
+        pending["mcp_wrapper"]["exit_code"] = json!(2);
+        assert!(app_control_source_contract_valid(
+            &pending,
+            "media",
+            "next",
+            false,
+            Some("episode-1"),
+            Some("rhythmbox"),
+            None,
+            None,
+            3600,
+            2
+        ));
+        assert!(advance_track_then_project_action_binding(
+            &pending,
             "episode-1",
             Some("rhythmbox"),
             3600

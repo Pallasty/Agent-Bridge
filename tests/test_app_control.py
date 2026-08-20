@@ -58,6 +58,17 @@ def make_media_run(tracks, calls, *, player="rhythmbox", discovery=True):
     return fake_run
 
 
+class VirtualClock:
+    def __init__(self, start=1000.0):
+        self.now = float(start)
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
 class AppControlTests(unittest.TestCase):
     def assert_preflight_receipt(
         self,
@@ -252,6 +263,54 @@ class AppControlTests(unittest.TestCase):
         changed = dict(before, track_id="two")
         self.assertFalse(mod.effect_verified("next", before, same)[0])
         self.assertTrue(mod.effect_verified("next", before, changed)[0])
+
+    def test_settled_track_observer_resets_every_invalid_or_changed_candidate(self):
+        mod = load_module()
+        clock = VirtualClock()
+        def track(track_id):
+            return {"track_id": track_id, "title": str(track_id)}, None
+
+        observations = [
+            track("B"),
+            track("B"),
+            track(None),
+            track("B"),
+            track("B"),
+            (None, {"code": "observation_failed"}),
+            track("B"),
+            track("B"),
+            track("A"),
+            track("B"),
+            track("B"),
+            track("C"),
+            track("C"),
+            track("C"),
+        ]
+        with mock.patch.object(mod, "observe", side_effect=observations):
+            outcome = mod.observe_settled_track_change(
+                "rhythmbox",
+                {"track_id": "A"},
+                {},
+                4.0,
+                monotonic_fn=clock.monotonic,
+                sleep_fn=clock.sleep,
+            )
+
+        self.assertTrue(outcome["verified"])
+        self.assertEqual(outcome["after"]["track_id"], "C")
+        self.assertEqual(outcome["polls"], 14)
+        self.assertEqual(
+            outcome["settlement"],
+            {
+                "schema": mod.TRACK_SETTLEMENT_SCHEMA,
+                "candidate_track_id": "C",
+                "required_consecutive_observations": 3,
+                "observed_consecutive_observations": 3,
+                "required_stable_ms": 500,
+                "observed_stable_ms": 500,
+                "settled": True,
+            },
+        )
 
     def test_status_actions_verify_the_requested_state(self):
         mod = load_module()
@@ -828,7 +887,7 @@ class AppControlTests(unittest.TestCase):
                 mod.shutil, "which", return_value="/usr/bin/playerctl"
             ):
                 first = mod.execute(
-                    "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                    "next", "rhythmbox", False, 0.8, operation_id=operation_id
                 )
             self.assertEqual(first["verdict"], "verified")
             record_path = mod.operation_record_path(operation_id)
@@ -1288,7 +1347,7 @@ class AppControlTests(unittest.TestCase):
              mock.patch.object(mod, "run", side_effect=fake_run), \
              mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"):
             payload = mod.execute(
-                "next", "rhythmbox", False, 0.2, operation_id="episode:next-001"
+                "next", "rhythmbox", False, 0.8, operation_id="episode:next-001"
             )
             record_path = mod.operation_record_path("episode:next-001")
             record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -1297,7 +1356,13 @@ class AppControlTests(unittest.TestCase):
 
         self.assertEqual(payload["verdict"], "verified")
         self.assertFalse(payload["read_only"])
-        self.assertEqual(payload["verification"]["predicate"], "track_identity_changed")
+        self.assertEqual(
+            payload["verification"]["predicate"], "track_identity_changed_settled"
+        )
+        self.assertEqual(
+            payload["verification"]["settlement"]["schema"],
+            mod.TRACK_SETTLEMENT_SCHEMA,
+        )
         self.assertEqual(payload["dispatch"]["status"], "dispatched")
         self.assertEqual(payload["dispatch"]["rc"], 0)
         self.assertEqual(payload["transaction"]["schema"], mod.OPERATION_SCHEMA)
@@ -1312,6 +1377,119 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(record["baseline"]["track_id"], "/track/1")
         self.assertEqual(record["payload"]["verdict"], "verified")
 
+    def test_durable_next_ignores_transient_changed_id_and_settles_final_track(self):
+        mod = load_module()
+        calls = []
+        clock = VirtualClock()
+        fake_run = make_media_run(
+            [
+                ("/track/A", "Artist", "A"),
+                ("/track/B", "Artist", "transient B"),
+                ("/track/C", "Artist", "settled C"),
+                ("/track/C", "Artist", "settled C"),
+                ("/track/C", "Artist", "settled C"),
+            ],
+            calls,
+        )
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.dict(os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}), \
+             mock.patch.object(mod, "run", side_effect=fake_run), \
+             mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"), \
+             mock.patch.object(mod.time, "monotonic", side_effect=clock.monotonic), \
+             mock.patch.object(mod.time, "sleep", side_effect=clock.sleep):
+            payload = mod.execute(
+                "next", "rhythmbox", False, 2.0, operation_id="settled-transient"
+            )
+            record = json.loads(
+                mod.operation_record_path("settled-transient").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertEqual(payload["after"]["track_id"], "/track/C")
+        self.assertEqual(payload["after"]["title"], "settled C")
+        self.assertEqual(payload["verification"]["polls"], 4)
+        self.assertEqual(
+            payload["verification"]["settlement"]["candidate_track_id"],
+            "/track/C",
+        )
+        self.assertEqual(record["phase"], "terminal")
+        self.assertEqual(record["payload"]["after"]["track_id"], "/track/C")
+        self.assertEqual(calls.count(["playerctl", "-p", "rhythmbox", "next"]), 1)
+
+    def test_pending_same_id_restarts_candidate_window_without_redispatch(self):
+        mod = load_module()
+        operation_id = "settled-pending-retry"
+        calls = []
+        clock = VirtualClock()
+        media_run = make_media_run(
+            ["/track/A", "/track/B", "/track/B", "/track/B",
+             "/track/C", "/track/C", "/track/C"],
+            calls,
+        )
+        dispatched_record = {"bytes": None}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            record_path = mod.operation_record_path(operation_id)
+
+            def checked_run(argv, env, timeout=2.0):
+                if argv == ["playerctl", "-p", "rhythmbox", "next"]:
+                    dispatched_record["bytes"] = record_path.read_bytes()
+                return media_run(argv, env, timeout)
+
+            with mock.patch.object(mod, "run", side_effect=checked_run), \
+                 mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"), \
+                 mock.patch.object(mod.time, "monotonic", side_effect=clock.monotonic), \
+                 mock.patch.object(mod.time, "sleep", side_effect=clock.sleep):
+                first = mod.execute(
+                    "next", "rhythmbox", False, 0.3, operation_id=operation_id
+                )
+                pending_bytes = record_path.read_bytes()
+                calls.clear()
+                preflight = mod.execute(
+                    "next",
+                    "rhythmbox",
+                    False,
+                    0.8,
+                    operation_id=operation_id,
+                    operation_preflight=True,
+                )
+                self.assertEqual(record_path.read_bytes(), pending_bytes)
+                recovered = mod.execute(
+                    "next", "rhythmbox", False, 0.8, operation_id=operation_id
+                )
+
+        self.assertEqual(first["error"]["code"], "operation_effect_not_settled")
+        self.assertEqual(first["recover"], "retry")
+        self.assertEqual(first["transaction"]["phase"], "dispatch_started")
+        self.assertEqual(first["transaction"]["dispatch_count"], 1)
+        self.assertEqual(
+            first["verification"]["settlement"]["candidate_track_id"], "/track/B"
+        )
+        self.assertFalse(first["verification"]["settlement"]["settled"])
+        self.assertEqual(
+            first["verification"]["settlement"]["required_stable_ms"], 500
+        )
+        self.assertLess(
+            first["verification"]["settlement"]["observed_stable_ms"], 500
+        )
+        self.assertEqual(pending_bytes, dispatched_record["bytes"])
+        self.assertNotIn("payload", json.loads(pending_bytes))
+        self.assertEqual(
+            preflight["preflight"]["state"], "recovery_observation_candidate"
+        )
+        self.assertFalse(preflight["preflight"]["player_observed"])
+        self.assertEqual(recovered["verdict"], "verified")
+        self.assertEqual(recovered["after"]["track_id"], "/track/C")
+        self.assertEqual(recovered["verification"]["polls"], 3)
+        self.assertEqual(
+            recovered["verification"]["settlement"]["observed_consecutive_observations"],
+            3,
+        )
+        self.assertTrue(recovered["transaction"]["recovered_after_interruption"])
+        self.assertFalse(any(call == ["playerctl", "-p", "rhythmbox", "next"] for call in calls))
+        self.assertFalse(any(call == ["playerctl", "-l"] for call in calls))
+
     def test_durable_next_same_id_replays_without_playerctl(self):
         mod = load_module()
         calls = []
@@ -1320,7 +1498,7 @@ class AppControlTests(unittest.TestCase):
              mock.patch.dict(os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}), \
              mock.patch.object(mod, "run", side_effect=fake_run), \
              mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"):
-            first = mod.execute("next", "rhythmbox", False, 0.2, operation_id="replay.1")
+            first = mod.execute("next", "rhythmbox", False, 0.8, operation_id="replay.1")
             calls.clear()
             replay = mod.execute("next", "rhythmbox", False, 0.2, operation_id="replay.1")
 
@@ -1329,6 +1507,10 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(replay["transaction"]["phase"], "verified")
         self.assertTrue(replay["transaction"]["idempotent_replay"])
         self.assertFalse(replay["transaction"]["external_execution_repeated"])
+        self.assertEqual(
+            replay["verification"]["settlement"],
+            first["verification"]["settlement"],
+        )
         self.assertEqual(calls, [])
 
     def test_durable_next_same_id_different_request_conflicts_without_playerctl(self):
@@ -1339,7 +1521,7 @@ class AppControlTests(unittest.TestCase):
              mock.patch.dict(os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}), \
              mock.patch.object(mod, "run", side_effect=fake_run), \
              mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"):
-            first = mod.execute("next", "rhythmbox", False, 0.2, operation_id="conflict-1")
+            first = mod.execute("next", "rhythmbox", False, 0.8, operation_id="conflict-1")
             calls.clear()
             conflict = mod.execute("next", "spotify", False, 0.2, operation_id="conflict-1")
 
@@ -1373,22 +1555,28 @@ class AppControlTests(unittest.TestCase):
             )
             mod.atomic_write_json(mod.operation_record_path(operation_id), record)
             payload = mod.execute(
-                "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                "next", "rhythmbox", False, 0.8, operation_id=operation_id
             )
 
         self.assertEqual(payload["verdict"], "verified")
         self.assertEqual(payload["causal_attribution"], "unknown_after_restart")
         self.assertEqual(
-            payload["verification"]["predicate"], "track_identity_changed_after_restart"
+            payload["verification"]["predicate"],
+            "track_identity_changed_after_restart_settled",
         )
         self.assertEqual(payload["transaction"]["phase"], "verified")
         self.assertTrue(payload["transaction"]["recovered_after_interruption"])
+        self.assertGreaterEqual(payload["verification"]["polls"], 3)
+        self.assertEqual(
+            payload["verification"]["settlement"]["candidate_track_id"],
+            "/track/2",
+        )
         self.assertEqual(payload["selection"]["selector"], "rhythmbox")
         self.assertFalse(payload["transaction"]["external_execution_repeated"])
         self.assertFalse(any(call == ["playerctl", "-p", "rhythmbox", "next"] for call in calls))
         self.assertFalse(any(call == ["playerctl", "-l"] for call in calls))
 
-    def test_dispatch_started_same_or_unknown_track_is_terminal_indeterminate(self):
+    def test_dispatch_started_same_or_unknown_track_remains_pending(self):
         for suffix, current_track, expected_reason in (
             ("same", "/track/1", "track_id_unchanged"),
             ("unknown", None, "current_track_id_missing"),
@@ -1416,22 +1604,91 @@ class AppControlTests(unittest.TestCase):
                         player="rhythmbox",
                         baseline={"track_id": "/track/1"},
                     )
-                    mod.atomic_write_json(mod.operation_record_path(operation_id), record)
+                    record_path = mod.operation_record_path(operation_id)
+                    mod.atomic_write_json(record_path, record)
+                    before = record_path.read_bytes()
                     payload = mod.execute(
                         "next", "rhythmbox", False, 0.2, operation_id=operation_id
                     )
+                    self.assertEqual(record_path.read_bytes(), before)
                     calls.clear()
-                    replay = mod.execute(
+                    pending_retry = mod.execute(
                         "next", "rhythmbox", False, 0.2, operation_id=operation_id
                     )
+                    self.assertEqual(record_path.read_bytes(), before)
 
                 self.assertEqual(payload["status"], "indeterminate")
                 self.assertEqual(payload["verdict"], "error")
-                self.assertEqual(payload["recover"], "replan")
+                self.assertEqual(payload["recover"], "retry")
                 self.assertEqual(payload["error"]["reason"], expected_reason)
+                self.assertEqual(
+                    payload["error"]["code"], "operation_effect_not_settled"
+                )
+                self.assertEqual(payload["transaction"]["phase"], "dispatch_started")
                 self.assertTrue(payload["transaction"]["recovered_after_interruption"])
-                self.assertTrue(replay["transaction"]["idempotent_replay"])
-                self.assertEqual(calls, [])
+                self.assertFalse(
+                    pending_retry["transaction"]["idempotent_replay"]
+                )
+                self.assertFalse(
+                    any(call == ["playerctl", "-p", "rhythmbox", "next"] for call in calls)
+                )
+                self.assertFalse(any(call == ["playerctl", "-l"] for call in calls))
+
+    def test_corrupt_dispatch_started_anchor_fails_closed_without_rewrite(self):
+        mutations = {
+            "missing-player": lambda record: record.pop("player"),
+            "missing-resolved-player": lambda record: record.pop("resolved_player"),
+            "resolved-player-mismatch": lambda record: record.__setitem__(
+                "resolved_player", "spotify"
+            ),
+            "missing-baseline-track": lambda record: record.__setitem__(
+                "baseline", {"track_id": None}
+            ),
+            "baseline-player-mismatch": lambda record: record.__setitem__(
+                "baseline", {"player": "spotify", "track_id": "/track/1"}
+            ),
+            "unexpected-payload": lambda record: record.__setitem__(
+                "payload", {"verdict": "verified"}
+            ),
+        }
+        for suffix, mutate in mutations.items():
+            with self.subTest(suffix=suffix):
+                mod = load_module()
+                operation_id = f"corrupt-pending-{suffix}"
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                    os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+                ), mock.patch.object(
+                    mod, "run", side_effect=AssertionError("must not call playerctl")
+                ):
+                    mod.ensure_operation_directory(mod.operation_directory())
+                    created_at = time.time() - 1
+                    request = mod.operation_request("next", "rhythmbox", 3600)
+                    digest = mod.operation_request_digest("next", "rhythmbox", 3600)
+                    record = mod.operation_record(
+                        operation_id,
+                        digest,
+                        request,
+                        created_at=created_at,
+                        expires_at=created_at + 3600,
+                        phase="dispatch_started",
+                        dispatch_count=1,
+                        player="rhythmbox",
+                        baseline={"player": "rhythmbox", "track_id": "/track/1"},
+                    )
+                    mutate(record)
+                    record_path = mod.operation_record_path(operation_id)
+                    mod.atomic_write_json(record_path, record)
+                    before = record_path.read_bytes()
+                    payload = mod.execute(
+                        "next", "rhythmbox", False, 0.8, operation_id=operation_id
+                    )
+
+                    self.assertEqual(record_path.read_bytes(), before)
+
+                self.assertEqual(payload["error"]["code"], "operation_record_invalid")
+                self.assertEqual(payload["recover"], "replan")
+                self.assertEqual(payload["transaction"]["phase"], "journal_error")
+                self.assertEqual(payload["transaction"]["dispatch_count"], 1)
 
     def test_expired_operation_never_observes_or_dispatches(self):
         mod = load_module()
@@ -1461,6 +1718,106 @@ class AppControlTests(unittest.TestCase):
 
         self.assertEqual(payload["error"]["code"], "operation_expired")
         self.assertEqual(payload["recover"], "replan")
+
+    def test_dispatch_started_expiry_during_recovery_never_terminalizes(self):
+        for suffix, wall_times in (
+            ("after-observation", [1000.0, 1000.6]),
+            ("before-terminal-write", [1000.0, 1000.4, 1000.6]),
+        ):
+            with self.subTest(suffix=suffix):
+                mod = load_module()
+                operation_id = f"recovery-expiry-{suffix}"
+                calls = []
+                clock = VirtualClock()
+                fake_run = make_media_run(["/track/2"], calls, discovery=False)
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                    os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+                ):
+                    mod.ensure_operation_directory(mod.operation_directory())
+                    request = mod.operation_request("next", "rhythmbox", 60)
+                    digest = mod.operation_request_digest("next", "rhythmbox", 60)
+                    record = mod.operation_record(
+                        operation_id,
+                        digest,
+                        request,
+                        created_at=940.5,
+                        expires_at=1000.5,
+                        phase="dispatch_started",
+                        dispatch_count=1,
+                        player="rhythmbox",
+                        baseline={"player": "rhythmbox", "track_id": "/track/1"},
+                    )
+                    record_path = mod.operation_record_path(operation_id)
+                    mod.atomic_write_json(record_path, record)
+                    before = record_path.read_bytes()
+                    with mock.patch.object(mod, "run", side_effect=fake_run), \
+                         mock.patch.object(mod.time, "time", side_effect=wall_times), \
+                         mock.patch.object(
+                             mod.time, "monotonic", side_effect=clock.monotonic
+                         ), mock.patch.object(
+                             mod.time, "sleep", side_effect=clock.sleep
+                         ):
+                        payload = mod.execute(
+                            "next",
+                            "rhythmbox",
+                            False,
+                            0.8,
+                            operation_id=operation_id,
+                            operation_ttl_secs=60,
+                        )
+
+                    self.assertEqual(record_path.read_bytes(), before)
+
+                self.assertEqual(payload["error"]["code"], "operation_expired")
+                self.assertEqual(payload["recover"], "replan")
+                self.assertEqual(payload["transaction"]["phase"], "dispatch_started")
+                self.assertEqual(payload["transaction"]["dispatch_count"], 1)
+                self.assertTrue(
+                    payload["transaction"]["recovered_after_interruption"]
+                )
+                self.assertFalse(
+                    any(call == ["playerctl", "-p", "rhythmbox", "next"] for call in calls)
+                )
+                self.assertFalse(any(call == ["playerctl", "-l"] for call in calls))
+
+    def test_fresh_terminal_write_rechecks_expiry_and_leaves_dispatch_anchor(self):
+        mod = load_module()
+        operation_id = "fresh-terminal-expiry"
+        calls = []
+        clock = VirtualClock()
+        fake_run = make_media_run(["/track/1", "/track/2"], calls)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ), mock.patch.object(mod, "run", side_effect=fake_run), mock.patch.object(
+            mod.shutil, "which", return_value="/usr/bin/playerctl"
+        ), mock.patch.object(
+            mod.time, "time", side_effect=[1000.0, 1000.1, 1059.9, 1060.1]
+        ), mock.patch.object(
+            mod.time, "monotonic", side_effect=clock.monotonic
+        ), mock.patch.object(
+            mod.time, "sleep", side_effect=clock.sleep
+        ):
+            payload = mod.execute(
+                "next",
+                "rhythmbox",
+                False,
+                0.8,
+                operation_id=operation_id,
+                operation_ttl_secs=60,
+            )
+            record = json.loads(
+                mod.operation_record_path(operation_id).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(payload["error"]["code"], "operation_expired")
+        self.assertEqual(payload["recover"], "replan")
+        self.assertEqual(payload["transaction"]["phase"], "dispatch_started")
+        self.assertEqual(record["phase"], "dispatch_started")
+        self.assertEqual(record["dispatch_count"], 1)
+        self.assertNotIn("payload", record)
+        self.assertEqual(
+            calls.count(["playerctl", "-p", "rhythmbox", "next"]), 1
+        )
 
     def test_durable_next_requires_nonempty_baseline_track_id(self):
         mod = load_module()
@@ -1502,11 +1859,24 @@ class AppControlTests(unittest.TestCase):
                         "next", "rhythmbox", False, 0.01,
                         operation_id=f"strict:{suffix}",
                     )
+                    record = json.loads(
+                        mod.operation_record_path(f"strict:{suffix}").read_text(
+                            encoding="utf-8"
+                        )
+                    )
 
-                self.assertEqual(payload["verdict"], "unmet")
-                self.assertEqual(payload["recover"], "replan")
-                self.assertEqual(payload["verification"]["predicate"], "track_identity_changed")
+                self.assertEqual(payload["verdict"], "error")
+                self.assertEqual(payload["recover"], "retry")
+                self.assertEqual(
+                    payload["error"]["code"], "operation_effect_not_settled"
+                )
+                self.assertEqual(
+                    payload["verification"]["predicate"],
+                    "track_identity_change_not_settled",
+                )
                 self.assertEqual(payload["transaction"]["dispatch_count"], 1)
+                self.assertEqual(payload["transaction"]["phase"], "dispatch_started")
+                self.assertEqual(record["phase"], "dispatch_started")
                 self.assertEqual(
                     calls.count(["playerctl", "-p", "rhythmbox", "next"]), 1
                 )
@@ -1573,7 +1943,7 @@ class AppControlTests(unittest.TestCase):
                 mod.operation_record_path("retryable-1").read_text(encoding="utf-8")
             )
             second = mod.execute(
-                "next", "rhythmbox", False, 0.2, operation_id="retryable-1"
+                "next", "rhythmbox", False, 0.8, operation_id="retryable-1"
             )
 
         self.assertEqual(first["recover"], "retry")
@@ -1639,7 +2009,7 @@ class AppControlTests(unittest.TestCase):
              mock.patch.object(mod, "run", side_effect=media_run), \
              mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"):
             fresh = mod.execute(
-                "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                "next", "rhythmbox", False, 0.8, operation_id=operation_id
             )
             self.assertEqual(fresh["verdict"], "verified")
             record_path = mod.operation_record_path(operation_id)
@@ -1663,6 +2033,55 @@ class AppControlTests(unittest.TestCase):
             def malformed_before(record):
                 record["payload"]["before"] = []
 
+            def legacy_unsettled(record):
+                record["payload"]["verification"].pop("settlement")
+                record["payload"]["verification"]["predicate"] = "track_identity_changed"
+
+            def settlement_candidate_mismatch(record):
+                record["payload"]["verification"]["settlement"][
+                    "candidate_track_id"
+                ] = "/track/other"
+
+            def settlement_required_count_wrong(record):
+                record["payload"]["verification"]["settlement"][
+                    "required_consecutive_observations"
+                ] = 2
+
+            def settlement_observed_count_bool(record):
+                record["payload"]["verification"]["settlement"][
+                    "observed_consecutive_observations"
+                ] = True
+
+            def settlement_required_stable_bool(record):
+                record["payload"]["verification"]["settlement"][
+                    "required_stable_ms"
+                ] = True
+
+            def settlement_observed_stable_short(record):
+                record["payload"]["verification"]["settlement"][
+                    "observed_stable_ms"
+                ] = 499
+
+            def settlement_polls_too_small(record):
+                record["payload"]["verification"]["polls"] = 2
+
+            def settlement_false(record):
+                record["payload"]["verification"]["settlement"]["settled"] = False
+
+            def settlement_reason_nonnull(record):
+                record["payload"]["verification"]["reason"] = "observation_failed"
+
+            def settlement_reason_missing(record):
+                record["payload"]["verification"].pop("reason")
+
+            def settlement_observation_error_nonnull(record):
+                record["payload"]["verification"]["observation_error"] = {
+                    "code": "observation_failed"
+                }
+
+            def settlement_observation_error_missing(record):
+                record["payload"]["verification"].pop("observation_error")
+
             for name, mutate in (
                 ("dispatch-count-float", dispatch_count_float),
                 ("rc-bool", rc_bool),
@@ -1670,6 +2089,24 @@ class AppControlTests(unittest.TestCase):
                 ("baseline-mismatch", baseline_mismatch),
                 ("wrong-expiry", wrong_expiry),
                 ("malformed-before", malformed_before),
+                ("legacy-unsettled", legacy_unsettled),
+                ("settlement-candidate-mismatch", settlement_candidate_mismatch),
+                ("settlement-required-count-wrong", settlement_required_count_wrong),
+                ("settlement-observed-count-bool", settlement_observed_count_bool),
+                ("settlement-required-stable-bool", settlement_required_stable_bool),
+                ("settlement-observed-stable-short", settlement_observed_stable_short),
+                ("settlement-polls-too-small", settlement_polls_too_small),
+                ("settlement-false", settlement_false),
+                ("settlement-reason-nonnull", settlement_reason_nonnull),
+                ("settlement-reason-missing", settlement_reason_missing),
+                (
+                    "settlement-observation-error-nonnull",
+                    settlement_observation_error_nonnull,
+                ),
+                (
+                    "settlement-observation-error-missing",
+                    settlement_observation_error_missing,
+                ),
             ):
                 with self.subTest(name=name):
                     record = json.loads(json.dumps(valid_record))
@@ -1717,18 +2154,28 @@ class AppControlTests(unittest.TestCase):
                  mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"), \
                  mock.patch.object(mod, "atomic_write_json", side_effect=fail_terminal_write):
                 failed = mod.execute(
-                    "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                    "next", "rhythmbox", False, 0.8, operation_id=operation_id
                 )
+                record_path = mod.operation_record_path(operation_id)
+            interrupted_record = json.loads(
+                record_path.read_text(encoding="utf-8")
+            )
             calls_before_recovery = list(calls)
             with mock.patch.dict(os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}), \
                  mock.patch.object(mod, "run", side_effect=checked_run):
                 recovered = mod.execute(
-                    "next", "rhythmbox", False, 0.2, operation_id=operation_id
+                    "next", "rhythmbox", False, 0.8, operation_id=operation_id
                 )
 
         self.assertEqual(failed["error"]["code"], "journal_write_failed")
         self.assertEqual(failed["transaction"]["dispatch_count"], 1)
+        self.assertEqual(interrupted_record["phase"], "dispatch_started")
+        self.assertNotIn("payload", interrupted_record)
         self.assertEqual(recovered["verdict"], "verified")
+        self.assertEqual(
+            recovered["verification"]["settlement"]["schema"],
+            mod.TRACK_SETTLEMENT_SCHEMA,
+        )
         self.assertTrue(recovered["transaction"]["recovered_after_interruption"])
         self.assertEqual(
             calls.count(["playerctl", "-p", "rhythmbox", "next"]),
@@ -1837,7 +2284,7 @@ raise SystemExit(64)
                 "--operation-id",
                 "sigkill-episode",
                 "--verify-timeout",
-                "0.2",
+                "4.0",
             ]
             crashed = subprocess.run(
                 argv, capture_output=True, text=True, env=env, check=False, timeout=5
@@ -1865,7 +2312,14 @@ raise SystemExit(64)
             self.assertEqual(payload["verdict"], "verified")
             self.assertEqual(
                 payload["verification"]["predicate"],
-                "track_identity_changed_after_restart",
+                "track_identity_changed_after_restart_settled",
+            )
+            self.assertEqual(
+                payload["verification"]["settlement"]["schema"],
+                "agent_bridge.app_control.track_settlement.v0",
+            )
+            self.assertGreaterEqual(
+                payload["verification"]["settlement"]["observed_stable_ms"], 500
             )
             self.assertTrue(payload["transaction"]["recovered_after_interruption"])
             state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -1876,6 +2330,10 @@ raise SystemExit(64)
             self.assertEqual(replayed.returncode, 0, replayed.stderr)
             replay_payload = json.loads(replayed.stdout)
             self.assertTrue(replay_payload["transaction"]["idempotent_replay"])
+            self.assertEqual(
+                replay_payload["verification"]["settlement"],
+                payload["verification"]["settlement"],
+            )
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["next_count"], 1)
 
@@ -1894,7 +2352,9 @@ raise SystemExit(64)
              mock.patch.dict(os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}), \
              mock.patch.object(mod, "run", side_effect=media_run), \
              mock.patch.object(mod.shutil, "which", return_value="/usr/bin/playerctl"), \
-             mock.patch.object(mod.time, "time", side_effect=[1000.0, 1061.0]):
+             mock.patch.object(
+                 mod.time, "time", side_effect=[1000.0, 1061.0, 1061.0]
+             ):
             expired = mod.execute(
                 "next", "rhythmbox", False, 0.2,
                 operation_id="expired-before-dispatch", operation_ttl_secs=60,

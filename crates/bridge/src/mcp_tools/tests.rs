@@ -18807,9 +18807,37 @@ async fn app_control_rejects_raw_or_unknown_control_before_exec() {
 }
 
 #[test]
-fn app_control_source_contract_binds_exit_action_and_durable_operation_evidence() {
+fn app_control_durable_verified_kat_is_internally_consistent() {
+    let fresh = app_control_durable_verified_kat(false, false);
+    assert_eq!(
+        fresh["verification"]["settlement"]["candidate_track_id"],
+        fresh["after"]["track_id"]
+    );
+    assert!(app_control_source_contract_valid(
+        &fresh,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+}
+
+fn app_control_durable_verified_kat(
+    recovered_after_interruption: bool,
+    idempotent_replay: bool,
+) -> Value {
     let request_digest = app_control_operation_request_digest("next", Some("rhythmbox"), 3_600);
-    let fresh = json!({
+    let predicate = if recovered_after_interruption {
+        "track_identity_changed_after_restart_settled"
+    } else {
+        "track_identity_changed_settled"
+    };
+    let mut payload = json!({
         "schema": "agent_bridge.app_control.v0",
         "status": "verified",
         "verdict": "verified",
@@ -18823,18 +18851,45 @@ fn app_control_source_contract_binds_exit_action_and_durable_operation_evidence(
         "after": {"player": "rhythmbox", "track_id": "/track/2"},
         "dispatch": {"status": "dispatched", "rc": 0,
                      "argv": ["playerctl", "-p", "rhythmbox", "next"]},
-        "verification": {"status": "verified", "predicate": "track_identity_changed"},
+        "verification": {
+            "status": "verified",
+            "predicate": predicate,
+            "polls": 5,
+            "observation_error": null,
+            "reason": null,
+            "settlement": {
+                "schema": "agent_bridge.app_control.track_settlement.v0",
+                "candidate_track_id": "/track/2",
+                "required_consecutive_observations": 3,
+                "observed_consecutive_observations": 4,
+                "required_stable_ms": 500,
+                "observed_stable_ms": 750,
+                "settled": true
+            }
+        },
         "transaction": {
             "schema": "agent_bridge.app_control.operation.v0",
             "operation_id": "episode-1",
             "request_digest": request_digest,
             "phase": "verified",
             "dispatch_count": 1,
-            "idempotent_replay": false,
-            "recovered_after_interruption": false,
+            "idempotent_replay": idempotent_replay,
+            "recovered_after_interruption": recovered_after_interruption,
             "external_execution_repeated": false
-        }
+        },
+        "mcp_wrapper": {"exit_code": 0, "source_contract_ok": true}
     });
+    if recovered_after_interruption {
+        payload.as_object_mut().unwrap().remove("dispatch");
+        payload["causal_attribution"] = json!("unknown_after_restart");
+        payload["verification"]["causal_attribution"] = json!("unknown_after_restart");
+    }
+    payload
+}
+
+#[test]
+fn app_control_source_contract_binds_exit_action_and_durable_operation_evidence() {
+    let fresh = app_control_durable_verified_kat(false, false);
     assert!(app_control_source_contract_valid(
         &fresh,
         "media",
@@ -18904,14 +18959,36 @@ fn app_control_source_contract_binds_exit_action_and_durable_operation_evidence(
         0,
     ));
 
-    let mut recovered = fresh.clone();
-    recovered.as_object_mut().unwrap().remove("dispatch");
-    recovered["verification"]["predicate"] = json!("track_identity_changed_after_restart");
-    recovered["verification"]["causal_attribution"] = json!("unknown_after_restart");
-    recovered["causal_attribution"] = json!("unknown_after_restart");
-    recovered["transaction"]["recovered_after_interruption"] = json!(true);
+    let fresh_replay = app_control_durable_verified_kat(false, true);
+    assert!(app_control_source_contract_valid(
+        &fresh_replay,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+
+    let recovered = app_control_durable_verified_kat(true, false);
     assert!(app_control_source_contract_valid(
         &recovered,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        0,
+    ));
+    let recovered_replay = app_control_durable_verified_kat(true, true);
+    assert!(app_control_source_contract_valid(
+        &recovered_replay,
         "media",
         "next",
         false,
@@ -19015,6 +19092,421 @@ fn app_control_source_contract_binds_exit_action_and_durable_operation_evidence(
         3_600,
         0,
     ));
+}
+
+fn app_control_durable_kat_source_valid(payload: &Value, exit_code: i32) -> bool {
+    app_control_source_contract_valid(
+        payload,
+        "media",
+        "next",
+        false,
+        Some("episode-1"),
+        Some("rhythmbox"),
+        None,
+        None,
+        3_600,
+        exit_code,
+    )
+}
+
+#[test]
+fn app_control_durable_settlement_contract_rejects_old_or_mutated_evidence() {
+    let fresh = app_control_durable_verified_kat(false, false);
+    assert!(app_control_durable_kat_source_valid(&fresh, 0));
+
+    let mut boundary = fresh.clone();
+    boundary["verification"]["polls"] = json!(3);
+    boundary["verification"]["settlement"]["observed_consecutive_observations"] = json!(3);
+    boundary["verification"]["settlement"]["observed_stable_ms"] = json!(500);
+    assert!(
+        app_control_durable_kat_source_valid(&boundary, 0),
+        "the fixed 3-observation/500ms boundary must be accepted"
+    );
+
+    let mutations = [
+        ("/status", json!("indeterminate")),
+        ("/verification/predicate", json!("track_identity_changed")),
+        ("/verification/reason", json!("track_settlement_pending")),
+        (
+            "/verification/observation_error",
+            json!({"code": "metadata_failed"}),
+        ),
+        ("/verification/polls", json!(3)),
+        ("/verification/polls", json!(true)),
+        ("/verification/polls", json!(5.0)),
+        (
+            "/verification/settlement/schema",
+            json!("agent_bridge.app_control.track_settlement.v1"),
+        ),
+        (
+            "/verification/settlement/candidate_track_id",
+            json!("/track/transient"),
+        ),
+        (
+            "/verification/settlement/required_consecutive_observations",
+            json!(2),
+        ),
+        (
+            "/verification/settlement/required_consecutive_observations",
+            json!(true),
+        ),
+        (
+            "/verification/settlement/required_consecutive_observations",
+            json!(3.0),
+        ),
+        (
+            "/verification/settlement/observed_consecutive_observations",
+            json!(2),
+        ),
+        (
+            "/verification/settlement/observed_consecutive_observations",
+            json!(true),
+        ),
+        (
+            "/verification/settlement/observed_consecutive_observations",
+            json!(4.0),
+        ),
+        ("/verification/settlement/required_stable_ms", json!(501)),
+        ("/verification/settlement/required_stable_ms", json!(true)),
+        ("/verification/settlement/required_stable_ms", json!(500.0)),
+        ("/verification/settlement/observed_stable_ms", json!(499)),
+        ("/verification/settlement/observed_stable_ms", json!(true)),
+        ("/verification/settlement/observed_stable_ms", json!(750.0)),
+        ("/verification/settlement/settled", json!(false)),
+        ("/verification/settlement/settled", json!(1)),
+    ];
+    let mut unexpectedly_accepted = Vec::new();
+    for (pointer, replacement) in mutations {
+        let mut forged = fresh.clone();
+        *forged
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("durable KAT lacks mutation target {pointer}")) = replacement;
+        if app_control_durable_kat_source_valid(&forged, 0) {
+            unexpectedly_accepted.push(pointer);
+        }
+    }
+    assert!(
+        unexpectedly_accepted.is_empty(),
+        "settlement mutations accepted unexpectedly: {unexpectedly_accepted:?}"
+    );
+
+    for (field, value) in [
+        (
+            "error",
+            json!({"code": "operation_effect_not_settled", "message": "contradiction"}),
+        ),
+        ("causal_attribution", json!("unknown_after_restart")),
+    ] {
+        let mut contradictory = fresh.clone();
+        contradictory[field] = value;
+        assert!(
+            !app_control_durable_kat_source_valid(&contradictory, 0),
+            "fresh verified receipt carrying {field} must fail closed"
+        );
+    }
+    let mut fresh_with_verification_causal = fresh.clone();
+    fresh_with_verification_causal["verification"]["causal_attribution"] =
+        json!("unknown_after_restart");
+    assert!(!app_control_durable_kat_source_valid(
+        &fresh_with_verification_causal,
+        0
+    ));
+
+    let mut missing_settlement = fresh;
+    missing_settlement["verification"]
+        .as_object_mut()
+        .unwrap()
+        .remove("settlement");
+    assert!(!app_control_durable_kat_source_valid(
+        &missing_settlement,
+        0
+    ));
+
+    let mut recovered_old_predicate = app_control_durable_verified_kat(true, false);
+    recovered_old_predicate["verification"]["predicate"] =
+        json!("track_identity_changed_after_restart");
+    assert!(!app_control_durable_kat_source_valid(
+        &recovered_old_predicate,
+        0
+    ));
+}
+
+#[test]
+fn advance_track_composite_binding_requires_settled_fresh_recovered_or_replay_evidence() {
+    for (recovered, replay) in [(false, false), (false, true), (true, false), (true, true)] {
+        let receipt = app_control_durable_verified_kat(recovered, replay);
+        assert!(
+            mobile::advance_track_then_project_action_binding(
+                &receipt,
+                "episode-1",
+                Some("rhythmbox"),
+                3_600,
+            )
+            .is_ok(),
+            "settled receipt rejected: recovered={recovered}, replay={replay}"
+        );
+    }
+
+    let mut old_predicate = app_control_durable_verified_kat(false, false);
+    old_predicate["verification"]["predicate"] = json!("track_identity_changed");
+    assert!(mobile::advance_track_then_project_action_binding(
+        &old_predicate,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+    )
+    .is_err());
+
+    let mut missing_settlement = app_control_durable_verified_kat(true, true);
+    missing_settlement["verification"]
+        .as_object_mut()
+        .unwrap()
+        .remove("settlement");
+    assert!(mobile::advance_track_then_project_action_binding(
+        &missing_settlement,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+    )
+    .is_err());
+}
+
+#[test]
+fn app_control_durable_unsettled_dispatch_is_a_strict_same_id_retry_receipt() {
+    let mut pending = app_control_durable_verified_kat(false, false);
+    pending["status"] = json!("indeterminate");
+    pending["verdict"] = json!("error");
+    pending["recover"] = json!("retry");
+    pending["verification"]["status"] = json!("indeterminate");
+    pending["verification"]["predicate"] = json!("track_identity_change_not_settled");
+    pending["verification"]["polls"] = json!(2);
+    pending["verification"]["observation_error"] = Value::Null;
+    pending["verification"]["reason"] = json!("track_settlement_pending");
+    pending["verification"]["settlement"]["observed_consecutive_observations"] = json!(2);
+    pending["verification"]["settlement"]["observed_stable_ms"] = json!(250);
+    pending["verification"]["settlement"]["settled"] = json!(false);
+    pending["transaction"]["phase"] = json!("dispatch_started");
+    pending["error"] = json!({
+        "code": "operation_effect_not_settled",
+        "message": "the dispatched next effect has not settled yet",
+        "reason": "track_settlement_pending"
+    });
+    assert!(
+        app_control_durable_kat_source_valid(&pending, 2),
+        "an exact pending receipt must survive the wrapper for same-ID retry"
+    );
+    assert!(mobile::advance_track_then_project_action_binding(
+        &pending,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+    )
+    .is_err());
+
+    for (pointer, replacement) in [
+        ("/status", json!("verified")),
+        ("/verdict", json!("unmet")),
+        ("/recover", json!("replan")),
+        ("/read_only", json!(true)),
+        ("/player", json!("vlc")),
+        ("/selection/selector", json!("vlc")),
+        ("/selection/selected_player", json!("vlc")),
+        ("/before/player", json!("vlc")),
+        ("/before/track_id", Value::Null),
+        ("/after/player", json!("vlc")),
+        ("/after/track_id", json!("/track/transient")),
+        ("/transaction/phase", json!("indeterminate")),
+        ("/transaction/dispatch_count", json!(0)),
+        ("/transaction/idempotent_replay", json!(true)),
+        ("/transaction/recovered_after_interruption", json!(true)),
+        ("/error/code", json!("operation_outcome_indeterminate")),
+        ("/error/message", json!("")),
+        ("/error/reason", json!("track_id_unchanged")),
+        ("/verification/status", json!("verified")),
+        (
+            "/verification/predicate",
+            json!("track_identity_changed_settled"),
+        ),
+        ("/verification/polls", json!(0)),
+        ("/verification/polls", json!(true)),
+        (
+            "/verification/observation_error",
+            json!({"code": "metadata_failed"}),
+        ),
+        ("/verification/reason", json!("track_id_unchanged")),
+        (
+            "/verification/settlement/schema",
+            json!("agent_bridge.app_control.track_settlement.v1"),
+        ),
+        (
+            "/verification/settlement/candidate_track_id",
+            json!("/track/transient"),
+        ),
+        (
+            "/verification/settlement/required_consecutive_observations",
+            json!(2),
+        ),
+        (
+            "/verification/settlement/observed_consecutive_observations",
+            json!(true),
+        ),
+        ("/verification/settlement/required_stable_ms", json!(499)),
+        ("/verification/settlement/observed_stable_ms", json!(true)),
+        ("/verification/settlement/settled", json!(true)),
+        ("/dispatch/status", json!("planned")),
+        ("/dispatch/rc", json!(true)),
+        (
+            "/dispatch/argv",
+            json!(["playerctl", "-p", "rhythmbox", "previous"]),
+        ),
+    ] {
+        let mut forged = pending.clone();
+        *forged
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("pending KAT lacks mutation target {pointer}")) = replacement;
+        assert!(
+            !app_control_durable_kat_source_valid(&forged, 2),
+            "pending mutation {pointer} must fail closed"
+        );
+    }
+    for field in ["error", "verification", "dispatch", "selection", "before", "after"] {
+        let mut missing = pending.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            !app_control_durable_kat_source_valid(&missing, 2),
+            "pending receipt missing {field} must fail closed"
+        );
+    }
+
+    let mut recovered = pending.clone();
+    recovered.as_object_mut().unwrap().remove("dispatch");
+    recovered["transaction"]["recovered_after_interruption"] = json!(true);
+    recovered["causal_attribution"] = json!("unknown_after_restart");
+    recovered["verification"]["causal_attribution"] = json!("unknown_after_restart");
+    assert!(app_control_durable_kat_source_valid(&recovered, 2));
+    assert!(mobile::advance_track_then_project_action_binding(
+        &recovered,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+    )
+    .is_err());
+
+    let mut recovered_with_dispatch = recovered.clone();
+    recovered_with_dispatch["dispatch"] = pending["dispatch"].clone();
+    assert!(!app_control_durable_kat_source_valid(
+        &recovered_with_dispatch,
+        2
+    ));
+    for pointer in ["/causal_attribution", "/verification/causal_attribution"] {
+        let mut missing_causal = recovered.clone();
+        if pointer == "/causal_attribution" {
+            missing_causal
+                .as_object_mut()
+                .unwrap()
+                .remove("causal_attribution");
+        } else {
+            missing_causal["verification"]
+                .as_object_mut()
+                .unwrap()
+                .remove("causal_attribution");
+        }
+        assert!(
+            !app_control_durable_kat_source_valid(&missing_causal, 2),
+            "recovered pending receipt missing {pointer} must fail closed"
+        );
+    }
+}
+
+#[test]
+fn app_control_expired_dispatch_anchor_is_source_valid_but_never_a_green_light() {
+    let request_digest = app_control_operation_request_digest("next", Some("rhythmbox"), 3_600);
+    let expired = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "error",
+        "verdict": "error",
+        "recover": "replan",
+        "domain": "media",
+        "action": "next",
+        "error": {
+            "code": "operation_expired",
+            "message": "operation expired before post-dispatch verification completed"
+        },
+        "transaction": {
+            "schema": "agent_bridge.app_control.operation.v0",
+            "operation_id": "episode-1",
+            "request_digest": request_digest,
+            "phase": "dispatch_started",
+            "dispatch_count": 1,
+            "idempotent_replay": false,
+            "recovered_after_interruption": false,
+            "external_execution_repeated": false,
+            "expires_at": 1_000.5
+        }
+    });
+    assert!(app_control_durable_kat_source_valid(&expired, 2));
+    assert!(mobile::advance_track_then_project_action_binding(
+        &expired,
+        "episode-1",
+        Some("rhythmbox"),
+        3_600,
+    )
+    .is_err());
+
+    let mut recovered_expiry = expired.clone();
+    recovered_expiry["transaction"]["recovered_after_interruption"] = json!(true);
+    assert!(app_control_durable_kat_source_valid(&recovered_expiry, 2));
+
+    for (pointer, replacement) in [
+        ("/status", json!("indeterminate")),
+        ("/recover", json!("retry")),
+        ("/error/code", json!("operation_effect_not_settled")),
+        ("/error/message", json!("")),
+        ("/transaction/dispatch_count", json!(0)),
+        ("/transaction/idempotent_replay", json!(true)),
+        ("/transaction/expires_at", json!(true)),
+        ("/transaction/expires_at", json!(0.0)),
+    ] {
+        let mut forged = expired.clone();
+        *forged
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("expiry KAT lacks mutation target {pointer}")) = replacement;
+        assert!(
+            !app_control_durable_kat_source_valid(&forged, 2),
+            "expired dispatch-anchor mutation {pointer} must fail closed"
+        );
+    }
+
+    for (field, value) in [
+        ("read_only", json!(false)),
+        ("player", json!("rhythmbox")),
+        (
+            "selection",
+            json!({"selector": "rhythmbox", "selected_player": "rhythmbox"}),
+        ),
+        ("before", json!({"player": "rhythmbox", "track_id": "/track/1"})),
+        ("after", json!({"player": "rhythmbox", "track_id": "/track/2"})),
+        (
+            "dispatch",
+            json!({
+                "status": "dispatched",
+                "rc": 0,
+                "argv": ["playerctl", "-p", "rhythmbox", "next"]
+            }),
+        ),
+        (
+            "verification",
+            json!({"status": "verified", "predicate": "track_identity_changed_settled"}),
+        ),
+        ("causal_attribution", json!("unknown_after_restart")),
+    ] {
+        let mut contradictory = expired.clone();
+        contradictory[field] = value;
+        assert!(
+            !app_control_durable_kat_source_valid(&contradictory, 2),
+            "expired dispatch anchor carrying {field} must fail closed"
+        );
+    }
 }
 
 #[test]

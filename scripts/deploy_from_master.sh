@@ -95,6 +95,7 @@ MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 SENTINELS=(
     "app_control.py"        # protocol-first application control router
     "agent_bridge.app_control.operation_preflight.v0" # journal-only embodied episode admission
+    "agent_bridge.app_control.track_settlement.v0" # bounded stable-track proof before durable verification
     "agent_bridge.mobile_projection_wait.v1" # exact Android draw-report receipt, never host-served inference
     "desktop_steer.py"      # steer control plane / cross-process injection (item 3)
     "desktop_action.py"     # computer-use: coordinate action
@@ -114,6 +115,7 @@ SENTINELS=(
 # contract by itself.
 REQUIRED_NEW_BINARY_MARKERS=(
     "agent_bridge.app_control.operation_preflight.v0"
+    "agent_bridge.app_control.track_settlement.v0"
 )
 
 DRY_RUN=0
@@ -273,6 +275,9 @@ done
 grep -q 'agent_bridge.app_control.operation_preflight.v0' \
     "$ASSET_SOURCE_ROOT/scripts/app_control.py" ||
     die "deploy-source app_control missing durable operation preflight before live-state mutation: $ASSET_SOURCE_ROOT/scripts/app_control.py"
+grep -q 'agent_bridge.app_control.track_settlement.v0' \
+    "$ASSET_SOURCE_ROOT/scripts/app_control.py" ||
+    die "deploy-source app_control missing bounded durable track settlement: $ASSET_SOURCE_ROOT/scripts/app_control.py"
 
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
@@ -473,7 +478,9 @@ grep -q 'agent_bridge.app_control.operation.v0' "$APP_CONTROL_RUNTIME" ||
     die "post-deploy app_control contract missing durable operation journal: $APP_CONTROL_RUNTIME"
 grep -q 'agent_bridge.app_control.operation_preflight.v0' "$APP_CONTROL_RUNTIME" ||
     die "post-deploy app_control contract missing durable operation preflight: $APP_CONTROL_RUNTIME"
-say "app_control action contract: OK (playlist_current, playlist_activate, durable operation + preflight v0)"
+grep -q 'agent_bridge.app_control.track_settlement.v0' "$APP_CONTROL_RUNTIME" ||
+    die "post-deploy app_control contract missing bounded durable track settlement: $APP_CONTROL_RUNTIME"
+say "app_control action contract: OK (playlist_current, playlist_activate, durable operation + preflight + track settlement v0)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086

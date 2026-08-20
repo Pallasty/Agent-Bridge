@@ -29,10 +29,14 @@ from typing import Any, Callable, MutableMapping
 SCHEMA = "agent_bridge.app_control.v0"
 OPERATION_SCHEMA = "agent_bridge.app_control.operation.v0"
 OPERATION_PREFLIGHT_SCHEMA = "agent_bridge.app_control.operation_preflight.v0"
+TRACK_SETTLEMENT_SCHEMA = "agent_bridge.app_control.track_settlement.v0"
 DEFAULT_OPERATION_TTL_SECS = 3600
 MIN_OPERATION_TTL_SECS = 60
 MAX_OPERATION_TTL_SECS = 86400
 MAX_OPERATION_RECORD_BYTES = 256 * 1024
+TRACK_SETTLEMENT_REQUIRED_CONSECUTIVE = 3
+TRACK_SETTLEMENT_MIN_SPAN_SECS = 0.5
+TRACK_SETTLEMENT_POLL_INTERVAL_SECS = 0.25
 OPERATION_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z", re.ASCII)
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
@@ -333,6 +337,135 @@ def strict_track_id_changed(
     )
 
 
+def track_settlement_evidence(
+    track_id: str | None,
+    observed_consecutive: int,
+    observed_span_secs: float,
+    *,
+    settled: bool,
+) -> dict[str, Any]:
+    """Return the exact, replay-validatable evidence for one track candidate."""
+    return {
+        "schema": TRACK_SETTLEMENT_SCHEMA,
+        "candidate_track_id": track_id,
+        "required_consecutive_observations": TRACK_SETTLEMENT_REQUIRED_CONSECUTIVE,
+        "observed_consecutive_observations": observed_consecutive,
+        "required_stable_ms": int(TRACK_SETTLEMENT_MIN_SPAN_SECS * 1_000),
+        "observed_stable_ms": max(0, int(observed_span_secs * 1_000)),
+        "settled": settled,
+    }
+
+
+def observe_settled_track_change(
+    player: str,
+    baseline: dict[str, Any],
+    env: dict[str, str],
+    verify_timeout: float,
+    *,
+    monotonic_fn: Callable[[], float] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
+) -> dict[str, Any]:
+    """Observe one stable non-baseline track without dispatching any action.
+
+    A candidate is settled only after three consecutive observations of the
+    exact same non-empty track id spanning at least 500 monotonic milliseconds.
+    Missing metadata, observation errors, the baseline id, or another changed
+    id reset the candidate. Candidate state is deliberately invocation-local:
+    it is never reconstructed from or persisted into a durable operation.
+    """
+    clock = monotonic_fn or time.monotonic
+    sleeper = sleep_fn or time.sleep
+    baseline_id = baseline.get("track_id")
+    deadline = clock() + verify_timeout
+    after = baseline
+    observation_error: dict[str, Any] | None = None
+    candidate_id: str | None = None
+    candidate_first_seen: float | None = None
+    candidate_count = 0
+    candidate_span_secs = 0.0
+    reason = "track_id_unchanged"
+    polls = 0
+
+    while True:
+        polls += 1
+        observed, observation_error = observe(player, env)
+        observed_at = clock()
+        if observed is None:
+            candidate_id = None
+            candidate_first_seen = None
+            candidate_count = 0
+            candidate_span_secs = 0.0
+            reason = "observation_failed"
+        else:
+            after = observed
+            observed_id = observed.get("track_id")
+            if not isinstance(observed_id, str) or not observed_id:
+                candidate_id = None
+                candidate_first_seen = None
+                candidate_count = 0
+                candidate_span_secs = 0.0
+                reason = "current_track_id_missing"
+            elif observed_id == baseline_id:
+                candidate_id = None
+                candidate_first_seen = None
+                candidate_count = 0
+                candidate_span_secs = 0.0
+                reason = "track_id_unchanged"
+            else:
+                reason = "track_settlement_pending"
+                if observed_id != candidate_id:
+                    candidate_id = observed_id
+                    candidate_first_seen = observed_at
+                    candidate_count = 1
+                    candidate_span_secs = 0.0
+                else:
+                    candidate_count += 1
+                    assert candidate_first_seen is not None
+                    candidate_span_secs = max(0.0, observed_at - candidate_first_seen)
+                settled = (
+                    candidate_count >= TRACK_SETTLEMENT_REQUIRED_CONSECUTIVE
+                    and candidate_span_secs >= TRACK_SETTLEMENT_MIN_SPAN_SECS
+                    and observed_at <= deadline
+                )
+                if settled:
+                    return {
+                        "verified": True,
+                        "after": after,
+                        "observation_error": observation_error,
+                        "polls": polls,
+                        "reason": None,
+                        "settlement": track_settlement_evidence(
+                            candidate_id,
+                            candidate_count,
+                            candidate_span_secs,
+                            settled=True,
+                        ),
+                    }
+
+        if observed_at >= deadline:
+            break
+        sleeper(
+            min(
+                TRACK_SETTLEMENT_POLL_INTERVAL_SECS,
+                max(0.0, deadline - observed_at),
+            )
+        )
+
+    return {
+        "verified": False,
+        "after": after,
+        "observation_error": observation_error,
+        "polls": polls,
+        "reason": reason,
+        "settlement": track_settlement_evidence(
+            candidate_id,
+            candidate_count,
+            candidate_span_secs,
+            settled=False,
+        ),
+    }
+
+
 def route_summary(selected: bool) -> dict[str, Any]:
     return {
         "policy": "protocol_api_then_semantic_ui_then_vision",
@@ -362,6 +495,7 @@ def execute_once(
     effect_check: Callable[
         [str, dict[str, Any], dict[str, Any]], tuple[bool, str]
     ] = effect_verified,
+    require_track_settlement: bool = False,
 ) -> dict[str, Any]:
     started = time.monotonic()
     # Validate caller-supplied parameters before probing the optional backend.
@@ -590,6 +724,53 @@ def execute_once(
             "domain": "media", "action": action, "player": player, "route": route_summary(True),
             "before": before, "dispatch": dispatch,
         }
+    if require_track_settlement:
+        outcome = observe_settled_track_change(
+            player,
+            before,
+            env,
+            verify_timeout,
+        )
+        verified = bool(outcome["verified"])
+        result = {
+            "schema": SCHEMA,
+            "status": "verified" if verified else "indeterminate",
+            "verdict": "verified" if verified else "error",
+            "recover": "proceed" if verified else "retry",
+            "domain": "media",
+            "action": action,
+            "read_only": False,
+            "player": player,
+            "selection": selection,
+            "route": route_summary(True),
+            "before": before,
+            "dispatch": dispatch,
+            "after": outcome["after"],
+            "verification": {
+                "status": "verified" if verified else "indeterminate",
+                "predicate": (
+                    "track_identity_changed_settled"
+                    if verified
+                    else "track_identity_change_not_settled"
+                ),
+                "polls": outcome["polls"],
+                "observation_error": outcome["observation_error"],
+                "reason": outcome["reason"],
+                "settlement": outcome["settlement"],
+            },
+            "session_env_restored": sorted(restored),
+            "duration_ms": round((time.monotonic() - started) * 1000),
+        }
+        if not verified:
+            result["error"] = {
+                "code": "operation_effect_not_settled",
+                "message": (
+                    "next was dispatched once, but no changed track remained stable "
+                    "for three consecutive observations spanning 500ms"
+                ),
+                "reason": outcome["reason"],
+            }
+        return result
     deadline = time.monotonic() + verify_timeout
     after = before
     verified = False
@@ -918,6 +1099,67 @@ def replay_terminal_operation(
     )
 
 
+def settled_track_evidence_valid(verification: Any, after: Any) -> bool:
+    """Bind a verified receipt to the fixed v0 settled-track policy."""
+    if not isinstance(verification, dict) or not isinstance(after, dict):
+        return False
+    settlement = verification.get("settlement")
+    after_track_id = after.get("track_id")
+    if not isinstance(settlement, dict):
+        return False
+    required_count = settlement.get("required_consecutive_observations")
+    observed_count = settlement.get("observed_consecutive_observations")
+    required_stable_ms = settlement.get("required_stable_ms")
+    observed_stable_ms = settlement.get("observed_stable_ms")
+    polls = verification.get("polls")
+    return (
+        settlement.get("schema") == TRACK_SETTLEMENT_SCHEMA
+        and "reason" in verification
+        and verification.get("reason") is None
+        and "observation_error" in verification
+        and verification.get("observation_error") is None
+        and isinstance(after_track_id, str)
+        and bool(after_track_id)
+        and settlement.get("candidate_track_id") == after_track_id
+        and type(required_count) is int
+        and required_count == TRACK_SETTLEMENT_REQUIRED_CONSECUTIVE
+        and type(observed_count) is int
+        and observed_count >= required_count
+        and type(polls) is int
+        and polls >= observed_count
+        and type(required_stable_ms) is int
+        and required_stable_ms == int(TRACK_SETTLEMENT_MIN_SPAN_SECS * 1_000)
+        and type(observed_stable_ms) is int
+        and observed_stable_ms >= required_stable_ms
+        and settlement.get("settled") is True
+    )
+
+
+def dispatch_started_record_valid(record: Any) -> bool:
+    """Validate the immutable recovery anchor before observing or rewriting it."""
+    if not isinstance(record, dict):
+        return False
+    player = record.get("player")
+    resolved_player = record.get("resolved_player")
+    baseline = record.get("baseline")
+    if (
+        record.get("phase") != "dispatch_started"
+        or type(record.get("dispatch_count")) is not int
+        or record.get("dispatch_count") != 1
+        or not isinstance(player, str)
+        or not player
+        or not isinstance(resolved_player, str)
+        or resolved_player != player
+        or not isinstance(baseline, dict)
+        or not isinstance(baseline.get("track_id"), str)
+        or not baseline.get("track_id")
+        or "payload" in record
+    ):
+        return False
+    baseline_player = baseline.get("player")
+    return baseline_player is None or baseline_player == player
+
+
 def terminal_payload_valid(
     payload: Any,
     record: Any,
@@ -1020,19 +1262,19 @@ def terminal_payload_valid(
     ):
         return False
     changed, _ = strict_track_id_changed("next", before, after)
-    if not changed:
+    if not changed or not settled_track_evidence_valid(payload["verification"], after):
         return False
     recovered = transaction["recovered_after_interruption"]
     predicate = payload["verification"].get("predicate")
     if recovered:
         return (
-            predicate == "track_identity_changed_after_restart"
+            predicate == "track_identity_changed_after_restart_settled"
             and payload.get("causal_attribution") == "unknown_after_restart"
             and payload.get("dispatch") is None
         )
     dispatch = payload.get("dispatch")
     return (
-        predicate == "track_identity_changed"
+        predicate == "track_identity_changed_settled"
         and isinstance(dispatch, dict)
         and dispatch.get("status") == "dispatched"
         and type(dispatch.get("rc")) is int
@@ -1043,9 +1285,12 @@ def terminal_payload_valid(
 
 
 def recover_dispatch_started_operation(
-    record: dict[str, Any], operation_id: str, request_digest: str
+    record: dict[str, Any],
+    operation_id: str,
+    request_digest: str,
+    verify_timeout: float,
 ) -> dict[str, Any]:
-    """Resolve an interrupted next operation by observation, never by re-dispatch."""
+    """Settle an interrupted next by bounded observation, never by re-dispatch."""
     player = record.get("resolved_player") or record.get("player")
     baseline = record.get("baseline")
     expires_at = record.get("expires_at")
@@ -1055,24 +1300,32 @@ def recover_dispatch_started_operation(
     after: dict[str, Any] | None = None
     observation_error: dict[str, Any] | None = None
     reason: str | None = None
+    settlement = track_settlement_evidence(None, 0, 0.0, settled=False)
+    polls = 0
+    pending = False
     if not isinstance(player, str) or not player:
         reason = "persisted_player_missing"
     elif not isinstance(baseline, dict) or not isinstance(baseline.get("track_id"), str) or not baseline.get("track_id"):
         reason = "baseline_track_id_missing"
     else:
-        after, observation_error = observe(player, env)
-        if after is None:
-            reason = "observation_failed"
-        elif not isinstance(after.get("track_id"), str) or not after.get("track_id"):
-            reason = "current_track_id_missing"
-        elif after["track_id"] == baseline["track_id"]:
-            reason = "track_id_unchanged"
+        outcome = observe_settled_track_change(
+            player,
+            baseline,
+            env,
+            verify_timeout,
+        )
+        after = outcome["after"]
+        observation_error = outcome["observation_error"]
+        reason = outcome["reason"]
+        settlement = outcome["settlement"]
+        polls = int(outcome["polls"])
+        pending = not bool(outcome["verified"])
 
-    verified = reason is None
+    verified = reason is None and not pending
     transaction = operation_transaction(
         operation_id,
         request_digest,
-        phase="verified" if verified else "indeterminate",
+        phase="verified" if verified else "dispatch_started" if pending else "indeterminate",
         dispatch_count=dispatch_count,
         idempotent_replay=False,
         recovered_after_interruption=True,
@@ -1082,7 +1335,7 @@ def recover_dispatch_started_operation(
         "schema": SCHEMA,
         "status": "verified" if verified else "indeterminate",
         "verdict": "verified" if verified else "error",
-        "recover": "proceed" if verified else "replan",
+        "recover": "proceed" if verified else "retry" if pending else "replan",
         "domain": "media",
         "action": "next",
         "read_only": False,
@@ -1102,20 +1355,38 @@ def recover_dispatch_started_operation(
         "causal_attribution": "unknown_after_restart",
         "verification": {
             "status": "verified" if verified else "indeterminate",
-            "predicate": "track_identity_changed_after_restart",
+            "predicate": (
+                "track_identity_changed_after_restart_settled"
+                if verified
+                else "track_identity_change_not_settled"
+            ),
             "causal_attribution": "unknown_after_restart",
+            "polls": polls,
             "observation_error": observation_error,
             "reason": reason,
+            "settlement": settlement,
         },
         "session_env_restored": sorted(restored),
         "transaction": transaction,
     }
     if not verified:
-        payload["error"] = {
-            "code": "operation_outcome_indeterminate",
-            "message": "interrupted operation cannot be safely attributed or repeated",
-            "reason": reason,
-        }
+        payload["error"] = (
+            {
+                "code": "operation_effect_not_settled",
+                "message": (
+                    "the dispatched operation has not produced a changed track stable "
+                    "for three consecutive observations spanning 500ms; retry only "
+                    "this operation_id"
+                ),
+                "reason": reason,
+            }
+            if pending
+            else {
+                "code": "operation_outcome_indeterminate",
+                "message": "interrupted operation cannot be safely attributed or repeated",
+                "reason": reason,
+            }
+        )
     return payload
 
 
@@ -1577,18 +1848,10 @@ def preflight_operation(
                 lock_present=True,
             )
         if phase == "dispatch_started" and reported_dispatch_count == 1:
-            player = existing.get("resolved_player") or existing.get("player")
-            baseline = existing.get("baseline")
-            if (
-                not isinstance(player, str)
-                or not player
-                or not isinstance(baseline, dict)
-                or not isinstance(baseline.get("track_id"), str)
-                or not baseline.get("track_id")
-            ):
+            if not dispatch_started_record_valid(existing):
                 return blocked(
                     "operation_record_invalid",
-                    "dispatch_started record lacks an exact player or baseline track_id",
+                    "dispatch_started record lacks an exact immutable player/baseline anchor",
                 )
             return operation_preflight_payload(
                 operation_id,
@@ -1882,13 +2145,53 @@ def execute(
                         dispatch_count=dispatch_count,
                         expires_at=float(expires_at),
                     )
+                if not dispatch_started_record_valid(existing):
+                    return operation_error(
+                        action,
+                        operation_id,
+                        request_digest,
+                        "operation_record_invalid",
+                        "dispatch_started record lacks an exact immutable player/baseline anchor",
+                        phase="journal_error",
+                        dispatch_count=dispatch_count,
+                        expires_at=float(expires_at),
+                    )
 
                 recovered_payload = recover_dispatch_started_operation(
-                    existing, operation_id, request_digest
+                    existing, operation_id, request_digest, verify_timeout
                 )
+                if time.time() >= float(expires_at):
+                    return operation_error(
+                        action,
+                        operation_id,
+                        request_digest,
+                        "operation_expired",
+                        "operation expired before recovery observation completed",
+                        phase="dispatch_started",
+                        dispatch_count=dispatch_count,
+                        expires_at=float(expires_at),
+                        recovered_after_interruption=True,
+                    )
+                if (
+                    recovered_payload.get("error", {}).get("code")
+                    == "operation_effect_not_settled"
+                ):
+                    return recovered_payload
                 terminal = terminal_record_from(
                     existing, recovered_payload, dispatch_count
                 )
+                if time.time() >= float(expires_at):
+                    return operation_error(
+                        action,
+                        operation_id,
+                        request_digest,
+                        "operation_expired",
+                        "operation expired before the recovered terminal receipt could be persisted",
+                        phase="dispatch_started",
+                        dispatch_count=dispatch_count,
+                        expires_at=float(expires_at),
+                        recovered_after_interruption=True,
+                    )
                 try:
                     atomic_write_json(record_path, terminal)
                 except OSError as exc:
@@ -1983,11 +2286,17 @@ def execute(
             playlist_id,
             before_dispatch=persist_dispatch_started,
             effect_check=strict_track_id_changed,
+            require_track_settlement=True,
         )
         if preparation_write_failed:
             return result
 
-        if prepared and result.get("verdict") != "verified":
+        effect_pending = (
+            prepared
+            and result.get("error", {}).get("code")
+            == "operation_effect_not_settled"
+        )
+        if prepared and result.get("verdict") != "verified" and not effect_pending:
             result["recover"] = "replan"
 
         dispatch_count = 1 if prepared else 0
@@ -2002,6 +2311,7 @@ def execute(
             phase=(
                 "verified"
                 if result.get("verdict") == "verified"
+                else "dispatch_started" if effect_pending
                 else "retryable" if retryable else "terminal"
             ),
             dispatch_count=dispatch_count,
@@ -2010,6 +2320,22 @@ def execute(
             expires_at=expires_at,
         )
         result = with_operation_transaction(result, transaction)
+        if time.time() >= expires_at:
+            return operation_error(
+                action,
+                operation_id,
+                request_digest,
+                "operation_expired",
+                "operation expired before post-dispatch verification completed",
+                phase="dispatch_started" if prepared else "terminal",
+                dispatch_count=dispatch_count,
+                expires_at=expires_at,
+            )
+        if effect_pending:
+            # The pre-dispatch record is already the exact durable truth.  Do
+            # not persist invocation-local candidates or change its bytes/SHA;
+            # a same-id retry starts a fresh bounded observation window.
+            return result
         terminal = (
             operation_record(
                 operation_id,
@@ -2024,6 +2350,17 @@ def execute(
             if retryable
             else terminal_record_from(base_record, result, dispatch_count)
         )
+        if time.time() >= expires_at:
+            return operation_error(
+                action,
+                operation_id,
+                request_digest,
+                "operation_expired",
+                "operation expired before the terminal receipt could be persisted",
+                phase="dispatch_started" if prepared else "terminal",
+                dispatch_count=dispatch_count,
+                expires_at=expires_at,
+            )
         try:
             atomic_write_json(record_path, terminal)
         except OSError as exc:
