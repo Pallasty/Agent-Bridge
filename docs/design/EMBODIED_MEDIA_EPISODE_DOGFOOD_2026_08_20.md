@@ -101,3 +101,9 @@ the configured secure journal. This exposed a wrapper/runtime version-pairing
 gap, not a failed track-settlement predicate. New live collection remains
 blocked until the action-before-version handshake is merged and deployed and a
 fresh MCP process proves the secure journal environment before actuation.
+
+Pair 02 was preregistered only after that admission gate passed at
+`docs/design/evidence/embodied_media_episode_dogfood_pair_02_preregistration_2026_08_20.json`.
+It uses fresh opaque operation identities and retains the same seven-call
+baseline versus two-call trial measurement, so the protocol repair does not
+retroactively change the comparison.
