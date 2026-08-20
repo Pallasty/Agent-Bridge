@@ -143,3 +143,22 @@ state, but neither exposed a non-empty `AXIdentifier`. The result therefore
 remains `INELIGIBLE_NO_STABLE_WINDOW_IDENTITY`. The experiment does not fall
 back to title, sample index, coordinates, pixels, or a different application.
 No focus action or application-state mutation was performed.
+
+## AX and CGWindow composite identity follow-up
+
+The next source-local read-only candidate tested whether a window-lifetime
+identity could be formed from exact bundle ID, PID, kernel process launch time,
+and `CGWindowID`. AX title and normalized bounds were permitted only to create a
+unique bidirectional AX-to-CGWindow correlation; neither value was promoted to
+identity or retained. Two samples had to preserve the exact process, window
+set, and mapping, with at least one initially unfocused candidate.
+
+The process-instance identity was readable through `proc_pidinfo`, but the
+natural frontmost surface contained an AX window without a readable non-empty
+title. The strict correlation therefore stopped before producing any candidate
+identity. The result is `INELIGIBLE_COMPOSITE_IDENTITY`. It does not fall back
+to bounds alone, sample index, pixels, another application, or window creation.
+No AX setter, focus action, application activation, Apple Event, or deployment
+was performed. This result also does not show that CGWindow correlation is
+generally unavailable; it shows only that the exact preregistered contract was
+not satisfied by this observed surface.

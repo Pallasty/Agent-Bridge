@@ -1,0 +1,49 @@
+{
+  "schema": "agent_bridge.macos_ax_composite_identity_readonly_eligibility.v0",
+  "observed_at": "2026-08-20T16:05:49Z",
+  "design_preregistration": "docs/design/evidence/macos_ax_composite_identity_design_preregistration_2026_08_20.json",
+  "authority": {
+    "source_local_readonly_probe_authorized": true,
+    "live_focus_authorized": false,
+    "application_activation_authorized": false,
+    "window_creation_authorized": false,
+    "deployment_authorized": false
+  },
+  "source": {
+    "swift_source_streamed_over_ssh_stdin": true,
+    "remote_source_file_written": false,
+    "uses_ax_setters": false,
+    "uses_system_events": false,
+    "uses_apple_events": false,
+    "uses_cgwindow_read_only": true,
+    "raw_receipt_retained": false,
+    "titles_retained": false,
+    "bounds_retained": false
+  },
+  "observation": {
+    "first_attempt_reason": "frontmost_identity_incomplete",
+    "process_launch_time_fallback": "proc_pidinfo_PROC_PIDTBSDINFO",
+    "process_instance_identity_readable_after_fallback": true,
+    "final_reason": "ax_title_incomplete",
+    "candidate_count": 0,
+    "sample_count_completed": 0,
+    "action_performed": false
+  },
+  "decision": {
+    "status": "INELIGIBLE_COMPOSITE_IDENTITY",
+    "may_use_bounds_without_title": false,
+    "may_use_title_or_bounds_as_identity": false,
+    "may_use_sample_index": false,
+    "may_switch_or_activate_application": false,
+    "may_create_windows": false,
+    "may_run_focus_transaction": false
+  },
+  "claim_boundary": {
+    "cgwindow_correlation_generally_unavailable": false,
+    "stable_window_identity_observed": false,
+    "focus_effect_verified": false,
+    "exclusive_causation_proven": false,
+    "pixel_or_human_observation_proven": false,
+    "runtime_rollout_ready": false
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schema": "agent_bridge.macos_ax_composite_identity_design_preregistration.v0",
+  "registered_at": "2026-08-20T16:05:00Z",
+  "authority": {
+    "source_local_readonly_prototype_authorized": true,
+    "live_focus_authorized": false,
+    "deployment_authorized": false,
+    "public_tool_expansion_authorized": false
+  },
+  "identity_contract": {
+    "components": ["bundle_id", "pid", "process_launch_time_ms", "cg_window_id"],
+    "cg_window_id_scope": "one_window_lifetime_within_one_process_instance",
+    "title_is_identity": false,
+    "bounds_are_identity": false,
+    "title_and_bounds_are_correlation_only": true,
+    "bidirectional_unique_ax_cg_mapping_required": true,
+    "two_samples_required": true,
+    "frontmost_process_must_remain_exact": true,
+    "window_set_must_remain_exact": true
+  },
+  "fail_closed": [
+    "ax_or_cg_read_incomplete", "frontmost_process_changed", "window_set_changed",
+    "zero_or_multiple_cg_matches", "cg_record_matches_multiple_ax_windows",
+    "fewer_than_two_stable_windows", "no_initially_unfocused_candidate"
+  ],
+  "privacy": {
+    "raw_titles_retained": false,
+    "raw_bounds_retained": false,
+    "raw_receipt_retained": false,
+    "persisted_identity_values_hashed": true
+  },
+  "claim_boundary": {
+    "window_identity_stable_beyond_observed_window_lifetime": false,
+    "focus_effect_verified": false,
+    "exclusive_causation_proven": false,
+    "pixel_or_human_observation_proven": false,
+    "executor_accepts_composite_identity": false
+  }
+}
