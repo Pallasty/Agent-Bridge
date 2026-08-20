@@ -35,6 +35,10 @@ pub struct Hub {
     /// Process-local body write ownership. It is deliberately not persisted
     /// or acquired by background work; a restart therefore clears the lease.
     pub embodiment_leases: Arc<tokio::sync::Mutex<WriteLeaseRegistry>>,
+    /// Transaction-scoped serialization for lease-mediated body writes. A
+    /// lease identifies the owning session; participating mutating tools hold
+    /// this guard across precondition, action, postcondition, and receipt.
+    pub embodiment_lease_action_lock: Arc<tokio::sync::Mutex<()>>,
     pub worktree: Option<Arc<GitWorktreeManager>>,
     /// D2.3: per-turn semantic search cache — populated by session_bootstrap,
     /// consumed by memory_search(mode=semantic) to skip the DB round-trip.
@@ -137,6 +141,7 @@ impl HubBuilder {
             agent: self.agent,
             agents: self.agents,
             embodiment_leases: Arc::new(tokio::sync::Mutex::new(WriteLeaseRegistry::default())),
+            embodiment_lease_action_lock: Arc::new(tokio::sync::Mutex::new(())),
             worktree: self.worktree,
             memory_embed_cache: Arc::new(tokio::sync::Mutex::new(None)),
             security: SecurityPolicy::from_env(),

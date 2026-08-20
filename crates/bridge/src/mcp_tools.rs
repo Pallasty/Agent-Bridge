@@ -172,6 +172,292 @@ fn killable_command<S: AsRef<std::ffi::OsStr>>(program: S) -> TokioCommand {
     cmd
 }
 
+#[cfg(unix)]
+fn macos_ax_isolate_process_group(command: &mut TokioCommand) {
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn macos_ax_isolate_process_group(_command: &mut TokioCommand) {}
+
+struct MacosAxProcessGroupGuard {
+    #[cfg(unix)]
+    pgid: libc::pid_t,
+    armed: bool,
+}
+
+impl MacosAxProcessGroupGuard {
+    fn for_child(child: &tokio::process::Child) -> std::io::Result<Self> {
+        let pid = child
+            .id()
+            .ok_or_else(|| std::io::Error::other("spawned child has no process id"))?;
+        Ok(Self {
+            #[cfg(unix)]
+            pgid: pid as libc::pid_t,
+            armed: true,
+        })
+    }
+
+    fn kill_group(&self) -> std::io::Result<()> {
+        if !self.armed {
+            return Ok(());
+        }
+        #[cfg(unix)]
+        {
+            // The child is spawned with process_group(0), so its pid is also the
+            // process-group id. A negative target kills the interpreter and any
+            // compiler/helper descendants before the body action lock is released.
+            let result = unsafe { libc::kill(-self.pgid, libc::SIGKILL) };
+            if result == 0 {
+                return Ok(());
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        #[cfg(not(unix))]
+        Ok(())
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    fn is_alive(&self) -> std::io::Result<bool> {
+        if !self.armed {
+            return Ok(false);
+        }
+        #[cfg(unix)]
+        {
+            let result = unsafe { libc::kill(-self.pgid, 0) };
+            if result == 0 {
+                return Ok(true);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(false);
+            }
+            if error.raw_os_error() == Some(libc::EPERM) {
+                return Ok(true);
+            }
+            return Err(error);
+        }
+        #[cfg(not(unix))]
+        Ok(false)
+    }
+
+    async fn wait_until_dead(&self) -> std::io::Result<()> {
+        for _ in 0..100 {
+            if !self.is_alive()? {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "executor process group remained alive after SIGKILL",
+        ))
+    }
+}
+
+impl Drop for MacosAxProcessGroupGuard {
+    fn drop(&mut self) {
+        let _ = self.kill_group();
+    }
+}
+
+#[derive(Debug)]
+struct MacosAxExecutorOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+struct MacosAxCapturedChild {
+    child: tokio::process::Child,
+    group: MacosAxProcessGroupGuard,
+    stdin: Option<tokio::process::ChildStdin>,
+    stdout_task: Option<tokio::task::JoinHandle<Vec<u8>>>,
+    stderr_task: Option<tokio::task::JoinHandle<Vec<u8>>>,
+}
+
+impl MacosAxCapturedChild {
+    fn spawn(mut command: TokioCommand) -> std::io::Result<Self> {
+        macos_ax_isolate_process_group(&mut command);
+        let mut child = command.spawn()?;
+        let group = MacosAxProcessGroupGuard::for_child(&child)?;
+        let stdin = child.stdin.take();
+        let mut stdout = child.stdout.take().ok_or_else(|| {
+            std::io::Error::other("executor stdout pipe was not configured")
+        })?;
+        let mut stderr = child.stderr.take().ok_or_else(|| {
+            std::io::Error::other("executor stderr pipe was not configured")
+        })?;
+        use tokio::io::AsyncReadExt as _;
+        let stdout_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes).await;
+            bytes
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            let _ = stderr.read_to_end(&mut bytes).await;
+            bytes
+        });
+        Ok(Self {
+            child,
+            group,
+            stdin,
+            stdout_task: Some(stdout_task),
+            stderr_task: Some(stderr_task),
+        })
+    }
+
+    async fn collect_pipes(&mut self) -> (Vec<u8>, Vec<u8>) {
+        let stdout = match self.stdout_task.take() {
+            Some(task) => task.await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let stderr = match self.stderr_task.take() {
+            Some(task) => task.await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        (stdout, stderr)
+    }
+
+    async fn terminate_and_reap(&mut self) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
+        let group_kill = self.group.kill_group();
+        let leader_kill = self.child.start_kill();
+        let leader_wait = self.child.wait().await;
+        let group_dead = self.group.wait_until_dead().await;
+        let pipes = self.collect_pipes().await;
+        if group_dead.is_ok() {
+            self.group.disarm();
+        }
+        group_kill?;
+        if let Err(error) = leader_kill {
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error);
+            }
+        }
+        leader_wait?;
+        group_dead?;
+        Ok(pipes)
+    }
+
+    async fn wait_with_source(
+        &mut self,
+        source: &'static [u8],
+        timeout_ms: u64,
+    ) -> std::result::Result<MacosAxExecutorOutput, Value> {
+        let Some(mut stdin) = self.stdin.take() else {
+            let cleanup = self.terminate_and_reap().await.err().map(|error| error.to_string());
+            return Err(json!({
+                "code": "executor_stdin_unavailable",
+                "cleanup_error": cleanup
+            }));
+        };
+        use tokio::io::AsyncWriteExt as _;
+        let run = async {
+            stdin.write_all(source).await?;
+            drop(stdin);
+            self.child.wait().await
+        };
+        let status = match tokio::time::timeout(Duration::from_millis(timeout_ms), run).await {
+            Err(_) => {
+                let cleanup = self
+                    .terminate_and_reap()
+                    .await
+                    .err()
+                    .map(|error| error.to_string());
+                return Err(json!({
+                    "code": "executor_timeout",
+                    "timeout_ms": timeout_ms,
+                    "cleanup_error": cleanup
+                }));
+            }
+            Ok(Err(error)) => {
+                let cleanup = self
+                    .terminate_and_reap()
+                    .await
+                    .err()
+                    .map(|cleanup| cleanup.to_string());
+                return Err(json!({
+                    "code": "executor_io_failed",
+                    "message": error.to_string(),
+                    "cleanup_error": cleanup
+                }));
+            }
+            Ok(Ok(status)) => status,
+        };
+        self.finish_completed(status).await
+    }
+
+    async fn wait_without_source(
+        &mut self,
+        timeout_ms: u64,
+    ) -> std::result::Result<MacosAxExecutorOutput, Value> {
+        let status = match tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            self.child.wait(),
+        )
+        .await
+        {
+            Err(_) => {
+                let cleanup = self
+                    .terminate_and_reap()
+                    .await
+                    .err()
+                    .map(|error| error.to_string());
+                return Err(json!({
+                    "code": "timeout",
+                    "timeout_ms": timeout_ms,
+                    "cleanup_error": cleanup
+                }));
+            }
+            Ok(Err(error)) => {
+                let cleanup = self
+                    .terminate_and_reap()
+                    .await
+                    .err()
+                    .map(|cleanup| cleanup.to_string());
+                return Err(json!({
+                    "code": "wait_failed",
+                    "message": error.to_string(),
+                    "cleanup_error": cleanup
+                }));
+            }
+            Ok(Ok(status)) => status,
+        };
+        self.finish_completed(status).await
+    }
+
+    async fn finish_completed(
+        &mut self,
+        status: std::process::ExitStatus,
+    ) -> std::result::Result<MacosAxExecutorOutput, Value> {
+        // The leader has exited. Kill any compiler/helper descendants that
+        // remained in its isolated group, prove the group is empty, and only
+        // then permit the transaction-scoped body lock to be released.
+        let _ = self.group.kill_group();
+        self.group.wait_until_dead().await.map_err(|error| {
+            json!({
+                "code": "executor_process_group_not_reaped",
+                "message": error.to_string()
+            })
+        })?;
+        let (stdout, stderr) = self.collect_pipes().await;
+        self.group.disarm();
+        Ok(MacosAxExecutorOutput {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+}
+
 // ===========================================================================
 //                                   notify
 // ===========================================================================
@@ -437,6 +723,7 @@ impl McpTool for TerminalSendKeysTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
+        let _body_action_guard = self.hub.embodiment_lease_action_lock.lock().await;
         let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
             Ok(lease_id) => lease_id,
             Err(error) => return Ok(ToolResult::error(error)),
@@ -551,6 +838,7 @@ impl McpTool for TerminalSplitTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
+        let _body_action_guard = self.hub.embodiment_lease_action_lock.lock().await;
         let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
             Ok(lease_id) => lease_id,
             Err(error) => return Ok(ToolResult::error(error)),
@@ -753,6 +1041,7 @@ impl McpTool for TerminalResizeTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
+        let _body_action_guard = self.hub.embodiment_lease_action_lock.lock().await;
         let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
             Ok(lease_id) => lease_id,
             Err(error) => return Ok(ToolResult::error(error)),
@@ -3553,6 +3842,2417 @@ fn macos_ax_watch_error(error: Value) -> ToolResult {
 }
 
 // ===========================================================================
+//                       macos_ax_action_admission
+// ===========================================================================
+
+fn macos_ax_action_risk(operation: &str) -> Option<(&'static str, u8)> {
+    match operation {
+        "activate_app" | "focus_window" | "move_window" | "resize_window" | "scroll"
+        | "select_element" => Some(("embodied_navigation", 1)),
+        "type_text" | "press_button" | "trash_item" => Some(("reversible_content", 2)),
+        "submit_form" | "send_message" | "permanent_delete" | "purchase" => {
+            Some(("consequential_external", 3))
+        }
+        "permission_change" | "credential_entry" => Some(("protected_boundary", 4)),
+        _ => None,
+    }
+}
+
+fn macos_ax_requested_effect_risk(effect: Option<&str>) -> Option<(&'static str, u8)> {
+    match effect {
+        None => None,
+        Some("local_navigation") => Some(("embodied_navigation", 1)),
+        Some("local_content") => Some(("reversible_content", 2)),
+        Some("external_commit") => Some(("consequential_external", 3)),
+        Some("protected_boundary") => Some(("protected_boundary", 4)),
+        Some(_) => None,
+    }
+}
+
+fn macos_ax_trimmed_string(value: Option<&Value>) -> Option<&str> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn macos_ax_target_binding_mode(target: &Value) -> Option<&'static str> {
+    let target = target.as_object()?;
+    let bundle_id = macos_ax_trimmed_string(target.get("bundle_id"))?;
+    let pid = target.get("pid").and_then(Value::as_u64)?;
+    if bundle_id.is_empty() || pid == 0 {
+        return None;
+    }
+    let ax_identifier = macos_ax_trimmed_string(target.get("ax_identifier"));
+    let window_index = target.get("window_index").and_then(Value::as_u64);
+    match (ax_identifier, window_index) {
+        (Some(_), None) => Some("stable_ax_identifier"),
+        (None, Some(_))
+            if target.get("expected_title").and_then(Value::as_str).is_some()
+                && macos_ax_trimmed_string(target.get("expected_role")).is_some() =>
+        {
+            Some("sample_index_with_constraints")
+        }
+        _ => None,
+    }
+}
+
+fn macos_ax_json_sha256(value: &Value) -> String {
+    let encoded = serde_json::to_vec(value).expect("serde_json::Value is serializable");
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn macos_ax_probe_receipt_binding(
+    receipt: &Value,
+    target: &Value,
+    max_observation_age_ms: u64,
+) -> (bool, bool, bool, Option<u64>, String) {
+    let receipt_sha256 = macos_ax_json_sha256(receipt);
+    let Some(target_mode) = macos_ax_target_binding_mode(target) else {
+        return (false, false, false, None, receipt_sha256);
+    };
+    let schema_ok = receipt.get("schema").and_then(Value::as_str) == Some("macos_ax_probe/v0")
+        && receipt.get("read_only").and_then(Value::as_bool) == Some(true)
+        && receipt.pointer("/platform/system").and_then(Value::as_str) == Some("Darwin");
+    let windows = receipt.get("windows").and_then(Value::as_array);
+    let returned_count = windows.map(|windows| windows.len() as u64);
+    let window_count = receipt.get("window_count").and_then(Value::as_u64);
+    let source_window_count = receipt
+        .get("source_window_count")
+        .and_then(Value::as_u64);
+    let max_windows = receipt.pointer("/limits/max_windows").and_then(Value::as_u64);
+    let counts_recomputed = returned_count.is_some()
+        && window_count == returned_count
+        && source_window_count == returned_count
+        && max_windows.is_some_and(|limit| limit <= 50)
+        && returned_count
+            .zip(max_windows)
+            .is_some_and(|(count, limit)| count <= limit);
+    let coverage_ok = receipt.get("status").and_then(Value::as_str) == Some("ready")
+        && receipt.get("coverage_complete").and_then(Value::as_bool) == Some(true)
+        && receipt.get("windows_read_ok").and_then(Value::as_bool) == Some(true)
+        && receipt.get("counts_consistent").and_then(Value::as_bool) == Some(true)
+        && counts_recomputed
+        && receipt
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && receipt
+            .get("incomplete_reasons")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && receipt
+            .pointer("/limits/include_windows")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && receipt
+            .pointer("/limits/truncated")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && receipt
+            .pointer("/permission/ax_trusted")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && receipt
+            .pointer("/permission/method")
+            .and_then(Value::as_str)
+            == Some("AXIsProcessTrusted")
+        && receipt
+            .pointer("/permission/prompted")
+            .and_then(Value::as_bool)
+            == Some(false);
+    let target_bundle_id = macos_ax_trimmed_string(target.get("bundle_id"));
+    let target_pid = target.get("pid").and_then(Value::as_u64);
+    let app_scope_ok = receipt.get("app_identity_valid").and_then(Value::as_bool) == Some(true)
+        && receipt.get("frontmost_app").is_some_and(|app| {
+            macos_ax_trimmed_string(app.get("bundle_id")) == target_bundle_id
+                && app.get("pid").and_then(Value::as_u64) == target_pid
+                && target_pid.is_some_and(|pid| pid > 0)
+                && (macos_ax_trimmed_string(app.get("name")).is_some()
+                    || macos_ax_trimmed_string(app.get("bundle_id")).is_some())
+        });
+    let matching_windows = windows
+        .map(|windows| {
+            windows
+                .iter()
+                .filter(|window| match target_mode {
+                    "stable_ax_identifier" => {
+                        let expected = macos_ax_trimmed_string(target.get("ax_identifier"));
+                        macos_ax_trimmed_string(window.get("ax_identifier")) == expected
+                            && window
+                                .pointer("/identity/kind")
+                                .and_then(Value::as_str)
+                                == Some("ax_identifier")
+                            && macos_ax_trimmed_string(window.pointer("/identity/value"))
+                                == expected
+                            && window
+                                .pointer("/identity/stable_across_samples")
+                                .and_then(Value::as_bool)
+                                == Some(true)
+                    }
+                    "sample_index_with_constraints" => {
+                        window.get("index").and_then(Value::as_u64)
+                            == target.get("window_index").and_then(Value::as_u64)
+                            && window.get("title").and_then(Value::as_str)
+                                == target.get("expected_title").and_then(Value::as_str)
+                            && macos_ax_trimmed_string(window.get("role"))
+                                == macos_ax_trimmed_string(target.get("expected_role"))
+                    }
+                    _ => false,
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    let target_bound = matching_windows == 1;
+    let captured_at = receipt.get("captured_at").and_then(Value::as_i64);
+    let now = dispatch_now_secs();
+    let age_ms = captured_at.and_then(|captured_at| {
+        if captured_at <= 0 || captured_at > now.saturating_add(2) {
+            None
+        } else {
+            u64::try_from(now.saturating_sub(captured_at))
+                .ok()
+                .map(|age| age.saturating_mul(1_000))
+        }
+    });
+    let surface_fresh = age_ms.is_some_and(|age| age <= max_observation_age_ms);
+    (
+        schema_ok && coverage_ok && app_scope_ok,
+        target_bound,
+        surface_fresh,
+        age_ms,
+        receipt_sha256,
+    )
+}
+
+pub struct MacosAxActionAdmissionTool;
+
+impl MacosAxActionAdmissionTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for MacosAxActionAdmissionTool {
+    fn name(&self) -> &'static str {
+        "macos_ax_action_admission"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Preview-only macOS AX action admission. It honors owner-standing body authority without per-action prompts, but computes freshness and exact target binding from a complete macos_ax_probe receipt instead of trusting caller booleans. It never executes AX actions, requests permissions, captures pixels, or changes application state.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["operation", "authority_scope", "target", "surface_receipt", "task_intent_bound"],
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": [
+                            "activate_app", "focus_window", "move_window", "resize_window",
+                            "scroll", "select_element", "type_text", "press_button",
+                            "trash_item", "submit_form", "send_message", "permanent_delete",
+                            "purchase", "permission_change", "credential_entry"
+                        ]
+                    },
+                    "authority_scope": {
+                        "type": "string",
+                        "enum": ["owner_standing", "task_specific", "none"]
+                    },
+                    "target": {
+                        "type": "object",
+                        "required": ["bundle_id", "pid"],
+                        "oneOf": [
+                            { "required": ["ax_identifier"], "not": { "required": ["window_index"] } },
+                            { "required": ["window_index", "expected_title", "expected_role"], "not": { "required": ["ax_identifier"] } }
+                        ],
+                        "properties": {
+                            "bundle_id": { "type": "string", "minLength": 1 },
+                            "pid": { "type": "integer", "minimum": 1 },
+                            "ax_identifier": { "type": "string", "minLength": 1 },
+                            "window_index": { "type": "integer", "minimum": 0 },
+                            "expected_title": { "type": "string" },
+                            "expected_role": { "type": "string", "minLength": 1 }
+                        },
+                        "additionalProperties": false
+                    },
+                    "surface_receipt": {
+                        "type": "object",
+                        "description": "Exact complete macos_ax_probe/v0 receipt that observed the target. Freshness and binding are recomputed locally."
+                    },
+                    "max_observation_age_ms": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 30000,
+                        "default": 5000
+                    },
+                    "task_intent_bound": { "type": "boolean" },
+                    "requested_effect": {
+                        "type": "string",
+                        "enum": ["local_navigation", "local_content", "external_commit", "protected_boundary"]
+                    }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let operation = args.get("operation").and_then(Value::as_str).unwrap_or("");
+        let Some((mut risk_class, mut risk_rank)) = macos_ax_action_risk(operation) else {
+            return Ok(ToolResult::error("unsupported macOS AX operation"));
+        };
+        let requested_effect = match args.get("requested_effect") {
+            None => None,
+            Some(value) => match value.as_str() {
+                Some(effect) if macos_ax_requested_effect_risk(Some(effect)).is_some() => {
+                    Some(effect)
+                }
+                _ => return Ok(ToolResult::error("unsupported requested_effect")),
+            },
+        };
+        if let Some((effect_class, effect_rank)) = macos_ax_requested_effect_risk(requested_effect) {
+            if effect_rank > risk_rank {
+                risk_class = effect_class;
+                risk_rank = effect_rank;
+            }
+        }
+        let authority_scope = args
+            .get("authority_scope")
+            .and_then(Value::as_str)
+            .unwrap_or("none");
+        let authority_scope_valid = matches!(
+            authority_scope,
+            "owner_standing" | "task_specific" | "none"
+        );
+        let target = args.get("target").cloned().unwrap_or(Value::Null);
+        let target_exact = macos_ax_target_binding_mode(&target).is_some();
+        let max_observation_age_ms = args
+            .get("max_observation_age_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(5_000)
+            .clamp(100, 30_000);
+        let receipt = args.get("surface_receipt").cloned().unwrap_or(Value::Null);
+        let (receipt_complete, target_bound, surface_fresh, age_ms, receipt_sha256) =
+            macos_ax_probe_receipt_binding(&receipt, &target, max_observation_age_ms);
+        let task_intent_bound = args
+            .get("task_intent_bound")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let (decision, reason_codes): (&str, Vec<&str>) = if !authority_scope_valid {
+            ("deny", vec!["unsupported_authority_scope"])
+        } else if !target_exact {
+            ("deny", vec!["target_not_exactly_specified"])
+        } else if !receipt_complete {
+            ("reobserve", vec!["semantic_surface_receipt_incomplete"])
+        } else if !target_bound {
+            ("reobserve", vec!["target_not_bound_by_surface_receipt"])
+        } else if !surface_fresh {
+            ("reobserve", vec!["semantic_surface_stale"])
+        } else if authority_scope == "none" {
+            ("needs_task_authority", vec!["no_owner_authority"])
+        } else if risk_rank == 4 {
+            ("requires_user_presence", vec!["os_protected_boundary"])
+        } else if risk_rank == 3 && authority_scope != "task_specific" {
+            (
+                "needs_task_authority",
+                vec!["consequential_effect_requires_task_specific_scope"],
+            )
+        } else if risk_rank >= 2 && !task_intent_bound {
+            ("needs_task_intent", vec!["content_effect_not_bound_to_task"])
+        } else {
+            ("admit", vec!["authority_and_semantic_preconditions_satisfied"])
+        };
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "macos_ax_action_admission/v1",
+            "status": "preview_only",
+            "execution": { "performed": false, "executor_present": false },
+            "operation": operation,
+            "risk": { "class": risk_class, "rank": risk_rank },
+            "decision": decision,
+            "reason_codes": reason_codes,
+            "authority": {
+                "scope": authority_scope,
+                "per_action_prompt_default": false,
+                "standing_authority_honored": authority_scope == "owner_standing"
+            },
+            "preconditions": {
+                "target_exact": target_exact,
+                "receipt_complete": receipt_complete,
+                "target_bound": target_bound,
+                "surface_fresh": surface_fresh,
+                "surface_age_ms": age_ms,
+                "surface_receipt_sha256": receipt_sha256,
+                "task_intent_bound": task_intent_bound
+            },
+            "receipt_requirements": {
+                "before": ["bundle_id", "pid", "unique_window_identity", "surface_receipt_sha256"],
+                "after": ["exact_target_focused", "new_world_revision", "observed_postcondition"],
+                "restore_foreground_when_incidental": true
+            },
+            "visual_evidence": { "included": false, "reason": "semantic_first_default" }
+        })))
+    }
+}
+
+// ===========================================================================
+//                       macos_ax_focus_transaction
+// ===========================================================================
+
+const MACOS_AX_FOCUS_WINDOW_SOURCE_SCHEMA: &str = "macos_ax_focus_window/v0";
+
+pub struct MacosAxFocusTransactionTool {
+    hub: Hub,
+}
+
+impl MacosAxFocusTransactionTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn macos_ax_focus_transaction_asset_path(name: &str) -> PathBuf {
+    let build_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts")
+        .join(name);
+    if build_path.exists() {
+        return build_path;
+    }
+    installed_runtime_script_path(name).unwrap_or(build_path)
+}
+
+#[cfg(test)]
+fn macos_ax_focus_transaction_script_path() -> PathBuf {
+    macos_ax_focus_transaction_asset_path("macos_ax_focus_window.swift")
+}
+
+struct PinnedMacosAxVerifyAssets {
+    directory: PathBuf,
+    verify_path: PathBuf,
+}
+
+impl Drop for PinnedMacosAxVerifyAssets {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
+fn macos_ax_write_pinned_asset(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+fn macos_ax_materialize_pinned_verify_assets() -> std::io::Result<PinnedMacosAxVerifyAssets> {
+    let directory = std::env::temp_dir().join(format!(
+        "agent-bridge-macos-ax-verify-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(error) =
+            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+        {
+            let _ = std::fs::remove_dir(&directory);
+            return Err(error);
+        }
+    }
+    let verify_path = directory.join("macos_ax_verify.py");
+    let probe_path = directory.join("macos_ax_probe.py");
+    if let Err(error) = macos_ax_write_pinned_asset(
+        &verify_path,
+        include_bytes!("../../../scripts/macos_ax_verify.py"),
+    )
+    .and_then(|()| {
+        macos_ax_write_pinned_asset(
+            &probe_path,
+            include_bytes!("../../../scripts/macos_ax_probe.py"),
+        )
+    }) {
+        let _ = std::fs::remove_file(&verify_path);
+        let _ = std::fs::remove_file(&probe_path);
+        let _ = std::fs::remove_dir(&directory);
+        return Err(error);
+    }
+    Ok(PinnedMacosAxVerifyAssets {
+        directory,
+        verify_path,
+    })
+}
+
+fn macos_ax_bytes_sha256(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+const MACOS_AX_CLEAN_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+fn macos_ax_clean_runtime_command(command: &mut TokioCommand) {
+    command
+        .env_clear()
+        .env("PATH", MACOS_AX_CLEAN_PATH)
+        .env("LANG", "C")
+        .env("LC_ALL", "C");
+}
+
+async fn macos_ax_trusted_locator_output(
+    program: &str,
+    args: &[&str],
+    developer_dir: Option<&Path>,
+) -> std::result::Result<String, Value> {
+    let mut command = killable_command(program);
+    macos_ax_clean_runtime_command(&mut command);
+    if let Some(developer_dir) = developer_dir {
+        command.env("DEVELOPER_DIR", developer_dir);
+    }
+    command.args(args);
+    let output = match tokio::time::timeout(Duration::from_secs(5), command.output()).await {
+        Err(_) => {
+            return Err(json!({
+                "code": "trusted_tool_locator_timeout",
+                "program": program,
+                "args": args
+            }))
+        }
+        Ok(Err(error)) => {
+            return Err(json!({
+                "code": "trusted_tool_locator_failed",
+                "program": program,
+                "args": args,
+                "message": error.to_string()
+            }))
+        }
+        Ok(Ok(output)) => output,
+    };
+    if !output.status.success() {
+        return Err(json!({
+            "code": "trusted_tool_locator_nonzero",
+            "program": program,
+            "args": args,
+            "exit_code": output.status.code().unwrap_or(-1),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim()
+        }));
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() || value.lines().count() != 1 {
+        return Err(json!({
+            "code": "trusted_tool_locator_invalid_output",
+            "program": program,
+            "args": args
+        }));
+    }
+    Ok(value)
+}
+
+fn macos_ax_file_sha256(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+#[derive(Clone)]
+struct MacosAxTrustedExecutable {
+    launch_path: PathBuf,
+    canonical_path: PathBuf,
+    sha256: String,
+    codesign_identifier: &'static str,
+}
+
+#[derive(Clone)]
+struct MacosAxTrustedToolchain {
+    developer_dir: PathBuf,
+    swift: MacosAxTrustedExecutable,
+    python3: MacosAxTrustedExecutable,
+}
+
+fn macos_ax_spawn_detached_supervisor<F, T>(future: F) -> tokio::task::JoinHandle<T>
+where
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::spawn(future)
+}
+
+async fn macos_ax_catch_postspawn<F, T>(
+    future: F,
+) -> std::result::Result<T, Box<dyn std::any::Any + Send>>
+where
+    F: std::future::Future<Output = T>,
+{
+    use futures::FutureExt as _;
+    std::panic::AssertUnwindSafe(future).catch_unwind().await
+}
+
+fn macos_ax_macho_magic_valid(path: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut magic = [0_u8; 4];
+    file.read_exact(&mut magic)?;
+    Ok(matches!(
+        magic,
+        [0xfe, 0xed, 0xfa, 0xce]
+            | [0xce, 0xfa, 0xed, 0xfe]
+            | [0xfe, 0xed, 0xfa, 0xcf]
+            | [0xcf, 0xfa, 0xed, 0xfe]
+            | [0xca, 0xfe, 0xba, 0xbe]
+            | [0xbe, 0xba, 0xfe, 0xca]
+            | [0xca, 0xfe, 0xba, 0xbf]
+            | [0xbf, 0xba, 0xfe, 0xca]
+    ))
+}
+
+async fn macos_ax_verify_apple_codesign(
+    canonical_path: &Path,
+    identifier: &'static str,
+) -> std::result::Result<(), Value> {
+    let requirement = format!("anchor apple and identifier \"{identifier}\"");
+    let mut command = killable_command("/usr/bin/codesign");
+    macos_ax_clean_runtime_command(&mut command);
+    command
+        .arg("--verify")
+        .arg("--strict")
+        .arg(format!("-R={requirement}"))
+        .arg(canonical_path);
+    let output = match tokio::time::timeout(Duration::from_secs(10), command.output()).await {
+        Err(_) => {
+            return Err(json!({
+                "code": "trusted_interpreter_codesign_timeout",
+                "canonical_path": canonical_path,
+                "identifier": identifier
+            }))
+        }
+        Ok(Err(error)) => {
+            return Err(json!({
+                "code": "trusted_interpreter_codesign_failed",
+                "canonical_path": canonical_path,
+                "identifier": identifier,
+                "message": error.to_string()
+            }))
+        }
+        Ok(Ok(output)) => output,
+    };
+    if !output.status.success() {
+        return Err(json!({
+            "code": "trusted_interpreter_codesign_rejected",
+            "canonical_path": canonical_path,
+            "identifier": identifier,
+            "exit_code": output.status.code().unwrap_or(-1),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim()
+        }));
+    }
+    Ok(())
+}
+
+async fn macos_ax_resolve_trusted_executable(
+    developer_dir: &Path,
+    tool: &'static str,
+) -> std::result::Result<MacosAxTrustedExecutable, Value> {
+    let codesign_identifier = match tool {
+        "swift" => "com.apple.swift-frontend",
+        "python3" => "com.apple.python3",
+        _ => {
+            return Err(json!({
+                "code": "unsupported_trusted_interpreter",
+                "tool": tool
+            }))
+        }
+    };
+    let located = macos_ax_trusted_locator_output(
+        "/usr/bin/xcrun",
+        &["--no-cache", "--find", tool],
+        Some(developer_dir),
+    )
+    .await?;
+    let launch_path = PathBuf::from(located);
+    if !launch_path.is_absolute() || !launch_path.is_file() {
+        return Err(json!({
+            "code": "trusted_interpreter_invalid",
+            "tool": tool,
+            "path": launch_path
+        }));
+    }
+    let launch_metadata = std::fs::symlink_metadata(&launch_path).map_err(|error| {
+        json!({
+            "code": "trusted_interpreter_invocation_metadata_failed",
+            "tool": tool,
+            "path": launch_path,
+            "message": error.to_string()
+        })
+    })?;
+    let canonical_path = std::fs::canonicalize(&launch_path).map_err(|error| {
+        json!({
+            "code": "trusted_interpreter_canonicalize_failed",
+            "tool": tool,
+            "path": launch_path,
+            "message": error.to_string()
+        })
+    })?;
+    if !canonical_path.starts_with(developer_dir) {
+        return Err(json!({
+            "code": "trusted_interpreter_outside_active_developer_dir",
+            "tool": tool,
+            "path": launch_path,
+            "canonical_path": canonical_path,
+            "active_developer_dir": developer_dir
+        }));
+    }
+    let metadata = std::fs::metadata(&canonical_path).map_err(|error| {
+        json!({
+            "code": "trusted_interpreter_metadata_failed",
+            "tool": tool,
+            "canonical_path": canonical_path,
+            "message": error.to_string()
+        })
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.uid() != 0
+            || metadata.mode() & 0o022 != 0
+            || launch_metadata.uid() != 0
+            || launch_metadata.mode() & 0o022 != 0
+        {
+            return Err(json!({
+                "code": "trusted_interpreter_ownership_invalid",
+                "tool": tool,
+                "canonical_path": canonical_path,
+                "uid": metadata.uid(),
+                "mode": format!("{:o}", metadata.mode() & 0o7777),
+                "invocation_uid": launch_metadata.uid(),
+                "invocation_mode": format!("{:o}", launch_metadata.mode() & 0o7777)
+            }));
+        }
+    }
+    if !macos_ax_macho_magic_valid(&canonical_path).map_err(|error| {
+        json!({
+            "code": "trusted_interpreter_format_read_failed",
+            "tool": tool,
+            "canonical_path": canonical_path,
+            "message": error.to_string()
+        })
+    })? {
+        return Err(json!({
+            "code": "trusted_interpreter_not_macho",
+            "tool": tool,
+            "canonical_path": canonical_path
+        }));
+    }
+    macos_ax_verify_apple_codesign(&canonical_path, codesign_identifier).await?;
+    let hash_path = canonical_path.clone();
+    let sha256 = tokio::task::spawn_blocking(move || macos_ax_file_sha256(&hash_path))
+        .await
+        .map_err(|error| {
+            json!({
+                "code": "trusted_interpreter_hash_task_failed",
+                "tool": tool,
+                "message": error.to_string()
+            })
+        })?
+        .map_err(|error| {
+            json!({
+                "code": "trusted_interpreter_hash_failed",
+                "tool": tool,
+                "canonical_path": canonical_path,
+                "message": error.to_string()
+            })
+        })?;
+    Ok(MacosAxTrustedExecutable {
+        launch_path,
+        canonical_path,
+        sha256,
+        codesign_identifier,
+    })
+}
+
+async fn macos_ax_resolve_trusted_toolchain(
+) -> std::result::Result<MacosAxTrustedToolchain, Value> {
+    let selected =
+        macos_ax_trusted_locator_output("/usr/bin/xcode-select", &["-p"], None).await?;
+    let selected_path = PathBuf::from(selected);
+    if !selected_path.is_absolute() {
+        return Err(json!({
+            "code": "active_developer_dir_invalid",
+            "path": selected_path,
+            "reason": "xcode-select returned a relative path"
+        }));
+    }
+    let developer_dir = std::fs::canonicalize(&selected_path).map_err(|error| {
+        json!({
+            "code": "active_developer_dir_invalid",
+            "path": selected_path,
+            "message": error.to_string()
+        })
+    })?;
+    if !developer_dir.is_absolute() || !developer_dir.is_dir() {
+        return Err(json!({
+            "code": "active_developer_dir_invalid",
+            "path": developer_dir
+        }));
+    }
+    let swift = macos_ax_resolve_trusted_executable(&developer_dir, "swift").await?;
+    let python3 = macos_ax_resolve_trusted_executable(&developer_dir, "python3").await?;
+    Ok(MacosAxTrustedToolchain {
+        developer_dir,
+        swift,
+        python3,
+    })
+}
+
+fn macos_ax_toolchain_resolution_receipt(toolchain: &MacosAxTrustedToolchain) -> Value {
+    json!({
+        "schema": "macos_ax_toolchain_resolution/v0",
+        "active_developer_dir": toolchain.developer_dir,
+        "environment": {
+            "mode": "clear_then_allowlist",
+            "PATH": MACOS_AX_CLEAN_PATH,
+            "LANG": "C",
+            "LC_ALL": "C",
+            "DEVELOPER_DIR": toolchain.developer_dir
+        },
+        "locator": {
+            "xcode_select": "/usr/bin/xcode-select -p",
+            "xcrun": "/usr/bin/xcrun --no-cache --find <tool>"
+        },
+        "swift": {
+            "invocation_path": toolchain.swift.launch_path,
+            "canonical_path": toolchain.swift.canonical_path,
+            "sha256": toolchain.swift.sha256,
+            "codesign_identifier": toolchain.swift.codesign_identifier,
+            "codesign_requirement_verified": true,
+            "macho": true
+        },
+        "python3": {
+            "invocation_path": toolchain.python3.launch_path,
+            "canonical_path": toolchain.python3.canonical_path,
+            "sha256": toolchain.python3.sha256,
+            "codesign_identifier": toolchain.python3.codesign_identifier,
+            "codesign_requirement_verified": true,
+            "macho": true
+        }
+    })
+}
+
+fn macos_ax_focus_verified_asset_sha256(
+    name: &str,
+    expected_bytes: &[u8],
+) -> std::result::Result<String, Value> {
+    let path = macos_ax_focus_transaction_asset_path(name);
+    let actual = std::fs::read(&path).map_err(|error| {
+        json!({
+            "code": "asset_unreadable",
+            "asset": name,
+            "path": path,
+            "message": error.to_string()
+        })
+    })?;
+    let expected_sha256 = macos_ax_bytes_sha256(expected_bytes);
+    let actual_sha256 = macos_ax_bytes_sha256(&actual);
+    if actual_sha256 != expected_sha256 {
+        return Err(json!({
+            "code": "asset_integrity_mismatch",
+            "asset": name,
+            "path": path,
+            "expected_sha256": expected_sha256,
+            "actual_sha256": actual_sha256
+        }));
+    }
+    Ok(actual_sha256)
+}
+
+fn macos_ax_focus_identity_matches(value: &Value, args: &Value) -> bool {
+    value.get("pid").and_then(Value::as_u64) == args.get("pid").and_then(Value::as_u64)
+        && macos_ax_trimmed_string(value.get("bundle_id"))
+            == macos_ax_trimmed_string(args.get("bundle_id"))
+}
+
+fn macos_ax_focus_window_matches_request(value: &Value, args: &Value) -> bool {
+    let expected_role = macos_ax_trimmed_string(args.get("expected_role")).unwrap_or("AXWindow");
+    let title_ok = match args.get("expected_title").filter(|value| !value.is_null()) {
+        Some(expected) => value.get("title") == Some(expected),
+        None => true,
+    };
+    macos_ax_trimmed_string(value.get("ax_identifier"))
+        == macos_ax_trimmed_string(args.get("ax_identifier"))
+        && macos_ax_trimmed_string(value.get("role")) == Some(expected_role)
+        && title_ok
+}
+
+fn macos_ax_focus_window_selector_reads_complete(value: &Value, args: &Value) -> bool {
+    value
+        .pointer("/selector_attributes_read_ok/ax_identifier")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && value
+            .pointer("/selector_attributes_read_ok/role")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && (args.get("expected_title").is_none()
+            || value
+                .pointer("/selector_attributes_read_ok/title")
+                .and_then(Value::as_bool)
+                == Some(true))
+}
+
+fn macos_ax_focus_source_contract_valid(payload: &Value, args: &Value) -> bool {
+    let status = payload.get("status").and_then(Value::as_str).unwrap_or("");
+    let verification = payload.pointer("/verification/verdict").and_then(Value::as_str);
+    let target = payload.get("target").unwrap_or(&Value::Null);
+    let selector = target.get("selector").unwrap_or(&Value::Null);
+    let expected_role = macos_ax_trimmed_string(args.get("expected_role")).unwrap_or("AXWindow");
+    let expected_title = args.get("expected_title").unwrap_or(&Value::Null);
+    let request_binding_ok = payload.get("schema").and_then(Value::as_str)
+        == Some(MACOS_AX_FOCUS_WINDOW_SOURCE_SCHEMA)
+        && payload.get("read_only").and_then(Value::as_bool) == Some(false)
+        && payload.get("operation").and_then(Value::as_str) == Some("focus_window")
+        && target.get("pid").and_then(Value::as_u64) == args.get("pid").and_then(Value::as_u64)
+        && macos_ax_trimmed_string(target.get("bundle_id"))
+            == macos_ax_trimmed_string(args.get("bundle_id"))
+        && selector.get("mode").and_then(Value::as_str) == Some("ax_identifier")
+        && macos_ax_trimmed_string(selector.get("ax_identifier"))
+            == macos_ax_trimmed_string(args.get("ax_identifier"))
+        && selector.get("window_index").is_some_and(Value::is_null)
+        && selector.get("expected_title").unwrap_or(&Value::Null) == expected_title
+        && macos_ax_trimmed_string(selector.get("expected_role")) == Some(expected_role);
+    let authority_ok = payload
+        .pointer("/authority/source")
+        .and_then(Value::as_str)
+        == Some("owner_standing")
+        && payload
+            .pointer("/authority/risk_rank")
+            .and_then(Value::as_u64)
+            == Some(1)
+        && payload
+            .pointer("/authority/classification")
+            .and_then(Value::as_str)
+            == Some("embodied_navigation")
+        && payload
+            .pointer("/authority/prompt_required")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && payload
+            .pointer("/authority/prompted")
+            .and_then(Value::as_bool)
+            == Some(false);
+    let execution_attempted = payload
+        .pointer("/execution/attempted")
+        .and_then(Value::as_bool);
+    let execution_performed_value = payload.pointer("/execution/performed");
+    let execution_performed = execution_performed_value.and_then(Value::as_bool);
+    let execution_performed_is_null = execution_performed_value.is_some_and(Value::is_null);
+    let idempotent_noop = payload
+        .pointer("/execution/idempotent_noop")
+        .and_then(Value::as_bool);
+    let execution_shape_ok = execution_attempted.is_some()
+        && (execution_performed.is_some() || execution_performed_is_null)
+        && idempotent_noop.is_some()
+        && !(execution_performed == Some(true) && execution_attempted != Some(true))
+        && !(execution_performed == Some(true) && idempotent_noop == Some(true))
+        && !(idempotent_noop == Some(true) && execution_attempted != Some(false));
+    let permission_shape_ok = payload
+        .pointer("/permission/method")
+        .and_then(Value::as_str)
+        == Some("AXIsProcessTrusted")
+        && payload
+            .pointer("/permission/prompted")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && payload
+            .pointer("/permission/ax_trusted")
+            .is_some_and(Value::is_boolean);
+    let unique_target_ok = target.get("match_count").and_then(Value::as_u64) == Some(1)
+        && target.get("hidden_candidate_count").and_then(Value::as_u64) == Some(0)
+        && payload
+            .pointer("/precondition/selector_attributes_complete")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/precondition/hidden_candidate_count")
+            .and_then(Value::as_u64)
+            == Some(0)
+        && target
+            .get("matched_window")
+            .is_some_and(|window| {
+                macos_ax_focus_window_matches_request(window, args)
+                    && macos_ax_focus_window_selector_reads_complete(window, args)
+            });
+    let verified_target_ok = unique_target_ok
+        && payload
+            .pointer("/postcondition/observed_window")
+            .is_some_and(|window| {
+                macos_ax_focus_window_matches_request(window, args)
+                    && macos_ax_focus_window_selector_reads_complete(window, args)
+            });
+    let verified_foreground_ok = payload
+        .pointer("/foreground/before")
+        .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, args))
+        && payload
+            .pointer("/foreground/after")
+            .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, args))
+        && payload.pointer("/foreground/changed").and_then(Value::as_bool) == Some(false);
+    let verified_revisions_ok = macos_ax_trimmed_string(payload.pointer("/world_revision/before"))
+        .is_some()
+        && macos_ax_trimmed_string(payload.pointer("/world_revision/after")).is_some();
+    let permission_trusted = payload
+        .pointer("/permission/ax_trusted")
+        .and_then(Value::as_bool)
+        == Some(true);
+    let postcondition_read_shape_ok = payload
+        .pointer("/postcondition/windows_read_ok")
+        .and_then(Value::as_bool)
+        .is_some()
+        && payload
+            .pointer("/postcondition/focused_window_read_ok")
+            .and_then(Value::as_bool)
+            .is_some()
+        && payload
+            .pointer("/postcondition/scope_stable")
+            .and_then(Value::as_bool)
+            .is_some()
+        && payload
+            .pointer("/postcondition/hidden_candidate_count")
+            .and_then(Value::as_u64)
+            .is_some();
+    let postcondition_read_complete = payload
+        .pointer("/postcondition/windows_read_ok")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && payload
+            .pointer("/postcondition/focused_window_read_ok")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/postcondition/scope_stable")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && payload
+            .pointer("/postcondition/hidden_candidate_count")
+            .and_then(Value::as_u64)
+            == Some(0);
+    let verification_failed_execution_ok = (execution_attempted == Some(true)
+        && execution_performed == Some(true)
+        && idempotent_noop == Some(false))
+        || (execution_attempted == Some(false)
+            && execution_performed == Some(false)
+            && idempotent_noop == Some(false)
+            && payload
+                .pointer("/execution/primitive")
+                .and_then(Value::as_str)
+                == Some("none_initially_focused_postcondition_lost"));
+    let outcome_unknown_execution_ok = (execution_attempted == Some(true)
+        && execution_performed == Some(true)
+        && idempotent_noop == Some(false)
+        && payload.pointer("/execution/ax_error").is_some_and(Value::is_null))
+        || (execution_attempted == Some(false)
+            && execution_performed == Some(false)
+            && idempotent_noop == Some(false)
+            && payload
+                .pointer("/execution/primitive")
+                .and_then(Value::as_str)
+                == Some("none_initially_focused_postcondition_unknown")
+            && payload.pointer("/execution/ax_error").is_some_and(Value::is_null))
+        || (execution_attempted == Some(true)
+            && execution_performed_is_null
+            && idempotent_noop == Some(false)
+            && payload
+                .pointer("/execution/ax_error")
+                .is_some_and(Value::is_object));
+    let outcome_ok = match status {
+        "verified" => {
+            verification == Some("verified")
+                && permission_trusted
+                && payload.pointer("/precondition/met").and_then(Value::as_bool) == Some(true)
+                && payload.pointer("/postcondition/met").and_then(Value::as_bool) == Some(true)
+                && payload
+                    .pointer("/postcondition/exact_target_focused")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                && payload
+                    .pointer("/postcondition/target_still_exact")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                && payload
+                    .pointer("/postcondition/foreground_unchanged")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                && postcondition_read_shape_ok
+                && postcondition_read_complete
+                && ((execution_performed == Some(true)) ^ (idempotent_noop == Some(true)))
+                && payload.pointer("/execution/ax_error").is_some_and(Value::is_null)
+                && verified_target_ok
+                && verified_foreground_ok
+                && verified_revisions_ok
+        }
+        "blocked" => {
+            verification == Some("blocked")
+                && execution_attempted == Some(false)
+                && execution_performed == Some(false)
+                && idempotent_noop == Some(false)
+        }
+        "verification_failed" => {
+            verification == Some("failed")
+                && permission_trusted
+                && payload.pointer("/precondition/met").and_then(Value::as_bool) == Some(true)
+                && payload.pointer("/postcondition/met").and_then(Value::as_bool) == Some(false)
+                && payload
+                    .pointer("/postcondition/exact_target_focused")
+                    .is_some_and(Value::is_boolean)
+                && payload
+                    .pointer("/postcondition/target_still_exact")
+                    .is_some_and(Value::is_boolean)
+                && payload
+                    .pointer("/postcondition/foreground_unchanged")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                && postcondition_read_shape_ok
+                && postcondition_read_complete
+                && unique_target_ok
+                && payload.pointer("/execution/ax_error").is_some_and(Value::is_null)
+                && payload
+                    .pointer("/foreground/before")
+                    .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, args))
+                && payload
+                    .pointer("/foreground/after")
+                    .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, args))
+                && payload.pointer("/foreground/changed").and_then(Value::as_bool)
+                    == Some(false)
+                && verified_revisions_ok
+                && verification_failed_execution_ok
+        }
+        "outcome_unknown" => {
+            verification == Some("unknown")
+                && permission_trusted
+                && payload.pointer("/precondition/met").and_then(Value::as_bool) == Some(true)
+                && payload.pointer("/postcondition/met").and_then(Value::as_bool) == Some(false)
+                && postcondition_read_shape_ok
+                && !postcondition_read_complete
+                && unique_target_ok
+                && payload
+                    .pointer("/foreground/before")
+                    .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, args))
+                && macos_ax_trimmed_string(payload.pointer("/world_revision/before")).is_some()
+                && outcome_unknown_execution_ok
+        }
+        "error" => {
+            verification == Some("error")
+                && permission_trusted
+                && execution_attempted == Some(false)
+                && execution_performed == Some(false)
+                && idempotent_noop == Some(false)
+                && payload
+                    .pointer("/execution/ax_error")
+                    .is_some_and(Value::is_object)
+        }
+        _ => false,
+    };
+    let revisions_ok = payload
+        .pointer("/world_revision/before")
+        .is_some_and(|value| value.is_null() || macos_ax_trimmed_string(Some(value)).is_some())
+        && payload
+            .pointer("/world_revision/after")
+            .is_some_and(|value| value.is_null() || macos_ax_trimmed_string(Some(value)).is_some());
+        request_binding_ok
+        && authority_ok
+        && execution_shape_ok
+        && permission_shape_ok
+        && outcome_ok
+        && revisions_ok
+        && payload
+            .pointer("/foreground/restore_attempted")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && payload.get("visual_evidence").and_then(Value::as_bool) == Some(false)
+}
+
+fn macos_ax_focus_independent_request_binding_valid(verify: &Value, source: &Value) -> bool {
+    let target = source.get("target").unwrap_or(&Value::Null);
+    let target_selector = target.get("selector").unwrap_or(&Value::Null);
+    let selector = verify
+        .pointer("/verification/evidence/selector")
+        .unwrap_or(&Value::Null);
+    let scope = verify
+        .pointer("/verification/evidence/scope")
+        .unwrap_or(&Value::Null);
+    let expected_role = macos_ax_trimmed_string(target_selector.get("expected_role"));
+    verify.get("schema").and_then(Value::as_str) == Some(MACOS_AX_VERIFY_SEMANTIC_SCHEMA)
+        && verify.get("source_schema").and_then(Value::as_str)
+            == Some(MACOS_AX_VERIFY_SOURCE_SCHEMA)
+        && verify.get("source_adapter").and_then(Value::as_str) == Some("macos.ax.verify")
+        && verify.get("read_only").and_then(Value::as_bool) == Some(true)
+        && verify.get("raw_available").and_then(Value::as_bool) == Some(true)
+        && verify.get("raw_included").and_then(Value::as_bool) == Some(false)
+        && verify
+            .get("semantic_objects")
+            .and_then(Value::as_array)
+            .is_some_and(|objects| objects.len() == 1)
+        && verify
+            .pointer("/verification/evidence/expect")
+            .and_then(Value::as_str)
+            == Some("window_focused")
+        && selector.get("pid") == target.get("pid")
+        && macos_ax_trimmed_string(selector.get("bundle_id"))
+            == macos_ax_trimmed_string(target.get("bundle_id"))
+        && macos_ax_trimmed_string(selector.get("ax_identifier"))
+            == macos_ax_trimmed_string(target_selector.get("ax_identifier"))
+        && macos_ax_trimmed_string(selector.get("role")) == expected_role
+        && selector.get("title").unwrap_or(&Value::Null)
+            == target_selector.get("expected_title").unwrap_or(&Value::Null)
+        && scope.get("source").and_then(Value::as_str) == Some("frontmost_app_windows")
+        && scope.get("max_windows").and_then(Value::as_u64) == Some(50)
+        && verify
+            .pointer("/semantic_objects/0/state/expect")
+            .and_then(Value::as_str)
+            == Some("window_focused")
+        && verify.pointer("/semantic_objects/0/state/selector") == Some(selector)
+        && verify.pointer("/semantic_objects/0/state/scope") == Some(scope)
+}
+
+fn macos_ax_focus_independent_verify_contract_valid(verify: &Value, source: &Value) -> bool {
+    let target = source.get("target").unwrap_or(&Value::Null);
+    let target_selector = target.get("selector").unwrap_or(&Value::Null);
+    let observed = verify
+        .pointer("/semantic_objects/0/state/observed")
+        .unwrap_or(&Value::Null);
+    let matches = observed.get("matches").and_then(Value::as_array);
+    let matched_window = matches.and_then(|matches| matches.first());
+    let returned_count = observed.get("window_count").and_then(Value::as_u64);
+    let source_count = observed
+        .get("source_window_count")
+        .and_then(Value::as_u64);
+    let expected_role = macos_ax_trimmed_string(target_selector.get("expected_role"));
+    let target_args = json!({
+        "pid": target.get("pid").cloned().unwrap_or(Value::Null),
+        "bundle_id": target.get("bundle_id").cloned().unwrap_or(Value::Null),
+        "ax_identifier": target_selector.get("ax_identifier").cloned().unwrap_or(Value::Null),
+        "expected_title": target_selector.get("expected_title").cloned().unwrap_or(Value::Null),
+        "expected_role": expected_role
+    });
+
+    macos_ax_focus_independent_request_binding_valid(verify, source)
+        && verify
+            .pointer("/verification/verdict")
+            .and_then(Value::as_str)
+            == Some("verified")
+        && verify
+            .pointer("/verification/source_verdict")
+            .and_then(Value::as_str)
+            == Some("verified")
+        && verify
+            .pointer("/verification/source_recover")
+            .and_then(Value::as_str)
+            == Some("proceed")
+        && verify.pointer("/verification/reason").is_some_and(Value::is_null)
+        && verify.pointer("/verification/recover").and_then(Value::as_str) == Some("proceed")
+        && verify.pointer("/verification/method").and_then(Value::as_str)
+            == Some("macos_ax_verify.semantic_normalizer")
+        && verify
+            .pointer("/verification/evidence/observed_count")
+            .and_then(Value::as_u64)
+            == Some(1)
+        && verify
+            .pointer("/semantic_objects/0/state/source_verdict")
+            .and_then(Value::as_str)
+            == Some("verified")
+        && verify
+            .pointer("/semantic_objects/0/state/source_recover")
+            .and_then(Value::as_str)
+            == Some("proceed")
+        && verify
+            .pointer("/semantic_objects/0/state/error")
+            .is_some_and(Value::is_null)
+        && observed.get("probe_status").and_then(Value::as_str) == Some("ready")
+        && observed
+            .get("permission")
+            .is_some_and(|permission| {
+                permission.get("ax_trusted").and_then(Value::as_bool) == Some(true)
+                    && permission.get("method").and_then(Value::as_str)
+                        == Some("AXIsProcessTrusted")
+                    && permission.get("prompted").and_then(Value::as_bool) == Some(false)
+            })
+        && observed
+            .get("frontmost_app")
+            .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, &target_args))
+        && observed.get("count").and_then(Value::as_u64) == Some(1)
+        && observed
+            .get("selector_candidate_count")
+            .and_then(Value::as_u64)
+            == Some(1)
+        && matches.is_some_and(|matches| matches.len() == 1)
+        && matched_window.is_some_and(|window| {
+            macos_ax_focus_window_matches_request(window, &target_args)
+                && window.get("focused").and_then(Value::as_bool) == Some(true)
+                && window.pointer("/identity/kind").and_then(Value::as_str)
+                    == Some("ax_identifier")
+                && macos_ax_trimmed_string(window.pointer("/identity/value"))
+                    == macos_ax_trimmed_string(target_selector.get("ax_identifier"))
+                && window
+                    .pointer("/identity/stable_across_samples")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+        })
+        && observed.get("unknown_count").and_then(Value::as_u64) == Some(0)
+        && observed
+            .get("unknowns")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && returned_count.is_some_and(|count| count <= 50)
+        && returned_count == source_count
+        && matches
+            .zip(returned_count)
+            .is_some_and(|(matches, count)| matches.len() as u64 <= count)
+        && observed.get("counts_consistent").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/limits/max_windows").and_then(Value::as_u64) == Some(50)
+        && observed
+            .pointer("/limits/include_windows")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && observed.pointer("/limits/truncated").and_then(Value::as_bool) == Some(false)
+        && observed.get("windows_read_ok").and_then(Value::as_bool) == Some(true)
+        && observed.get("app_identity_valid").and_then(Value::as_bool) == Some(true)
+        && observed.get("scope_match").and_then(Value::as_bool) == Some(true)
+        && observed
+            .pointer("/coverage/complete")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && observed
+            .pointer("/coverage/reasons")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && observed.get("coverage_complete").and_then(Value::as_bool) == Some(true)
+        && observed
+            .get("incomplete_reasons")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && observed.pointer("/proof/complete").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/proof/truth").and_then(Value::as_str) == Some("match")
+        && observed.get("proof_complete").and_then(Value::as_bool) == Some(true)
+        && observed
+            .pointer("/proof/required_evidence")
+            .and_then(Value::as_str)
+            == Some("frontmost_app_window_observation")
+        && observed
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+}
+
+fn macos_ax_focus_independent_unmet_contract_valid(verify: &Value, source: &Value) -> bool {
+    let target = source.get("target").unwrap_or(&Value::Null);
+    let target_selector = target.get("selector").unwrap_or(&Value::Null);
+    let observed = verify
+        .pointer("/semantic_objects/0/state/observed")
+        .unwrap_or(&Value::Null);
+    let matches = observed.get("matches").and_then(Value::as_array);
+    let observed_count = observed.get("count").and_then(Value::as_u64);
+    let returned_count = observed.get("window_count").and_then(Value::as_u64);
+    let source_count = observed
+        .get("source_window_count")
+        .and_then(Value::as_u64);
+    let expected_role = macos_ax_trimmed_string(target_selector.get("expected_role"));
+    let target_args = json!({
+        "pid": target.get("pid").cloned().unwrap_or(Value::Null),
+        "bundle_id": target.get("bundle_id").cloned().unwrap_or(Value::Null),
+        "ax_identifier": target_selector.get("ax_identifier").cloned().unwrap_or(Value::Null),
+        "expected_title": target_selector.get("expected_title").cloned().unwrap_or(Value::Null),
+        "expected_role": expected_role
+    });
+    let target_absent_or_uniquely_unfocused = matches.is_some_and(|matches| {
+        matches.len() <= 1
+            && observed_count == Some(matches.len() as u64)
+            && matches.first().is_none_or(|window| {
+                macos_ax_focus_window_matches_request(window, &target_args)
+                    && window.get("focused").and_then(Value::as_bool) == Some(false)
+            })
+    });
+
+    macos_ax_focus_independent_request_binding_valid(verify, source)
+        && verify.pointer("/verification/verdict").and_then(Value::as_str)
+            == Some("not_verified")
+        && verify
+            .pointer("/verification/source_verdict")
+            .and_then(Value::as_str)
+            == Some("unmet")
+        && verify
+            .pointer("/verification/source_recover")
+            .and_then(Value::as_str)
+            == Some("retry")
+        && verify.pointer("/verification/recover").and_then(Value::as_str) == Some("retry")
+        && verify.pointer("/verification/reason").and_then(Value::as_str)
+            == Some("postcondition_unmet")
+        && verify.pointer("/verification/method").and_then(Value::as_str)
+            == Some("macos_ax_verify.semantic_normalizer")
+        && verify
+            .pointer("/verification/evidence/observed_count")
+            .and_then(Value::as_u64)
+            == observed_count
+        && verify
+            .pointer("/semantic_objects/0/state/source_verdict")
+            .and_then(Value::as_str)
+            == Some("unmet")
+        && verify
+            .pointer("/semantic_objects/0/state/source_recover")
+            .and_then(Value::as_str)
+            == Some("retry")
+        && verify
+            .pointer("/semantic_objects/0/state/error")
+            .is_some_and(Value::is_null)
+        && observed.get("probe_status").and_then(Value::as_str) == Some("ready")
+        && observed.get("permission").is_some_and(|permission| {
+            permission.get("ax_trusted").and_then(Value::as_bool) == Some(true)
+                && permission.get("method").and_then(Value::as_str)
+                    == Some("AXIsProcessTrusted")
+                && permission.get("prompted").and_then(Value::as_bool) == Some(false)
+        })
+        && observed
+            .get("frontmost_app")
+            .is_some_and(|foreground| macos_ax_focus_identity_matches(foreground, &target_args))
+        && target_absent_or_uniquely_unfocused
+        && observed
+            .get("selector_candidate_count")
+            .and_then(Value::as_u64)
+            == observed_count
+        && observed.get("unknown_count").and_then(Value::as_u64) == Some(0)
+        && observed
+            .get("unknowns")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && returned_count.is_some_and(|count| count <= 50)
+        && returned_count == source_count
+        && observed.get("counts_consistent").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/limits/max_windows").and_then(Value::as_u64) == Some(50)
+        && observed.pointer("/limits/include_windows").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/limits/truncated").and_then(Value::as_bool) == Some(false)
+        && observed.get("windows_read_ok").and_then(Value::as_bool) == Some(true)
+        && observed.get("app_identity_valid").and_then(Value::as_bool) == Some(true)
+        && observed.get("scope_match").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/coverage/complete").and_then(Value::as_bool) == Some(true)
+        && observed
+            .pointer("/coverage/reasons")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && observed.get("coverage_complete").and_then(Value::as_bool) == Some(true)
+        && observed
+            .get("incomplete_reasons")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && observed.pointer("/proof/complete").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/proof/truth").and_then(Value::as_str) == Some("no_match")
+        && observed.get("proof_complete").and_then(Value::as_bool) == Some(true)
+        && observed.pointer("/proof/required_evidence").and_then(Value::as_str)
+            == Some("frontmost_app_window_observation")
+        && observed
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+}
+
+fn macos_ax_focus_transaction_envelope(
+    source: &Value,
+    independent_verify: Option<&Value>,
+) -> Value {
+    let source_status = source
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("error");
+    let executor_verdict = source
+        .pointer("/verification/verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("error");
+    let reported_independent_verdict = independent_verify
+        .and_then(|verify| verify.pointer("/verification/verdict"))
+        .and_then(Value::as_str)
+        .unwrap_or(if source_status == "verified" {
+            "error"
+        } else {
+            "skipped"
+        });
+    let independent_verified_contract_ok = independent_verify
+        .is_some_and(|verify| macos_ax_focus_independent_verify_contract_valid(verify, source));
+    let independent_unmet_contract_ok = independent_verify
+        .is_some_and(|verify| macos_ax_focus_independent_unmet_contract_valid(verify, source));
+    let independent_contract_ok =
+        independent_verified_contract_ok || independent_unmet_contract_ok;
+    let independent_verdict = if independent_verified_contract_ok {
+        "verified"
+    } else if independent_unmet_contract_ok {
+        "not_verified"
+    } else if reported_independent_verdict == "error" {
+        "error"
+    } else if reported_independent_verdict == "skipped" {
+        "skipped"
+    } else {
+        "unknown"
+    };
+    let (status, verdict, recover, reason) = match source_status {
+        "verified" if independent_verified_contract_ok => {
+            ("verified", "verified", "proceed", Value::Null)
+        }
+        "verified" if independent_unmet_contract_ok => (
+            "not_verified",
+            "not_verified",
+            "reobserve",
+            json!("independent_postcondition_not_verified"),
+        ),
+        "verified" => (
+            "outcome_unknown",
+            "unknown",
+            "reobserve",
+            json!("independent_postcondition_receipt_invalid_or_unavailable"),
+        ),
+        "blocked" => (
+            "blocked",
+            "blocked",
+            "reobserve",
+            json!("executor_precondition_blocked"),
+        ),
+        "verification_failed" => (
+            "not_verified",
+            "not_verified",
+            "reobserve",
+            json!("executor_postcondition_not_verified"),
+        ),
+        "outcome_unknown" => (
+            "outcome_unknown",
+            "unknown",
+            "reobserve",
+            json!("executor_postcondition_receipt_incomplete_or_scope_changed"),
+        ),
+        _ => (
+            "error",
+            "error",
+            "replan",
+            json!("executor_error"),
+        ),
+    };
+    let independent_evidence = independent_verify.cloned().unwrap_or_else(|| {
+        json!({
+            "schema": "macos_ax_focus_independent_verify/v0",
+            "status": "skipped",
+            "reason": "executor_did_not_report_verified"
+        })
+    });
+    let precondition = source
+        .get("precondition")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let admission_decision = if precondition.get("met").and_then(Value::as_bool) == Some(true) {
+        "admitted"
+    } else {
+        "blocked"
+    };
+
+    json!({
+        "schema": "macos_ax_focus_transaction/v0",
+        "status": status,
+        "operation": "focus_window",
+        "read_only": false,
+        "risk": {"class": "embodied_navigation", "rank": 1},
+        "authority": {
+            "source": "owner_standing",
+            "prompt_required": false,
+            "prompted": false
+        },
+        "target": source.get("target").cloned().unwrap_or(Value::Null),
+        "admission": {
+            "decision": admission_decision,
+            "basis": "rank1_owner_standing_and_live_executor_precondition",
+            "per_action_prompt": false,
+            "precondition": precondition
+        },
+        "execution": source.get("execution").cloned().unwrap_or(Value::Null),
+        "postcondition": {
+            "executor": source.get("postcondition").cloned().unwrap_or(Value::Null),
+            "independent_verify": independent_evidence
+        },
+        "world_revision": source.get("world_revision").cloned().unwrap_or(Value::Null),
+        "foreground": source.get("foreground").cloned().unwrap_or(Value::Null),
+        "verification": {
+            "verdict": verdict,
+            "executor_verdict": executor_verdict,
+            "independent_verdict": independent_verdict,
+            "independent_reported_verdict": reported_independent_verdict,
+            "independent_contract_ok": independent_contract_ok,
+            "independent_verified_contract_ok": independent_verified_contract_ok,
+            "independent_unmet_contract_ok": independent_unmet_contract_ok,
+            "recover": recover,
+            "reason": reason
+        },
+        "executor_receipt": source,
+        "visual_evidence": {"included": false, "reason": "semantic_first_default"}
+    })
+}
+
+fn macos_ax_focus_transaction_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "macos_ax_focus_transaction_mcp_error.v0",
+        "status": "error",
+        "operation": "focus_window",
+        "execution": { "attempted": false, "performed": false },
+        "visual_evidence": { "included": false, "reason": "semantic_first_default" },
+        "error": error
+    }));
+    result.is_error = true;
+    result
+}
+
+async fn macos_ax_focus_persist_start_marker(
+    hub: &Hub,
+    args: &Value,
+    transaction_id: &str,
+    lease_id: &LeaseId,
+    target_binding_sha256: &str,
+    executor_asset_sha256: &str,
+    verifier_asset_sha256: &str,
+    probe_asset_sha256: &str,
+    toolchain: &MacosAxTrustedToolchain,
+) -> std::result::Result<(), String> {
+    let store = hub
+        .store
+        .as_ref()
+        .ok_or_else(|| "semantic-event store is unavailable".to_string())?;
+    let intent_id = args
+        .get("embodiment_intent_id")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let toolchain_resolution_sha256 =
+        macos_ax_json_sha256(&macos_ax_toolchain_resolution_receipt(toolchain));
+    let facts = json!({
+        "operation": "focus_window",
+        "action_kind": "focus_window",
+        "body_id": LOCAL_BODY_ID,
+        "transaction_id": transaction_id,
+        "intent_id": intent_id,
+        "embodiment_lease_id": lease_id,
+        "target_binding_sha256": target_binding_sha256,
+        "executor_asset_sha256": executor_asset_sha256,
+        "verifier_asset_sha256": verifier_asset_sha256,
+        "probe_asset_sha256": probe_asset_sha256,
+        "toolchain_resolution_sha256": toolchain_resolution_sha256,
+        "phase": "prepared_before_dispatch",
+        "phase_seq": 0,
+        "terminal_known": false,
+        "dispatch_state": "not_yet_dispatched_at_marker",
+        "status": "pending",
+        "execution_attempted": Value::Null,
+        "execution_performed": Value::Null,
+        "resumes_action": false
+    });
+    // This is a write-ahead marker, not a terminal action receipt. The
+    // embodiment projection deliberately ignores `action_started`, so a
+    // same-second marker cannot overwrite or prematurely close the intent.
+    let event = crate::embodiment_projection::embodiment_event(
+        dispatch_now_secs(),
+        "mcp",
+        "action_started",
+        LOCAL_BODY_ID,
+        json!({"body_id": LOCAL_BODY_ID, "facts": facts, "resumes_action": false}),
+        crate::semantic_event::VerdictStatus::Unknown,
+    );
+    store
+        .record_semantic_event(event.to_record())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn macos_ax_focus_persist_action_receipt(
+    hub: &Hub,
+    facts: Value,
+    verdict: crate::semantic_event::VerdictStatus,
+) -> Value {
+    let Some(store) = &hub.store else {
+        return json!({"available": false, "recorded": false, "reason": "store_unavailable"});
+    };
+    let event = crate::embodiment_projection::embodiment_event(
+        dispatch_now_secs(),
+        "mcp",
+        "action_receipt",
+        LOCAL_BODY_ID,
+        json!({"body_id": LOCAL_BODY_ID, "facts": facts, "resumes_action": false}),
+        verdict,
+    );
+    match store.record_semantic_event(event.to_record()).await {
+        Ok(()) => json!({"available": true, "recorded": true, "kind": "action_receipt"}),
+        Err(error) => json!({"available": true, "recorded": false, "error": error.to_string()}),
+    }
+}
+
+async fn macos_ax_focus_transaction_outcome_unknown(
+    hub: &Hub,
+    args: &Value,
+    transaction_id: &str,
+    lease_id: &LeaseId,
+    target_binding_sha256: &str,
+    executor_asset_sha256: &str,
+    verifier_asset_sha256: &str,
+    probe_asset_sha256: &str,
+    toolchain: &MacosAxTrustedToolchain,
+    duration_ms: u64,
+    error: Value,
+) -> ToolResult {
+    let intent_id = args
+        .get("embodiment_intent_id")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut receipt = json!({
+        "schema": "macos_ax_focus_transaction/v0",
+        "transaction_id": transaction_id,
+        "status": "outcome_unknown",
+        "operation": "focus_window",
+        "read_only": false,
+        "risk": {"class": "embodied_navigation", "rank": 1},
+        "authority": {
+            "source": "owner_standing",
+            "prompt_required": false,
+            "prompted": false
+        },
+        "target": {
+            "pid": args.get("pid").cloned().unwrap_or(Value::Null),
+            "bundle_id": args.get("bundle_id").cloned().unwrap_or(Value::Null),
+            "selector": {
+                "mode": "ax_identifier",
+                "ax_identifier": args.get("ax_identifier").cloned().unwrap_or(Value::Null),
+                "expected_title": args.get("expected_title").cloned().unwrap_or(Value::Null),
+                "expected_role": args.get("expected_role").cloned().unwrap_or_else(|| json!("AXWindow"))
+            }
+        },
+        "execution": {
+            "attempted": true,
+            "performed": Value::Null,
+            "outcome_unknown": true
+        },
+        "verification": {
+            "verdict": "unknown",
+            "recover": "reobserve",
+            "reason": "executor_started_without_a_valid_complete_receipt"
+        },
+        "visual_evidence": {"included": false, "reason": "semantic_first_default"},
+        "error": error
+    });
+    let transaction_core_sha256 = macos_ax_json_sha256(&receipt);
+    let toolchain_resolution = macos_ax_toolchain_resolution_receipt(toolchain);
+    let toolchain_resolution_sha256 = macos_ax_json_sha256(&toolchain_resolution);
+    let audit_binding = json!({
+        "transaction_id": transaction_id,
+        "transaction_core_sha256": transaction_core_sha256,
+        "body_id": LOCAL_BODY_ID,
+        "embodiment_lease_id": lease_id,
+        "intent_id": intent_id,
+        "target_binding_sha256": target_binding_sha256,
+        "executor_asset_sha256": executor_asset_sha256,
+        "verifier_asset_sha256": verifier_asset_sha256,
+        "probe_asset_sha256": probe_asset_sha256,
+        "toolchain_resolution_sha256": toolchain_resolution_sha256,
+        "active_developer_dir": toolchain.developer_dir,
+        "executor_interpreter_invocation_path": toolchain.swift.launch_path,
+        "executor_interpreter_canonical_path": toolchain.swift.canonical_path,
+        "executor_interpreter_sha256": toolchain.swift.sha256,
+        "verifier_interpreter_invocation_path": toolchain.python3.launch_path,
+        "verifier_interpreter_canonical_path": toolchain.python3.canonical_path,
+        "verifier_interpreter_sha256": toolchain.python3.sha256
+    });
+    let audit_binding_sha256 = macos_ax_json_sha256(&audit_binding);
+    let facts = json!({
+        "operation": "focus_window",
+        "action_kind": "focus_window",
+        "body_id": LOCAL_BODY_ID,
+        "transaction_id": transaction_id,
+        "intent_id": intent_id,
+        "embodiment_lease_id": lease_id,
+        "target_binding_sha256": target_binding_sha256,
+        "transaction_core_sha256": transaction_core_sha256,
+        "audit_binding_sha256": audit_binding_sha256,
+        "phase": "terminal",
+        "phase_seq": 1,
+        "terminal_known": true,
+        "status": "outcome_unknown",
+        "execution_attempted": true,
+        "execution_performed": Value::Null,
+        "resumes_action": false
+    });
+    let persistence = macos_ax_focus_persist_action_receipt(
+        hub,
+        facts,
+        crate::semantic_event::VerdictStatus::Unknown,
+    )
+    .await;
+    let terminal_receipt_recorded =
+        persistence.get("recorded").and_then(Value::as_bool) == Some(true);
+    receipt["mcp_wrapper"] = json!({
+        "tool": "macos_ax_focus_transaction",
+        "body_id": LOCAL_BODY_ID,
+        "embodiment_lease_id": lease_id,
+        "embodiment_intent_id": args.get("embodiment_intent_id").cloned().unwrap_or(Value::Null),
+        "risk": {"class": "embodied_navigation", "rank": 1},
+        "per_action_prompt": false,
+        "executor_asset_sha256": executor_asset_sha256,
+        "verifier_asset_sha256": verifier_asset_sha256,
+        "probe_asset_sha256": probe_asset_sha256,
+        "toolchain_resolution": toolchain_resolution,
+        "toolchain_resolution_sha256": toolchain_resolution_sha256,
+        "active_developer_dir": toolchain.developer_dir,
+        "executor_interpreter_invocation_path": toolchain.swift.launch_path,
+        "executor_interpreter_canonical_path": toolchain.swift.canonical_path,
+        "executor_interpreter_sha256": toolchain.swift.sha256,
+        "verifier_interpreter_invocation_path": toolchain.python3.launch_path,
+        "verifier_interpreter_canonical_path": toolchain.python3.canonical_path,
+        "verifier_interpreter_sha256": toolchain.python3.sha256,
+        "target_binding_sha256": target_binding_sha256,
+        "transaction_core_sha256": transaction_core_sha256,
+        "audit_binding": audit_binding,
+        "audit_binding_sha256": audit_binding_sha256,
+        "duration_ms": duration_ms,
+        "transaction_closed": terminal_receipt_recorded,
+        "audit_status": if terminal_receipt_recorded { "complete" } else { "terminal_receipt_not_recorded" },
+        "receipt_persistence": persistence
+    });
+    let mut result = ToolResult::json_text(&receipt);
+    result.is_error = true;
+    result
+}
+
+async fn macos_ax_focus_transaction_pre_spawn_failure(
+    hub: &Hub,
+    args: &Value,
+    transaction_id: &str,
+    lease_id: &LeaseId,
+    target_binding_sha256: &str,
+    executor_asset_sha256: &str,
+    verifier_asset_sha256: &str,
+    probe_asset_sha256: &str,
+    toolchain: &MacosAxTrustedToolchain,
+    error: Value,
+) -> ToolResult {
+    let intent_id = args
+        .get("embodiment_intent_id")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let facts = json!({
+        "operation": "focus_window",
+        "action_kind": "focus_window",
+        "body_id": LOCAL_BODY_ID,
+        "transaction_id": transaction_id,
+        "intent_id": intent_id,
+        "embodiment_lease_id": lease_id,
+        "target_binding_sha256": target_binding_sha256,
+        "phase": "terminal_before_dispatch",
+        "phase_seq": 1,
+        "terminal_known": true,
+        "dispatch_state": "never_dispatched",
+        "status": "spawn_failed",
+        "execution_attempted": false,
+        "execution_performed": false,
+        "resumes_action": false
+    });
+    let persistence = macos_ax_focus_persist_action_receipt(
+        hub,
+        facts,
+        crate::semantic_event::VerdictStatus::NotVerified,
+    )
+    .await;
+    let terminal_receipt_recorded =
+        persistence.get("recorded").and_then(Value::as_bool) == Some(true);
+    let toolchain_resolution = macos_ax_toolchain_resolution_receipt(toolchain);
+    let receipt = json!({
+        "schema": "macos_ax_focus_transaction/v0",
+        "transaction_id": transaction_id,
+        "status": "error",
+        "operation": "focus_window",
+        "read_only": false,
+        "execution": {"attempted": false, "performed": false},
+        "verification": {"verdict": "error", "recover": "retry"},
+        "visual_evidence": {"included": false, "reason": "semantic_first_default"},
+        "error": error,
+        "mcp_wrapper": {
+            "tool": "macos_ax_focus_transaction",
+            "body_id": LOCAL_BODY_ID,
+            "embodiment_lease_id": lease_id,
+            "embodiment_intent_id": args.get("embodiment_intent_id").cloned().unwrap_or(Value::Null),
+            "target_binding_sha256": target_binding_sha256,
+            "executor_asset_sha256": executor_asset_sha256,
+            "verifier_asset_sha256": verifier_asset_sha256,
+            "probe_asset_sha256": probe_asset_sha256,
+            "toolchain_resolution": toolchain_resolution,
+            "transaction_closed": terminal_receipt_recorded,
+            "audit_status": if terminal_receipt_recorded { "complete" } else { "terminal_receipt_not_recorded" },
+            "receipt_persistence": persistence
+        }
+    });
+    let mut result = ToolResult::json_text(&receipt);
+    result.is_error = true;
+    result
+}
+
+#[async_trait]
+impl McpTool for MacosAxFocusTransactionTool {
+    fn name(&self) -> &'static str {
+        "macos_ax_focus_transaction"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations {
+            read_only_hint: false,
+            destructive_hint: false,
+            open_world_hint: false,
+            idempotent_hint: Some(true),
+        })
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Execute one rank-1 macOS semantic focus transaction under owner-standing authority and an exclusive body write lease. v0 only focuses a uniquely identified AX window inside the already-frontmost target application; it never activates another app, prompts for permission, captures pixels, accepts coordinates/text/code, or requires a per-action confirmation. It rechecks exact bundle_id + pid + sample-unique AXIdentifier immediately before mutation and verifies the postcondition before returning a receipt.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["pid", "bundle_id", "ax_identifier", "embodiment_lease_id"],
+                "properties": {
+                    "pid": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+                    "bundle_id": { "type": "string", "minLength": 1 },
+                    "ax_identifier": { "type": "string", "minLength": 1 },
+                    "expected_title": { "type": "string", "description": "Optional exact corroborator; never a standalone identity." },
+                    "expected_role": { "type": "string", "minLength": 1, "default": "AXWindow" },
+                    "verify_timeout_ms": { "type": "integer", "minimum": 50, "maximum": 2000, "default": 750 },
+                    "timeout_ms": { "type": "integer", "minimum": 5000, "maximum": 30000, "default": 15000 },
+                    "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Exclusive body write ownership; this is concurrency control, not per-action user permission." },
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional opaque linkage for the returned and persisted action receipt." }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        // Cancellation before this admission barrier drops the owned lock and
+        // dispatches nothing. Once the executor is ready to spawn, the guard is
+        // moved into a detached supervisor so MCP cancellation can discard the
+        // response without abandoning the mutation, verification, or receipt.
+        let body_action_guard = self
+            .hub
+            .embodiment_lease_action_lock
+            .clone()
+            .lock_owned()
+            .await;
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => {
+                return Ok(macos_ax_focus_transaction_error(json!({
+                    "code": "body_write_lease_required",
+                    "message": error
+                })))
+            }
+        };
+        let pid = args.get("pid").and_then(Value::as_u64).unwrap_or(0);
+        let bundle_id = macos_ax_trimmed_string(args.get("bundle_id")).map(ToOwned::to_owned);
+        let ax_identifier =
+            macos_ax_trimmed_string(args.get("ax_identifier")).map(ToOwned::to_owned);
+        if pid == 0
+            || pid > i32::MAX as u64
+            || bundle_id.is_none()
+            || ax_identifier.is_none()
+        {
+            return Ok(macos_ax_focus_transaction_error(json!({
+                "code": "target_not_exactly_bound",
+                "message": "pid 1..2147483647, non-empty bundle_id, and non-empty ax_identifier are required"
+            })));
+        }
+        let bundle_id = bundle_id.expect("validated bundle id");
+        let ax_identifier = ax_identifier.expect("validated AX identifier");
+        if args.get("expected_title").is_some_and(|value| !value.is_string()) {
+            return Ok(macos_ax_focus_transaction_error(json!({
+                "code": "invalid_optional_corroborator",
+                "field": "expected_title",
+                "message": "expected_title must be a string when supplied"
+            })));
+        }
+        if args.get("expected_role").is_some_and(|value| {
+            !value.is_string() || macos_ax_trimmed_string(Some(value)).is_none()
+        }) {
+            return Ok(macos_ax_focus_transaction_error(json!({
+                "code": "invalid_optional_corroborator",
+                "field": "expected_role",
+                "message": "expected_role must be a non-empty string when supplied"
+            })));
+        }
+        if args.get("embodiment_intent_id").is_some_and(|value| {
+            macos_ax_trimmed_string(Some(value))
+                .is_none_or(|intent_id| intent_id.len() > 128)
+        }) {
+            return Ok(macos_ax_focus_transaction_error(json!({
+                "code": "invalid_intent_id",
+                "message": "embodiment_intent_id must be a non-empty string of at most 128 bytes"
+            })));
+        }
+        let expected_role = macos_ax_trimmed_string(args.get("expected_role"))
+            .unwrap_or("AXWindow")
+            .to_string();
+        let verify_timeout_ms = args
+            .get("verify_timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(750)
+            .clamp(50, 2_000);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(15_000)
+            .clamp(5_000, 30_000)
+            .max(verify_timeout_ms.saturating_add(4_000));
+        if self.hub.store.is_none() {
+            return Ok(macos_ax_focus_transaction_error(json!({
+                "code": "durable_receipt_store_required",
+                "message": "focus actions require a durable semantic-event store before admission"
+            })));
+        }
+        let executor_asset_sha256 = match macos_ax_focus_verified_asset_sha256(
+            "macos_ax_focus_window.swift",
+            include_bytes!("../../../scripts/macos_ax_focus_window.swift"),
+        ) {
+            Ok(sha256) => sha256,
+            Err(error) => return Ok(macos_ax_focus_transaction_error(error)),
+        };
+        let verifier_asset_sha256 = match macos_ax_focus_verified_asset_sha256(
+            "macos_ax_verify.py",
+            include_bytes!("../../../scripts/macos_ax_verify.py"),
+        ) {
+            Ok(sha256) => sha256,
+            Err(error) => return Ok(macos_ax_focus_transaction_error(error)),
+        };
+        let probe_asset_sha256 = match macos_ax_focus_verified_asset_sha256(
+            "macos_ax_probe.py",
+            include_bytes!("../../../scripts/macos_ax_probe.py"),
+        ) {
+            Ok(sha256) => sha256,
+            Err(error) => return Ok(macos_ax_focus_transaction_error(error)),
+        };
+        let toolchain = match macos_ax_resolve_trusted_toolchain().await {
+            Ok(toolchain) => toolchain,
+            Err(error) => return Ok(macos_ax_focus_transaction_error(error)),
+        };
+        let pinned_verify_assets = match macos_ax_materialize_pinned_verify_assets() {
+            Ok(assets) => assets,
+            Err(error) => {
+                return Ok(macos_ax_focus_transaction_error(json!({
+                    "code": "pinned_verifier_materialization_failed",
+                    "message": error.to_string()
+                })))
+            }
+        };
+        let target_binding_sha256 = macos_ax_json_sha256(&json!({
+            "bundle_id": bundle_id,
+            "pid": pid,
+            "ax_identifier": ax_identifier,
+            "expected_title": args.get("expected_title").cloned().unwrap_or(Value::Null),
+            "expected_role": expected_role
+        }));
+        let transaction_id = format!("macos-focus-{}", uuid::Uuid::new_v4());
+
+        let mut command = killable_command(&toolchain.swift.launch_path);
+        macos_ax_clean_runtime_command(&mut command);
+        command.env("DEVELOPER_DIR", &toolchain.developer_dir);
+        command
+            .arg("-")
+            .arg("--compact")
+            .arg("--pid")
+            .arg(pid.to_string())
+            .arg("--bundle-id")
+            .arg(&bundle_id)
+            .arg("--ax-identifier")
+            .arg(&ax_identifier)
+            .arg("--verify-timeout-ms")
+            .arg(verify_timeout_ms.to_string())
+            .arg("--expected-role")
+            .arg(&expected_role)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(expected_title) = args.get("expected_title").and_then(Value::as_str) {
+            command.arg("--expected-title").arg(expected_title);
+        }
+
+        let hub = self.hub.clone();
+        let supervised = macos_ax_spawn_detached_supervisor(async move {
+        let _body_action_guard = body_action_guard;
+        let started = Instant::now();
+        if let Err(message) = macos_ax_focus_persist_start_marker(
+            &hub,
+            &args,
+            &transaction_id,
+            &lease_id,
+            &target_binding_sha256,
+            &executor_asset_sha256,
+            &verifier_asset_sha256,
+            &probe_asset_sha256,
+            &toolchain,
+        )
+        .await
+        {
+            return Ok(macos_ax_focus_transaction_error(json!({
+                "code": "durable_start_marker_failed",
+                "transaction_id": transaction_id,
+                "message": message
+            })));
+        }
+        let mut child = match MacosAxCapturedChild::spawn(command) {
+            Ok(child) => child,
+            Err(error) => {
+                return Ok(macos_ax_focus_transaction_pre_spawn_failure(
+                    &hub,
+                    &args,
+                    &transaction_id,
+                    &lease_id,
+                    &target_binding_sha256,
+                    &executor_asset_sha256,
+                    &verifier_asset_sha256,
+                    &probe_asset_sha256,
+                    &toolchain,
+                    json!({
+                        "code": "spawn_failed",
+                        "message": error.to_string()
+                    }),
+                )
+                .await)
+            }
+        };
+        let action = macos_ax_catch_postspawn(async {
+        let output = match child
+            .wait_with_source(
+                include_bytes!("../../../scripts/macos_ax_focus_window.swift"),
+                timeout_ms,
+            )
+            .await
+        {
+            Ok(output) => output,
+            Err(error) => {
+                return Ok(macos_ax_focus_transaction_outcome_unknown(
+                    &hub,
+                    &args,
+                    &transaction_id,
+                    &lease_id,
+                    &target_binding_sha256,
+                    &executor_asset_sha256,
+                    &verifier_asset_sha256,
+                    &probe_asset_sha256,
+                    &toolchain,
+                    started.elapsed().as_millis() as u64,
+                    error,
+                )
+                .await)
+            }
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+        let payload = match serde_json::from_str::<Value>(&stdout) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return Ok(macos_ax_focus_transaction_outcome_unknown(
+                    &hub,
+                    &args,
+                    &transaction_id,
+                    &lease_id,
+                    &target_binding_sha256,
+                    &executor_asset_sha256,
+                    &verifier_asset_sha256,
+                    &probe_asset_sha256,
+                    &toolchain,
+                    started.elapsed().as_millis() as u64,
+                    json!({
+                        "code": "invalid_executor_json",
+                        "message": error.to_string(),
+                        "exit_code": output.status.code().unwrap_or(-1),
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "truncated": stdout_truncated || stderr_truncated
+                    }),
+                )
+                .await)
+            }
+        };
+        if !macos_ax_focus_source_contract_valid(&payload, &args) {
+            return Ok(macos_ax_focus_transaction_outcome_unknown(
+                &hub,
+                &args,
+                &transaction_id,
+                &lease_id,
+                &target_binding_sha256,
+                &executor_asset_sha256,
+                &verifier_asset_sha256,
+                &probe_asset_sha256,
+                &toolchain,
+                started.elapsed().as_millis() as u64,
+                json!({
+                    "code": "invalid_source_receipt",
+                    "exit_code": output.status.code().unwrap_or(-1),
+                    "source_status": payload.get("status").cloned().unwrap_or(Value::Null),
+                    "source_schema": payload.get("schema").cloned().unwrap_or(Value::Null)
+                }),
+            )
+            .await);
+        }
+        let source_verified = payload.get("status").and_then(Value::as_str) == Some("verified");
+        if source_verified != output.status.success() {
+            return Ok(macos_ax_focus_transaction_outcome_unknown(
+                &hub,
+                &args,
+                &transaction_id,
+                &lease_id,
+                &target_binding_sha256,
+                &executor_asset_sha256,
+                &verifier_asset_sha256,
+                &probe_asset_sha256,
+                &toolchain,
+                started.elapsed().as_millis() as u64,
+                json!({
+                    "code": "source_exit_verdict_mismatch",
+                    "exit_code": output.status.code().unwrap_or(-1),
+                    "source_status": payload.get("status").cloned().unwrap_or(Value::Null)
+                }),
+            )
+            .await);
+        }
+        let source_receipt_sha256 = macos_ax_json_sha256(&payload);
+        let independent_verify = if source_verified {
+            let mut verify_args = json!({
+                "script_path": pinned_verify_assets.verify_path,
+                "expect": "window_focused",
+                "bundle_id": bundle_id,
+                "pid": pid,
+                "ax_identifier": ax_identifier,
+                "role": expected_role,
+                "max_windows": 50,
+                "jxa_timeout_secs": 2.0,
+                "poll_timeout_secs": verify_timeout_ms as f64 / 1_000.0,
+                "poll_interval_secs": 0.05,
+                "semantic_bus": true,
+                "semantic_include_raw": false,
+                "timeout_ms": verify_timeout_ms.saturating_add(4_000)
+            });
+            if let Some(expected_title) = args.get("expected_title").and_then(Value::as_str) {
+                verify_args["title"] = json!(expected_title);
+            }
+            let verify_tool = MacosAxVerifyTool::new_with_interpreter(
+                hub.clone(),
+                toolchain.python3.launch_path.clone(),
+            );
+            Some(match verify_tool
+                .execute(verify_args, &ToolContext::default())
+                .await
+            {
+                Ok(result) => tool_result_first_json(&result).unwrap_or_else(|| {
+                    json!({
+                        "schema": "macos_ax_focus_independent_verify/v0",
+                        "status": "error",
+                        "reason": "verify_tool_returned_no_json",
+                        "tool_is_error": result.is_error
+                    })
+                }),
+                Err(error) => json!({
+                    "schema": "macos_ax_focus_independent_verify/v0",
+                    "status": "error",
+                    "reason": "verify_tool_failed",
+                    "error": error.to_string()
+                }),
+            })
+        } else {
+            None
+        };
+        let independent_receipt_sha256 = independent_verify
+            .as_ref()
+            .map(macos_ax_json_sha256)
+            .unwrap_or_else(|| "not-run".to_string());
+        let mut transaction =
+            macos_ax_focus_transaction_envelope(&payload, independent_verify.as_ref());
+        transaction["transaction_id"] = json!(transaction_id);
+        let transaction_core_sha256 = macos_ax_json_sha256(&transaction);
+        let intent_id = args
+            .get("embodiment_intent_id")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let audit_binding = json!({
+            "transaction_id": transaction_id,
+            "transaction_core_sha256": transaction_core_sha256,
+            "body_id": LOCAL_BODY_ID,
+            "embodiment_lease_id": lease_id,
+            "intent_id": intent_id,
+            "target_binding_sha256": target_binding_sha256,
+            "executor_asset_sha256": executor_asset_sha256,
+            "verifier_asset_sha256": verifier_asset_sha256,
+            "probe_asset_sha256": probe_asset_sha256,
+            "toolchain_resolution_sha256": macos_ax_json_sha256(
+                &macos_ax_toolchain_resolution_receipt(&toolchain)
+            ),
+            "source_receipt_sha256": source_receipt_sha256,
+            "independent_receipt_sha256": independent_receipt_sha256,
+            "active_developer_dir": toolchain.developer_dir,
+            "executor_interpreter_invocation_path": toolchain.swift.launch_path,
+            "executor_interpreter_canonical_path": toolchain.swift.canonical_path,
+            "executor_interpreter_sha256": toolchain.swift.sha256,
+            "verifier_interpreter_invocation_path": toolchain.python3.launch_path,
+            "verifier_interpreter_canonical_path": toolchain.python3.canonical_path,
+            "verifier_interpreter_sha256": toolchain.python3.sha256
+        });
+        let audit_binding_sha256 = macos_ax_json_sha256(&audit_binding);
+        let toolchain_resolution = macos_ax_toolchain_resolution_receipt(&toolchain);
+        let toolchain_resolution_sha256 = macos_ax_json_sha256(&toolchain_resolution);
+        let transaction_status = transaction
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("error")
+            .to_string();
+        let transaction_verdict = transaction
+            .pointer("/verification/verdict")
+            .and_then(Value::as_str)
+            .unwrap_or("error")
+            .to_string();
+        let verdict = match transaction_verdict.as_str() {
+            "verified" => crate::semantic_event::VerdictStatus::Verified,
+            "unknown" => crate::semantic_event::VerdictStatus::Unknown,
+            _ => crate::semantic_event::VerdictStatus::NotVerified,
+        };
+        let facts = json!({
+            "operation": "focus_window",
+            "action_kind": "focus_window",
+            "body_id": LOCAL_BODY_ID,
+            "transaction_id": transaction_id,
+            "intent_id": intent_id,
+            "source_receipt_sha256": source_receipt_sha256,
+            "independent_receipt_sha256": independent_receipt_sha256,
+            "transaction_core_sha256": transaction_core_sha256,
+            "audit_binding_sha256": audit_binding_sha256,
+            "target_binding_sha256": target_binding_sha256,
+            "phase": "terminal",
+            "phase_seq": 1,
+            "terminal_known": true,
+            "bundle_id": bundle_id,
+            "pid": pid,
+            "selector_kind": "ax_identifier",
+            "execution_attempted": payload.pointer("/execution/attempted").and_then(Value::as_bool),
+            "execution_performed": payload.pointer("/execution/performed").and_then(Value::as_bool),
+            "idempotent_noop": payload.pointer("/execution/idempotent_noop").and_then(Value::as_bool),
+            "executor_status": payload.get("status").cloned().unwrap_or(Value::Null),
+            "independent_verdict": transaction.pointer("/verification/independent_verdict").cloned().unwrap_or(Value::Null),
+            "status": transaction_status,
+            "verification_verdict": transaction_verdict,
+            "embodiment_lease_id": lease_id,
+            "resumes_action": false
+        });
+        let persistence =
+            macos_ax_focus_persist_action_receipt(&hub, facts, verdict).await;
+        let terminal_receipt_recorded =
+            persistence.get("recorded").and_then(Value::as_bool) == Some(true);
+        let total_duration_ms = started.elapsed().as_millis() as u64;
+        if let Some(object) = transaction.as_object_mut() {
+            object.insert(
+                "mcp_wrapper".to_string(),
+                json!({
+                    "tool": "macos_ax_focus_transaction",
+                    "body_id": LOCAL_BODY_ID,
+                    "embodiment_lease_id": lease_id,
+                    "embodiment_intent_id": args.get("embodiment_intent_id").cloned().unwrap_or(Value::Null),
+                    "risk": {"class": "embodied_navigation", "rank": 1},
+                    "per_action_prompt": false,
+                    "executor_asset_sha256": executor_asset_sha256,
+                    "verifier_asset_sha256": verifier_asset_sha256,
+                    "probe_asset_sha256": probe_asset_sha256,
+                    "toolchain_resolution": toolchain_resolution,
+                    "toolchain_resolution_sha256": toolchain_resolution_sha256,
+                    "active_developer_dir": toolchain.developer_dir,
+                    "executor_interpreter_invocation_path": toolchain.swift.launch_path,
+                    "executor_interpreter_canonical_path": toolchain.swift.canonical_path,
+                    "executor_interpreter_sha256": toolchain.swift.sha256,
+                    "verifier_interpreter_invocation_path": toolchain.python3.launch_path,
+                    "verifier_interpreter_canonical_path": toolchain.python3.canonical_path,
+                    "verifier_interpreter_sha256": toolchain.python3.sha256,
+                    "source_receipt_sha256": source_receipt_sha256,
+                    "independent_receipt_sha256": independent_receipt_sha256,
+                    "transaction_core_sha256": transaction_core_sha256,
+                    "audit_binding": audit_binding,
+                    "audit_binding_sha256": audit_binding_sha256,
+                    "target_binding_sha256": target_binding_sha256,
+                    "executor_duration_ms": duration_ms,
+                    "total_duration_ms": total_duration_ms,
+                    "exit_code": output.status.code().unwrap_or(-1),
+                    "stderr": stderr,
+                    "stderr_truncated": stderr_truncated,
+                    "stdout_truncated": stdout_truncated,
+                    "transaction_closed": terminal_receipt_recorded,
+                    "audit_status": if terminal_receipt_recorded { "complete" } else { "terminal_receipt_not_recorded" },
+                    "receipt_persistence": persistence
+                }),
+            );
+        }
+        let mut result = ToolResult::json_text(&transaction);
+        result.is_error = !terminal_receipt_recorded
+            || matches!(transaction_status.as_str(), "error" | "outcome_unknown");
+        Ok(result)
+        })
+        .await;
+        match action {
+            Ok(result) => result,
+            Err(_) => {
+                let cleanup_error = child
+                    .terminate_and_reap()
+                    .await
+                    .err()
+                    .map(|error| error.to_string());
+                Ok(macos_ax_focus_transaction_outcome_unknown(
+                    &hub,
+                    &args,
+                    &transaction_id,
+                    &lease_id,
+                    &target_binding_sha256,
+                    &executor_asset_sha256,
+                    &verifier_asset_sha256,
+                    &probe_asset_sha256,
+                    &toolchain,
+                    started.elapsed().as_millis() as u64,
+                    json!({
+                        "code": "executor_supervisor_panicked_after_spawn",
+                        "cleanup_error": cleanup_error
+                    }),
+                )
+                .await)
+            }
+        }
+        });
+        match supervised.await {
+            Ok(result) => result,
+            Err(error) => Ok(macos_ax_focus_transaction_error(json!({
+                "code": "focus_supervisor_join_failed",
+                "message": error.to_string()
+            }))),
+        }
+    }
+}
+
+// ===========================================================================
 //                              macos_ax_verify
 // ===========================================================================
 
@@ -3561,11 +6261,22 @@ const MACOS_AX_VERIFY_SOURCE_SCHEMA: &str = "macos_ax_verify/v0";
 
 pub struct MacosAxVerifyTool {
     _hub: Hub,
+    interpreter: Option<PathBuf>,
 }
 
 impl MacosAxVerifyTool {
     pub fn new(hub: Hub) -> Self {
-        Self { _hub: hub }
+        Self {
+            _hub: hub,
+            interpreter: None,
+        }
+    }
+
+    fn new_with_interpreter(hub: Hub, interpreter: PathBuf) -> Self {
+        Self {
+            _hub: hub,
+            interpreter: Some(interpreter),
+        }
     }
 }
 
@@ -3758,12 +6469,20 @@ impl McpTool for MacosAxVerifyTool {
             })));
         }
 
-        let mut cmd = killable_command(
-            std::env::var("PYTHON")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| "python3".to_string()),
-        );
+        let pinned_runtime = self.interpreter.is_some();
+        let interpreter = self.interpreter.clone().unwrap_or_else(|| {
+            PathBuf::from(
+                std::env::var("PYTHON")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "python3".to_string()),
+            )
+        });
+        let mut cmd = killable_command(interpreter);
+        if pinned_runtime {
+            macos_ax_clean_runtime_command(&mut cmd);
+            cmd.arg("-E").arg("-s").arg("-B");
+        }
         cmd.arg(&script)
             .arg("--compact")
             .arg("--expect")
@@ -3798,24 +6517,31 @@ impl McpTool for MacosAxVerifyTool {
         }
 
         let started = Instant::now();
-        let output =
-            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
-                Err(_) => {
-                    return Ok(macos_ax_verify_error(json!({
-                        "code": "timeout",
-                        "message": format!("macos_ax_verify exceeded {timeout_ms} ms"),
-                        "duration_ms": started.elapsed().as_millis() as u64
-                    })));
-                }
-                Ok(Err(e)) => {
-                    return Ok(macos_ax_verify_error(json!({
-                        "code": "spawn_failed",
-                        "message": e.to_string(),
-                        "duration_ms": started.elapsed().as_millis() as u64
-                    })));
-                }
-                Ok(Ok(output)) => output,
-            };
+        let mut child = match MacosAxCapturedChild::spawn(cmd) {
+            Ok(child) => child,
+            Err(error) => {
+                return Ok(macos_ax_verify_error(json!({
+                    "code": "spawn_failed",
+                    "message": error.to_string(),
+                    "duration_ms": started.elapsed().as_millis() as u64
+                })))
+            }
+        };
+        let output = match child.wait_without_source(timeout_ms).await {
+            Ok(output) => output,
+            Err(error) => {
+                let code = if error.get("code").and_then(Value::as_str) == Some("timeout") {
+                    "timeout"
+                } else {
+                    "executor_supervision_failed"
+                };
+                return Ok(macos_ax_verify_error(json!({
+                    "code": code,
+                    "detail": error,
+                    "duration_ms": started.elapsed().as_millis() as u64
+                })))
+            }
+        };
         let duration_ms = started.elapsed().as_millis() as u64;
         let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
         let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
@@ -9600,6 +12326,7 @@ impl McpTool for BrowserNavigateTool {
         if let Err(e) = self.hub.security.check(Cap::Browser) {
             return Ok(ToolResult::error(e));
         }
+        let _body_action_guard = self.hub.embodiment_lease_action_lock.lock().await;
         let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
             Ok(lease_id) => lease_id,
             Err(error) => return Ok(ToolResult::error(error)),
@@ -28242,6 +30969,11 @@ impl McpTool for EmbodimentLeaseTool {
                 .unwrap_or(LOCAL_BODY_ID),
         );
         let holder = embodiment_lease_holder(ctx);
+        let _body_action_guard = if matches!(op, "acquire" | "release") {
+            Some(self.hub.embodiment_lease_action_lock.lock().await)
+        } else {
+            None
+        };
         let mut leases = self.hub.embodiment_leases.lock().await;
 
         match op {
@@ -46307,6 +49039,13 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // macOS bounded short-term AX event stream. Lifecycle events require a
     // stable AXIdentifier; sample-local indices never claim continuity.
     "macos_ax_watch",
+    // macOS action policy: preview-only, receipt-bound admission under
+    // owner-standing authority. Caller-supplied freshness booleans are not used.
+    "macos_ax_action_admission",
+    // First real rank-1 macOS actuator. Niche by tier but explicit for Codex:
+    // an exclusive body lease plus a unique AXIdentifier binds one focus
+    // transaction inside the already-frontmost app, with mandatory postflight.
+    "macos_ax_focus_transaction",
     // SSB conformance inventory: read-only source/fixture/doc classification.
     // It does not execute live probes or mutate desktop/service state.
     "semantic_bus_adapter_report",
@@ -49781,6 +52520,20 @@ pub(crate) fn build_registry_with_policy_surface(
         surface.apple_host,
         Tier::Standard,
         Arc::new(MacosAxWatchTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.apple_host,
+        Tier::Niche,
+        Arc::new(MacosAxActionAdmissionTool::new()),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.apple_host,
+        Tier::Niche,
+        Arc::new(MacosAxFocusTransactionTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

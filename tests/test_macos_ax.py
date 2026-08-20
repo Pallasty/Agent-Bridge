@@ -534,6 +534,56 @@ class MacosAxVerifyCompletenessTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "error")
         self.assertEqual(result["recover"], "replan")
 
+    def test_focused_witness_reports_all_selector_candidates_for_exactness(self):
+        rc, result, _ = self._run(
+            [
+                "--expect",
+                "window_focused",
+                "--bundle-id",
+                "com.openai.codex",
+                "--ax-identifier",
+                "editor",
+                "--timeout",
+                "0",
+            ],
+            _jxa_payload(
+                windows=[
+                    _window(focused=True, index=0, ax_identifier="editor"),
+                    _window(focused=False, index=1, ax_identifier="editor"),
+                ]
+            ),
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["verdict"], "verified")
+        self.assertEqual(result["observed"]["count"], 1)
+        self.assertEqual(result["observed"]["selector_candidate_count"], 2)
+
+    def test_focused_witness_exposes_unreadable_hidden_candidate(self):
+        rc, result, _ = self._run(
+            [
+                "--expect",
+                "window_focused",
+                "--bundle-id",
+                "com.openai.codex",
+                "--ax-identifier",
+                "editor",
+                "--timeout",
+                "0",
+            ],
+            _jxa_payload(
+                windows=[
+                    _window(focused=True, index=0, ax_identifier="editor"),
+                    _window(focused=False, index=1, ax_identifier=None),
+                ]
+            ),
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["verdict"], "verified")
+        self.assertEqual(result["observed"]["count"], 1)
+        self.assertEqual(result["observed"]["selector_candidate_count"], 1)
+        self.assertEqual(result["observed"]["unknown_count"], 1)
+        self.assertEqual(len(result["observed"]["unknowns"]), 1)
+
     def test_window_scope_mismatch_is_not_absence(self):
         finder = _app(name="Finder", pid=77, bundle_id="com.apple.finder")
         rc, result, _ = self._run(

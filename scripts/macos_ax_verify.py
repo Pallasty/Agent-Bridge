@@ -403,40 +403,40 @@ def _evaluate(
     probe: dict[str, Any],
     *,
     coverage_complete: bool,
-) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], str | None]:
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], int | None, str | None]:
     expect = args.expect
     if expect == "ax_trusted_is":
         wanted = _bool_arg(args.state)
         if wanted is None:
-            return UNKNOWN, [], [], "invalid_selector:state_must_be_true_or_false"
+            return UNKNOWN, [], [], None, "invalid_selector:state_must_be_true_or_false"
         actual = probe.get("permission", {}).get("ax_trusted")
-        return (MATCH if actual is wanted else NO_MATCH), [{"ax_trusted": actual}], [], None
+        return (MATCH if actual is wanted else NO_MATCH), [{"ax_trusted": actual}], [], None, None
 
     app = probe.get("frontmost_app")
     if expect == "frontmost_app_is":
         comparison = _compare_app(app, args)
-        return comparison, [app] if comparison == MATCH and isinstance(app, dict) else [], [], None
+        return comparison, [app] if comparison == MATCH and isinstance(app, dict) else [], [], None, None
 
     windows = probe.get("windows") or []
     candidates = [window for window in windows if _compare_window(window, args) == MATCH]
     unknowns = [window for window in windows if _compare_window(window, args) == UNKNOWN]
     if expect == "window_appeared":
         if candidates:
-            return MATCH, candidates, unknowns, None
-        return (UNKNOWN if unknowns or not coverage_complete else NO_MATCH), [], unknowns, None
+            return MATCH, candidates, unknowns, len(candidates), None
+        return (UNKNOWN if unknowns or not coverage_complete else NO_MATCH), [], unknowns, 0, None
     if expect == "window_gone":
         if candidates:
-            return NO_MATCH, candidates, unknowns, None
-        return (UNKNOWN if unknowns or not coverage_complete else MATCH), [], unknowns, None
+            return NO_MATCH, candidates, unknowns, len(candidates), None
+        return (UNKNOWN if unknowns or not coverage_complete else MATCH), [], unknowns, 0, None
     if expect == "window_focused":
         focused = [w for w in candidates if w.get("focused") is True]
         focus_unknowns = [w for w in candidates if not isinstance(w.get("focused"), bool)]
         if focused:
-            return MATCH, focused, unknowns + focus_unknowns, None
+            return MATCH, focused, unknowns + focus_unknowns, len(candidates), None
         if unknowns or focus_unknowns or not coverage_complete:
-            return UNKNOWN, candidates, unknowns + focus_unknowns, None
-        return NO_MATCH, candidates, [], None
-    return UNKNOWN, [], [], f"unsupported_expect:{expect}"
+            return UNKNOWN, candidates, unknowns + focus_unknowns, len(candidates), None
+        return NO_MATCH, candidates, [], len(candidates), None
+    return UNKNOWN, [], [], None, f"unsupported_expect:{expect}"
 
 
 def _recover(_expect: str, verdict: str, probe_error: str | None) -> str:
@@ -518,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     last_probe: dict[str, Any] = {}
     last_matches: list[dict[str, Any]] = []
     last_unknowns: list[dict[str, Any]] = []
+    last_selector_candidate_count: int | None = None
     last_scope_match: bool | None = None
     last_truth = UNKNOWN
     error = _selector_error(args)
@@ -561,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
                 proof_complete = False
                 last_matches = []
                 last_unknowns = []
+                last_selector_candidate_count = None
             else:
                 if args.expect in WINDOW_EXPECTS:
                     scope_comparison = _compare_app(probe.get("frontmost_app"), args)
@@ -576,18 +578,27 @@ def main(argv: list[str] | None = None) -> int:
                         proof_complete = False
                         last_matches = []
                         last_unknowns = []
+                        last_selector_candidate_count = None
                     else:
                         coverage_complete = probe.get("coverage_complete") is True
-                        last_truth, last_matches, last_unknowns, eval_error = _evaluate(
-                            args,
-                            probe,
-                            coverage_complete=coverage_complete,
-                        )
+                        (
+                            last_truth,
+                            last_matches,
+                            last_unknowns,
+                            last_selector_candidate_count,
+                            eval_error,
+                        ) = _evaluate(args, probe, coverage_complete=coverage_complete)
                         error = eval_error
                         outcome_kind = "error" if eval_error else "indeterminate"
                         proof_complete = last_truth != UNKNOWN and eval_error is None
                 else:
-                    last_truth, last_matches, last_unknowns, eval_error = _evaluate(
+                    (
+                        last_truth,
+                        last_matches,
+                        last_unknowns,
+                        last_selector_candidate_count,
+                        eval_error,
+                    ) = _evaluate(
                         args,
                         probe,
                         coverage_complete=probe.get("coverage_complete") is True,
@@ -637,6 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             "frontmost_app": last_probe.get("frontmost_app"),
             "count": len(last_matches),
             "matches": last_matches,
+            "selector_candidate_count": last_selector_candidate_count,
             "unknown_count": len(last_unknowns),
             "unknowns": last_unknowns,
             "window_count": last_probe.get("window_count"),

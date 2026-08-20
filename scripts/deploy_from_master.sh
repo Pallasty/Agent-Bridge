@@ -80,6 +80,7 @@ RUNTIME_ASSETS=(
     desktop_snapshot.py
     desktop_steer.py
     desktop_verify.py
+    macos_ax_focus_window.swift
     macos_ax_probe.py
     macos_ax_verify.py
     macos_ax_watch.py
@@ -97,6 +98,7 @@ SENTINELS=(
     "desktop_action.py"     # computer-use: coordinate action
     "desktop_invoke.py"     # computer-use: AT-SPI semantic invoke
     "desktop_confirm"       # host-confirm phase-2 executor
+    "macos_ax_focus_window.swift" # exact rank-1 macOS AX focus transaction
     "avatar_renderer"       # linux avatar renderer backend
     "present_voice"         # voice embodiment (ab-tts/Kokoro)
     "browser_navigate"      # browser CDP surface

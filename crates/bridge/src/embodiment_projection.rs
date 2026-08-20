@@ -561,6 +561,30 @@ mod tests {
     }
 
     #[test]
+    fn native_action_receipt_nested_intent_id_closes_lineage() {
+        let events = vec![
+            event_with(
+                10,
+                "intent_opened",
+                "unknown",
+                r#"{"body_id":"body-mac","intent_id":"focus-1","action_kind":"focus_window"}"#,
+            ),
+            event_with(
+                20,
+                "action_receipt",
+                "verified",
+                r#"{"body_id":"body-mac","facts":{"body_id":"body-mac","intent_id":"focus-1","action_kind":"focus_window","resumes_action":false}}"#,
+            ),
+        ];
+        let audit = project_action_lineage(&events, 500);
+        assert_eq!(audit["counts"]["intent_linked_receipts"], 1);
+        assert_eq!(audit["counts"]["missing_intent_link"], 0);
+        assert_eq!(audit["counts"]["matched_prior_intent"], 1);
+        let snapshot = project_embodiment_snapshot(&events, &json!({"status":"ok"}), 500);
+        assert!(snapshot["open_intents"].as_array().is_some_and(Vec::is_empty));
+    }
+
+    #[test]
     fn action_lineage_counts_privacy_minimal_receipt_without_intent() {
         let events = vec![SemanticEventRecord {
             ts: 20,

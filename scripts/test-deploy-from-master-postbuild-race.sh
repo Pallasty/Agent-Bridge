@@ -52,7 +52,7 @@ mkdir -p "$SEED/scripts"
 for asset in deploy_from_master.sh audio_embody.py app_control.py desktop_action.py \
     desktop_confirm_store.py desktop_grant.py desktop_invoke.py \
     desktop_snapshot.py desktop_steer.py desktop_verify.py \
-    macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
+    macos_ax_focus_window.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
     vision_grounding_ocr.py omnivoice_mac_remote_synth.py \
     omnivoice_onnx_bundle_synth.py omnivoice_onnx_official_decode.py \
     omnivoice_tts_synth.py qwen3_tts_rust_gate.py qwen3_tts_synth.py \
