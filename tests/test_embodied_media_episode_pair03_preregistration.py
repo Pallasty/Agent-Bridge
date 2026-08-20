@@ -10,6 +10,10 @@ PREREGISTRATION = (
     ROOT
     / "docs/design/evidence/embodied_media_episode_dogfood_pair_03_preregistration_2026_08_20.json"
 )
+PAIR04_PREREGISTRATION = (
+    ROOT
+    / "docs/design/evidence/embodied_media_episode_dogfood_pair_04_preregistration_2026_08_20.json"
+)
 SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 
 
@@ -104,6 +108,57 @@ class Pair03PreregistrationTests(unittest.TestCase):
         self.assertFalse(claims["long_lived_stability_proven"])
         self.assertFalse(claims["human_observation_proven"])
         self.assertFalse(claims["pixel_verification_proven"])
+        self.assertFalse(
+            claims["pair_authorizes_runtime_influence_beyond_two_preregistered_next_operations"]
+        )
+
+
+class Pair04PreregistrationTests(unittest.TestCase):
+    def setUp(self):
+        self.raw = PAIR04_PREREGISTRATION.read_text(encoding="utf-8")
+        self.value = json.loads(self.raw)
+
+    def test_pair04_is_a_frozen_replication_of_pair03_protocol(self):
+        self.assertEqual(self.value["pair_id"], "embodied-media-pair-04")
+        self.assertTrue(self.value["registered_before_actuation"])
+        admission = self.value["admission"]
+        self.assertEqual(
+            admission["required_master_commit"],
+            "afd1bd697874cfb06a2ed6c87080cb910ee94bb8",
+        )
+        self.assertEqual(
+            admission["required_runner_commit"],
+            "8fbc8faa505fe31bd337ffbbb3b25d5cd45a1758",
+        )
+        self.assertTrue(admission["pair_03_enrolled_before_registration"])
+        self.assertFalse(admission["protocol_or_threshold_changes_from_pair_03_allowed"])
+        self.assertEqual(admission["relevant_dogfood_tests_passed_before_registration"], 42)
+        self.assertEqual(self.value["baseline"]["expected_agent_orchestration_calls"], 7)
+        self.assertEqual(self.value["trial"]["expected_agent_orchestration_calls"], 2)
+        self.assertEqual(
+            self.value["success_contract"]["recovery_requires_three_matching_track_ids_over_at_least_ms"],
+            500,
+        )
+
+    def test_pair04_public_evidence_contains_only_private_hashes(self):
+        bindings = self.value["private_bindings"]
+        for key in (
+            "baseline_operation_id_sha256", "trial_operation_id_sha256",
+            "adb_serial_sha256", "bind_address_sha256",
+        ):
+            self.assertRegex(bindings[key], SHA256)
+        for forbidden in (
+            "p4-baseline-", "p4-trial-", "3K661F0178H00000", "192.168.1.16",
+        ):
+            self.assertNotIn(forbidden, self.raw)
+        self.assertFalse(bindings["raw_values_persisted_in_git"])
+
+    def test_pair04_does_not_claim_lift_or_broader_authority(self):
+        claims = self.value["claim_boundary"]
+        self.assertFalse(claims["pair_proves_behavior_lift"])
+        self.assertFalse(claims["pair_proves_global_dispatch_count"])
+        self.assertFalse(claims["pair_proves_exclusive_causation"])
+        self.assertFalse(claims["long_lived_stability_proven"])
         self.assertFalse(
             claims["pair_authorizes_runtime_influence_beyond_two_preregistered_next_operations"]
         )
