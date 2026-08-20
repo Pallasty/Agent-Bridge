@@ -1,0 +1,71 @@
+{
+  "candidate": {
+    "artifact": {
+      "baseline_bytes": 50331648,
+      "candidate_bytes": 12595968
+    },
+    "id": "qwen3-tts-codec-scope3-native-perchannel-q8",
+    "model": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "quantization": "three-codec-linear-per-output-channel-int8"
+  },
+  "components": [
+    {
+      "boundary": "codec",
+      "name": "speech_tokenizer.decoder.scope3"
+    }
+  ],
+  "corpus": {
+    "case_ids": [
+      "zh-long-technical-vivian",
+      "zh-mixed-english-supported",
+      "zh-warm-serena",
+      "zh-homophone-difficult"
+    ],
+    "id": "2026-08-20-codec-linear-e26-manifest-v1",
+    "path": "inputs/corpus.json",
+    "sha256": "fef7e58970d1d032a48bde15673b86a4a8b6648f0c5a978806538b126783c0ea"
+  },
+  "evidence": [
+    {
+      "case_ids": [
+        "zh-long-technical-vivian",
+        "zh-mixed-english-supported",
+        "zh-warm-serena",
+        "zh-homophone-difficult"
+      ],
+      "kind": "waveform_numeric",
+      "metrics": {},
+      "path": "inputs/waveform_numeric.json",
+      "sha256": "4d7b1c504e1fb2338af878a6627c26f90f0be4309bd3f9af70bbb8bf0c8fc72e",
+      "status": "PASS"
+    },
+    {
+      "case_ids": [
+        "zh-long-technical-vivian",
+        "zh-mixed-english-supported",
+        "zh-warm-serena",
+        "zh-homophone-difficult"
+      ],
+      "kind": "blind_listening",
+      "metrics": {},
+      "path": "inputs/blind_listening.json",
+      "sha256": "d57966aaac09db02016f9f0fadc63c8a400622adf837cc700bb85a975622d25f",
+      "status": "PASS"
+    },
+    {
+      "case_ids": [
+        "zh-long-technical-vivian",
+        "zh-mixed-english-supported"
+      ],
+      "kind": "runtime_benchmark",
+      "metrics": {
+        "max_latency_ratio": 1.017644163833269,
+        "runtime_memory_delta_bytes": 12595200.0
+      },
+      "path": "inputs/runtime_benchmark.json",
+      "sha256": "0ad226fa50f8860e095121e3e1510cb5d0d2b3b25bbc1b1b3e3362d060b01c75",
+      "status": "FAIL"
+    }
+  ],
+  "schema": "agent_bridge.tts_quantization_candidate.v1"
+}

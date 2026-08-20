@@ -1,0 +1,65 @@
+{
+  "authorization": {
+    "allows_audio_generation_or_playback": false,
+    "allows_checkpoint_rewrite": false,
+    "allows_deployment": false,
+    "allows_promotion": false,
+    "allows_runtime_wiring": false,
+    "allows_weight_writing": false
+  },
+  "candidate_id": "qwen3-tts-codec-scope3-native-perchannel-q8",
+  "components": [
+    {
+      "boundary": "codec",
+      "name": "speech_tokenizer.decoder.scope3"
+    }
+  ],
+  "corpus": {
+    "case_ids": [
+      "zh-long-technical-vivian",
+      "zh-mixed-english-supported",
+      "zh-warm-serena",
+      "zh-homophone-difficult"
+    ],
+    "id": "2026-08-20-codec-linear-e26-manifest-v1",
+    "sha256": "fef7e58970d1d032a48bde15673b86a4a8b6648f0c5a978806538b126783c0ea"
+  },
+  "decision": "reject",
+  "evidence": [
+    {
+      "case_count": 4,
+      "kind": "waveform_numeric",
+      "sha256": "4d7b1c504e1fb2338af878a6627c26f90f0be4309bd3f9af70bbb8bf0c8fc72e",
+      "status": "PASS"
+    },
+    {
+      "case_count": 4,
+      "kind": "blind_listening",
+      "sha256": "d57966aaac09db02016f9f0fadc63c8a400622adf837cc700bb85a975622d25f",
+      "status": "PASS"
+    },
+    {
+      "case_count": 2,
+      "kind": "runtime_benchmark",
+      "sha256": "0ad226fa50f8860e095121e3e1510cb5d0d2b3b25bbc1b1b3e3362d060b01c75",
+      "status": "FAIL"
+    }
+  ],
+  "manifest_sha256": "56ffa8be983974455fe6286627cefa7cdcf5504c2d6ca28f6042d768749a1408",
+  "missing_evidence": [
+    "evidence_case_coverage:runtime_benchmark"
+  ],
+  "model": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "policy_sha256": "d573b4fe49612e0a8c93bbef46c57e1989702d00ea0986b54aeeb53698200dbf",
+  "rejection_reasons": [
+    "evidence_failed:runtime_benchmark",
+    "resource_limit:runtime_memory_increased"
+  ],
+  "required_evidence_kinds": [
+    "blind_listening",
+    "runtime_benchmark",
+    "waveform_numeric"
+  ],
+  "schema": "agent_bridge.tts_quantization_gate_receipt.v1",
+  "shadow_evidence_observed": false
+}

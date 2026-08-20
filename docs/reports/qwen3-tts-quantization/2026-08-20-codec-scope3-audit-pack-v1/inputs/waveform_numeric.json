@@ -1,0 +1,42 @@
+{
+  "schema": "agent_bridge.qwen3_tts.codec_linear_perchannel_q8_scope3_expansion_evidence.v1",
+  "status": "PERCHANNEL_Q8_SCOPE3_BLIND_AB_PLAN_AUTHORIZED",
+  "scope": [
+    "decoder.upsample.0.1.pwconv2",
+    "decoder.upsample.1.1.pwconv1",
+    "decoder.upsample.1.1.pwconv2"
+  ],
+  "excluded": ["decoder.upsample.0.1.pwconv1"],
+  "prompt_results": [
+    {"case_id": "zh-long-technical-vivian", "waveform_nrmse": 0.006429941028399441, "cosine_similarity": 0.9999794132383677, "log_stft_rmse": 0.0027557734257085244, "passed": true, "receipt_sha256": "1efc25e9d4c1e4c539b68397202a432a68c3ed32d4d6d1bb80d9739d51c2fd86"},
+    {"case_id": "zh-mixed-english-supported", "waveform_nrmse": 0.00845445815994581, "cosine_similarity": 0.9999642875310685, "log_stft_rmse": 0.0023695183163892934, "passed": true, "receipt_sha256": "f927607888ee1b014945d497756e526ab272e2cc279e1355c6c7517dd29eb7bb"},
+    {"case_id": "zh-warm-serena", "waveform_nrmse": 0.005563038736552475, "cosine_similarity": 0.9999845440051383, "log_stft_rmse": 0.0017623298266124599, "passed": true, "receipt_sha256": "b1c3a74067b9fc20d15407cc177efa0dd64f57f7b9cd2474af98c8f10ad2054e"},
+    {"case_id": "zh-homophone-difficult", "waveform_nrmse": 0.0065409554004292655, "cosine_similarity": 0.9999786197782513, "log_stft_rmse": 0.0017609753926939346, "passed": true, "receipt_sha256": "53361d02968c09133776f322be40e643aa60c5442beaa09419a7f33509f81318"}
+  ],
+  "summary": {
+    "prompts": 4,
+    "passed": 4,
+    "max_waveform_nrmse": 0.00845445815994581,
+    "min_cosine_similarity": 0.9999642875310685,
+    "max_log_stft_rmse": 0.0027557734257085244
+  },
+  "sidecar": {
+    "bytes": 12595968,
+    "sha256": "658d53cacd79eb159b1ef1da67ad713d2db5790dc589d4a1da9598fd55e67760",
+    "source_fp32_bytes": 50331648,
+    "saving_fraction": 0.7497138977050781,
+    "location_role": "mac_experimental_cache_nonproduction"
+  },
+  "inadmissible_attempts": {
+    "count": 3,
+    "reason": "v1 runner hardcoded mixed-language case despite distinct trial ids; no result used"
+  },
+  "authorization": {
+    "allows_blind_ab_artifact_plan": true,
+    "allows_audio_write_or_playback": false,
+    "allows_checkpoint_rewrite": false,
+    "allows_runtime_wiring": false,
+    "allows_deployment": false,
+    "allows_promotion": false
+  }
+}
