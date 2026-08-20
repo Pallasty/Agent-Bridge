@@ -76,6 +76,35 @@ def record(trial_id="episode-1", *, baseline=True, useful=True):
 
 
 class ScorecardTests(unittest.TestCase):
+    def test_checked_in_pair03_and_pair04_are_still_collecting(self):
+        fixtures = []
+        for name in (
+            "embodied-media-episode-dogfood-pair-03-2026-08-20.json",
+            "embodied-media-episode-dogfood-pair-04-2026-08-20.json",
+        ):
+            path = Path(__file__).parents[1] / "docs/design/fixtures" / name
+            fixtures.append(MODULE.validate(json.loads(path.read_text(encoding="utf-8"))))
+        self.assertEqual(
+            [MODULE.decide(item)["decision"] for item in fixtures],
+            ["PASS_USEFUL_PAIRED_TASK", "PASS_USEFUL_PAIRED_TASK"],
+        )
+        aggregate = MODULE.report(fixtures)
+        self.assertEqual(aggregate["decision"], "COLLECTING_PAIRED_REAL_TASKS")
+        self.assertFalse(aggregate["behavior_lift_proven"])
+
+    def test_checked_in_pair04_is_a_useful_replication(self):
+        fixture = (
+            Path(__file__).parents[1]
+            / "docs/design/fixtures/embodied-media-episode-dogfood-pair-04-2026-08-20.json"
+        )
+        result = MODULE.decide(
+            MODULE.validate(json.loads(fixture.read_text(encoding="utf-8")))
+        )
+        self.assertEqual(result["decision"], "PASS_USEFUL_PAIRED_TASK")
+        self.assertEqual(result["metrics"]["agent_orchestration_calls_saved"], 5)
+        self.assertEqual(result["metrics"]["elapsed_ms_saved_descriptive_only"], 879)
+        self.assertFalse(result["metrics"]["behavior_lift_proven"])
+
     def test_checked_in_pair03_is_a_useful_paired_task(self):
         fixture = (
             Path(__file__).parents[1]

@@ -181,3 +181,13 @@ global dispatch proof, exclusive causation, long-lived stability, human
 observation, or pixel verification. Pair 01 and Pair 02 remain operational
 history but remain outside the denominator because each was aborted before a
 complete pair existed.
+
+## Pair 04 result
+
+Pair 04 repeated the frozen Pair 03 protocol without threshold or tool changes.
+Its baseline again required seven agent-visible calls and its trial required
+two; all other gating metrics remained zero. Exact settlement, device draw, and
+cleanup passed on both sides. The scorecard therefore classifies Pair 04 as a
+second `PASS_USEFUL_PAIRED_TASK`. With two useful pairs and the code-locked
+target still at three, the aggregate remains `COLLECTING_PAIRED_REAL_TASKS`;
+owner review and any broader runtime influence remain premature.
