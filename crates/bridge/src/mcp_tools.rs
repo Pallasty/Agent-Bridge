@@ -26006,12 +26006,13 @@ impl McpTool for SessionBootstrapTool {
                  AB_BOOTSTRAP_MMR_DISABLE=1 restores plain score order, \
                  AB_BOOTSTRAP_MMR_LAMBDA overrides lambda). Also \
                  surfaces an S1 distillation-candidates block (propose-only; \
-                 AB_DISTILL_SURFACING_DISABLE=1 drops it). A no-query cold start may \
-                 also surface read-only durable-media recovery candidates when the \
+                 AB_DISTILL_SURFACING_DISABLE=1 drops it). Any bootstrap may also \
+                 surface read-only durable-media recovery candidates when the \
                  owner-only journal is configured; these remain unselected, are not \
                  workspace/current-intent bound, never authorize execution, and require \
                  exact operation_id + record_sha256 revalidation. Query-targeted \
-                 bootstraps omit this global hint."
+                 bootstraps retain this bounded safety hint while continuing to omit \
+                 unrelated global auxiliary panels."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -26126,9 +26127,11 @@ impl McpTool for SessionBootstrapTool {
             .filter(|s| !s.is_empty())
             .map(str::to_string);
         let include_auxiliary_sections = include_bootstrap_auxiliary_sections(query.is_some());
-        let recovery_candidates_block = if include_auxiliary_sections {
-            bootstrap_recovery_candidates_block(is_compact).await
-        } else { None };
+        // Recovery discovery is a bounded safety hint rather than a global
+        // auxiliary dashboard. Keep it on task-targeted bootstraps (including
+        // the default UserPromptSubmit hook path) without reintroducing the
+        // letters/research/curation panels that compact recovery omits.
+        let recovery_candidates_block = bootstrap_recovery_candidates_block(is_compact).await;
 
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
             // Semantic path: cosine-ranked results, with only current,

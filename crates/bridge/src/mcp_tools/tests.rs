@@ -3172,7 +3172,7 @@ fn session_bootstrap_recovery_candidate_hint_is_unselected_and_fail_closed() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn default_bootstrap_surfaces_recovery_hint_but_targeted_bootstrap_omits_it() {
+async fn recovery_hint_surfaces_in_default_and_targeted_bootstrap() {
     let _env_lock = RUNTIME_ASSET_ADB_ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (hub, temp_dir) = mk_test_hub_with_store().await;
     let runtime_dir = temp_dir.join("runtime");
@@ -3192,7 +3192,9 @@ async fn default_bootstrap_surfaces_recovery_hint_but_targeted_bootstrap_omits_i
     let targeted = SessionBootstrapTool::new(hub).execute(
         json!({"cwd":cwd, "query":"continue repository work", "frontend":"claude-code"}),
         &ToolContext::default()).await.unwrap();
-    assert!(!result_text(&targeted).contains("Durable Media Recovery Candidates"));
+    let targeted_text = result_text(&targeted);
+    assert!(targeted_text.contains("Durable Media Recovery Candidates"), "{targeted_text}");
+    assert!(targeted_text.contains("Automatic execution: forbidden"), "{targeted_text}");
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
