@@ -2921,6 +2921,7 @@ impl McpTool for MobileProjectionFollowMediaTool {
         let mut changed_frames = 0u64;
         let mut last_revision = 1u64;
         let mut last_media_context = Value::Null;
+        let mut change_events: Vec<Value> = Vec::new();
         let mut loop_error: Option<String> = None;
         if connected {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
@@ -2953,6 +2954,14 @@ impl McpTool for MobileProjectionFollowMediaTool {
                     .unwrap_or(last_revision);
                 if revision > last_revision {
                     changed_frames += 1;
+                    if change_events.len() < 16 {
+                        change_events.push(json!({
+                            "poll": polls,
+                            "revision": revision,
+                            "status": payload.get("status").cloned().unwrap_or(Value::Null),
+                            "media_context": payload.get("media_context").cloned().unwrap_or(Value::Null)
+                        }));
+                    }
                     last_revision = revision;
                 }
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -2999,6 +3008,7 @@ impl McpTool for MobileProjectionFollowMediaTool {
             "final_session": final_status_payload.get("session").cloned().unwrap_or(Value::Null),
             "polls": polls,
             "changed_frames": changed_frames,
+            "change_events": change_events,
             "last_revision": last_revision,
             "last_media_context": last_media_context,
             "text_submission_count": text_submission_count,
