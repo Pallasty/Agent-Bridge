@@ -2985,12 +2985,18 @@ impl McpTool for MobileProjectionFollowMediaTool {
             )
             .await?;
         let stop_payload = mobile_projection_tool_result_json(&stop).unwrap_or(Value::Null);
+        let final_status = MobileProjectionStatusTool::new(self.hub.clone())
+            .execute(json!({"session_id": session_id}), ctx)
+            .await?;
+        let final_status_payload =
+            mobile_projection_tool_result_json(&final_status).unwrap_or(Value::Null);
         Ok(ToolResult::json_text(&json!({
             "schema": "agent_bridge.mobile_projection_follow_media.v0",
             "status": if connected && loop_error.is_none() { "completed" } else { "incomplete" },
             "verdict": if connected && loop_error.is_none() { "verified" } else { "error" },
             "session_id": session_id,
             "connection": connection_payload,
+            "final_session": final_status_payload.get("session").cloned().unwrap_or(Value::Null),
             "polls": polls,
             "changed_frames": changed_frames,
             "last_revision": last_revision,
