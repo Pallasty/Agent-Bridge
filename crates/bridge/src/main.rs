@@ -1001,6 +1001,71 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Run the owner-local Linux embodiment loop: refresh one stable presence
+    /// row while the native transparent renderer follows the pet sidecar.
+    /// This foreground command emits no audio and controls no desktop input.
+    LinuxLive {
+        /// Stable project slug. Defaults to the cwd basename.
+        #[arg(long)]
+        project: Option<String>,
+        /// Presence role for the live embodiment row.
+        #[arg(long, default_value = "embodiment")]
+        role: String,
+        /// Pet sidecar id. Defaults to AB_PET_ID/current Codex avatar/xiao-shu-v2.
+        #[arg(long)]
+        pet_id: Option<String>,
+        /// Stable presence session id. Defaults to com.agentbridge.avatar-live.<project>.
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Stable Agent Avatar Protocol agent_id. Defaults to the session id.
+        #[arg(long)]
+        agent_id: Option<String>,
+        /// Runtime label projected into avatar_state.
+        #[arg(long, default_value = "local-cli")]
+        runtime: String,
+        /// Working directory to project. Defaults to this process cwd.
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Foreground renderer lifetime in milliseconds (clamped to 1s..24h).
+        #[arg(long, default_value_t = 1_800_000)]
+        duration_ms: u64,
+        /// Presence refresh interval in seconds (clamped to 5..300s).
+        #[arg(long, default_value_t = 15)]
+        heartbeat_interval_secs: u64,
+        /// Pet sidecar polling interval in milliseconds (clamped to 100..5000ms).
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_STATE_POLL_MS)]
+        state_poll_ms: u64,
+        /// Transparent surface width in pixels.
+        #[arg(long, default_value_t = 360)]
+        width: u32,
+        /// Transparent surface height in pixels.
+        #[arg(long, default_value_t = 520)]
+        height: u32,
+        /// Screen anchor: top-left, top-right, bottom-left, bottom-right.
+        #[arg(long, default_value = "bottom-right")]
+        anchor: String,
+        /// Top margin in pixels.
+        #[arg(long, default_value_t = 0)]
+        margin_top: i32,
+        /// Right margin in pixels.
+        #[arg(long, default_value_t = 96)]
+        margin_right: i32,
+        /// Bottom margin in pixels.
+        #[arg(long, default_value_t = 96)]
+        margin_bottom: i32,
+        /// Left margin in pixels.
+        #[arg(long, default_value_t = 0)]
+        margin_left: i32,
+        /// Wayland output to place the avatar on. Omit for compositor default.
+        #[arg(long)]
+        output: Option<String>,
+        /// Print the bounded plan without writing presence or opening Wayland.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit JSON instead of a compact human summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Sync the current pet sidecar into a presence row for CLI/launchd heartbeats.
     SyncPresence {
         /// Pet id to sync. Defaults to AB_PET_ID, current Codex avatar, then xiao-shu-v2.
@@ -4878,6 +4943,52 @@ async fn real_main() -> Result<()> {
                     *sprite_scale_percent,
                     *frame_count,
                     *frame_interval_ms,
+                    output.clone(),
+                    *dry_run,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::LinuxLive {
+                project,
+                role,
+                pet_id,
+                session_id,
+                agent_id,
+                runtime,
+                cwd,
+                duration_ms,
+                heartbeat_interval_secs,
+                state_poll_ms,
+                width,
+                height,
+                anchor,
+                margin_top,
+                margin_right,
+                margin_bottom,
+                margin_left,
+                output,
+                dry_run,
+                json: as_json,
+            } => {
+                run_avatar_linux_live(
+                    project.clone(),
+                    role.clone(),
+                    pet_id.clone(),
+                    session_id.clone(),
+                    agent_id.clone(),
+                    runtime.clone(),
+                    cwd.clone(),
+                    *duration_ms,
+                    *heartbeat_interval_secs,
+                    *state_poll_ms,
+                    *width,
+                    *height,
+                    anchor.clone(),
+                    *margin_top,
+                    *margin_right,
+                    *margin_bottom,
+                    *margin_left,
                     output.clone(),
                     *dry_run,
                     *as_json,
@@ -8823,6 +8934,273 @@ async fn run_avatar_linux_native_transparent(
         println!(
             "native transparent probe completed: {}x{} duration={}ms",
             opts.width, opts.height, opts.duration_ms
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_linux_live(
+    project: Option<String>,
+    role: String,
+    pet_id: Option<String>,
+    session_id: Option<String>,
+    agent_id: Option<String>,
+    runtime: String,
+    cwd: Option<PathBuf>,
+    duration_ms: u64,
+    heartbeat_interval_secs: u64,
+    state_poll_ms: u64,
+    width: u32,
+    height: u32,
+    anchor: String,
+    margin_top: i32,
+    margin_right: i32,
+    margin_bottom: i32,
+    margin_left: i32,
+    output: Option<String>,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    let cwd = cwd.unwrap_or(avatar_current_cwd()?);
+    let project = avatar_project_slug(project, &cwd);
+    let project_component = launchd_label_component(&project);
+    let session_id = session_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("com.agentbridge.avatar-live.{project_component}"));
+    let agent_id = agent_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| session_id.clone());
+    let pet_id = ab_bridge::pet_state::normalize_pet_id(pet_id.as_deref());
+    let pet_state = ab_bridge::pet_state::read_pet_state(&pet_id)
+        .with_context(|| format!("read Linux live pet sidecar for {pet_id}"))?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Linux live embodiment requires pet sidecar {}",
+                ab_bridge::pet_state::pet_state_path(&pet_id).display()
+            )
+        })?;
+    let mode = pet_state
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("idle");
+    let anchor = ab_bridge::avatar_native::parse_native_anchor(&anchor).ok_or_else(|| {
+        anyhow::anyhow!(
+            "invalid --anchor; expected top-left, top-right, bottom-left, or bottom-right"
+        )
+    })?;
+    let duration_ms = duration_ms.clamp(1_000, 86_400_000);
+    let heartbeat_interval_secs = heartbeat_interval_secs.clamp(5, 300);
+    let state_poll_ms = state_poll_ms.clamp(100, 5_000);
+
+    let mut renderer_opts = ab_bridge::avatar_native::NativeTransparentOptions {
+        width,
+        height,
+        layer: ab_bridge::avatar_native::NativeLayer::Overlay,
+        anchor,
+        margin_top,
+        margin_right,
+        margin_bottom,
+        margin_left,
+        duration_ms,
+        sprite_asset: ab_bridge::avatar_native::native_sprite_asset_for_mode(mode),
+        state_pet_id: Some(pet_id.clone()),
+        state_poll_ms,
+        output,
+        ..ab_bridge::avatar_native::NativeTransparentOptions::default()
+    };
+    let sprite_plan = ab_bridge::avatar_native::native_sprite_plan_from_state_value(&pet_state);
+    ab_bridge::avatar_native::apply_native_sprite_plan(&mut renderer_opts, &sprite_plan);
+
+    let presence_args = json!({
+        "pet_id": pet_id,
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "project": project,
+        "role": role,
+        "tag": "linux-live",
+        "runtime": runtime,
+        "cwd": cwd.display().to_string(),
+        "auto_tag": false,
+    });
+    let compositor = ab_bridge::avatar_floater::detect_compositor();
+    let backend = ab_bridge::avatar_floater::recommend_backend(&compositor);
+    let native_compiled = cfg!(all(target_os = "linux", feature = "linux-native-avatar"));
+    let renderer_plan = ab_bridge::avatar_native::native_transparent_plan_json(
+        &renderer_opts,
+        false,
+    );
+    let plan = json!({
+        "surface": "linux_avatar_live_plan",
+        "schema": 1,
+        "dry_run": true,
+        "ready": native_compiled
+            && backend.backend == ab_bridge::avatar_floater::AvatarBackend::NativeTransparent,
+        "platform": std::env::consts::OS,
+        "native_feature_compiled": native_compiled,
+        "backend": {
+            "recommended": backend.backend.as_str(),
+            "transparency_available": backend.transparency_available,
+            "reason": backend.reason,
+        },
+        "presence": {
+            "session_id": presence_args.get("session_id").cloned().unwrap_or(Value::Null),
+            "agent_id": presence_args.get("agent_id").cloned().unwrap_or(Value::Null),
+            "project": presence_args.get("project").cloned().unwrap_or(Value::Null),
+            "role": presence_args.get("role").cloned().unwrap_or(Value::Null),
+            "runtime": presence_args.get("runtime").cloned().unwrap_or(Value::Null),
+            "pet_id": presence_args.get("pet_id").cloned().unwrap_or(Value::Null),
+            "heartbeat_interval_secs": heartbeat_interval_secs,
+            "stable_identity": true,
+            "projects_current_sidecar_facets": true,
+        },
+        "renderer": renderer_plan,
+        "safety": {
+            "foreground_only": true,
+            "installs_service": false,
+            "writes_presence_only": true,
+            "writes_pet_sidecar": false,
+            "emits_audio": false,
+            "emits_notification": false,
+            "controls_desktop": false,
+            "executes_actions": false,
+            "enables_embodiment_runtime_p4": false,
+        },
+    });
+
+    if dry_run {
+        if as_json {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!("Linux avatar live plan (dry run)");
+            println!(
+                "ready={} backend={} project={} pet_id={} session_id={}",
+                plan["ready"],
+                plan["backend"]["recommended"],
+                presence_args["project"],
+                presence_args["pet_id"],
+                presence_args["session_id"]
+            );
+            println!(
+                "duration_ms={} heartbeat_interval_secs={} audio=false actions=false",
+                duration_ms, heartbeat_interval_secs
+            );
+        }
+        return Ok(());
+    }
+
+    if !native_compiled {
+        anyhow::bail!(
+            "avatar linux-live requires a Linux build with the linux-native-avatar feature"
+        );
+    }
+    if backend.backend != ab_bridge::avatar_floater::AvatarBackend::NativeTransparent {
+        anyhow::bail!(
+            "avatar linux-live requires the verified native transparent backend: {}",
+            backend.reason
+        );
+    }
+
+    let store = SqliteStore::open(&default_db_path())
+        .await
+        .context("open state.db for Linux avatar live presence")?;
+    let mut last_presence = ab_bridge::pet_presence::sync_pet_presence(
+        &store,
+        presence_args.clone(),
+    )
+    .await
+    .context("initial Linux avatar live presence sync")?;
+    let mut heartbeat_count = 1_u64;
+    let mut heartbeat_failures = 0_u64;
+    let mut last_heartbeat_error: Option<String> = None;
+    let started = std::time::Instant::now();
+
+    if !as_json {
+        println!(
+            "Linux avatar live started project={} pet_id={} session_id={} duration_ms={}",
+            presence_args["project"],
+            presence_args["pet_id"],
+            presence_args["session_id"],
+            duration_ms
+        );
+    }
+
+    let renderer_opts_for_run = renderer_opts.clone();
+    let mut renderer = tokio::task::spawn_blocking(move || {
+        ab_bridge::avatar_native::run_native_transparent_probe(renderer_opts_for_run)
+    });
+    let mut heartbeat = tokio::time::interval_at(
+        tokio::time::Instant::now()
+            + std::time::Duration::from_secs(heartbeat_interval_secs),
+        std::time::Duration::from_secs(heartbeat_interval_secs),
+    );
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let renderer_result = loop {
+        tokio::select! {
+            result = &mut renderer => break result,
+            _ = heartbeat.tick() => {
+                match ab_bridge::pet_presence::sync_pet_presence(&store, presence_args.clone()).await {
+                    Ok(payload) => {
+                        heartbeat_count += 1;
+                        last_presence = payload;
+                    }
+                    Err(error) => {
+                        heartbeat_failures += 1;
+                        last_heartbeat_error = Some(error.to_string());
+                    }
+                }
+            }
+        }
+    };
+    renderer_result.context("join Linux avatar native renderer")??;
+
+    match ab_bridge::pet_presence::sync_pet_presence(&store, presence_args.clone()).await {
+        Ok(payload) => {
+            heartbeat_count += 1;
+            last_presence = payload;
+        }
+        Err(error) => {
+            heartbeat_failures += 1;
+            last_heartbeat_error = Some(error.to_string());
+        }
+    }
+
+    let receipt = json!({
+        "surface": "linux_avatar_live_receipt",
+        "schema": 1,
+        "dry_run": false,
+        "completed": true,
+        "elapsed_ms": started.elapsed().as_millis() as u64,
+        "presence": {
+            "session_id": presence_args.get("session_id").cloned().unwrap_or(Value::Null),
+            "heartbeat_count": heartbeat_count,
+            "heartbeat_failures": heartbeat_failures,
+            "last_error": last_heartbeat_error,
+            "last_projection": last_presence,
+        },
+        "renderer": {
+            "completed": true,
+            "launch_plan": ab_bridge::avatar_native::native_transparent_plan_json(&renderer_opts, true),
+            "dynamic_state_source": "pet_state_sidecar",
+            "dynamic_state_polling_ran": true,
+            "final_visual_state_observed": false,
+            "reason": "the native surface completed and polled the sidecar, but this foreground receipt does not capture compositor pixels or infer the final visible sprite",
+        },
+        "safety": plan.get("safety").cloned().unwrap_or(Value::Null),
+    });
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+    } else {
+        println!(
+            "Linux avatar live completed heartbeats={} failures={} elapsed_ms={}",
+            heartbeat_count,
+            heartbeat_failures,
+            receipt["elapsed_ms"]
         );
     }
     Ok(())

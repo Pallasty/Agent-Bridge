@@ -764,13 +764,14 @@ Native HTTP-state verification:
 
 ## 11. Implementation Plan
 
-Current status: items 1-13 have landed in the repository as of 2026-06-02. The
+Current status: items 1-14 have landed in the repository as of 2026-08-20. The
 native Wayland/layer-shell backend is the first backend on this host that
 satisfies the mandatory transparent-background requirement, and it now renders a
 real animated sidecar sprite that can poll local pet sidecar state or daemon
 HTTP renderer-state and hot-swap tracks during a running transparent surface.
-The next boundary is making the daemon HTTP source the ergonomic default for
-project-aware launch flows.
+The foreground `linux-live` loop now supplies the first ergonomic, project-aware
+presence and renderer dogfood path. The next boundary is real-use evidence, not
+automatic service installation.
 
 1. **Probe and record current Linux state.** Done.
    Save the exact sidecar path, active `pet_id`, official-package availability,
@@ -832,12 +833,21 @@ project-aware launch flows.
     sidecar state when configured, and retain `--pet-id` as a local fallback for
     failed HTTP polls.
 
+14. **Run a bounded owner-local live loop.** Done for EAP-1A.
+    `agent-bridge avatar linux-live` refreshes one stable presence row while the
+    native transparent renderer polls the same pet sidecar. It is foreground
+    only and keeps audio, notifications, desktop control, action execution,
+    service installation and `embodiment-runtime-p4` disabled. A 10.059-second
+    live run produced four heartbeats with zero failures; a concurrent avatar
+    surface read returned exactly one stable row in the sidecar's real `handoff`
+    state. The pet sidecar SHA-256 was identical before and after the run.
+
 ---
 
 ## 12. Open Questions
 
-1. Should the MVP be packaged as an Agent-Bridge CLI subcommand
-   (`agent-bridge avatar floater`) or as a separate app directory?
+1. After ten or more useful real task transitions, should `linux-live` remain a
+   foreground command or gain an owner-local systemd user service installer?
 2. Should the first floater watch the sidecar JSON directly, poll MCP/HTTP, or
    support both?
 3. Which Linux desktops must be treated as Tier 1: GNOME, KDE, Sway, Hyprland,
