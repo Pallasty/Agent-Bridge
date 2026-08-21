@@ -217,6 +217,8 @@ operation ID and record SHA returned by the previous scan. The scanner then
 performs a locked read and returns `selection_conflict/replan` on any record
 drift, disappearance, expiry, or insufficient window. A stale candidate never
 becomes a recovery plan.
+The two selection arguments are an inseparable pair; a bare ID or bare digest,
+and any human-semantic ID, are rejected before the journal is inspected.
 
 The source-local cross-process synthetic gate exercises the complete handoff:
 one process is killed after its fake `playerctl next` child changes state, a

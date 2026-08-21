@@ -20,6 +20,8 @@
     "insufficient_window_is_blocked": true,
     "explicit_selection_requires_record_sha": true,
     "selection_drift_is_replan": true,
+    "selection_arguments_are_an_inseparable_pair": true,
+    "human_semantic_selection_ids_rejected": true,
     "owner_only_journal_required": true,
     "shared_nonblocking_lock_required": true
   },

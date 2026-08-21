@@ -127,6 +127,20 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         bad = INDEX.discover(self.directory, now=1100.0, selected_operation_id=self.operation_id, expected_record_sha256="0" * 64)
         self.assertEqual(bad["admission"], "selection_conflict")
 
+    def test_selection_requires_paired_opaque_id_and_record_sha(self):
+        self.write_candidate()
+        sha = __import__("hashlib").sha256((self.directory / f"{self.key}.json").read_bytes()).hexdigest()
+        for kwargs in (
+            {"selected_operation_id": self.operation_id},
+            {"expected_record_sha256": sha},
+            {"selected_operation_id": "human-readable-id", "expected_record_sha256": sha},
+        ):
+            with self.subTest(kwargs=kwargs):
+                result = INDEX.discover(self.directory, now=1100.0, **kwargs)
+                self.assertEqual(result["candidate_count"], 0)
+                self.assertEqual(result["admission"], "selection_conflict")
+                self.assertEqual(result["recover"], "replan")
+
     def test_unsafe_or_corrupt_journal_fails_entire_scan_closed(self):
         record_path, _ = self.write_candidate()
         record_path.write_text("{")

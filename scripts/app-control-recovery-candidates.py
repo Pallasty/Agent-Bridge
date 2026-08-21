@@ -51,6 +51,14 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
         "scan_complete": True, "media_observed": False, "action_invoked": False,
         "automatic_recovery_authorized": False,
     }
+    if (selected_operation_id is None) != (expected_record_sha256 is None):
+        result.update(admission="selection_conflict", recover="replan", selection_conflict=True)
+        result["error"] = {"code": "selection_requires_operation_id_and_record_sha256_pair"}
+        return result
+    if selected_operation_id is not None and not OPAQUE_ID_RE.fullmatch(selected_operation_id):
+        result.update(admission="selection_conflict", recover="replan", selection_conflict=True)
+        result["error"] = {"code": "invalid_selected_operation_id"}
+        return result
     try:
         metadata = os.lstat(directory)
         if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
