@@ -62,6 +62,7 @@ AUDIO_ADAPTER_COMPANIONS=(
     omnivoice_onnx_bundle_synth.py
     omnivoice_onnx_official_decode.py
     omnivoice_tts_synth.py
+    qwen3_lan_remote_synth.py
     qwen3_tts_rust_gate.py
     qwen3_tts_synth.py
     tts_canary_router.py
