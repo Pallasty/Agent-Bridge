@@ -336,6 +336,12 @@ class FocusContinuityRunnerTests(unittest.TestCase):
 
 
 class FocusContinuityEligibilityTests(unittest.TestCase):
+    def test_non_object_probe_preserves_legacy_reason_and_adds_reason_list(self):
+        result = ELIGIBILITY.summarize(None, now=1000)
+        self.assertFalse(result["eligible_now"])
+        self.assertEqual(result["reason"], "probe_not_object")
+        self.assertEqual(result["ineligibility_reasons"], ["probe_not_object"])
+
     def test_complete_two_window_probe_is_eligible_without_retaining_content(self):
         value = probe()
         value["captured_at"] = 1000

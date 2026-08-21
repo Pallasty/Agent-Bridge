@@ -25,6 +25,7 @@ def summarize(value: Any, *, now: float | None = None) -> dict[str, Any]:
             "schema": SCHEMA,
             "status": "ineligible",
             "eligible_now": False,
+            "reason": "probe_not_object",
             "ineligibility_reasons": ["probe_not_object"],
         }
     windows = value.get("windows") if isinstance(value.get("windows"), list) else []
