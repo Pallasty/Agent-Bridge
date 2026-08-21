@@ -61,13 +61,13 @@ public final class RecoveryAuthorizationActivity extends Activity {
     private KeyPair loadOrCreateKey() throws Exception {
         KeyStore store=KeyStore.getInstance("AndroidKeyStore"); store.load(null);
         if (!store.containsAlias(ALIAS)) {
-            KeyPairGenerator generator=KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_ED25519,"AndroidKeyStore");
+            KeyPairGenerator generator=KeyPairGenerator.getInstance("Ed25519","AndroidKeyStore");
             generator.initialize(new KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_SIGN)
                     .setUserAuthenticationRequired(true).setUserAuthenticationParameters(0,
                         KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL).build());
             generator.generateKeyPair();
         }
-        return new KeyPair(store.getCertificate(ALIAS).getPublic(), (java.security.PrivateKey)store.getKey(ALIAS,null));
+        return new KeyPair(store.getCertificate(ALIAS).getPublicKey(), (java.security.PrivateKey)store.getKey(ALIAS,null));
     }
 
     private void sign(BiometricPrompt.AuthenticationResult result, KeyPair pair) {
