@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -35,48 +34,37 @@ def _result(admission: str, *, consumed: bool = False, error: str | None = None)
     return out
 
 
-def _owner_file(path: Path, mode: int) -> bytes:
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        meta = os.fstat(fd)
-        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.getuid() or stat.S_IMODE(meta.st_mode) != mode:
-            raise OSError("unsafe_owner_file")
-        data = os.read(fd, 129)
-        if len(data) < 32 or len(data) > 128:
-            raise OSError("invalid_key_length")
-        return data
-    finally:
-        os.close(fd)
-
-
 def _decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def authorize(*, receipt: str, key_path: Path | None, ledger: Path | None,
+def authorize(*, receipt: str, public_key_b64: str | None, ledger: Path | None,
               operation_id: str, record_sha256: str, request_sha256: str,
               workspace_sha256: str, session_sha256: str, consume: bool,
               now: float | None = None) -> dict[str, Any]:
-    if key_path is None or ledger is None:
+    if public_key_b64 is None or ledger is None:
         return _result("source_unavailable", error="authorization_source_unavailable")
     try:
-        key = _owner_file(key_path, 0o600)
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        key_raw = _decode(public_key_b64)
+        if len(key_raw) != 32:
+            raise ValueError("invalid_public_key")
+        public_key = Ed25519PublicKey.from_public_bytes(key_raw)
         meta = os.lstat(ledger)
         if not stat.S_ISDIR(meta.st_mode) or meta.st_uid != os.getuid() or stat.S_IMODE(meta.st_mode) != 0o700:
             raise OSError("unsafe_ledger")
-    except OSError:
+    except (ImportError, OSError, ValueError):
         return _result("source_unavailable", error="authorization_source_unavailable")
     try:
         encoded, encoded_mac = receipt.split(".", 1)
         raw = _decode(encoded)
         supplied_mac = _decode(encoded_mac)
-        if len(raw) > MAX_RECEIPT_BYTES or len(supplied_mac) != 32:
+        if len(raw) > MAX_RECEIPT_BYTES or len(supplied_mac) != 64:
             raise ValueError("invalid_receipt")
-        expected_mac = hmac.new(key, raw, hashlib.sha256).digest()
-        if not hmac.compare_digest(supplied_mac, expected_mac):
-            raise ValueError("invalid_mac")
+        public_key.verify(supplied_mac, raw)
         payload = json.loads(raw)
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except (ValueError, TypeError, json.JSONDecodeError, InvalidSignature):
         return _result("binding_conflict", error="authorization_receipt_invalid")
     required = {
         "schema", "operation_id", "record_sha256", "request_sha256", "workspace_sha256",
@@ -133,9 +121,9 @@ def main() -> int:
     parser.add_argument("--session-sha256", required=True)
     parser.add_argument("--consume", action="store_true")
     args = parser.parse_args()
-    key = os.environ.get("AB_APP_CONTROL_RECOVERY_AUTH_KEY_FILE")
+    public_key = os.environ.get("AB_APP_CONTROL_RECOVERY_AUTH_PUBLIC_KEY_B64")
     ledger = os.environ.get("AB_APP_CONTROL_RECOVERY_AUTH_DIR")
-    out = authorize(receipt=args.receipt, key_path=Path(key) if key else None,
+    out = authorize(receipt=args.receipt, public_key_b64=public_key,
                     ledger=Path(ledger) if ledger else None, operation_id=args.operation_id,
                     record_sha256=args.record_sha256, request_sha256=args.request_sha256,
                     workspace_sha256=args.workspace_sha256, session_sha256=args.session_sha256,

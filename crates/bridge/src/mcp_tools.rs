@@ -11301,6 +11301,7 @@ impl McpTool for AppControlTool {
                     "intent_confirmed": {"type": "boolean", "default": false},
                     "minimum_recovery_secs": {"type": "number", "minimum": 0.0, "maximum": 86400.0, "default": 5.0},
                     "recovery_authorization_review": {"type": "boolean", "default": false},
+                    "recovery_authorization_request": {"type": "boolean", "default": false},
                     "recovery_authorization_receipt": {"type": "string", "maxLength": 8192},
                     "recovery_authorization_consume": {"type": "boolean", "default": false},
                     "dry_run": {
@@ -11334,6 +11335,7 @@ impl McpTool for AppControlTool {
             "intent_confirmed",
             "minimum_recovery_secs",
             "recovery_authorization_review",
+            "recovery_authorization_request",
             "recovery_authorization_receipt",
             "recovery_authorization_consume",
             "dry_run",
@@ -11495,12 +11497,19 @@ impl McpTool for AppControlTool {
         {
             return Ok(app_control_error("replan", json!({"code": "recovery_preflight_required"})));
         }
+        if !recovery_preflight && args.get("recovery_authorization_request").is_some() {
+            return Ok(app_control_error("replan", json!({"code": "recovery_preflight_required"})));
+        }
         if recovery_preflight {
             let authorization_review = args.get("recovery_authorization_review").and_then(Value::as_bool).unwrap_or(false);
+            let authorization_request = args.get("recovery_authorization_request").and_then(Value::as_bool).unwrap_or(false);
             let authorization_consume = args.get("recovery_authorization_consume").and_then(Value::as_bool).unwrap_or(false);
             let authorization_receipt = args.get("recovery_authorization_receipt").and_then(Value::as_str);
             if authorization_consume && !authorization_review {
                 return Ok(app_control_error("replan", json!({"code": "recovery_authorization_review_required"})));
+            }
+            if authorization_request && authorization_review {
+                return Ok(app_control_error("replan", json!({"code": "recovery_authorization_mode_conflict"})));
             }
             if authorization_review && authorization_receipt.map(str::is_empty).unwrap_or(true) {
                 return Ok(app_control_error("replan", json!({"code": "recovery_authorization_receipt_required"})));
@@ -11579,6 +11588,39 @@ impl McpTool for AppControlTool {
                 || payload.get("recover").and_then(Value::as_str) == Some("replan");
             if !safe || !eligible_contract || !blocked_contract {
                 return Ok(app_control_error("replan", json!({"code": "recovery_preflight_source_contract_mismatch"})));
+            }
+            if authorization_request && payload.get("admission").and_then(Value::as_str) == Some("eligible") {
+                let Some(session_id) = _ctx.session_id.as_ref() else {
+                    return Ok(app_control_error("replan", json!({"code": "authorization_source_unavailable"})));
+                };
+                let request_script = app_control_recovery_authorization_request_script_path();
+                let session_sha256 = format!("{:x}", Sha256::digest(session_id.as_str().as_bytes()));
+                let request_sha256 = payload.pointer("/candidates/0/request_digest").and_then(Value::as_str).unwrap();
+                let mut request_cmd = killable_command(std::env::var("PYTHON").ok()
+                    .filter(|value| !value.trim().is_empty()).unwrap_or_else(|| "python3".into()));
+                request_cmd.arg(request_script).arg("--operation-id").arg(operation_id)
+                    .arg("--record-sha256").arg(expected_record_sha256.unwrap())
+                    .arg("--request-sha256").arg(request_sha256)
+                    .arg("--workspace-sha256").arg(workspace_sha256.as_deref().unwrap())
+                    .arg("--session-sha256").arg(session_sha256)
+                    .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+                let request_output = match tokio::time::timeout(Duration::from_millis(2_000), request_cmd.output()).await {
+                    Ok(Ok(output)) => output,
+                    _ => return Ok(app_control_error("retry", json!({"code": "recovery_authorization_request_unavailable"}))),
+                };
+                let request_payload: Value = match serde_json::from_slice(&request_output.stdout) {
+                    Ok(value) => value,
+                    Err(_) => return Ok(app_control_error("replan", json!({"code": "recovery_authorization_request_invalid_json"}))),
+                };
+                let request_safe = request_payload.get("schema").and_then(Value::as_str)
+                    == Some("agent_bridge.app_control.recovery_authorization_broker_request.v0")
+                    && request_payload.get("verdict").and_then(Value::as_str) == Some("verified")
+                    && request_payload.get("read_only").and_then(Value::as_bool) == Some(true)
+                    && request_payload.get("authorization_granted").and_then(Value::as_bool) == Some(false)
+                    && request_payload.get("action_invoked").and_then(Value::as_bool) == Some(false)
+                    && request_payload.get("automatic_recovery_authorized").and_then(Value::as_bool) == Some(false);
+                if !request_safe { return Ok(app_control_error("replan", json!({"code": "recovery_authorization_request_contract_mismatch"}))); }
+                return Ok(ToolResult::json_text(&request_payload));
             }
             if authorization_review && payload.get("admission").and_then(Value::as_str) == Some("eligible") {
                 let Some(session_id) = _ctx.session_id.as_ref() else {
@@ -26080,6 +26122,12 @@ fn app_control_recovery_candidates_script_path() -> PathBuf {
 fn app_control_recovery_authorization_script_path() -> PathBuf {
     installed_runtime_script_path("app-control-recovery-authorization.py").unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app-control-recovery-authorization.py")
+    })
+}
+
+fn app_control_recovery_authorization_request_script_path() -> PathBuf {
+    installed_runtime_script_path("app-control-recovery-authorization-request.py").unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app-control-recovery-authorization-request.py")
     })
 }
 

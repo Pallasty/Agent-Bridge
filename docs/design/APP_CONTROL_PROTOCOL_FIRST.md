@@ -289,11 +289,13 @@ influence.
 
 An eligible intent preflight is not user authorization. The optional
 `recovery_authorization_review` layer verifies a short-lived (at most five
-minutes), HMAC-authenticated receipt bound to the exact operation ID, record
+minutes), Ed25519-signed receipt bound to the exact operation ID, record
 digest, canonical request digest, workspace digest, frontend session digest,
 issuer, and random nonce. Receipts retain no prompt, path, or media content.
-The key and nonce ledger are owner-only runtime resources supplied by a trusted
-frontend broker; neither issuance nor key material is exposed through MCP.
+The signing private key remains outside the host, workspace, hook, environment,
+and MCP. The MCP process receives only the frontend public key via
+`AB_APP_CONTROL_RECOVERY_AUTH_PUBLIC_KEY_B64`; the owner-only nonce ledger is a
+runtime resource. Neither issuance nor private key material is exposed through MCP.
 Without that broker, admission is `source_unavailable`: `intent_confirmed` and
 caller session hints are never promoted to authority.
 
@@ -302,6 +304,16 @@ so concurrent or replayed use admits one consumer and reports
 `already_consumed` to all others. Even successful consumption keeps
 `automatic_recovery_authorized=false` and never dispatches media. Connecting a
 consumed permit to mutation remains a separate future gate.
+
+`recovery_authorization_request=true` produces a fresh, read-only broker request
+only after the exact intent preflight is eligible. It contains only the five
+binding identifiers, request time, maximum receipt TTL, and a random request
+nonce. It carries `authorization_granted=false`, is not itself signable receipt
+authority, and invokes no action. A trusted external frontend must independently
+display the request, obtain a new user decision, construct the exact receipt
+schema, and sign it with its non-exportable Ed25519 key. Official OpenAI Codex
+documentation currently establishes no signed `UserPromptSubmit` event, so the
+ordinary local hook is intentionally excluded as an issuer.
 
 ## Extension rule
 

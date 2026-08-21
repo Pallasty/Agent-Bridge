@@ -1,6 +1,8 @@
-import base64, hashlib, hmac, importlib.util, json, os
+import base64, importlib.util, json
 from pathlib import Path
 import tempfile, threading, unittest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/app-control-recovery-authorization.py"
 SPEC = importlib.util.spec_from_file_location("recovery_authorization", SCRIPT)
@@ -9,7 +11,9 @@ MOD = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(MOD)
 class RecoveryAuthorizationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); root = Path(self.tmp.name)
-        self.key = root / "key"; self.key.write_bytes(b"k" * 32); os.chmod(self.key, 0o600)
+        self.private_key = Ed25519PrivateKey.generate()
+        public = self.private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        self.public_key_b64 = base64.urlsafe_b64encode(public).decode().rstrip("=")
         self.ledger = root / "ledger"; self.ledger.mkdir(mode=0o700)
         self.now = 2_000_000_000.0
         self.bindings = dict(operation_id="ab-episode-" + "1" * 32, record_sha256="2" * 64,
@@ -20,12 +24,12 @@ class RecoveryAuthorizationTests(unittest.TestCase):
             "expires_at_unix_seconds": self.now + 60, "issuer": "trusted-frontend:test", "nonce": "6" * 32}
         payload.update(changes); raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         enc = lambda value: base64.urlsafe_b64encode(value).decode().rstrip("=")
-        return enc(raw) + "." + enc(hmac.new(b"k" * 32, raw, hashlib.sha256).digest())
+        return enc(raw) + "." + enc(self.private_key.sign(raw))
     def call(self, receipt=None, consume=False, **bindings):
-        return MOD.authorize(receipt=receipt or self.receipt(), key_path=self.key, ledger=self.ledger,
+        return MOD.authorize(receipt=receipt or self.receipt(), public_key_b64=self.public_key_b64, ledger=self.ledger,
             consume=consume, now=self.now, **{**self.bindings, **bindings})
     def test_default_without_trusted_source_is_unavailable(self):
-        out = MOD.authorize(receipt="x", key_path=None, ledger=None, consume=False, now=self.now, **self.bindings)
+        out = MOD.authorize(receipt="x", public_key_b64=None, ledger=None, consume=False, now=self.now, **self.bindings)
         self.assertEqual(out["admission"], "source_unavailable")
     def test_boolean_or_unsigned_text_cannot_authorize(self):
         self.assertEqual(self.call(receipt="true")["admission"], "binding_conflict")
