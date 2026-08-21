@@ -53859,6 +53859,13 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.android_adb,
         Tier::Niche,
+        Arc::new(MobileProjectionFollowMediaTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
         Arc::new(MobileProjectionStatusTool::new(hub.clone())),
     );
     reg_if_available(

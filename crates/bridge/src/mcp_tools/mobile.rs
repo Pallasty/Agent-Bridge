@@ -111,6 +111,47 @@ pub(super) fn media_context_from_app_control(
     Ok(context)
 }
 
+fn media_projection_identity_changed(
+    previous: Option<&crate::mobile_projection::MediaContext>,
+    current: &crate::mobile_projection::MediaContext,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    previous.player != current.player
+        || previous.active_playlist_id != current.active_playlist_id
+        || previous.active_playlist_name != current.active_playlist_name
+        || previous.playback_status != current.playback_status
+        || previous.track_id != current.track_id
+        || previous.artist != current.artist
+        || previous.title != current.title
+        || previous.duration_seconds != current.duration_seconds
+        || previous.metadata_available != current.metadata_available
+}
+
+#[cfg(test)]
+mod follow_media_tests {
+    use super::*;
+
+    #[test]
+    fn position_and_observation_time_drift_do_not_refresh_display() {
+        let mut previous = crate::mobile_projection::MediaContext::new(100);
+        previous.player = Some("rhythmbox".into());
+        previous.track_id = Some("/track/1".into());
+        previous.title = Some("Track one".into());
+        previous.position_seconds = Some(1.0);
+        let mut current = previous.clone();
+        current.observed_at_unix_seconds = 101;
+        current.position_seconds = Some(2.0);
+        assert!(!media_projection_identity_changed(
+            Some(&previous),
+            &current
+        ));
+        current.track_id = Some("/track/2".into());
+        assert!(media_projection_identity_changed(Some(&previous), &current));
+    }
+}
+
 /// Preserve the read-only player-selection evidence in the projection response.
 /// This is intentionally a pure projection of the verified app-control payload;
 /// it cannot add control capabilities or fabricate a selection result.
@@ -2572,6 +2613,7 @@ impl McpTool for MobileProjectionSyncMediaTool {
                     "player": { "type": "string", "description": "Optional exact or unique-substring MPRIS player selector." },
                     "cwd": { "type": "string", "description": "Optional repo root used to resolve app_control.py." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 15000 }
+                    ,"suppress_unchanged_display": { "type": "boolean", "default": false, "description": "When true, do not create a new projection revision for position/time-only drift." }
                 }
             }),
         }
@@ -2678,6 +2720,28 @@ impl McpTool for MobileProjectionSyncMediaTool {
             Ok(value) => value,
             Err(error) => return Ok(ToolResult::error(error)),
         };
+        if args
+            .get("suppress_unchanged_display")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            let frame = state.frame.read().unwrap();
+            if !media_projection_identity_changed(frame.media_context.as_ref(), &context) {
+                return Ok(ToolResult::json_text(&json!({
+                    "schema": "agent_bridge.mobile_projection_sync_media.v0",
+                    "status": "unchanged",
+                    "session_id": session_id,
+                    "media_context": context,
+                    "app_control": mobile_projection_app_control_evidence(&payload),
+                    "projection_update": {
+                        "status": "unchanged",
+                        "revision": frame.revision,
+                        "changed_fields": []
+                    },
+                    "authority": {"attention": false, "memory": false, "sensor": false, "actuation": false}
+                })));
+            }
+        }
         let (title, body, status) = media_projection_presentation(&context);
         let update_args = json!({
             "session_id": session_id,
@@ -2713,6 +2777,200 @@ impl McpTool for MobileProjectionSyncMediaTool {
                 "sensor": false,
                 "actuation": false
             }
+        })))
+    }
+}
+
+fn mobile_projection_tool_result_json(result: &ToolResult) -> Option<Value> {
+    result.content.iter().find_map(|block| match block {
+        ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
+        _ => None,
+    })
+}
+
+mobile_tool_struct!(MobileProjectionFollowMediaTool);
+#[async_trait]
+impl McpTool for MobileProjectionFollowMediaTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_follow_media"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Run one bounded continuous embodiment session: start a mobile projection, wait for an authenticated device pull, repeatedly observe verified media state, update the projection only when its stable frame changes, retain the latest device-submitted text observation, and stop the owned session at the end. It never dispatches media controls or grants background authority.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["bind"],
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "bind": { "type": "string", "description": "Private or link-local host IP reachable by the phone." },
+                    "player": { "type": "string", "description": "Optional exact or unique-substring MPRIS player selector." },
+                    "auto_connect": { "type": "boolean", "default": false },
+                    "duration_secs": { "type": "integer", "minimum": 1, "maximum": 120, "default": 15 },
+                    "poll_interval_ms": { "type": "integer", "minimum": 500, "maximum": 10000, "default": 1000 },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 15000 }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let duration_secs = args
+            .get("duration_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(15);
+        if !(1..=120).contains(&duration_secs) {
+            return Ok(ToolResult::error("duration_secs must be in 1..=120"));
+        }
+        let poll_interval_ms = args
+            .get("poll_interval_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(1000);
+        if !(500..=10_000).contains(&poll_interval_ms) {
+            return Ok(ToolResult::error("poll_interval_ms must be in 500..=10000"));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(15_000);
+        if !(1_000..=30_000).contains(&timeout_ms) {
+            return Ok(ToolResult::error("timeout_ms must be in 1000..=30000"));
+        }
+        let mut start_args = json!({
+            "bind": args.get("bind").cloned().unwrap_or(Value::Null),
+            "title": "Agent-Bridge live media",
+            "body": "Observing current media state…",
+            "status": "Connecting",
+            "auto_connect": args.get("auto_connect").and_then(Value::as_bool).unwrap_or(false),
+            "ttl_seconds": (duration_secs + 30).min(600),
+            "timeout_ms": timeout_ms,
+        });
+        if let Some(serial) = args.get("serial") {
+            start_args["serial"] = serial.clone();
+        }
+        let start = MobileProjectionStartTool::new(self.hub.clone())
+            .execute(start_args, ctx)
+            .await?;
+        let Some(start_payload) = mobile_projection_tool_result_json(&start) else {
+            return Ok(ToolResult::error(
+                "mobile_projection_start returned no JSON receipt",
+            ));
+        };
+        if start.is_error {
+            return Ok(start);
+        }
+        let Some(session_id) = start_payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            return Ok(ToolResult::error(
+                "mobile_projection_start omitted session_id",
+            ));
+        };
+        let connection = MobileProjectionWaitTool::new(self.hub.clone())
+            .execute(
+                json!({
+                    "session_id": session_id,
+                    "timeout_ms": timeout_ms.min(30_000),
+                }),
+                ctx,
+            )
+            .await?;
+        let connection_payload =
+            mobile_projection_tool_result_json(&connection).unwrap_or(Value::Null);
+        let connected = connection_payload
+            .get("status")
+            .and_then(Value::as_str)
+            .map(|value| {
+                value == "consent_observed"
+                    || value == "test_only_authenticated_connection_observed"
+            })
+            .unwrap_or(false);
+        let mut polls = 0u64;
+        let mut changed_frames = 0u64;
+        let mut last_revision = 1u64;
+        let mut last_media_context = Value::Null;
+        let mut loop_error: Option<String> = None;
+        if connected {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
+            while tokio::time::Instant::now() < deadline {
+                let mut sync_args = json!({
+                    "session_id": session_id,
+                    "timeout_ms": timeout_ms,
+                    "suppress_unchanged_display": true
+                });
+                if let Some(player) = args.get("player") {
+                    sync_args["player"] = player.clone();
+                }
+                let sync = MobileProjectionSyncMediaTool::new(self.hub.clone())
+                    .execute(sync_args, ctx)
+                    .await?;
+                polls += 1;
+                let Some(payload) = mobile_projection_tool_result_json(&sync) else {
+                    loop_error =
+                        Some("mobile_projection_sync_media returned no JSON receipt".into());
+                    break;
+                };
+                if sync.is_error {
+                    loop_error = Some("mobile_projection_sync_media failed".into());
+                    break;
+                }
+                last_media_context = payload.get("media_context").cloned().unwrap_or(Value::Null);
+                let revision = payload
+                    .pointer("/projection_update/revision")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(last_revision);
+                if revision > last_revision {
+                    changed_frames += 1;
+                    last_revision = revision;
+                }
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(std::cmp::min(
+                    Duration::from_millis(poll_interval_ms),
+                    remaining,
+                ))
+                .await;
+            }
+        }
+        let status = MobileProjectionStatusTool::new(self.hub.clone())
+            .execute(json!({"session_id": session_id}), ctx)
+            .await?;
+        let status_payload = mobile_projection_tool_result_json(&status).unwrap_or(Value::Null);
+        let latest_text_observation = status_payload
+            .pointer("/session/latest_text_observation")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let text_submission_count = status_payload
+            .pointer("/session/text_submission_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let stop = MobileProjectionStopTool::new(self.hub.clone())
+            .execute(
+                json!({"session_id": session_id, "timeout_ms": timeout_ms}),
+                ctx,
+            )
+            .await?;
+        let stop_payload = mobile_projection_tool_result_json(&stop).unwrap_or(Value::Null);
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.mobile_projection_follow_media.v0",
+            "status": if connected && loop_error.is_none() { "completed" } else { "incomplete" },
+            "verdict": if connected && loop_error.is_none() { "verified" } else { "error" },
+            "session_id": session_id,
+            "connection": connection_payload,
+            "polls": polls,
+            "changed_frames": changed_frames,
+            "last_revision": last_revision,
+            "last_media_context": last_media_context,
+            "text_submission_count": text_submission_count,
+            "latest_text_observation": latest_text_observation,
+            "loop_error": loop_error,
+            "stop": stop_payload,
+            "authority": {"media_control": false, "background": false, "arbitrary_mobile_control": false}
         })))
     }
 }

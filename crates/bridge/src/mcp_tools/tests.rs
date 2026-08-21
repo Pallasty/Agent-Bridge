@@ -1613,6 +1613,7 @@ fn codex_essential_exposes_mobile_readonly_bridge_tools() {
         "mobile_projection_start",
         "mobile_projection_update",
         "mobile_projection_sync_media",
+        "mobile_projection_follow_media",
         "mobile_projection_stop",
         "advance_track_then_project",
         "mobile_install_apk",
@@ -1870,10 +1871,7 @@ fn mobile_projection_sync_media_preserves_player_selection_evidence() {
     assert_eq!(evidence["read_only"], true);
     assert_eq!(evidence["verdict"], "verified");
     assert_eq!(evidence["player"], "rhythmbox");
-    assert_eq!(
-        evidence["selection"]["policy"],
-        "unique_playing_player"
-    );
+    assert_eq!(evidence["selection"]["policy"], "unique_playing_player");
     assert_eq!(
         evidence["selection"]["observations"][0]["player"],
         "chromium.instance"
@@ -1930,7 +1928,9 @@ async fn mobile_projection_sync_media_clears_stale_frame_on_player_ambiguity() {
     );
     let temp_dir = std::env::temp_dir().join(format!("ab-mobile-media-unavailable-{unique}"));
     let scripts_dir = temp_dir.join("scripts");
-    tokio::fs::create_dir_all(&scripts_dir).await.expect("mkdir");
+    tokio::fs::create_dir_all(&scripts_dir)
+        .await
+        .expect("mkdir");
     tokio::fs::write(
         scripts_dir.join("app_control.py"),
         r#"import json
@@ -8766,6 +8766,7 @@ fn host_surface_gates_device_and_credential_families() {
                 "mobile_list_devices",
                 "mobile_logcat_tail",
                 "mobile_projection_start",
+                "mobile_projection_follow_media",
                 "mobile_projection_status",
                 "mobile_projection_stop",
                 "mobile_projection_sync_media",
@@ -10344,7 +10345,9 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         tool.input_schema["properties"]["owner_confirmed"]["const"],
         true
     );
-    assert!(tool.description.contains("never creates a persistent runtime"));
+    assert!(tool
+        .description
+        .contains("never creates a persistent runtime"));
     assert!(tool.input_schema["properties"].get("request_id").is_some());
     assert!(abot_tools
         .iter()
@@ -10365,7 +10368,9 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         .find(|schema| schema.name == "modelscope_abot_attempt_preview")
         .expect("modelscope_abot_attempt_preview schema");
     assert!(preview.description.contains("Read-only"));
-    assert!(preview.description.contains("never accepts owner confirmation"));
+    assert!(preview
+        .description
+        .contains("never accepts owner confirmation"));
     assert!(preview.input_schema["properties"]
         .get("owner_confirmed")
         .is_none());
@@ -20145,13 +20150,19 @@ print(json.dumps({
     );
     assert_eq!(payload["action"]["found"]["app_pid"], 222);
     assert_eq!(payload["action"]["dispatch"], "dispatched");
-    assert_eq!(payload["action"]["effect_verification"]["status"], "unknown");
+    assert_eq!(
+        payload["action"]["effect_verification"]["status"],
+        "unknown"
+    );
     assert_eq!(
         payload["action"]["effect_verification"]["reason"],
         "desktop invoke was dispatched; resulting UI state was not read back"
     );
     assert_eq!(payload["action"]["effect_verified"], false);
-    assert_eq!(payload["action"]["requires_postcondition_observation"], true);
+    assert_eq!(
+        payload["action"]["requires_postcondition_observation"],
+        true
+    );
     assert_eq!(payload["verification"]["observed_count"], 1);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
