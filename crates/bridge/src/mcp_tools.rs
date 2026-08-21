@@ -11302,6 +11302,10 @@ impl McpTool for AppControlTool {
                     "minimum_recovery_secs": {"type": "number", "minimum": 0.0, "maximum": 86400.0, "default": 5.0},
                     "recovery_authorization_review": {"type": "boolean", "default": false},
                     "recovery_authorization_request": {"type": "boolean", "default": false},
+                    "recovery_authorization_status": {
+                        "type": "boolean", "default": false,
+                        "description": "Read-only readiness probe for the external Ed25519 signer contract. Requires action=discover and never reads a private key."
+                    },
                     "recovery_authorization_receipt": {"type": "string", "maxLength": 8192},
                     "recovery_authorization_consume": {"type": "boolean", "default": false},
                     "dry_run": {
@@ -11336,6 +11340,7 @@ impl McpTool for AppControlTool {
             "minimum_recovery_secs",
             "recovery_authorization_review",
             "recovery_authorization_request",
+            "recovery_authorization_status",
             "recovery_authorization_receipt",
             "recovery_authorization_consume",
             "dry_run",
@@ -11491,6 +11496,41 @@ impl McpTool for AppControlTool {
             Some(_) => return Ok(app_control_error("replan", json!({"code": "invalid_player"}))),
         };
         let recovery_preflight = args.get("recovery_preflight").and_then(Value::as_bool).unwrap_or(false);
+        let authorization_status = args.get("recovery_authorization_status").and_then(Value::as_bool).unwrap_or(false);
+        if authorization_status {
+            if recovery_preflight || action != "discover" || args.as_object().map(|object| object.keys().any(|key|
+                !matches!(key.as_str(), "action" | "domain" | "recovery_authorization_status"))).unwrap_or(false)
+            {
+                return Ok(app_control_error("replan", json!({"code": "recovery_authorization_status_requires_discover_only"})));
+            }
+            let script = app_control_recovery_signer_status_script_path();
+            if !script.is_file() {
+                return Ok(app_control_error("replan", json!({"code": "recovery_authorization_status_script_missing"})));
+            }
+            let mut cmd = killable_command(std::env::var("PYTHON").ok()
+                .filter(|value| !value.trim().is_empty()).unwrap_or_else(|| "python3".into()));
+            cmd.arg(script).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+            let output = match tokio::time::timeout(Duration::from_millis(2_000), cmd.output()).await {
+                Ok(Ok(output)) => output,
+                _ => return Ok(app_control_error("retry", json!({"code": "recovery_authorization_status_unavailable"}))),
+            };
+            let payload: Value = match serde_json::from_slice(&output.stdout) {
+                Ok(value) => value,
+                Err(_) => return Ok(app_control_error("replan", json!({"code": "recovery_authorization_status_invalid_json"}))),
+            };
+            let safe = payload.get("schema").and_then(Value::as_str)
+                == Some("agent_bridge.app_control.recovery_authorization_signer_status.v0")
+                && payload.get("verdict").and_then(Value::as_str) == Some("verified")
+                && payload.get("read_only").and_then(Value::as_bool) == Some(true)
+                && payload.get("private_key_observed").and_then(Value::as_bool) == Some(false)
+                && payload.get("action_invoked").and_then(Value::as_bool) == Some(false)
+                && payload.get("automatic_recovery_authorized").and_then(Value::as_bool) == Some(false)
+                && matches!(payload.get("admission").and_then(Value::as_str), Some("configured" | "source_unavailable"));
+            if !safe { return Ok(app_control_error("replan", json!({"code": "recovery_authorization_status_contract_mismatch"}))); }
+            let mut result = ToolResult::json_text(&payload);
+            result.is_error = payload.get("admission").and_then(Value::as_str) != Some("configured");
+            return Ok(result);
+        }
         if !recovery_preflight && ["expected_record_sha256", "intent_confirmed", "minimum_recovery_secs",
             "recovery_authorization_review", "recovery_authorization_receipt", "recovery_authorization_consume"]
             .iter().any(|key| args.get(*key).is_some())
@@ -26128,6 +26168,12 @@ fn app_control_recovery_authorization_script_path() -> PathBuf {
 fn app_control_recovery_authorization_request_script_path() -> PathBuf {
     installed_runtime_script_path("app-control-recovery-authorization-request.py").unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app-control-recovery-authorization-request.py")
+    })
+}
+
+fn app_control_recovery_signer_status_script_path() -> PathBuf {
+    installed_runtime_script_path("app-control-recovery-signer-status.py").unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app-control-recovery-signer-status.py")
     })
 }
 

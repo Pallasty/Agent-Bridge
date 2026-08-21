@@ -76,6 +76,7 @@ RUNTIME_ASSETS=(
     app-control-recovery-candidates.py
     app-control-recovery-authorization.py
     app-control-recovery-authorization-request.py
+    app-control-recovery-signer-status.py
     app-control-recovery-hint-dedupe.py
     desktop_action.py
     desktop_confirm_store.py
