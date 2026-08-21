@@ -278,8 +278,33 @@ fn is_auth_failure(output: &str) -> bool {
     normalized.contains("token refresh failed: 401")
 }
 
+fn is_payment_failure(output: &str) -> bool {
+    strip_csi_sequences(output)
+        .to_ascii_lowercase()
+        .contains("error: no payment method.")
+}
+
+fn strip_csi_sequences(output: &str) -> String {
+    let mut clean = String::with_capacity(output.len());
+    let mut chars = output.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.next() == Some('[') {
+            for code in chars.by_ref() {
+                if code.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            clean.push(ch);
+        }
+    }
+    clean
+}
+
 fn corrected_exit_code(exit_code: Option<i32>, stdout: &str, stderr: &str) -> Option<i32> {
-    if exit_code == Some(0) && (is_auth_failure(stdout) || is_auth_failure(stderr)) {
+    if exit_code == Some(0)
+        && (is_auth_failure(stdout) || is_auth_failure(stderr) || is_payment_failure(stderr))
+    {
         Some(1)
     } else {
         exit_code
@@ -690,14 +715,16 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                 None
                             }
                         });
-                        let auth_failure = exit_code == Some(0)
-                            && (is_auth_failure(&stdout) || is_auth_failure(&stderr));
+                        let provider_failure = exit_code == Some(0)
+                            && (is_auth_failure(&stdout)
+                                || is_auth_failure(&stderr)
+                                || is_payment_failure(&stderr));
                         let exit_code = corrected_exit_code(exit_code, &stdout, &stderr);
-                        if auth_failure {
+                        if provider_failure {
                             warn!(
                                 session = %sid_bg,
                                 runtime = %runtime_id,
-                                "authentication failure reported by child; overriding successful exit status"
+                                "provider failure reported by child; overriding successful exit status"
                             );
                         }
                         if let Some(store) = store_bg.clone() {
@@ -952,6 +979,15 @@ mod tests {
     }
 
     #[test]
+    fn is_payment_failure_detects_missing_billing_method_only() {
+        assert!(is_payment_failure("Error: No payment method."));
+        assert!(is_payment_failure("\u{1b}[91mError: No payment method.\n"));
+        assert!(!is_payment_failure("payment completed successfully"));
+        assert!(!is_payment_failure("No payment method."));
+        assert!(!is_payment_failure("Token refresh failed: 401"));
+    }
+
+    #[test]
     fn corrected_exit_code_marks_auth_failure_even_when_child_exits_zero() {
         assert_eq!(
             corrected_exit_code(Some(0), "", "Error: Token refresh failed: 401"),
@@ -961,6 +997,14 @@ mod tests {
         assert_eq!(
             corrected_exit_code(Some(7), "", "Error: Token refresh failed: 401"),
             Some(7)
+        );
+        assert_eq!(
+            corrected_exit_code(Some(0), "", "Error: No payment method."),
+            Some(1)
+        );
+        assert_eq!(
+            corrected_exit_code(Some(0), "No payment method.", ""),
+            Some(0)
         );
         assert_eq!(corrected_exit_code(None, "completed", ""), None);
     }
@@ -1047,6 +1091,67 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("Token refresh failed: 401"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn payment_failure_overrides_zero_in_persisted_session() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+        use std::sync::Arc;
+
+        let root = unique_temp_dir("ab-opencode-payment-failure");
+        fs::create_dir_all(&root).expect("mkdir root");
+        let binary = root.join("fake-opencode");
+        fs::write(
+            &binary,
+            "#!/bin/sh\nprintf '%s\\n' 'Error: No payment method.' >&2\nexit 0\n",
+        )
+        .expect("write fake opencode");
+        let mut perms = fs::metadata(&binary).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&binary, perms).expect("chmod fake opencode");
+        let store = Arc::new(
+            SqliteStore::open(&root.join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let runtime = OpenCodeFamilyRuntime::opencode()
+            .with_binary(binary.display().to_string())
+            .with_store(store.clone());
+
+        runtime
+            .spawn(SpawnConfig {
+                cwd: root.display().to_string(),
+                initial_prompt: Some("hello".to_string()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn fake opencode");
+
+        let mut finalised = false;
+        for _ in 0..80 {
+            let rows = store
+                .list_sessions(
+                    &SessionFilter {
+                        runtime_id: Some("opencode".to_string()),
+                        cwd_prefix: Some(root.display().to_string()),
+                        ..SessionFilter::default()
+                    },
+                    10,
+                )
+                .await
+                .expect("list sessions while waiting");
+            if rows
+                .first()
+                .is_some_and(|row| row.ended_at.is_some() && row.exit_code == Some(1))
+            {
+                finalised = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(finalised, "payment failure must persist as exit_code=1");
         let _ = fs::remove_dir_all(root);
     }
 
