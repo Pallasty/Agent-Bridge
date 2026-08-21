@@ -6,8 +6,9 @@
 //! adds proposal metadata, P1A4 adds an unauthenticated review preflight, and
 //! P1A5 adds a persisted, content-addressed proposal artifact through
 //! inherent [`crate::SqliteStore`] methods. P1A6 persists untrusted review
-//! observations and P1A7 projects them into a bounded, conflict-preserving
-//! read-only snapshot.
+//! observations, P1A7 projects them into a bounded, conflict-preserving
+//! read-only snapshot, and P1A8 classifies only that snapshot's structural
+//! observation topology.
 //! Neither slice exposes an MCP, CLI, scheduler, or automatic producer.
 
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,12 @@ pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE: &str =
 pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_HASH_DOMAIN: &str =
     "agent-bridge/sepl/resource-proposal-review-snapshot/v0";
 pub const RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS: usize = 256;
+pub const RESOURCE_PROPOSAL_REVIEW_READINESS_SCHEMA: &str =
+    "agent_bridge.resource_proposal_review_readiness.v0";
+pub const RESOURCE_PROPOSAL_REVIEW_READINESS_SCOPE: &str =
+    "structural_projection_of_integrity_verified_review_snapshot_only";
+pub const RESOURCE_PROPOSAL_REVIEW_READINESS_HASH_DOMAIN: &str =
+    "agent-bridge/sepl/resource-proposal-review-readiness/v0";
 pub const RESOURCE_BINDING_HASH_DOMAIN: &str = "agent-bridge/sepl/resource-binding/v0";
 pub const RESOURCE_CONTENT_MAX_BYTES: u64 = 1_048_576;
 const RESOURCE_LINEAGE_MIGRATION_META_KEY: &str = "resource_lineage.migration_sha256";
@@ -382,6 +389,37 @@ pub struct AgentMdProposalReviewSnapshot {
     pub snapshot_scope: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMdProposalReviewReadinessProjection {
+    pub schema: String,
+    pub proposal_id: String,
+    pub proposal_record_sha256: String,
+    pub source_snapshot_sha256: String,
+    pub observation_count: u64,
+    pub accept_candidate_count: u64,
+    pub reject_candidate_count: u64,
+    pub defer_count: u64,
+    pub distinct_disposition_count: u64,
+    pub structural_status: String,
+    pub observations_present: bool,
+    pub single_disposition_observed: bool,
+    pub conflicting_dispositions_observed: bool,
+    pub projection_sha256: String,
+    pub source_snapshot_integrity_verified: bool,
+    pub structural_projection_verified: bool,
+    pub reviewer_identities_authenticated: bool,
+    pub human_reviews_authenticated: bool,
+    pub semantic_review_authority_granted: bool,
+    pub quorum_established: bool,
+    pub winner_selected: bool,
+    pub proposal_approved: bool,
+    pub eligible_for_apply: bool,
+    pub automatic_apply_allowed: bool,
+    pub resource_content_mutated: bool,
+    pub lineage_mutated: bool,
+    pub projection_scope: String,
+}
+
 pub fn persisted_proposal_record_sha256(
     resource_id: &str,
     producer_id: &str,
@@ -447,6 +485,38 @@ pub fn proposal_review_snapshot_sha256(
     for record_sha256 in ordered_review_record_sha256s {
         update_framed(&mut hasher, record_sha256.as_bytes());
     }
+    hex_digest(hasher.finalize())
+}
+
+pub fn proposal_review_readiness_sha256(
+    proposal_id: &str,
+    proposal_record_sha256: &str,
+    source_snapshot_sha256: &str,
+    observation_count: u64,
+    accept_candidate_count: u64,
+    reject_candidate_count: u64,
+    defer_count: u64,
+    distinct_disposition_count: u64,
+    structural_status: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    update_framed(
+        &mut hasher,
+        RESOURCE_PROPOSAL_REVIEW_READINESS_HASH_DOMAIN.as_bytes(),
+    );
+    update_framed(&mut hasher, proposal_id.as_bytes());
+    update_framed(&mut hasher, proposal_record_sha256.as_bytes());
+    update_framed(&mut hasher, source_snapshot_sha256.as_bytes());
+    for count in [
+        observation_count,
+        accept_candidate_count,
+        reject_candidate_count,
+        defer_count,
+        distinct_disposition_count,
+    ] {
+        update_framed(&mut hasher, &count.to_be_bytes());
+    }
+    update_framed(&mut hasher, structural_status.as_bytes());
     hex_digest(hasher.finalize())
 }
 
@@ -2707,8 +2777,38 @@ mod tests {
             empty.snapshot_sha256,
             proposal_review_snapshot_sha256(&proposal.proposal_id, &proposal.record_sha256, &[])
         );
+        let empty_projection = store
+            .project_agent_md_proposal_review_readiness(&proposal.proposal_id)
+            .await
+            .expect("project empty review readiness");
+        assert_eq!(
+            empty_projection.schema,
+            RESOURCE_PROPOSAL_REVIEW_READINESS_SCHEMA
+        );
+        assert_eq!(empty_projection.structural_status, "no_observations");
+        assert!(!empty_projection.observations_present);
+        assert!(!empty_projection.single_disposition_observed);
+        assert!(!empty_projection.conflicting_dispositions_observed);
+        assert_eq!(
+            empty_projection.source_snapshot_sha256,
+            empty.snapshot_sha256
+        );
+        assert_eq!(
+            empty_projection.projection_sha256,
+            proposal_review_readiness_sha256(
+                &proposal.proposal_id,
+                &proposal.record_sha256,
+                &empty.snapshot_sha256,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "no_observations",
+            )
+        );
 
-        for (reviewer_id, reviewed_at, disposition, reason) in [
+        for (index, (reviewer_id, reviewed_at, disposition, reason)) in [
             (
                 "reviewer:later",
                 1_700_000_003,
@@ -2727,7 +2827,10 @@ mod tests {
                 "reject_candidate",
                 "Candidate conflicts with one local constraint.",
             ),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             store
                 .create_agent_md_proposal_review_observation(
                     AgentMdProposalReviewObservationCreate {
@@ -2740,6 +2843,22 @@ mod tests {
                 )
                 .await
                 .expect("create review observation");
+            if index == 0 {
+                let single = store
+                    .project_agent_md_proposal_review_readiness(&proposal.proposal_id)
+                    .await
+                    .expect("project single disposition readiness");
+                assert_eq!(single.structural_status, "single_disposition_observed");
+                assert!(single.observations_present);
+                assert!(single.single_disposition_observed);
+                assert!(!single.conflicting_dispositions_observed);
+                assert_eq!(single.observation_count, 1);
+                assert_eq!(single.defer_count, 1);
+                assert!(!single.quorum_established);
+                assert!(!single.winner_selected);
+                assert!(!single.proposal_approved);
+                assert!(!single.eligible_for_apply);
+            }
         }
 
         let first = store
@@ -2802,6 +2921,53 @@ mod tests {
                 &proposal.record_sha256,
                 &reordered_hashes
             )
+        );
+        let projected = store
+            .project_agent_md_proposal_review_readiness(&proposal.proposal_id)
+            .await
+            .expect("project conflicting review readiness");
+        let projected_again = store
+            .project_agent_md_proposal_review_readiness(&proposal.proposal_id)
+            .await
+            .expect("project deterministic review readiness");
+        assert_eq!(projected, projected_again);
+        assert_eq!(
+            projected.structural_status,
+            "conflicting_dispositions_observed"
+        );
+        assert!(projected.observations_present);
+        assert!(!projected.single_disposition_observed);
+        assert!(projected.conflicting_dispositions_observed);
+        assert_eq!(projected.source_snapshot_sha256, first.snapshot_sha256);
+        assert!(projected.source_snapshot_integrity_verified);
+        assert!(projected.structural_projection_verified);
+        assert!(!projected.reviewer_identities_authenticated);
+        assert!(!projected.human_reviews_authenticated);
+        assert!(!projected.semantic_review_authority_granted);
+        assert!(!projected.quorum_established);
+        assert!(!projected.winner_selected);
+        assert!(!projected.proposal_approved);
+        assert!(!projected.eligible_for_apply);
+        assert!(!projected.automatic_apply_allowed);
+        assert!(!projected.resource_content_mutated);
+        assert!(!projected.lineage_mutated);
+        assert_eq!(
+            projected.projection_sha256,
+            proposal_review_readiness_sha256(
+                &proposal.proposal_id,
+                &proposal.record_sha256,
+                &first.snapshot_sha256,
+                3,
+                1,
+                1,
+                1,
+                3,
+                "conflicting_dispositions_observed",
+            )
+        );
+        assert_ne!(
+            empty_projection.projection_sha256,
+            projected.projection_sha256
         );
         assert_eq!(
             std::fs::read(&agent_md).expect("read unchanged AGENT.md"),
@@ -2978,6 +3144,16 @@ mod tests {
         assert!(full.bounded_snapshot_complete);
         assert_eq!(full.defer_count, 256);
         assert!(full.snapshot_integrity_verified);
+        let bounded_projection = reopened
+            .project_agent_md_proposal_review_readiness(&proposal.proposal_id)
+            .await
+            .expect("exactly bounded projection must succeed");
+        assert_eq!(bounded_projection.observation_count, 256);
+        assert_eq!(
+            bounded_projection.structural_status,
+            "single_disposition_observed"
+        );
+        assert!(!bounded_projection.quorum_established);
         drop(reopened);
 
         let connection = rusqlite::Connection::open(&database).expect("reopen raw fixture db");
@@ -3014,12 +3190,21 @@ mod tests {
             .expect("insert overflow fixture");
         drop(connection);
 
-        let reopened = SqliteStore::open(&database).await.expect("reopen store again");
+        let reopened = SqliteStore::open(&database)
+            .await
+            .expect("reopen store again");
         let error = reopened
             .read_agent_md_proposal_review_snapshot(&proposal.proposal_id)
             .await
             .expect_err("oversized observation set must fail closed");
         assert!(error.to_string().contains("bounded maximum of 256"));
+        let projection_error = reopened
+            .project_agent_md_proposal_review_readiness(&proposal.proposal_id)
+            .await
+            .expect_err("oversized projection must fail closed through P1A7");
+        assert!(projection_error
+            .to_string()
+            .contains("bounded maximum of 256"));
         assert_eq!(
             std::fs::read(directory.path().join("AGENT.md")).expect("read unchanged AGENT.md"),
             original

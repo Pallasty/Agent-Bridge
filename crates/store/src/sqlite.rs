@@ -3,23 +3,24 @@
 use crate::resource_lineage::{
     is_lower_hex_sha256, migrate_or_verify as migrate_or_verify_resource_lineage,
     persisted_proposal_record_sha256, proposal_review_observation_record_sha256,
-    proposal_review_snapshot_sha256, resource_binding_sha256, resource_content_sha256,
-    resource_version_record_sha256, unavailable_resource_lineage, validate_resource_lineage,
-    AgentMdBaselineAdmission, AgentMdBaselineReceipt, AgentMdCasCommit, AgentMdCasCommitReceipt,
-    AgentMdCasRollback, AgentMdCasRollbackReceipt, AgentMdChangeProposal,
+    proposal_review_readiness_sha256, proposal_review_snapshot_sha256, resource_binding_sha256,
+    resource_content_sha256, resource_version_record_sha256, unavailable_resource_lineage,
+    validate_resource_lineage, AgentMdBaselineAdmission, AgentMdBaselineReceipt, AgentMdCasCommit,
+    AgentMdCasCommitReceipt, AgentMdCasRollback, AgentMdCasRollbackReceipt, AgentMdChangeProposal,
     AgentMdChangeProposalReceipt, AgentMdChangeProposalReview, AgentMdChangeProposalReviewReceipt,
     AgentMdPersistedProposalArtifact, AgentMdPersistedProposalCreate,
     AgentMdProposalReviewObservationArtifact, AgentMdProposalReviewObservationCreate,
-    AgentMdProposalReviewSnapshot, ResourceBindingRecord, ResourceLineageReport,
-    ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA, RESOURCE_BASELINE_OBSERVATION_SCOPE,
-    RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE, RESOURCE_CAS_ROLLBACK_SCHEMA,
-    RESOURCE_CAS_ROLLBACK_SCOPE, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA,
-    RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE, RESOURCE_CHANGE_PROPOSAL_SCHEMA,
-    RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES, RESOURCE_LINEAGE_MAX_ROWS,
-    RESOURCE_PERSISTED_PROPOSAL_SCHEMA, RESOURCE_PERSISTED_PROPOSAL_SCOPE,
-    RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA, RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE,
-    RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS, RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCHEMA,
-    RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE,
+    AgentMdProposalReviewReadinessProjection, AgentMdProposalReviewSnapshot, ResourceBindingRecord,
+    ResourceLineageReport, ResourceVersionRecord, RESOURCE_BASELINE_ADMISSION_SCHEMA,
+    RESOURCE_BASELINE_OBSERVATION_SCOPE, RESOURCE_CAS_COMMIT_SCHEMA, RESOURCE_CAS_COMMIT_SCOPE,
+    RESOURCE_CAS_ROLLBACK_SCHEMA, RESOURCE_CAS_ROLLBACK_SCOPE,
+    RESOURCE_CHANGE_PROPOSAL_REVIEW_SCHEMA, RESOURCE_CHANGE_PROPOSAL_REVIEW_SCOPE,
+    RESOURCE_CHANGE_PROPOSAL_SCHEMA, RESOURCE_CHANGE_PROPOSAL_SCOPE, RESOURCE_CONTENT_MAX_BYTES,
+    RESOURCE_LINEAGE_MAX_ROWS, RESOURCE_PERSISTED_PROPOSAL_SCHEMA,
+    RESOURCE_PERSISTED_PROPOSAL_SCOPE, RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCHEMA,
+    RESOURCE_PROPOSAL_REVIEW_OBSERVATION_SCOPE, RESOURCE_PROPOSAL_REVIEW_READINESS_SCHEMA,
+    RESOURCE_PROPOSAL_REVIEW_READINESS_SCOPE, RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_MAX_OBSERVATIONS,
+    RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCHEMA, RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE,
 };
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
@@ -3918,6 +3919,71 @@ impl SqliteStore {
             resource_content_mutated: false,
             lineage_mutated: false,
             snapshot_scope: RESOURCE_PROPOSAL_REVIEW_SNAPSHOT_SCOPE.to_string(),
+        })
+    }
+
+    /// SEPL P1A8 — classify the structural topology of a verified P1A7 snapshot.
+    ///
+    /// This projection does not authenticate identities, interpret a
+    /// disposition, establish quorum, select a winner, approve a proposal, or
+    /// authorize application.
+    pub async fn project_agent_md_proposal_review_readiness(
+        &self,
+        proposal_id: &str,
+    ) -> Result<AgentMdProposalReviewReadinessProjection> {
+        let snapshot = self
+            .read_agent_md_proposal_review_snapshot(proposal_id)
+            .await?;
+        let structural_status = if snapshot.no_observations {
+            "no_observations"
+        } else if snapshot.conflicting_dispositions_observed {
+            "conflicting_dispositions_observed"
+        } else {
+            "single_disposition_observed"
+        };
+        let projection_sha256 = proposal_review_readiness_sha256(
+            &snapshot.proposal_id,
+            &snapshot.proposal_record_sha256,
+            &snapshot.snapshot_sha256,
+            snapshot.observation_count,
+            snapshot.accept_candidate_count,
+            snapshot.reject_candidate_count,
+            snapshot.defer_count,
+            snapshot.distinct_disposition_count,
+            structural_status,
+        );
+
+        Ok(AgentMdProposalReviewReadinessProjection {
+            schema: RESOURCE_PROPOSAL_REVIEW_READINESS_SCHEMA.to_string(),
+            proposal_id: snapshot.proposal_id,
+            proposal_record_sha256: snapshot.proposal_record_sha256,
+            source_snapshot_sha256: snapshot.snapshot_sha256,
+            observation_count: snapshot.observation_count,
+            accept_candidate_count: snapshot.accept_candidate_count,
+            reject_candidate_count: snapshot.reject_candidate_count,
+            defer_count: snapshot.defer_count,
+            distinct_disposition_count: snapshot.distinct_disposition_count,
+            structural_status: structural_status.to_string(),
+            observations_present: !snapshot.no_observations,
+            single_disposition_observed: snapshot.observation_count > 0
+                && !snapshot.conflicting_dispositions_observed,
+            conflicting_dispositions_observed: snapshot.conflicting_dispositions_observed,
+            projection_sha256,
+            source_snapshot_integrity_verified: snapshot.snapshot_integrity_verified
+                && snapshot.proposal_integrity_verified
+                && snapshot.all_observations_integrity_verified,
+            structural_projection_verified: true,
+            reviewer_identities_authenticated: false,
+            human_reviews_authenticated: false,
+            semantic_review_authority_granted: false,
+            quorum_established: false,
+            winner_selected: false,
+            proposal_approved: false,
+            eligible_for_apply: false,
+            automatic_apply_allowed: false,
+            resource_content_mutated: false,
+            lineage_mutated: false,
+            projection_scope: RESOURCE_PROPOSAL_REVIEW_READINESS_SCOPE.to_string(),
         })
     }
 
