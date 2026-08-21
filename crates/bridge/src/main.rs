@@ -9119,6 +9119,7 @@ async fn run_avatar_linux_live(
             && voice_plan.get("ready").and_then(Value::as_bool).unwrap_or(false),
         "platform": std::env::consts::OS,
         "native_feature_compiled": native_compiled,
+        "native_feature_contract": ab_bridge::avatar_native::NATIVE_FEATURE_CONTRACT,
         "backend": {
             "recommended": backend.backend.as_str(),
             "transparency_available": backend.transparency_available,

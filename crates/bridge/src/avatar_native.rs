@@ -18,6 +18,10 @@ pub const DEFAULT_NATIVE_SPRITE_SCALE_PERCENT: u32 = 155;
 pub const DEFAULT_NATIVE_FRAME_COUNT: u32 = 6;
 pub const DEFAULT_NATIVE_FRAME_INTERVAL_MS: u64 = 180;
 pub const DEFAULT_NATIVE_STATE_POLL_MS: u64 = 500;
+#[cfg(all(target_os = "linux", feature = "linux-native-avatar"))]
+pub const NATIVE_FEATURE_CONTRACT: &str = "agent_bridge.avatar.native_linux.v1";
+#[cfg(not(all(target_os = "linux", feature = "linux-native-avatar")))]
+pub const NATIVE_FEATURE_CONTRACT: &str = "agent_bridge.avatar.native_linux.uncompiled.v1";
 pub const DEFAULT_NATIVE_STATE_HTTP_TIMEOUT_MS: u64 = 800;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

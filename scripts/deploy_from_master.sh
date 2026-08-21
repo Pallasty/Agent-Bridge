@@ -122,6 +122,13 @@ REQUIRED_NEW_BINARY_MARKERS=(
     "agent_bridge.app_control.wrapper_contract.v1"
 )
 
+# Linux production builds must contain the transparent native avatar backend.
+# Keep the feature explicit here: Cargo's default feature set intentionally
+# remains small, while `linux-live` is only useful with this opt-in backend.
+if [ "$(uname -s)" = "Linux" ]; then
+    REQUIRED_NEW_BINARY_MARKERS+=("agent_bridge.avatar.native_linux.v1")
+fi
+
 DRY_RUN=0
 ASSUME_YES=0
 USE_BINARY=""
@@ -175,9 +182,11 @@ markers_in() {
 
 CLEANUP_WT=""
 CLEANUP_RUNTIME_STAGE=""
+CLEANUP_PKG_CONFIG=""
 cleanup() {
     [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
     [ -n "$CLEANUP_RUNTIME_STAGE" ] && rm -rf "$CLEANUP_RUNTIME_STAGE" 2>/dev/null || true
+    [ -n "$CLEANUP_PKG_CONFIG" ] && rm -rf "$CLEANUP_PKG_CONFIG" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -239,9 +248,35 @@ else
     DEPLOY_TARGET_ROOT="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
     DEPLOY_TARGET_DIR="$DEPLOY_TARGET_ROOT/$MASTER_SHA"
     mkdir -p "$DEPLOY_TARGET_DIR" || die "cannot create build target dir $DEPLOY_TARGET_DIR"
-    say ">> cargo build --release --bin agent-bridge"
+    CARGO_FEATURE_ARGS=()
+    if [ "$(uname -s)" = "Linux" ]; then
+        CARGO_FEATURE_ARGS+=(--features linux-native-avatar)
+        say ">> enabling linux-native-avatar for the production Linux binary"
+    fi
+    BUILD_PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
+    if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists xkbcommon >/dev/null 2>&1; then
+        XKB_LIB="$(ldconfig -p 2>/dev/null | awk '/libxkbcommon\.so\.0 \(/ {print $NF; exit}')"
+        [ -n "$XKB_LIB" ] || XKB_LIB="/usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
+        [ -e "$XKB_LIB" ] || die "linux-native-avatar build requires libxkbcommon.so.0 (install runtime xkbcommon or provide PKG_CONFIG_PATH)"
+        CLEANUP_PKG_CONFIG="$(mktemp -d /tmp/agent-bridge-pkgconfig.XXXXXX)"
+        cat > "$CLEANUP_PKG_CONFIG/xkbcommon.pc" <<EOF
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=$(dirname "$XKB_LIB")
+includedir=/usr/include
+
+Name: xkbcommon
+Description: XKB common library (runtime-only build shim)
+Version: 0.0
+Libs: -L\${libdir} -lxkbcommon
+Cflags: -I\${includedir}
+EOF
+        BUILD_PKG_CONFIG_PATH="$CLEANUP_PKG_CONFIG${BUILD_PKG_CONFIG_PATH:+:$BUILD_PKG_CONFIG_PATH}"
+        say ">> using runtime libxkbcommon pkg-config shim for linux-native-avatar"
+    fi
+    say ">> cargo build --release --bin agent-bridge ${CARGO_FEATURE_ARGS[*]-}"
     say "   (target dir: $DEPLOY_TARGET_DIR — off /Data; takes several minutes) ..."
-    ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge )
+    ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge "${CARGO_FEATURE_ARGS[@]}" )
     NEW_BIN="$DEPLOY_TARGET_DIR/release/agent-bridge"
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
     BUILT_VERSION="$("$NEW_BIN" --version 2>&1)" ||
