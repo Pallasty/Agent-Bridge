@@ -285,6 +285,24 @@ owner restatements and manual interventions without retaining prompts, track
 metadata, device identifiers, or operation IDs, and it never authorizes runtime
 influence.
 
+### Owner-bound recovery authorization v0
+
+An eligible intent preflight is not user authorization. The optional
+`recovery_authorization_review` layer verifies a short-lived (at most five
+minutes), HMAC-authenticated receipt bound to the exact operation ID, record
+digest, canonical request digest, workspace digest, frontend session digest,
+issuer, and random nonce. Receipts retain no prompt, path, or media content.
+The key and nonce ledger are owner-only runtime resources supplied by a trusted
+frontend broker; neither issuance nor key material is exposed through MCP.
+Without that broker, admission is `source_unavailable`: `intent_confirmed` and
+caller session hints are never promoted to authority.
+
+Review is read-only. Optional consume creates an atomic `O_EXCL` nonce claim,
+so concurrent or replayed use admits one consumer and reports
+`already_consumed` to all others. Even successful consumption keeps
+`automatic_recovery_authorized=false` and never dispatches media. Connecting a
+consumed permit to mutation remains a separate future gate.
+
 ## Extension rule
 
 Add a new domain only as a typed adapter with:
