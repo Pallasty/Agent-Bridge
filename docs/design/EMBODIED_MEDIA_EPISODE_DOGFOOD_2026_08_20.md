@@ -216,3 +216,9 @@ authorize rollout, new runtime authority, background polling, or a new live
 pair. The next candidate, if explicitly approved, is a design-only
 `mac_window_focus_then_ax_verify` exercise with its own collector, runner,
 preregistration, denominator, and failure matrix.
+
+The subsequent bounded-retention review is recorded separately at
+`docs/design/evidence/embodied_media_episode_bounded_retention_review_2026_08_20.json`.
+It incorporates the live cross-process media handoff as additional evidence,
+without changing the three-pair scorecard denominator or granting automatic
+routing, background recovery, or cross-domain authority.

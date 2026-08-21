@@ -1,0 +1,56 @@
+{
+  "schema": "agent_bridge.embodied_media_episode_bounded_retention_review.v0",
+  "review_id": "embodied-media-retention-review-20260820-02",
+  "reviewed_at": "2026-08-20T17:20:00Z",
+  "inputs": {
+    "owner_review": "docs/design/evidence/embodied_media_episode_dogfood_owner_review_2026_08_20.json",
+    "live_handoff": "docs/design/evidence/app_control_recovery_handoff_live_2026_08_20.json",
+    "implementation_commit": "b1ac69e506faa791a0cde6724ac6a221a80f2c13",
+    "live_handoff_commit": "92167888"
+  },
+  "decision": {
+    "status": "RETAIN_BOUNDED_PRIVATE_CAPABILITY",
+    "retained_scope": "explicit advance_track_then_project with same_id settlement recovery",
+    "public_surface_expanded": false,
+    "automatic_routing_enabled": false,
+    "background_recovery_enabled": false,
+    "automatic_new_operation_id_enabled": false,
+    "cross_domain_expansion_enabled": false,
+    "new_runtime_authority_granted": false
+  },
+  "evidence_summary": {
+    "paired_real_tasks": 3,
+    "paired_tasks_each_saved_agent_calls": 5,
+    "live_cross_process_handoff_verified": true,
+    "live_contract_bound_dispatches": 1,
+    "live_same_id_recovery_without_redispatch": true,
+    "live_terminal_replay_without_journal_change": true,
+    "behavior_lift_proven": false,
+    "exclusive_causation_proven": false,
+    "global_dispatch_count_proven": false
+  },
+  "operating_gates": {
+    "exact_player_and_ttl_binding": true,
+    "settlement_required": true,
+    "recovery_index_requires_sufficient_ttl": true,
+    "empty_or_blocked_index_returns_replan": true,
+    "projection_draw_and_cleanup_required_for_composite": true,
+    "owner_explicit_intent_required": true,
+    "no_sensitive_raw_receipt_retention": true
+  },
+  "next_candidate": {
+    "name": "mac_window_focus_then_ax_verify",
+    "status": "DESIGN_ONLY",
+    "implementation_authorized": false,
+    "live_execution_authorized": false,
+    "required_new_preregistration": true,
+    "media_denominator_reuse_allowed": false,
+    "reason": "native AX/CGWindow composite identity was ineligible on the observed natural surface"
+  },
+  "claim_boundary": {
+    "this_is_not_general_workflow_authority": false,
+    "this_is_not_automatic_autonomy": false,
+    "this_is_not_behavior_lift": false,
+    "this_does_not_prove_human_or_pixel_observation": false
+  }
+}
