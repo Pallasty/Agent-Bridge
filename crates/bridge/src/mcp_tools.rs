@@ -11094,6 +11094,23 @@ pub struct AppControlTool {
 const APP_CONTROL_WRAPPER_CONTRACT_SCHEMA: &str =
     "agent_bridge.app_control.wrapper_contract.v1";
 
+// Keep the durable app-control contracts discoverable in the release binary.
+// The deploy gate intentionally checks the binary, not only the external
+// Python asset; these `#[used]` sentinels make that trust boundary explicit
+// without changing any runtime behavior.
+#[used]
+#[no_mangle]
+pub static APP_CONTROL_OPERATION_PREFLIGHT_SENTINEL: [u8; 48] =
+    *b"agent_bridge.app_control.operation_preflight.v0\0";
+#[used]
+#[no_mangle]
+pub static APP_CONTROL_TRACK_SETTLEMENT_SENTINEL: [u8; 45] =
+    *b"agent_bridge.app_control.track_settlement.v0\0";
+#[used]
+#[no_mangle]
+pub static APP_CONTROL_WRAPPER_CONTRACT_SENTINEL: [u8; 45] =
+    *b"agent_bridge.app_control.wrapper_contract.v1\0";
+
 impl AppControlTool {
     pub fn new(hub: Hub) -> Self {
         Self { _hub: hub }
