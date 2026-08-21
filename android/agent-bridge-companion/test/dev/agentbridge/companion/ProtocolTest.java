@@ -118,6 +118,19 @@ public final class ProtocolTest {
         check(VoiceDraftPolicy.mergeDraft("typed draft", "voice draft")
                 .equals("typed draft\nvoice draft"));
         check(VoiceDraftPolicy.mergeDraft("typed draft", "  ").equals("typed draft"));
+        String canonicalReceipt=RecoveryAuthorizationProtocol.canonicalReceipt(
+                "ab-episode-"+repeat("1",32),repeat("2",64),repeat("3",64),repeat("4",64),repeat("5",64),
+                now,now+120,"android-keystore:companion-v0",repeat("6",32));
+        check(canonicalReceipt.equals("{\"expires_at_unix_seconds\":1700000120,\"issued_at_unix_seconds\":1700000000,"
+                +"\"issuer\":\"android-keystore:companion-v0\",\"nonce\":\""+repeat("6",32)
+                +"\",\"operation_id\":\"ab-episode-"+repeat("1",32)+"\",\"record_sha256\":\""+repeat("2",64)
+                +"\",\"request_sha256\":\""+repeat("3",64)+"\",\"schema\":\""
+                +RecoveryAuthorizationProtocol.RECEIPT_SCHEMA+"\",\"session_sha256\":\""+repeat("5",64)
+                +"\",\"workspace_sha256\":\""+repeat("4",64)+"\"}"));
+        check(RecoveryAuthorizationProtocol.receiptToken(canonicalReceipt,new byte[64]).split("\\.").length==2);
+        rejected=false; try { RecoveryAuthorizationProtocol.canonicalReceipt("bad",repeat("2",64),repeat("3",64),
+                repeat("4",64),repeat("5",64),now,now+120,"android-keystore:companion-v0",repeat("6",32)); }
+        catch(IllegalArgumentException expected){ rejected=true; } check(rejected);
         System.out.println("android companion protocol tests: PASS");
     }
 

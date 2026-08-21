@@ -38,6 +38,7 @@ public final class CompanionService extends Service {
     private static final String HEALTH_SCHEMA = "agent_bridge.android_companion.health.v1";
     private static final String HEALTH_PREFIX = "AGENT_BRIDGE_COMPANION_HEALTH ";
     private static final String IMU_PREFIX = "AGENT_BRIDGE_COMPANION_IMU ";
+    private static final String RECOVERY_AUTH_PREFIX = "AGENT_BRIDGE_COMPANION_RECOVERY_AUTH ";
     private static final String IMU_SCHEMA = "agent_bridge.android_companion.imu_summary.v0";
     private static final String IMU_REQUEST_ID = "imu_request_id";
     private static final String IMU_CHALLENGE = "imu_challenge";
@@ -180,6 +181,22 @@ public final class CompanionService extends Service {
     @Override protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
         writer.println(HEALTH_PREFIX + healthJson());
         writer.println(IMU_PREFIX + lastImuJson);
+        writer.println(RECOVERY_AUTH_PREFIX + recoveryAuthorizationJson());
+    }
+
+    private String recoveryAuthorizationJson() {
+        SharedPreferences preferences=getSharedPreferences(RecoveryAuthorizationActivity.PREFS,MODE_PRIVATE);
+        String receipt=preferences.getString(RecoveryAuthorizationActivity.RECEIPT_KEY,"");
+        String publicKey=preferences.getString(RecoveryAuthorizationActivity.PUBLIC_KEY,"");
+        if (receipt.isEmpty() || publicKey.isEmpty())
+            return "{\"schema\":\"agent_bridge.android_companion.recovery_authorization_export.v0\",\"status\":\"empty\",\"private_key_exported\":false}";
+        try {
+            return new org.json.JSONObject().put("schema","agent_bridge.android_companion.recovery_authorization_export.v0")
+                    .put("status","signed").put("receipt",receipt).put("public_key_b64",publicKey)
+                    .put("private_key_exported",false).put("action_invoked",false).toString();
+        } catch (Exception error) {
+            return "{\"schema\":\"agent_bridge.android_companion.recovery_authorization_export.v0\",\"status\":\"error\",\"private_key_exported\":false}";
+        }
     }
 
     private synchronized void startImuCapture(Intent intent) {

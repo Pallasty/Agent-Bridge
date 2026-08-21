@@ -19,6 +19,12 @@ if grep -R -q 'AudioRecord\|MediaRecorder' "$root/src"; then
   echo "companion raw-audio capture must remain absent" >&2
   exit 1
 fi
+grep -q 'AndroidKeyStore' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+grep -q 'setUserAuthenticationRequired(true)' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+grep -q 'BiometricPrompt.CryptoObject' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+if grep -R -q 'getPrivate().getEncoded\|private_key.*putString' "$root/src/dev/agentbridge/companion"; then
+  echo "recovery signing private key must never be exported" >&2; exit 1
+fi
 test "$(grep -c 'submitTextObservation()' "$root/src/dev/agentbridge/companion/ProjectionActivity.java")" -eq 2
 javac -source 8 -target 8 -d "$out" \
   "$root/src/dev/agentbridge/companion/Hex.java" \
@@ -30,5 +36,6 @@ javac -source 8 -target 8 -d "$out" \
   "$root/src/dev/agentbridge/companion/ProjectionProtocol.java" \
   "$root/src/dev/agentbridge/companion/TextObservationProtocol.java" \
   "$root/src/dev/agentbridge/companion/VoiceDraftPolicy.java" \
+  "$root/src/dev/agentbridge/companion/RecoveryAuthorizationProtocol.java" \
   "$root/test/dev/agentbridge/companion/ProtocolTest.java"
 java -cp "$out" dev.agentbridge.companion.ProtocolTest

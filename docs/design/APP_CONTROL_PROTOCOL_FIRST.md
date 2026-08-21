@@ -315,6 +315,22 @@ schema, and sign it with its non-exportable Ed25519 key. Official OpenAI Codex
 documentation currently establishes no signed `UserPromptSubmit` event, so the
 ordinary local hook is intentionally excluded as an issuer.
 
+### Android recovery signer candidate v0
+
+The Android companion candidate is restricted to Android 13+ and creates an
+Ed25519 signing key in `AndroidKeyStore` with per-use user authentication. A
+foreground `BiometricPrompt` displays the bounded `next` recovery identity and
+states that signing does not execute recovery. The private key is never
+exported; the companion exposes only the raw public key and detached signed
+receipt. The host adapter accepts that export only when its public key exactly
+matches the independently configured frontend pin. ADB may present the UI and
+read the public receipt, but cannot satisfy the keystore authentication or sign.
+
+This slice is deliberately not exposed through MCP and is not connected to the
+mutating recovery path. Source/protocol qualification does not prove APK build,
+device keystore support, biometric enrollment, or a live signed round trip;
+those remain separate activation gates.
+
 ## Extension rule
 
 Add a new domain only as a typed adapter with:
