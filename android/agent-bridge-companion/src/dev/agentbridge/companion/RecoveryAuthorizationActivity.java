@@ -2,6 +2,8 @@ package dev.agentbridge.companion;
 
 import android.app.Activity;
 import android.hardware.biometrics.BiometricPrompt;
+import android.hardware.biometrics.BiometricManager;
+import android.app.KeyguardManager;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.security.keystore.KeyGenParameterSpec;
@@ -21,7 +23,8 @@ public final class RecoveryAuthorizationActivity extends Activity {
     public static final String PREFS="agent_bridge_companion";
     public static final String RECEIPT_KEY="recovery_authorization_receipt";
     public static final String PUBLIC_KEY="recovery_authorization_public_key_b64";
-    private static final String ALIAS="agent_bridge_recovery_authorization_es256_v0";
+    private static final String BIOMETRIC_ALIAS="agent_bridge_recovery_authorization_es256_strong_v1";
+    private static final String CREDENTIAL_ALIAS="agent_bridge_recovery_authorization_es256_credential_v1";
     private TextView state;
     private String operationId, recordSha, requestSha, workspaceSha, sessionSha, nonce;
 
@@ -45,37 +48,75 @@ public final class RecoveryAuthorizationActivity extends Activity {
     private void beginAuthentication() {
         if (android.os.Build.VERSION.SDK_INT < 33) { state.setText("Unavailable: Android 13 or newer required"); return; }
         try {
-            final KeyPair pair=loadOrCreateKey(); final Signature signature=Signature.getInstance("SHA256withECDSA");
+            BiometricManager manager=getSystemService(BiometricManager.class);
+            if (manager == null || manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    != BiometricManager.BIOMETRIC_SUCCESS) { beginCredentialAuthentication(); return; }
+        } catch (RuntimeException error) {
+            state.setText("Unavailable [biometric-check]: biometric capability check failed"); return;
+        }
+        final KeyPair pair;
+        try { pair=loadOrCreateKey(BIOMETRIC_ALIAS, 0, KeyProperties.AUTH_BIOMETRIC_STRONG); }
+        catch (Exception error) { state.setText("Unavailable [key-create]: secure signing key is not available"); return; }
+        final Signature signature;
+        try {
+            signature=Signature.getInstance("SHA256withECDSA");
             signature.initSign(pair.getPrivate());
+        } catch (Exception error) { state.setText("Unavailable [key-init]: secure signing key is not usable"); return; }
+        try {
             BiometricPrompt prompt=new BiometricPrompt.Builder(this).setTitle("Confirm recovery authorization")
                     .setSubtitle("Sign one exact receipt; no recovery action will run")
-                    .setAllowedAuthenticators(KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL).build();
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    .setNegativeButton("Cancel", getMainExecutor(), (dialog, which) ->
+                            state.setText("Not authorized: cancelled")).build();
             Executor executor=new Executor(){ public void execute(Runnable command){ runOnUiThread(command); }};
             prompt.authenticate(new BiometricPrompt.CryptoObject(signature), new CancellationSignal(), executor,
                 new BiometricPrompt.AuthenticationCallback(){
-                    @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){ sign(result,pair); }
+                    @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result){ sign(result.getCryptoObject().getSignature(),pair); }
                     @Override public void onAuthenticationError(int code, CharSequence message){ state.setText("Not authorized: "+message); }
                 });
-        } catch (Exception error) { state.setText("Unavailable: secure signing key or device authentication is not available"); }
+        } catch (Exception error) { state.setText("Unavailable [prompt]: biometric prompt could not start"); }
     }
 
-    private KeyPair loadOrCreateKey() throws Exception {
+    private void beginCredentialAuthentication() {
+        KeyguardManager keyguard=getSystemService(KeyguardManager.class);
+        if (keyguard == null || !keyguard.isDeviceSecure()) {
+            state.setText("Unavailable [device-credential]: configure a screen lock"); return;
+        }
+        try {
+            BiometricPrompt prompt=new BiometricPrompt.Builder(this).setTitle("Confirm recovery authorization")
+                    .setSubtitle("Use the device PIN, pattern, or password to sign one exact receipt")
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.DEVICE_CREDENTIAL).build();
+            Executor executor=new Executor(){ public void execute(Runnable command){ runOnUiThread(command); }};
+            prompt.authenticate(new CancellationSignal(), executor, new BiometricPrompt.AuthenticationCallback(){
+                @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                    try {
+                        KeyPair pair=loadOrCreateKey(CREDENTIAL_ALIAS,15,KeyProperties.AUTH_DEVICE_CREDENTIAL);
+                        Signature signature=Signature.getInstance("SHA256withECDSA"); signature.initSign(pair.getPrivate());
+                        sign(signature,pair);
+                    } catch (Exception error) { state.setText("Not authorized [credential-sign]: signing key unavailable"); }
+                }
+                @Override public void onAuthenticationError(int code, CharSequence message){ state.setText("Not authorized: "+message); }
+            });
+        } catch (RuntimeException error) { state.setText("Unavailable [credential-prompt]: device credential prompt could not start"); }
+    }
+
+    private KeyPair loadOrCreateKey(String alias, int validitySeconds, int authenticationType) throws Exception {
         KeyStore store=KeyStore.getInstance("AndroidKeyStore"); store.load(null);
-        if (!store.containsAlias(ALIAS)) {
+        if (!store.containsAlias(alias)) {
             KeyPairGenerator generator=KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC,"AndroidKeyStore");
-            generator.initialize(new KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_SIGN)
+            generator.initialize(new KeyGenParameterSpec.Builder(alias,KeyProperties.PURPOSE_SIGN)
                     .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
                     .setDigests(KeyProperties.DIGEST_SHA256)
-                    .setUserAuthenticationRequired(true).setUserAuthenticationParameters(0,
-                        KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL).build());
+                    .setUserAuthenticationRequired(true).setUserAuthenticationParameters(validitySeconds,
+                        authenticationType).setInvalidatedByBiometricEnrollment(true).build());
             generator.generateKeyPair();
         }
-        return new KeyPair(store.getCertificate(ALIAS).getPublicKey(), (java.security.PrivateKey)store.getKey(ALIAS,null));
+        return new KeyPair(store.getCertificate(alias).getPublicKey(), (java.security.PrivateKey)store.getKey(alias,null));
     }
 
-    private void sign(BiometricPrompt.AuthenticationResult result, KeyPair pair) {
+    private void sign(Signature signature, KeyPair pair) {
         try {
-            Signature signature=result.getCryptoObject().getSignature(); long issued=System.currentTimeMillis()/1000L;
+            long issued=System.currentTimeMillis()/1000L;
             String canonical=RecoveryAuthorizationProtocol.canonicalReceipt(operationId,recordSha,requestSha,workspaceSha,
                     sessionSha,issued,issued+120,"android-keystore:companion-v0",nonce);
             signature.update(canonical.getBytes("UTF-8")); String receipt=RecoveryAuthorizationProtocol.receiptToken(canonical,signature.sign());

@@ -331,6 +331,13 @@ receipt. The host adapter accepts that export only when its public key exactly
 matches the independently configured frontend pin. ADB may present the UI and
 read the public receipt, but cannot satisfy the keystore authentication or sign.
 
+The preferred Android authentication profile is Class 3 strong biometric with
+a per-use `CryptoObject`. If the device has no Class 3 biometric, the companion
+may use the system device credential prompt and a separate P-256 key whose
+Keystore authorization window is limited to 15 seconds; it signs the one bound
+receipt immediately in the successful system callback. A device with neither a
+strong biometric nor a secure screen lock fails closed.
+
 This slice is deliberately not exposed through MCP and is not connected to the
 mutating recovery path. Source/protocol qualification does not prove APK build,
 device keystore support, biometric enrollment, or a live signed round trip;

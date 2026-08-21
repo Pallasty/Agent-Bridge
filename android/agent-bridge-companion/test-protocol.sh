@@ -5,7 +5,8 @@ out="$root/build/protocol-test"
 rm -rf "$out"
 mkdir -p "$out"
 grep -q 'android:targetSdkVersion="35"' "$root/AndroidManifest.xml"
-grep -q 'android:enabled="false"' "$root/AndroidManifest.xml"
+grep -q 'android:enabled="true"' "$root/AndroidManifest.xml"
+grep -q 'android.permission.USE_BIOMETRIC' "$root/AndroidManifest.xml"
 grep -q 'android:foregroundServiceType="connectedDevice"' "$root/AndroidManifest.xml"
 if grep -q 'BOOT_COMPLETED\|RECEIVE_BOOT_COMPLETED' "$root/AndroidManifest.xml"; then
   echo "boot-start authority must remain absent" >&2
@@ -22,6 +23,10 @@ fi
 grep -q 'AndroidKeyStore' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
 grep -q 'setUserAuthenticationRequired(true)' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
 grep -q 'BiometricPrompt.CryptoObject' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+grep -q 'setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+grep -q 'loadOrCreateKey(BIOMETRIC_ALIAS, 0, KeyProperties.AUTH_BIOMETRIC_STRONG)' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+grep -q 'setAllowedAuthenticators(BiometricManager.Authenticators.DEVICE_CREDENTIAL)' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
+grep -q 'loadOrCreateKey(CREDENTIAL_ALIAS,15,KeyProperties.AUTH_DEVICE_CREDENTIAL)' "$root/src/dev/agentbridge/companion/RecoveryAuthorizationActivity.java"
 if grep -R -q 'getPrivate().getEncoded\|private_key.*putString' "$root/src/dev/agentbridge/companion"; then
   echo "recovery signing private key must never be exported" >&2; exit 1
 fi
