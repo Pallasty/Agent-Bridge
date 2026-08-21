@@ -259,10 +259,11 @@ else
         [ -n "$XKB_LIB" ] || XKB_LIB="/usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
         [ -e "$XKB_LIB" ] || die "linux-native-avatar build requires libxkbcommon.so.0 (install runtime xkbcommon or provide PKG_CONFIG_PATH)"
         CLEANUP_PKG_CONFIG="$(mktemp -d /tmp/agent-bridge-pkgconfig.XXXXXX)"
+        ln -s "$XKB_LIB" "$CLEANUP_PKG_CONFIG/libxkbcommon.so"
         cat > "$CLEANUP_PKG_CONFIG/xkbcommon.pc" <<EOF
 prefix=/usr
 exec_prefix=\${prefix}
-libdir=$(dirname "$XKB_LIB")
+libdir=$CLEANUP_PKG_CONFIG
 includedir=/usr/include
 
 Name: xkbcommon
