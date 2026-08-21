@@ -10,12 +10,14 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_COOLDOWN_SECS: i64 = 300;
 pub const DEFAULT_MAX_UTTERANCES: u64 = 3;
 pub const DEFAULT_VOICE: &str = "Serena";
+pub const DEFAULT_BACKEND: &str = "qwen3";
 pub const DEFAULT_INSTRUCT: &str = "用温暖、清晰、简短的普通话播报，语速自然，不要添加额外内容。";
 pub const ADAPTER_CONTRACT_MARKER: &str = "agent_bridge.linux_live_qwen_voice.v1";
 
 #[derive(Clone, Debug)]
 pub struct LinuxLiveVoiceConfig {
     pub enabled: bool,
+    pub backend: String,
     pub python: String,
     pub script_path: PathBuf,
     pub qwen_worker: PathBuf,
@@ -176,13 +178,15 @@ pub fn invocation_args(
         "--cooldown-secs".to_string(),
         config.cooldown_secs.to_string(),
         "--synth-backend".to_string(),
-        "qwen3".to_string(),
-        "--qwen-worker".to_string(),
-        config.qwen_worker.to_string_lossy().to_string(),
+        config.backend.clone(),
         "--qwen-instruct".to_string(),
         config.instruct.clone(),
         "--json".to_string(),
     ];
+    if config.backend == "qwen3" {
+        args.push("--qwen-worker".to_string());
+        args.push(config.qwen_worker.to_string_lossy().to_string());
+    }
     if let Some(sink) = config
         .sink
         .as_deref()
@@ -240,10 +244,36 @@ pub fn plan_json(config: &LinuxLiveVoiceConfig) -> Value {
         .unwrap_or(false);
     let python_ready = command_ready(&config.python);
     let voice_ready = !config.voice.trim().is_empty();
+    let backend_supported = matches!(config.backend.as_str(), "qwen3" | "qwen3-lan");
+    let lan_dispatcher = config
+        .script_path
+        .parent()
+        .map(|parent| parent.join("qwen3_lan_remote_synth.py"))
+        .unwrap_or_default();
+    let lan_dispatcher_ready = lan_dispatcher.is_file();
+    let lan_config_ready = [
+        "AB_QWEN3_LAN_REMOTE_HOST",
+        "AB_QWEN3_LAN_REMOTE_PYTHON",
+        "AB_QWEN3_LAN_WORKER_SOCKET",
+        "AB_QWEN3_LAN_HOST_KEY_ALIAS",
+    ]
+    .iter()
+    .all(|key| {
+        std::env::var(key)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    });
+    let backend_ready = match config.backend.as_str() {
+        "qwen3" => worker_ready,
+        "qwen3-lan" => lan_dispatcher_ready && lan_config_ready,
+        _ => false,
+    };
     json!({
         "enabled": config.enabled,
-        "ready": !config.enabled || (worker_ready && script_contract_ready && python_ready && voice_ready),
-        "backend": "qwen3",
+        "ready": !config.enabled || (backend_supported && backend_ready && script_contract_ready && python_ready && voice_ready),
+        "backend": config.backend,
+        "backend_supported": backend_supported,
+        "backend_ready": backend_ready,
         "voice": config.voice,
         "voice_ready": voice_ready,
         "worker_socket": config.qwen_worker,
@@ -251,6 +281,9 @@ pub fn plan_json(config: &LinuxLiveVoiceConfig) -> Value {
         "worker_is_socket": worker_is_socket,
         "worker_owner_only": worker_owner_only,
         "worker_owned_by_current_user": worker_owned_by_current_user,
+        "lan_dispatcher": lan_dispatcher,
+        "lan_dispatcher_ready": lan_dispatcher_ready,
+        "lan_config_ready": lan_config_ready,
         "python": config.python,
         "python_ready": python_ready,
         "script_path": config.script_path,
@@ -304,6 +337,7 @@ mod tests {
     fn config(enabled: bool) -> LinuxLiveVoiceConfig {
         LinuxLiveVoiceConfig {
             enabled,
+            backend: DEFAULT_BACKEND.to_string(),
             python: "python3".to_string(),
             script_path: PathBuf::from("/tmp/audio_embody.py"),
             qwen_worker: PathBuf::from("/tmp/qwen.sock"),
@@ -394,6 +428,26 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--last-spoken-ts", "700"]));
+    }
+
+    #[test]
+    fn lan_invocation_is_explicit_and_never_forwards_a_local_socket() {
+        let mut cfg = config(true);
+        cfg.backend = "qwen3-lan".to_string();
+        let decision = transition_decision(
+            &cfg,
+            "working",
+            &json!({"mode": "handoff"}),
+            None,
+            1000,
+            0,
+            false,
+        );
+        let args = invocation_args(&cfg, &decision, None);
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--synth-backend", "qwen3-lan"]));
+        assert!(!args.iter().any(|arg| arg == "--qwen-worker"));
     }
 
     #[test]

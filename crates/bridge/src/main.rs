@@ -1038,7 +1038,11 @@ enum AvatarOp {
         /// Explicitly enable sparse Qwen3-TTS feedback for eligible mode transitions.
         #[arg(long)]
         voice_feedback: bool,
-        /// Owner-only local Qwen3-TTS worker socket. Required when voice is enabled.
+        /// Explicit Qwen route: owner-local socket or authenticated LAN dispatcher.
+        #[arg(long, default_value = ab_bridge::avatar_live_voice::DEFAULT_BACKEND,
+              value_parser = ["qwen3", "qwen3-lan"])]
+        voice_backend: String,
+        /// Owner-only local Qwen3-TTS worker socket. Required for the qwen3 route.
         #[arg(long, env = "AB_QWEN3_TTS_WORKER_SOCKET")]
         qwen_worker: Option<PathBuf>,
         /// Python used to run the bounded audio adapter.
@@ -4988,6 +4992,7 @@ async fn real_main() -> Result<()> {
                 heartbeat_interval_secs,
                 state_poll_ms,
                 voice_feedback,
+                voice_backend,
                 qwen_worker,
                 voice_python,
                 voice_script,
@@ -5019,6 +5024,7 @@ async fn real_main() -> Result<()> {
                     *heartbeat_interval_secs,
                     *state_poll_ms,
                     *voice_feedback,
+                    voice_backend.clone(),
                     qwen_worker.clone(),
                     voice_python.clone(),
                     voice_script.clone(),
@@ -8997,6 +9003,7 @@ async fn run_avatar_linux_live(
     heartbeat_interval_secs: u64,
     state_poll_ms: u64,
     voice_feedback: bool,
+    voice_backend: String,
     qwen_worker: Option<PathBuf>,
     voice_python: String,
     voice_script: Option<PathBuf>,
@@ -9061,6 +9068,7 @@ async fn run_avatar_linux_live(
     });
     let voice_config = ab_bridge::avatar_live_voice::LinuxLiveVoiceConfig {
         enabled: voice_feedback,
+        backend: voice_backend.trim().to_string(),
         python: voice_python.trim().to_string(),
         script_path: voice_script,
         qwen_worker: qwen_worker.unwrap_or_default(),
@@ -9213,7 +9221,7 @@ async fn run_avatar_linux_live(
             .unwrap_or(false)
     {
         anyhow::bail!(
-            "avatar linux-live voice feedback requires an existing audio adapter and owner-local --qwen-worker socket"
+            "avatar linux-live voice feedback requires a ready audio adapter and explicit qwen3 or qwen3-lan configuration"
         );
     }
 
@@ -9496,7 +9504,7 @@ async fn run_linux_live_voice_feedback(
         "surface": "linux_avatar_live_voice_receipt",
         "schema": 1,
         "enabled": true,
-        "backend": "qwen3",
+        "backend": config.backend,
         "transition_count": transition_count,
         "invocation_count": invocation_count,
         "utterance_count": utterance_count,

@@ -71,9 +71,15 @@ the production backend and explicit cooldown/enable controls.
 ## EAP-1B sparse Qwen voice
 
 Voice feedback remains off unless the foreground invocation includes
-`--voice-feedback`. EAP-1B accepts only an existing owner-local Qwen3-TTS worker
-socket; it does not download weights, start a worker, fall back to another
-engine, or keep the model resident after the operator stops it.
+`--voice-feedback`. EAP-1B accepts either an existing owner-local Qwen3-TTS
+worker socket or the explicit authenticated Qwen LAN dispatcher; it does not
+download weights, start a worker, fall back to another engine, or keep the
+model resident after the operator stops it.
+
+When the worker runs on a Mac in the same LAN, select
+`--voice-backend qwen3-lan` and provide the four `AB_QWEN3_LAN_*` variables documented in
+`MACOS_QWEN3_TTS_PILOT.md`. This route remains explicit and default-off, never
+opens a TTS HTTP listener, and does not fall back to a local socket.
 
 Deploy the binary and `scripts/audio_embody.py` together with the existing
 version-matched deployment workflow. The live plan checks the
@@ -99,6 +105,17 @@ agent-bridge avatar linux-live \
   --qwen-worker "$AB_QWEN3_TTS_WORKER_SOCKET" \
   --voice-cooldown-secs 300 \
   --voice-max-utterances 3 \
+  --dry-run --json
+```
+
+For the Mac LAN worker, replace `--qwen-worker ...` with:
+
+```bash
+agent-bridge avatar linux-live \
+  --project agent-bridge \
+  --pet-id xiao-shu-v2 \
+  --voice-feedback \
+  --voice-backend qwen3-lan \
   --dry-run --json
 ```
 

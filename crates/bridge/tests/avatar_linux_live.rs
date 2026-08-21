@@ -175,3 +175,54 @@ fn linux_live_voice_feedback_is_explicit_bounded_and_fail_closed() {
     assert_eq!(payload["safety"]["controls_desktop"], false);
     assert!(!xdg.join("agent-bridge").join("state.db").exists());
 }
+
+#[test]
+fn linux_live_lan_voice_is_explicit_default_off_and_config_gated() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let xdg = temp.path().join("xdg");
+    let home = temp.path().join("home");
+    write_pet_fixture(&xdg, "eap-live-lan-voice-test");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-bridge"))
+        .args([
+            "avatar",
+            "linux-live",
+            "--project",
+            "agent-bridge",
+            "--pet-id",
+            "eap-live-lan-voice-test",
+            "--voice-feedback",
+            "--voice-backend",
+            "qwen3-lan",
+            "--dry-run",
+            "--json",
+        ])
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", &xdg)
+        .env("XDG_SESSION_TYPE", "wayland")
+        .env("XDG_CURRENT_DESKTOP", "sway")
+        .env("WAYLAND_DISPLAY", "wayland-test")
+        .env("SWAYSOCK", "/tmp/sway-test.sock")
+        .env("AB_QWEN3_LAN_REMOTE_HOST", "operator@mac.lan")
+        .env("AB_QWEN3_LAN_REMOTE_PYTHON", "/opt/qwen/bin/python")
+        .env("AB_QWEN3_LAN_WORKER_SOCKET", "/tmp/qwen.sock")
+        .env("AB_QWEN3_LAN_HOST_KEY_ALIAS", "mac.lan")
+        .output()
+        .expect("run LAN voice-enabled linux-live dry run");
+
+    assert!(
+        output.status.success(),
+        "stdout={}; stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse plan JSON");
+    assert_eq!(payload["voice_feedback"]["enabled"], true);
+    assert_eq!(payload["voice_feedback"]["backend"], "qwen3-lan");
+    assert_eq!(payload["voice_feedback"]["backend_supported"], true);
+    assert_eq!(payload["voice_feedback"]["lan_config_ready"], true);
+    assert_eq!(payload["voice_feedback"]["lan_dispatcher_ready"], true);
+    assert_eq!(payload["voice_feedback"]["worker_socket_ready"], false);
+    assert_eq!(payload["voice_feedback"]["ready"], true);
+    assert_eq!(payload["safety"]["audio_default_off"], true);
+}
