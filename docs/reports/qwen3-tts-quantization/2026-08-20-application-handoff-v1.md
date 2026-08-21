@@ -43,5 +43,5 @@ backend configuration in response to a numeric or listening `PASS` alone.
 
 Reopening a quantized runtime requires a native fused kernel (or equivalent
 without retained FP16 weights), at least 5% projected model-memory saving, full
-frozen-corpus runtime coverage, end-to-end latency no worse than 1.05x, negative
-runtime-memory delta, and fresh waveform plus blinded-listening evidence.
+frozen-corpus runtime coverage, end-to-end latency no worse than 1.05x, negative runtime-memory delta,
+and fresh waveform plus blinded-listening evidence.
