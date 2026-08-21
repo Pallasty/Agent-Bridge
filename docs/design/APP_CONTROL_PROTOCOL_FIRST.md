@@ -289,7 +289,7 @@ influence.
 
 An eligible intent preflight is not user authorization. The optional
 `recovery_authorization_review` layer verifies a short-lived (at most five
-minutes), Ed25519-signed receipt bound to the exact operation ID, record
+minutes), signed receipt bound to the exact operation ID, record
 digest, canonical request digest, workspace digest, frontend session digest,
 issuer, and random nonce. Receipts retain no prompt, path, or media content.
 The signing private key remains outside the host, workspace, hook, environment,
@@ -311,17 +311,22 @@ binding identifiers, request time, maximum receipt TTL, and a random request
 nonce. It carries `authorization_granted=false`, is not itself signable receipt
 authority, and invokes no action. A trusted external frontend must independently
 display the request, obtain a new user decision, construct the exact receipt
-schema, and sign it with its non-exportable Ed25519 key. Official OpenAI Codex
+schema, and sign it with its non-exportable key. The independently trusted host
+configuration pins both the public key and the allowed algorithm (`Ed25519` or
+`ES256`); the receipt cannot request an algorithm or downgrade verification.
+Official OpenAI Codex
 documentation currently establishes no signed `UserPromptSubmit` event, so the
 ordinary local hook is intentionally excluded as an issuer.
 
 ### Android recovery signer candidate v0
 
-The Android companion candidate is restricted to Android 13+ and creates an
-Ed25519 signing key in `AndroidKeyStore` with per-use user authentication. A
+The Android companion candidate is restricted to Android 13+ and creates a
+P-256 ECDSA (`ES256`) signing key in `AndroidKeyStore` with per-use user
+authentication. This explicit profile supports Android devices whose secure
+keystore does not expose Ed25519 key generation. A
 foreground `BiometricPrompt` displays the bounded `next` recovery identity and
 states that signing does not execute recovery. The private key is never
-exported; the companion exposes only the raw public key and detached signed
+exported; the companion exposes only the DER SubjectPublicKeyInfo public key and detached signed
 receipt. The host adapter accepts that export only when its public key exactly
 matches the independently configured frontend pin. ADB may present the UI and
 read the public receipt, but cannot satisfy the keystore authentication or sign.

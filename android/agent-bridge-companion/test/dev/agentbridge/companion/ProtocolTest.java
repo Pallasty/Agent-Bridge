@@ -127,7 +127,7 @@ public final class ProtocolTest {
                 +"\",\"request_sha256\":\""+repeat("3",64)+"\",\"schema\":\""
                 +RecoveryAuthorizationProtocol.RECEIPT_SCHEMA+"\",\"session_sha256\":\""+repeat("5",64)
                 +"\",\"workspace_sha256\":\""+repeat("4",64)+"\"}"));
-        check(RecoveryAuthorizationProtocol.receiptToken(canonicalReceipt,new byte[64]).split("\\.").length==2);
+        check(RecoveryAuthorizationProtocol.receiptToken(canonicalReceipt,new byte[70]).split("\\.").length==2);
         rejected=false; try { RecoveryAuthorizationProtocol.canonicalReceipt("bad",repeat("2",64),repeat("3",64),
                 repeat("4",64),repeat("5",64),now,now+120,"android-keystore:companion-v0",repeat("6",32)); }
         catch(IllegalArgumentException expected){ rejected=true; } check(rejected);

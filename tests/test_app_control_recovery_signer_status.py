@@ -1,7 +1,9 @@
 import base64, importlib.util, os
 from pathlib import Path
 import tempfile, unittest
+from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 SCRIPT=Path(__file__).resolve().parents[1]/"scripts/app-control-recovery-signer-status.py"
@@ -23,5 +25,15 @@ class SignerStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ledger=Path(tmp)/"ledger"; ledger.mkdir(); os.chmod(ledger,0o755)
             self.assertEqual(MOD.status(public_key_b64="bad", ledger=ledger)["admission"], "source_unavailable")
+    def test_es256_p256_key_is_configured_only_under_explicit_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger=Path(tmp)/"ledger"; ledger.mkdir(mode=0o700); os.chmod(ledger,0o700)
+            key=ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(
+                serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+            key_b64=base64.urlsafe_b64encode(key).decode().rstrip("=")
+            with patch.dict(os.environ, {"AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM": "ES256"}):
+                self.assertEqual(MOD.status(public_key_b64=key_b64, ledger=ledger)["admission"], "configured")
+            with patch.dict(os.environ, {"AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM": "Ed25519"}):
+                self.assertEqual(MOD.status(public_key_b64=key_b64, ledger=ledger)["admission"], "source_unavailable")
 
 if __name__ == "__main__": unittest.main()

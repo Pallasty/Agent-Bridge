@@ -1,7 +1,10 @@
 import base64, importlib.util, json
 from pathlib import Path
-import tempfile, threading, unittest
+import os, tempfile, threading, unittest
+from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/app-control-recovery-authorization.py"
@@ -54,5 +57,24 @@ class RecoveryAuthorizationTests(unittest.TestCase):
         for thread in threads: thread.join()
         self.assertEqual(admissions.count("authorized"), 1)
         self.assertEqual(admissions.count("already_consumed"), 7)
+    def test_es256_exact_receipt_verifies_and_algorithm_mismatch_fails(self):
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        public = private_key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        payload = {"schema": MOD.RECEIPT_SCHEMA, **self.bindings,
+            "issued_at_unix_seconds": self.now - 1, "expires_at_unix_seconds": self.now + 60,
+            "issuer": "trusted-frontend:test", "nonce": "7" * 32}
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        enc = lambda value: base64.urlsafe_b64encode(value).decode().rstrip("=")
+        receipt = enc(raw) + "." + enc(private_key.sign(raw, ec.ECDSA(hashes.SHA256())))
+        key_b64 = enc(public)
+        with patch.dict(os.environ, {"AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM": "ES256"}):
+            out = MOD.authorize(receipt=receipt, public_key_b64=key_b64, ledger=self.ledger,
+                consume=False, now=self.now, **self.bindings)
+        self.assertEqual(out["admission"], "authorized")
+        with patch.dict(os.environ, {"AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM": "Ed25519"}):
+            out = MOD.authorize(receipt=receipt, public_key_b64=key_b64, ledger=self.ledger,
+                consume=False, now=self.now, **self.bindings)
+        self.assertEqual(out["admission"], "source_unavailable")
 
 if __name__ == "__main__": unittest.main()

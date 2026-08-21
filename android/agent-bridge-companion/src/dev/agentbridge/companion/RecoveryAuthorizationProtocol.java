@@ -34,19 +34,15 @@ public final class RecoveryAuthorizationProtocol {
     }
 
     public static String receiptToken(String canonical, byte[] signature) {
-        if (signature == null || signature.length != 64) throw new IllegalArgumentException("invalid Ed25519 signature");
+        if (signature == null || signature.length < 64 || signature.length > 80) throw new IllegalArgumentException("invalid signature");
         return Base64.getUrlEncoder().withoutPadding().encodeToString(canonical.getBytes(UTF_8))
                 + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(signature);
     }
 
-    public static String publicKeyRawBase64(byte[] subjectPublicKeyInfo) {
-        if (subjectPublicKeyInfo == null || subjectPublicKeyInfo.length != 44)
-            throw new IllegalArgumentException("invalid Ed25519 SubjectPublicKeyInfo");
-        byte[] prefix = new byte[] {0x30,0x2a,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x03,0x21,0x00};
-        for (int i=0;i<prefix.length;i++) if (subjectPublicKeyInfo[i] != prefix[i])
-            throw new IllegalArgumentException("unexpected Ed25519 public key encoding");
-        byte[] raw = new byte[32]; System.arraycopy(subjectPublicKeyInfo, 12, raw, 0, 32);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+    public static String publicKeyBase64(byte[] subjectPublicKeyInfo) {
+        if (subjectPublicKeyInfo == null || subjectPublicKeyInfo.length < 80 || subjectPublicKeyInfo.length > 120)
+            throw new IllegalArgumentException("invalid P-256 SubjectPublicKeyInfo");
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(subjectPublicKeyInfo);
     }
 
     public static String digest(String value) {

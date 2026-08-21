@@ -46,11 +46,18 @@ def authorize(*, receipt: str, public_key_b64: str | None, ledger: Path | None,
         return _result("source_unavailable", error="authorization_source_unavailable")
     try:
         from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
         key_raw = _decode(public_key_b64)
-        if len(key_raw) != 32:
-            raise ValueError("invalid_public_key")
-        public_key = Ed25519PublicKey.from_public_bytes(key_raw)
+        algorithm = os.environ.get("AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM", "Ed25519")
+        if algorithm == "Ed25519" and len(key_raw) == 32:
+            public_key = Ed25519PublicKey.from_public_bytes(key_raw)
+        elif algorithm == "ES256":
+            public_key = serialization.load_der_public_key(key_raw)
+            if not isinstance(public_key, ec.EllipticCurvePublicKey) or not isinstance(public_key.curve, ec.SECP256R1):
+                raise ValueError("invalid_public_key")
+        else: raise ValueError("invalid_public_key")
         meta = os.lstat(ledger)
         if not stat.S_ISDIR(meta.st_mode) or meta.st_uid != os.getuid() or stat.S_IMODE(meta.st_mode) != 0o700:
             raise OSError("unsafe_ledger")
@@ -60,9 +67,10 @@ def authorize(*, receipt: str, public_key_b64: str | None, ledger: Path | None,
         encoded, encoded_mac = receipt.split(".", 1)
         raw = _decode(encoded)
         supplied_mac = _decode(encoded_mac)
-        if len(raw) > MAX_RECEIPT_BYTES or len(supplied_mac) != 64:
+        if len(raw) > MAX_RECEIPT_BYTES or not (64 <= len(supplied_mac) <= 80):
             raise ValueError("invalid_receipt")
-        public_key.verify(supplied_mac, raw)
+        if algorithm == "Ed25519": public_key.verify(supplied_mac, raw)
+        else: public_key.verify(supplied_mac, raw, ec.ECDSA(hashes.SHA256()))
         payload = json.loads(raw)
     except (ValueError, TypeError, json.JSONDecodeError, InvalidSignature):
         return _result("binding_conflict", error="authorization_receipt_invalid")

@@ -14,13 +14,14 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.Signature;
+import java.security.spec.ECGenParameterSpec;
 import java.util.concurrent.Executor;
 
 public final class RecoveryAuthorizationActivity extends Activity {
     public static final String PREFS="agent_bridge_companion";
     public static final String RECEIPT_KEY="recovery_authorization_receipt";
     public static final String PUBLIC_KEY="recovery_authorization_public_key_b64";
-    private static final String ALIAS="agent_bridge_recovery_authorization_ed25519_v0";
+    private static final String ALIAS="agent_bridge_recovery_authorization_es256_v0";
     private TextView state;
     private String operationId, recordSha, requestSha, workspaceSha, sessionSha, nonce;
 
@@ -44,7 +45,7 @@ public final class RecoveryAuthorizationActivity extends Activity {
     private void beginAuthentication() {
         if (android.os.Build.VERSION.SDK_INT < 33) { state.setText("Unavailable: Android 13 or newer required"); return; }
         try {
-            final KeyPair pair=loadOrCreateKey(); final Signature signature=Signature.getInstance("Ed25519");
+            final KeyPair pair=loadOrCreateKey(); final Signature signature=Signature.getInstance("SHA256withECDSA");
             signature.initSign(pair.getPrivate());
             BiometricPrompt prompt=new BiometricPrompt.Builder(this).setTitle("Confirm recovery authorization")
                     .setSubtitle("Sign one exact receipt; no recovery action will run")
@@ -61,8 +62,10 @@ public final class RecoveryAuthorizationActivity extends Activity {
     private KeyPair loadOrCreateKey() throws Exception {
         KeyStore store=KeyStore.getInstance("AndroidKeyStore"); store.load(null);
         if (!store.containsAlias(ALIAS)) {
-            KeyPairGenerator generator=KeyPairGenerator.getInstance("Ed25519","AndroidKeyStore");
+            KeyPairGenerator generator=KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC,"AndroidKeyStore");
             generator.initialize(new KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_SIGN)
+                    .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
+                    .setDigests(KeyProperties.DIGEST_SHA256)
                     .setUserAuthenticationRequired(true).setUserAuthenticationParameters(0,
                         KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL).build());
             generator.generateKeyPair();
@@ -76,7 +79,7 @@ public final class RecoveryAuthorizationActivity extends Activity {
             String canonical=RecoveryAuthorizationProtocol.canonicalReceipt(operationId,recordSha,requestSha,workspaceSha,
                     sessionSha,issued,issued+120,"android-keystore:companion-v0",nonce);
             signature.update(canonical.getBytes("UTF-8")); String receipt=RecoveryAuthorizationProtocol.receiptToken(canonical,signature.sign());
-            String publicKey=RecoveryAuthorizationProtocol.publicKeyRawBase64(pair.getPublic().getEncoded());
+            String publicKey=RecoveryAuthorizationProtocol.publicKeyBase64(pair.getPublic().getEncoded());
             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(RECEIPT_KEY,receipt).putString(PUBLIC_KEY,publicKey).commit();
             state.setText("Authorized once. Receipt expires in 2 minutes; no action was executed.");
         } catch (Exception error) { state.setText("Not authorized: signing failed"); }

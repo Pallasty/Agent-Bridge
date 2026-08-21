@@ -10,12 +10,16 @@ def status(*, public_key_b64: str | None, ledger: Path | None) -> dict:
     key_valid = False
     verifier_available = False
     try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
         verifier_available = True
         if public_key_b64:
             raw = base64.urlsafe_b64decode(public_key_b64 + "=" * (-len(public_key_b64) % 4))
-            Ed25519PublicKey.from_public_bytes(raw)
-            key_valid = len(raw) == 32
+            algorithm=os.environ.get("AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM","Ed25519")
+            if algorithm=="Ed25519": Ed25519PublicKey.from_public_bytes(raw); key_valid=len(raw)==32
+            elif algorithm=="ES256":
+                key=serialization.load_der_public_key(raw); key_valid=isinstance(key,ec.EllipticCurvePublicKey) and isinstance(key.curve,ec.SECP256R1)
     except (ImportError, ValueError):
         pass
     ledger_ready = False
