@@ -1,0 +1,32 @@
+{
+  "schema": "agent_bridge.app_control.recovery_handoff_live_closure.v0",
+  "observed_at": "2026-08-20T17:32:00Z",
+  "source_live_receipt": "docs/design/evidence/app_control_recovery_handoff_live_2026_08_20.json",
+  "closure": {
+    "journal_scan_complete": true,
+    "admission": "no_recovery_candidate",
+    "recover": "replan",
+    "candidate_count": 0,
+    "blocked_count": 0,
+    "historical_records_skipped": 13,
+    "target_operation_phase": "terminal",
+    "target_operation_dispatch_count": 1,
+    "target_operation_payload_present": true,
+    "target_operation_record_sha256": "84d7d8fd8bebe677d2d6346c1120533a9de18ce93c7b629b6c1440691911912a",
+    "journal_manifest_unchanged_during_audit": true,
+    "media_observed_by_index": false,
+    "action_invoked_by_index": false
+  },
+  "decision": {
+    "status": "LIVE_HANDOFF_CLOSED_NO_PENDING_RECOVERY",
+    "automatic_recovery_authorized": false,
+    "new_operation_id_authorized": false,
+    "additional_next_authorized": false
+  },
+  "claim_boundary": {
+    "all_system_media_actions_accounted_for": false,
+    "exclusive_causation_proven": false,
+    "current_owner_intent_proven": false,
+    "long_lived_track_stability_proven": false
+  }
+}
