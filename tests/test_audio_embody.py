@@ -4,6 +4,8 @@
     python3 tests/test_audio_embody.py
 """
 import array
+import contextlib
+import io
 import math
 import os
 import sys
@@ -829,6 +831,109 @@ def test_qwen3_worker_receipt_preserves_declared_runtime_identity(monkeypatch):
         assert info["protocol"] == "ab.tts.worker.v1"
         assert info["engine"] == "onnxruntime"
         assert info["dtype"] == "int8"
+    finally:
+        _restore(saved)
+
+
+def test_qwen3_selected_backend_does_not_fall_into_generic_synth():
+    seen = {}
+
+    def fake_qwen(text, voice, speed, instruct, qwen_python, qwen_model, qwen_worker):
+        seen.update(text=text, voice=voice, instruct=instruct, worker=qwen_worker)
+        return "/tmp/qwen-selected.wav", {
+            "ok": True, "protocol": "ab.tts.worker.v1", "engine": "qwen3-pytorch",
+            "model": "Qwen/test", "dtype": "float16", "device": "cuda",
+        }
+
+    saved = _patch(
+        synth_qwen3=fake_qwen,
+        synth_speech=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("generic synth must not receive qwen3")),
+    )
+    try:
+        wav, info = ae.synth_selected_backend(
+            "交接完成", "Serena", 1.0, "qwen3", qwen_instruct="温暖清晰",
+            qwen_worker="/tmp/qwen.sock")
+        assert wav == "/tmp/qwen-selected.wav"
+        assert info["engine"] == "qwen3-pytorch"
+        assert seen == {
+            "text": "交接完成", "voice": "Serena", "instruct": "温暖清晰",
+            "worker": "/tmp/qwen.sock",
+        }
+    finally:
+        _restore(saved)
+
+
+def test_qwen3_fast_emit_preserves_worker_identity_and_stays_unverified():
+    saved = _patch(
+        synth_qwen3=lambda *args, **kwargs: ("/tmp/qwen-live.wav", {
+            "ok": True, "protocol": "ab.tts.worker.v1", "engine": "qwen3-pytorch",
+            "model": "Qwen/test", "dtype": "float16", "device": "cuda",
+        }),
+        _read_wav_mono_s16=lambda path: {
+            "samples": [1000] * 24000, "sr": 24000, "frames": 24000,
+        },
+        _sh=lambda command: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    try:
+        out = ae.run_emit(
+            "任务已经准备交接。", "Serena", 1.0, "test-sink", None,
+            synth_backend="qwen3", qwen_worker="/tmp/qwen.sock")
+        assert out["status"] == "played_unverified"
+        assert out["verify_status"] == "unverified"
+        assert out["verified_to"] is None
+        assert out["synth_backend"] == "qwen3"
+        assert out["worker_protocol"] == "ab.tts.worker.v1"
+        assert out["worker_engine"] == "qwen3-pytorch"
+        assert out["qwen_model"] == "Qwen/test"
+    finally:
+        _restore(saved)
+
+
+def test_voice_cli_forwards_explicit_qwen_worker_without_playback():
+    seen = {}
+
+    def fake_voice(*args, **kwargs):
+        seen.update(kwargs)
+        return {"mode": "voice", "status": "silent", "verify_status": "skipped"}
+
+    saved_functions = _patch(run_voice=fake_voice)
+    saved_argv = sys.argv
+    try:
+        sys.argv = [
+            "audio_embody.py", "--mode", "voice", "--lifecycle-mode", "handoff",
+            "--voice-line", "任务已经准备交接。", "--agent-id", "agent-live",
+            "--synth-backend", "qwen3", "--qwen-worker", "/tmp/qwen.sock", "--json",
+        ]
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            ae.main()
+        assert '"status": "silent"' in output.getvalue()
+        assert seen["synth_backend"] == "qwen3"
+        assert seen["qwen_worker"] == "/tmp/qwen.sock"
+    finally:
+        sys.argv = saved_argv
+        _restore(saved_functions)
+
+
+def test_voice_receipt_keeps_qwen_worker_provenance():
+    saved = _patch(run_emit=lambda *args, **kwargs: {
+        "status": "played_unverified", "verify_status": "unverified",
+        "verified_to": None, "not_verified": "output bus", "play_ok": True,
+        "synth_backend": "qwen3", "worker_protocol": "ab.tts.worker.v1",
+        "worker_engine": "qwen3-pytorch", "qwen_model": "Qwen/test",
+        "qwen_device": "cuda", "qwen_dtype": "float16",
+        "qwen_instruct_applied": True,
+    })
+    try:
+        out = ae.run_voice(
+            "handoff", "Serena", None, None, voice_line="任务已经准备交接。",
+            agent_id="agent-live", synth_backend="qwen3",
+            qwen_worker="/tmp/qwen.sock")
+        assert out["status"] == "played_unverified"
+        assert out["worker_protocol"] == "ab.tts.worker.v1"
+        assert out["worker_engine"] == "qwen3-pytorch"
+        assert out["qwen_model"] == "Qwen/test"
+        assert out["qwen_dtype"] == "float16"
     finally:
         _restore(saved)
 

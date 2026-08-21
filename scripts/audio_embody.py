@@ -22,6 +22,10 @@ This is the Python half (analysis + decision) wrapped by the thin Rust MCP tool
 """
 import argparse, array, fcntl, hashlib, json, math, os, re, socket, subprocess, sys, tempfile, time, unicodedata, wave
 
+# Version marker consumed by `avatar linux-live` preflight. A new binary paired
+# with an older deployed adapter must fail closed before audio is attempted.
+AB_LINUX_LIVE_QWEN_VOICE_V1 = "agent_bridge.linux_live_qwen_voice.v1"
+
 # Platform routing: macOS has NO PipeWire sink `.monitor` loopback, so present_voice
 # verifies the SYNTHESIZED FILE (via STT) instead of a bus readback — a different,
 # honestly-narrower channel (verified_to = synth file, NOT the output bus). The Linux
@@ -1079,6 +1083,70 @@ def synth_qwen3_rust(text, voice, speed, instruct=None, binary=None,
     }
 
 
+def synth_selected_backend(text, voice, speed, synth_backend="kokoro", synth_bin=None,
+                           qwen_instruct=None, qwen_python=None, qwen_model=None,
+                           qwen_worker=None, sherpa_worker=None,
+                           qwen_rust_bin=None, qwen_rust_model_dir=None,
+                           qwen_rust_profile=None, omnivoice_python=None,
+                           omnivoice_manifest=None, canary_subject=None,
+                           canary_request_id=None, canary_policy=None):
+    """Dispatch one explicit backend without fallback or platform inference.
+
+    This is shared by fast emit, Linux bus verification and synth-file
+    verification. Keeping one dispatcher prevents a backend accepted by the CLI
+    (notably Qwen3) from silently falling into the Kokoro/Piper binary path.
+    """
+    if synth_backend == "qwen3":
+        return synth_qwen3(text, voice, speed, qwen_instruct,
+                           qwen_python, qwen_model, qwen_worker)
+    if synth_backend == "sherpa" and sherpa_worker:
+        return synth_sherpa_worker(text, voice, speed, sherpa_worker)
+    if synth_backend == "qwen3-rust":
+        return synth_qwen3_rust(text, voice, speed, qwen_instruct,
+                                qwen_rust_bin, qwen_rust_model_dir,
+                                qwen_rust_profile)
+    if synth_backend == "omnivoice":
+        return synth_omnivoice(text, voice, speed, qwen_instruct,
+                               omnivoice_python, omnivoice_manifest)
+    if synth_backend == "canary":
+        return synth_tts_canary(
+            text, voice, speed, qwen_instruct, canary_subject,
+            canary_request_id, canary_policy, qwen_python, qwen_model,
+            qwen_worker, omnivoice_python, omnivoice_manifest)
+    if synth_backend == "say":
+        return synth_say(text, voice, speed)
+    return synth_speech(text, voice, speed, synth_bin, backend=synth_backend)
+
+
+def copy_backend_provenance(out, info, synth_backend):
+    """Copy bounded runtime identity into a receipt without free-form prompts."""
+    executed_backend = info.get("canary_executed_backend")
+    if synth_backend in {"qwen3", "qwen3-rust"} or (
+            synth_backend == "canary" and executed_backend == "qwen3"):
+        for field in ("model", "device", "dtype", "instruct_applied", "runtime",
+                      "model_profile", "model_revision", "integrity_verified",
+                      "binary", "binary_sha256"):
+            if field in info:
+                out[f"qwen_{field}"] = info[field]
+    if synth_backend == "omnivoice" or (
+            synth_backend == "canary" and executed_backend == "omnivoice"):
+        for field in ("manifest", "manifest_status", "hashes_verified", "steps",
+                      "language", "runtime", "rtf"):
+            if field in info:
+                out[f"omnivoice_{field}"] = info[field]
+    if synth_backend == "canary":
+        for field in ("canary_selected_backend", "canary_candidate_selected",
+                      "canary_assigned_backend", "canary_executed_backend",
+                      "canary_fallback_used", "canary_candidate_error",
+                      "canary_bucket", "canary_reasons",
+                      "canary_review_decision_sha256"):
+            if field in info:
+                out[field] = info[field]
+    for field in ("protocol", "engine", "capabilities", "speakers"):
+        if field in info:
+            out[f"worker_{field}"] = info[field]
+
+
 def transcribe_synth_file(wav_path, model=None, language="en"):
     """OpenAI-whisper (Python CLI, NOT whisper.cpp) transcription of a synth WAV ->
     (text, None) or (None, err). The macOS STT path: AB_TTS_STT_BIN points at a
@@ -1125,7 +1193,13 @@ def transcribe_synth_file(wav_path, model=None, language="en"):
 
 
 def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
-               check_intelligibility=False, stt_bin=None, stt_model=None, synth_backend="kokoro"):
+               check_intelligibility=False, stt_bin=None, stt_model=None,
+               synth_backend="kokoro", qwen_instruct=None, qwen_python=None,
+               qwen_model=None, qwen_worker=None, sherpa_worker=None,
+               qwen_rust_bin=None, qwen_rust_model_dir=None,
+               qwen_rust_profile=None, omnivoice_python=None,
+               omnivoice_manifest=None, canary_subject=None,
+               canary_request_id=None, canary_policy=None):
     """Speech-mode embodiment: synthesize `text` (via `synth_backend` = kokoro|piper)
     → play to the sink while capturing the bus → verify by energy-envelope correlation
     + voiced span (NOT a tone peak). Optionally also transcribe the bus capture
@@ -1143,10 +1217,16 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
         "not_verified": honest_attestation(None, channel_verified_to, channel_not_verified)[1],
     }
 
-    wav, info = synth_speech(text, voice, speed, synth_bin, backend=synth_backend)
+    wav, info = synth_selected_backend(
+        text, voice, speed, synth_backend, synth_bin,
+        qwen_instruct, qwen_python, qwen_model, qwen_worker, sherpa_worker,
+        qwen_rust_bin, qwen_rust_model_dir, qwen_rust_profile,
+        omnivoice_python, omnivoice_manifest, canary_subject,
+        canary_request_id, canary_policy)
     if wav is None:
         out.update(status="error", verify_status="error", detail=info.get("detail", "synth failed"))
         return out
+    copy_backend_provenance(out, info, synth_backend)
     played = _read_wav_mono_s16(wav)
     if played is None or not len(played["samples"]):
         out.update(status="error", verify_status="error", detail="synthesized WAV unreadable/empty")
@@ -1232,56 +1312,17 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", synth_bin=Non
         "verified_to": None,
         "not_verified": honest_attestation(None, channel_verified_to, channel_not_verified)[1],
     }
-    if synth_backend == "qwen3":
-        wav, info = synth_qwen3(text, voice, speed, qwen_instruct, qwen_python, qwen_model, qwen_worker)
-    elif synth_backend == "sherpa":
-        if sherpa_worker:
-            wav, info = synth_sherpa_worker(text, voice, speed, sherpa_worker)
-        else:
-            wav, info = synth_speech(text, voice, speed, synth_bin, backend="sherpa")
-    elif synth_backend == "qwen3-rust":
-        wav, info = synth_qwen3_rust(text, voice, speed, qwen_instruct,
-                                     qwen_rust_bin, qwen_rust_model_dir,
-                                     qwen_rust_profile)
-    elif synth_backend == "omnivoice":
-        wav, info = synth_omnivoice(text, voice, speed, qwen_instruct,
-                                    omnivoice_python, omnivoice_manifest)
-    elif synth_backend == "canary":
-        wav, info = synth_tts_canary(
-            text, voice, speed, qwen_instruct, canary_subject, canary_request_id,
-            canary_policy, qwen_python, qwen_model, qwen_worker,
-            omnivoice_python, omnivoice_manifest)
-    else:
-        wav, info = synth_say(text, voice, speed)
+    wav, info = synth_selected_backend(
+        text, voice, speed, synth_backend, synth_bin,
+        qwen_instruct, qwen_python, qwen_model, qwen_worker, sherpa_worker,
+        qwen_rust_bin, qwen_rust_model_dir, qwen_rust_profile,
+        omnivoice_python, omnivoice_manifest, canary_subject,
+        canary_request_id, canary_policy)
     if wav is None:
         out.update(status="error", verify_status="error", detail=info.get("detail", f"{synth_backend} synth failed"))
         return out
     out["voice"] = info.get("voice", voice)
-    executed_backend = info.get("canary_executed_backend")
-    if synth_backend in {"qwen3", "qwen3-rust"} or (
-            synth_backend == "canary" and executed_backend == "qwen3"):
-        for field in ("model", "device", "dtype", "instruct_applied", "runtime",
-                      "model_profile", "model_revision", "integrity_verified",
-                      "binary", "binary_sha256"):
-            if field in info:
-                out[f"qwen_{field}"] = info[field]
-    if synth_backend == "omnivoice" or (
-            synth_backend == "canary" and executed_backend == "omnivoice"):
-        for field in ("manifest", "manifest_status", "hashes_verified", "steps",
-                      "language", "runtime", "rtf"):
-            if field in info:
-                out[f"omnivoice_{field}"] = info[field]
-    if synth_backend == "canary":
-        for field in ("canary_selected_backend", "canary_candidate_selected",
-                      "canary_assigned_backend", "canary_executed_backend",
-                      "canary_fallback_used", "canary_candidate_error",
-                      "canary_bucket", "canary_reasons",
-                      "canary_review_decision_sha256"):
-            if field in info:
-                out[field] = info[field]
-    for field in ("protocol", "engine", "capabilities", "speakers"):
-        if field in info:
-            out[f"worker_{field}"] = info[field]
+    copy_backend_provenance(out, info, synth_backend)
     parsed = _read_wav_mono_s16(wav)
     if parsed is None or not len(parsed["samples"]):
         out.update(status="error", verify_status="error", detail="synthesized WAV unreadable/empty")
@@ -1342,7 +1383,13 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", synth_bin=Non
     return out
 
 
-def run_emit(text, voice, speed, sink_arg, synth_bin):
+def run_emit(text, voice, speed, sink_arg, synth_bin, synth_backend="kokoro",
+             qwen_instruct=None, qwen_python=None, qwen_model=None,
+             qwen_worker=None, sherpa_worker=None,
+             qwen_rust_bin=None, qwen_rust_model_dir=None,
+             qwen_rust_profile=None, omnivoice_python=None,
+             omnivoice_manifest=None, canary_subject=None,
+             canary_request_id=None, canary_policy=None):
     """FAST-EMIT tier: synthesize `text` and play it to the sink WITHOUT reading the
     bus back. The low-truth-claim companion-chatter path (status lines), distinct
     from `--mode speech` which verifies on the bus. It makes NO verification claim
@@ -1353,16 +1400,23 @@ def run_emit(text, voice, speed, sink_arg, synth_bin):
     sink = sink_arg or _sh("pactl get-default-sink").stdout.strip()
     out = {
         "mode": "emit", "text": text, "voice": voice, "speed": speed, "sink": sink,
+        "synth_backend": synth_backend,
         # emit never reads back → it asserts nothing about the bus:
         "verified_to": None,
         "not_verified": "output bus AND physical transducer "
                         "(emit mode plays without bus readback — use --mode speech to verify)",
     }
-    wav, info = synth_speech(text, voice, speed, synth_bin)
+    wav, info = synth_selected_backend(
+        text, voice, speed, synth_backend, synth_bin,
+        qwen_instruct, qwen_python, qwen_model, qwen_worker, sherpa_worker,
+        qwen_rust_bin, qwen_rust_model_dir, qwen_rust_profile,
+        omnivoice_python, omnivoice_manifest, canary_subject,
+        canary_request_id, canary_policy)
     if wav is None:
         status, verify_status, _ = emit_claim_fields(False)
         out.update(status=status, verify_status=verify_status, detail=info.get("detail", "synth failed"))
         return out
+    copy_backend_provenance(out, info, synth_backend)
     played = _read_wav_mono_s16(wav)
     played_dur = (played["frames"] / (played["sr"] or 24000)) if played else 0.0
     out["played_dur_s"] = round(played_dur, 3)
@@ -1423,6 +1477,8 @@ _VOICE_TIER_PASSTHROUGH = (
     "status", "verify_status", "verified_to", "not_verified", "play_ok",
     "played_dur_s", "sink", "env_corr", "voiced_secs", "capture_rms",
     "intelligibility", "word_overlap", "stt_transcript",
+    "synth_backend", "worker_protocol", "worker_engine", "worker_capabilities",
+    "qwen_model", "qwen_device", "qwen_dtype", "qwen_instruct_applied",
 )
 
 
@@ -1430,7 +1486,13 @@ def run_voice(mode, voice, sink_arg, synth_bin, evidence_ids=None,
               voice_line_id=None, voice_line=None, agent_id=None,
               allowed_modes=VOICE_ALLOWED_MODES, last_spoken_ts=None, now=None,
               cooldown_secs=VOICE_COOLDOWN_SECS, speed=1.0,
-              stt_bin=None, stt_model=None):
+              stt_bin=None, stt_model=None, synth_backend="kokoro",
+              qwen_instruct=None, qwen_python=None, qwen_model=None,
+              qwen_worker=None, sherpa_worker=None,
+              qwen_rust_bin=None, qwen_rust_model_dir=None,
+              qwen_rust_profile=None, omnivoice_python=None,
+              omnivoice_manifest=None, canary_subject=None,
+              canary_request_id=None, canary_policy=None):
     """LCC-V1 companion voice adapter. Applies the PURE voice-policy v0 decision
     (`decide_voice`), then — only if it says speak — routes to the FAST tier
     (`run_emit`) or the VERIFIED tier (`run_speech`) and folds the tier's own
@@ -1463,9 +1525,33 @@ def run_voice(mode, voice, sink_arg, synth_bin, evidence_ids=None,
     if d["tier"] == "speech":
         want_stt = bool(stt_bin or os.environ.get("AB_TTS_STT_BIN", "").strip())
         em = run_speech(text, voice, speed, sink_arg, "sink_monitor", synth_bin,
-                        check_intelligibility=want_stt, stt_bin=stt_bin, stt_model=stt_model)
+                        check_intelligibility=want_stt, stt_bin=stt_bin,
+                        stt_model=stt_model, synth_backend=synth_backend,
+                        qwen_instruct=qwen_instruct, qwen_python=qwen_python,
+                        qwen_model=qwen_model, qwen_worker=qwen_worker,
+                        sherpa_worker=sherpa_worker,
+                        qwen_rust_bin=qwen_rust_bin,
+                        qwen_rust_model_dir=qwen_rust_model_dir,
+                        qwen_rust_profile=qwen_rust_profile,
+                        omnivoice_python=omnivoice_python,
+                        omnivoice_manifest=omnivoice_manifest,
+                        canary_subject=canary_subject,
+                        canary_request_id=canary_request_id,
+                        canary_policy=canary_policy)
     else:
-        em = run_emit(text, voice, speed, sink_arg, synth_bin)
+        em = run_emit(text, voice, speed, sink_arg, synth_bin,
+                      synth_backend=synth_backend,
+                      qwen_instruct=qwen_instruct, qwen_python=qwen_python,
+                      qwen_model=qwen_model, qwen_worker=qwen_worker,
+                      sherpa_worker=sherpa_worker,
+                      qwen_rust_bin=qwen_rust_bin,
+                      qwen_rust_model_dir=qwen_rust_model_dir,
+                      qwen_rust_profile=qwen_rust_profile,
+                      omnivoice_python=omnivoice_python,
+                      omnivoice_manifest=omnivoice_manifest,
+                      canary_subject=canary_subject,
+                      canary_request_id=canary_request_id,
+                      canary_policy=canary_policy)
     for k in _VOICE_TIER_PASSTHROUGH:
         if k in em:
             receipt[k] = em[k]
@@ -1541,7 +1627,20 @@ def main():
                             voice_line=a.voice_line, agent_id=a.agent_id, allowed_modes=allowed,
                             last_spoken_ts=a.last_spoken_ts, now=now,
                             cooldown_secs=a.cooldown_secs, speed=max(0.5, min(a.speed, 2.0)),
-                            stt_bin=a.stt_bin, stt_model=a.stt_model)
+                            stt_bin=a.stt_bin, stt_model=a.stt_model,
+                            synth_backend=a.synth_backend,
+                            qwen_instruct=a.qwen_instruct,
+                            qwen_python=a.qwen_python, qwen_model=a.qwen_model,
+                            qwen_worker=a.qwen_worker,
+                            sherpa_worker=a.sherpa_worker,
+                            qwen_rust_bin=a.qwen_rust_bin,
+                            qwen_rust_model_dir=a.qwen_rust_model_dir,
+                            qwen_rust_profile=a.qwen_rust_profile,
+                            omnivoice_python=a.omnivoice_python,
+                            omnivoice_manifest=a.omnivoice_manifest,
+                            canary_subject=a.canary_subject,
+                            canary_request_id=a.canary_request_id,
+                            canary_policy=a.canary_policy)
         if a.json:
             print(json.dumps(res))
         else:
@@ -1553,8 +1652,20 @@ def main():
             res = {"mode": "emit", "status": "error", "verify_status": "error",
                    "detail": "emit mode requires --text"}
         else:
-            res = run_emit(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
-                           resolve_synth_bin(a.synth_bin))
+            res = run_emit(
+                a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
+                resolve_synth_bin(a.synth_bin), synth_backend=a.synth_backend,
+                qwen_instruct=a.qwen_instruct, qwen_python=a.qwen_python,
+                qwen_model=a.qwen_model, qwen_worker=a.qwen_worker,
+                sherpa_worker=a.sherpa_worker,
+                qwen_rust_bin=a.qwen_rust_bin,
+                qwen_rust_model_dir=a.qwen_rust_model_dir,
+                qwen_rust_profile=a.qwen_rust_profile,
+                omnivoice_python=a.omnivoice_python,
+                omnivoice_manifest=a.omnivoice_manifest,
+                canary_subject=a.canary_subject,
+                canary_request_id=a.canary_request_id,
+                canary_policy=a.canary_policy)
         if a.json:
             print(json.dumps(res))
         else:
@@ -1603,7 +1714,19 @@ def main():
                              a.capture_channel, resolve_synth_bin(a.synth_bin),
                              check_intelligibility=a.check_intelligibility,
                              stt_bin=a.stt_bin, stt_model=a.stt_model,
-                             synth_backend=a.synth_backend)
+                             synth_backend=a.synth_backend,
+                             qwen_instruct=a.qwen_instruct,
+                             qwen_python=a.qwen_python, qwen_model=a.qwen_model,
+                             qwen_worker=a.qwen_worker,
+                             sherpa_worker=a.sherpa_worker,
+                             qwen_rust_bin=a.qwen_rust_bin,
+                             qwen_rust_model_dir=a.qwen_rust_model_dir,
+                             qwen_rust_profile=a.qwen_rust_profile,
+                             omnivoice_python=a.omnivoice_python,
+                             omnivoice_manifest=a.omnivoice_manifest,
+                             canary_subject=a.canary_subject,
+                             canary_request_id=a.canary_request_id,
+                             canary_policy=a.canary_policy)
         if a.json:
             print(json.dumps(res))
         else:

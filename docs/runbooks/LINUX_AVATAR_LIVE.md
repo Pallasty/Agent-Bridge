@@ -67,3 +67,51 @@ Do not install an automatic user service yet. First collect at least ten real
 task-state transitions and confirm that state changes are timely, useful, and
 free of duplicate rows. Audio remains a separate EAP-1B gate, with Qwen3-TTS as
 the production backend and explicit cooldown/enable controls.
+
+## EAP-1B sparse Qwen voice
+
+Voice feedback remains off unless the foreground invocation includes
+`--voice-feedback`. EAP-1B accepts only an existing owner-local Qwen3-TTS worker
+socket; it does not download weights, start a worker, fall back to another
+engine, or keep the model resident after the operator stops it.
+
+Deploy the binary and `scripts/audio_embody.py` together with the existing
+version-matched deployment workflow. The live plan checks the
+`agent_bridge.linux_live_qwen_voice.v1` adapter marker and fails closed when a
+new binary is paired with an older deployed adapter.
+
+Validate the worker without playing audio:
+
+```bash
+python3 scripts/validate_tts_worker_contract.py \
+  --socket "$AB_QWEN3_TTS_WORKER_SOCKET" \
+  --expected-engine qwen3-pytorch \
+  --require-capability zh
+```
+
+Then inspect the complete live plan. This still emits no audio:
+
+```bash
+agent-bridge avatar linux-live \
+  --project agent-bridge \
+  --pet-id xiao-shu-v2 \
+  --voice-feedback \
+  --qwen-worker "$AB_QWEN3_TTS_WORKER_SOCKET" \
+  --voice-cooldown-secs 300 \
+  --voice-max-utterances 3 \
+  --dry-run --json
+```
+
+Only after the plan reports `voice_feedback.ready=true`, run the same command
+without `--dry-run`. The initial sidecar state is silent. A line is considered
+only when the mode changes to `failed`, `verified`, `waiting_for_user`, or
+`handoff`; `verified` additionally requires a real evidence id in the sidecar.
+Lines are fixed Chinese templates, not arbitrary model text. The default global
+cooldown is five minutes and one foreground session can successfully speak at
+most three times.
+
+`failed`, `waiting_for_user`, and `handoff` use fast playback and are honestly
+reported as unverified at the output bus. `verified` uses the existing
+PipeWire-monitor falsifier and cannot claim output-bus delivery unless the
+captured envelope passes. Neither route proves headphone/speaker audibility;
+continuous microphone listening remains out of scope.

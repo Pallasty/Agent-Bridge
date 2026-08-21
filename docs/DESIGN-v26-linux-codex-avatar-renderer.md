@@ -764,7 +764,7 @@ Native HTTP-state verification:
 
 ## 11. Implementation Plan
 
-Current status: items 1-14 have landed in the repository as of 2026-08-20. The
+Current status: items 1-15 have landed in the repository as of 2026-08-21. The
 native Wayland/layer-shell backend is the first backend on this host that
 satisfies the mandatory transparent-background requirement, and it now renders a
 real animated sidecar sprite that can poll local pet sidecar state or daemon
@@ -841,6 +841,16 @@ automatic service installation.
     live run produced four heartbeats with zero failures; a concurrent avatar
     surface read returned exactly one stable row in the sidecar's real `handoff`
     state. The pet sidecar SHA-256 was identical before and after the run.
+
+15. **Add default-off sparse Qwen voice feedback.** Done for EAP-1B.
+    The live loop can explicitly attach an existing owner-local Qwen3-TTS worker
+    to four eligible sidecar transitions. Initial state is silent; fixed lines,
+    verified-evidence grounding, a five-minute default cooldown, a three-line
+    session budget and no-overlap execution constrain output. The Linux
+    `sink_monitor` and fast-emit paths now dispatch Qwen through the same backend
+    selector used by synth-file verification instead of falling into the
+    Kokoro/Piper binary path. Audio remains opt-in and no service or worker is
+    installed or started by the command.
 
 ---
 

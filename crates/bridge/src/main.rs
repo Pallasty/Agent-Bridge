@@ -1035,6 +1035,33 @@ enum AvatarOp {
         /// Pet sidecar polling interval in milliseconds (clamped to 100..5000ms).
         #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_STATE_POLL_MS)]
         state_poll_ms: u64,
+        /// Explicitly enable sparse Qwen3-TTS feedback for eligible mode transitions.
+        #[arg(long)]
+        voice_feedback: bool,
+        /// Owner-only local Qwen3-TTS worker socket. Required when voice is enabled.
+        #[arg(long, env = "AB_QWEN3_TTS_WORKER_SOCKET")]
+        qwen_worker: Option<PathBuf>,
+        /// Python used to run the bounded audio adapter.
+        #[arg(long, default_value = "python3")]
+        voice_python: String,
+        /// audio_embody.py override. Defaults to the deployed or repository adapter.
+        #[arg(long)]
+        voice_script: Option<PathBuf>,
+        /// Qwen CustomVoice speaker name.
+        #[arg(long, default_value = ab_bridge::avatar_live_voice::DEFAULT_VOICE)]
+        voice_name: String,
+        /// Fixed expression instruction sent to Qwen; spoken text remains template-only.
+        #[arg(long, default_value = ab_bridge::avatar_live_voice::DEFAULT_INSTRUCT)]
+        voice_instruct: String,
+        /// Optional PipeWire/PulseAudio sink for voice playback.
+        #[arg(long)]
+        voice_sink: Option<String>,
+        /// Global voice cooldown in seconds (clamped to 30..3600s).
+        #[arg(long, default_value_t = ab_bridge::avatar_live_voice::DEFAULT_COOLDOWN_SECS)]
+        voice_cooldown_secs: i64,
+        /// Maximum successful utterances in one foreground session (clamped to 1..10).
+        #[arg(long, default_value_t = ab_bridge::avatar_live_voice::DEFAULT_MAX_UTTERANCES)]
+        voice_max_utterances: u64,
         /// Transparent surface width in pixels.
         #[arg(long, default_value_t = 360)]
         width: u32,
@@ -4960,6 +4987,15 @@ async fn real_main() -> Result<()> {
                 duration_ms,
                 heartbeat_interval_secs,
                 state_poll_ms,
+                voice_feedback,
+                qwen_worker,
+                voice_python,
+                voice_script,
+                voice_name,
+                voice_instruct,
+                voice_sink,
+                voice_cooldown_secs,
+                voice_max_utterances,
                 width,
                 height,
                 anchor,
@@ -4982,6 +5018,15 @@ async fn real_main() -> Result<()> {
                     *duration_ms,
                     *heartbeat_interval_secs,
                     *state_poll_ms,
+                    *voice_feedback,
+                    qwen_worker.clone(),
+                    voice_python.clone(),
+                    voice_script.clone(),
+                    voice_name.clone(),
+                    voice_instruct.clone(),
+                    voice_sink.clone(),
+                    *voice_cooldown_secs,
+                    *voice_max_utterances,
                     *width,
                     *height,
                     anchor.clone(),
@@ -8951,6 +8996,15 @@ async fn run_avatar_linux_live(
     duration_ms: u64,
     heartbeat_interval_secs: u64,
     state_poll_ms: u64,
+    voice_feedback: bool,
+    qwen_worker: Option<PathBuf>,
+    voice_python: String,
+    voice_script: Option<PathBuf>,
+    voice_name: String,
+    voice_instruct: String,
+    voice_sink: Option<String>,
+    voice_cooldown_secs: i64,
+    voice_max_utterances: u64,
     width: u32,
     height: u32,
     anchor: String,
@@ -8996,6 +9050,28 @@ async fn run_avatar_linux_live(
     let duration_ms = duration_ms.clamp(1_000, 86_400_000);
     let heartbeat_interval_secs = heartbeat_interval_secs.clamp(5, 300);
     let state_poll_ms = state_poll_ms.clamp(100, 5_000);
+    let voice_cooldown_secs = voice_cooldown_secs.clamp(30, 3_600);
+    let voice_max_utterances = voice_max_utterances.clamp(1, 10);
+    let voice_script = voice_script.unwrap_or_else(|| {
+        ab_bridge::avatar_live_voice::default_script_path(
+            std::env::var_os("HOME")
+                .as_deref()
+                .map(std::path::Path::new),
+        )
+    });
+    let voice_config = ab_bridge::avatar_live_voice::LinuxLiveVoiceConfig {
+        enabled: voice_feedback,
+        python: voice_python.trim().to_string(),
+        script_path: voice_script,
+        qwen_worker: qwen_worker.unwrap_or_default(),
+        voice: voice_name.trim().to_string(),
+        instruct: voice_instruct.trim().to_string(),
+        sink: voice_sink,
+        cooldown_secs: voice_cooldown_secs,
+        max_utterances: voice_max_utterances,
+        agent_id: agent_id.clone(),
+    };
+    let voice_plan = ab_bridge::avatar_live_voice::plan_json(&voice_config);
 
     let mut renderer_opts = ab_bridge::avatar_native::NativeTransparentOptions {
         width,
@@ -9039,7 +9115,8 @@ async fn run_avatar_linux_live(
         "schema": 1,
         "dry_run": true,
         "ready": native_compiled
-            && backend.backend == ab_bridge::avatar_floater::AvatarBackend::NativeTransparent,
+            && backend.backend == ab_bridge::avatar_floater::AvatarBackend::NativeTransparent
+            && voice_plan.get("ready").and_then(Value::as_bool).unwrap_or(false),
         "platform": std::env::consts::OS,
         "native_feature_compiled": native_compiled,
         "backend": {
@@ -9059,12 +9136,16 @@ async fn run_avatar_linux_live(
             "projects_current_sidecar_facets": true,
         },
         "renderer": renderer_plan,
+        "voice_feedback": voice_plan,
         "safety": {
             "foreground_only": true,
             "installs_service": false,
-            "writes_presence_only": true,
+            "writes_presence_only": !voice_feedback,
+            "persistent_writes_presence_only": true,
+            "creates_ephemeral_audio_files": voice_feedback,
             "writes_pet_sidecar": false,
-            "emits_audio": false,
+            "audio_default_off": true,
+            "emits_audio": voice_feedback,
             "emits_notification": false,
             "controls_desktop": false,
             "executes_actions": false,
@@ -9086,8 +9167,8 @@ async fn run_avatar_linux_live(
                 presence_args["session_id"]
             );
             println!(
-                "duration_ms={} heartbeat_interval_secs={} audio=false actions=false",
-                duration_ms, heartbeat_interval_secs
+                "duration_ms={} heartbeat_interval_secs={} audio={} actions=false",
+                duration_ms, heartbeat_interval_secs, voice_feedback
             );
         }
         return Ok(());
@@ -9102,6 +9183,16 @@ async fn run_avatar_linux_live(
         anyhow::bail!(
             "avatar linux-live requires the verified native transparent backend: {}",
             backend.reason
+        );
+    }
+    if voice_feedback
+        && !voice_plan
+            .get("ready")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        anyhow::bail!(
+            "avatar linux-live voice feedback requires an existing audio adapter and owner-local --qwen-worker socket"
         );
     }
 
@@ -9130,6 +9221,23 @@ async fn run_avatar_linux_live(
     }
 
     let renderer_opts_for_run = renderer_opts.clone();
+    let voice_task = if voice_feedback {
+        let voice_config = voice_config.clone();
+        let voice_pet_id = pet_id.clone();
+        let initial_mode = ab_bridge::avatar_live_voice::lifecycle_mode(&pet_state);
+        Some(tokio::spawn(async move {
+            run_linux_live_voice_feedback(
+                voice_config,
+                voice_pet_id,
+                initial_mode,
+                duration_ms,
+                state_poll_ms,
+            )
+            .await
+        }))
+    } else {
+        None
+    };
     let mut renderer = tokio::task::spawn_blocking(move || {
         ab_bridge::avatar_native::run_native_transparent_probe(renderer_opts_for_run)
     });
@@ -9158,6 +9266,19 @@ async fn run_avatar_linux_live(
         }
     };
     renderer_result.context("join Linux avatar native renderer")??;
+
+    let voice_receipt = match voice_task {
+        Some(task) => task
+            .await
+            .context("join Linux avatar sparse voice loop")?,
+        None => json!({
+            "surface": "linux_avatar_live_voice_receipt",
+            "schema": 1,
+            "enabled": false,
+            "utterance_count": 0,
+            "emits_audio": false,
+        }),
+    };
 
     match ab_bridge::pet_presence::sync_pet_presence(&store, presence_args.clone()).await {
         Ok(payload) => {
@@ -9191,6 +9312,7 @@ async fn run_avatar_linux_live(
             "final_visual_state_observed": false,
             "reason": "the native surface completed and polled the sidecar, but this foreground receipt does not capture compositor pixels or infer the final visible sprite",
         },
+        "voice_feedback": voice_receipt,
         "safety": plan.get("safety").cloned().unwrap_or(Value::Null),
     });
     if as_json {
@@ -9204,6 +9326,190 @@ async fn run_avatar_linux_live(
         );
     }
     Ok(())
+}
+
+async fn run_linux_live_voice_feedback(
+    config: ab_bridge::avatar_live_voice::LinuxLiveVoiceConfig,
+    pet_id: String,
+    initial_mode: String,
+    duration_ms: u64,
+    poll_ms: u64,
+) -> Value {
+    let started = tokio::time::Instant::now();
+    let deadline = started + std::time::Duration::from_millis(duration_ms);
+    let mut poll = tokio::time::interval(std::time::Duration::from_millis(poll_ms));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut previous_mode = initial_mode;
+    let mut last_spoken_at: Option<i64> = None;
+    let mut transition_count = 0_u64;
+    let mut invocation_count = 0_u64;
+    let mut utterance_count = 0_u64;
+    let mut failure_count = 0_u64;
+    let mut last_decision = Value::Null;
+    let mut last_adapter_receipt = Value::Null;
+
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => break,
+            _ = poll.tick() => {
+                let state = match ab_bridge::pet_state::read_pet_state(&pet_id) {
+                    Ok(Some(state)) => state,
+                    Ok(None) => {
+                        failure_count += 1;
+                        last_adapter_receipt = json!({"status": "error", "detail": "pet sidecar disappeared"});
+                        continue;
+                    }
+                    Err(error) => {
+                        failure_count += 1;
+                        last_adapter_receipt = json!({"status": "error", "detail": error.to_string()});
+                        continue;
+                    }
+                };
+                let mode = ab_bridge::avatar_live_voice::lifecycle_mode(&state);
+                let changed = mode != previous_mode;
+                let now = linux_live_unix_time_secs();
+                let decision = ab_bridge::avatar_live_voice::transition_decision(
+                    &config,
+                    &previous_mode,
+                    &state,
+                    last_spoken_at,
+                    now,
+                    utterance_count,
+                    false,
+                );
+                if changed {
+                    transition_count += 1;
+                    previous_mode = mode;
+                }
+                let should_invoke = decision
+                    .get("should_invoke")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                last_decision = decision.clone();
+                if !should_invoke {
+                    continue;
+                }
+                invocation_count += 1;
+                let invocation_config = config.clone();
+                let args = ab_bridge::avatar_live_voice::invocation_args(
+                    &invocation_config,
+                    &decision,
+                    last_spoken_at,
+                );
+                let receipt = match tokio::task::spawn_blocking(move || {
+                    invoke_linux_live_voice_adapter(&invocation_config, &args)
+                }).await {
+                    Ok(receipt) => receipt,
+                    Err(error) => json!({
+                        "status": "error",
+                        "detail": format!("voice adapter task failed: {error}"),
+                    }),
+                };
+                if ab_bridge::avatar_live_voice::adapter_receipt_emitted(&receipt) {
+                    utterance_count += 1;
+                    last_spoken_at = Some(linux_live_unix_time_secs());
+                } else {
+                    failure_count += 1;
+                }
+                last_adapter_receipt = linux_live_voice_receipt_summary(&receipt);
+            }
+        }
+    }
+
+    json!({
+        "surface": "linux_avatar_live_voice_receipt",
+        "schema": 1,
+        "enabled": true,
+        "backend": "qwen3",
+        "transition_count": transition_count,
+        "invocation_count": invocation_count,
+        "utterance_count": utterance_count,
+        "failure_count": failure_count,
+        "emits_audio": utterance_count > 0,
+        "cooldown_secs": config.cooldown_secs,
+        "max_utterances": config.max_utterances,
+        "last_spoken_at": last_spoken_at,
+        "last_decision": last_decision,
+        "last_adapter_receipt": last_adapter_receipt,
+        "continuous_listening": false,
+    })
+}
+
+fn invoke_linux_live_voice_adapter(
+    config: &ab_bridge::avatar_live_voice::LinuxLiveVoiceConfig,
+    args: &[String],
+) -> Value {
+    let output = match std::process::Command::new(&config.python).args(args).output() {
+        Ok(output) => output,
+        Err(error) => {
+            return json!({
+                "status": "error",
+                "detail": format!("spawn audio adapter failed: {error}"),
+            })
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut receipt = stdout
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .and_then(|line| serde_json::from_str::<Value>(line).ok())
+        .unwrap_or_else(|| {
+            json!({
+                "status": "error",
+                "detail": "audio adapter returned no JSON receipt",
+            })
+        });
+    if let Some(object) = receipt.as_object_mut() {
+        object.insert("process_success".to_string(), json!(output.status.success()));
+        object.insert("process_exit_code".to_string(), json!(output.status.code()));
+        if !stderr.trim().is_empty() {
+            object.insert(
+                "stderr_preview".to_string(),
+                json!(stderr.chars().take(500).collect::<String>()),
+            );
+        }
+    }
+    receipt
+}
+
+fn linux_live_voice_receipt_summary(receipt: &Value) -> Value {
+    let mut summary = serde_json::Map::new();
+    for key in [
+        "status",
+        "verify_status",
+        "verified_to",
+        "not_verified",
+        "play_ok",
+        "tier",
+        "decision",
+        "worker_protocol",
+        "worker_engine",
+        "qwen_model",
+        "qwen_device",
+        "qwen_dtype",
+        "process_success",
+        "process_exit_code",
+    ] {
+        if let Some(value) = receipt.get(key) {
+            summary.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(detail) = receipt.get("detail").and_then(Value::as_str) {
+        summary.insert(
+            "detail".to_string(),
+            json!(detail.chars().take(500).collect::<String>()),
+        );
+    }
+    Value::Object(summary)
+}
+
+fn linux_live_unix_time_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+        .unwrap_or(0)
 }
 
 fn avatar_arg_string(args: &mut Map<String, Value>, key: &str, value: Option<String>) {
