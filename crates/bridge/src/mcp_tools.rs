@@ -50183,6 +50183,7 @@ const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
     "mobile_projection_start",
     "mobile_projection_update",
     "mobile_projection_sync_media",
+    "mobile_projection_follow_media",
     "mobile_projection_stop",
 ];
 

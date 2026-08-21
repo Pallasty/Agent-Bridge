@@ -8183,6 +8183,8 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     for tool_name in [
         "mobile_projection_start",
         "mobile_projection_update",
+        "mobile_projection_sync_media",
+        "mobile_projection_follow_media",
         "mobile_projection_stop",
         "mobile_install_apk",
         "mobile_launch_app",
