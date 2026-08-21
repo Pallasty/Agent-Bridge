@@ -414,7 +414,7 @@ class FocusContinuityEligibilityTests(unittest.TestCase):
                 "counts_inconsistent",
                 "coverage_incomplete",
                 "fewer_than_two_stable_windows",
-                "incomplete_reasons_present",
+                "incomplete_reasons_missing",
                 "no_unfocused_stable_window",
                 "selector_attributes_incomplete",
                 "windows_not_readable",

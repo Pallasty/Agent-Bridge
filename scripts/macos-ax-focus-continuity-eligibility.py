@@ -126,8 +126,14 @@ def summarize(value: Any, *, now: float | None = None) -> dict[str, Any]:
     require(value.get("coverage_complete") is True, "coverage_incomplete")
     require(value.get("counts_consistent") is True, "counts_inconsistent")
     require(limits.get("truncated") is False, "window_list_truncated")
-    require(value.get("errors") == [], "probe_errors_present")
-    require(value.get("incomplete_reasons") == [], "incomplete_reasons_present")
+    if "errors" not in value:
+        reasons.append("probe_errors_missing")
+    else:
+        require(value.get("errors") == [], "probe_errors_present")
+    if "incomplete_reasons" not in value:
+        reasons.append("incomplete_reasons_missing")
+    else:
+        require(value.get("incomplete_reasons") == [], "incomplete_reasons_present")
     require(value.get("app_identity_valid") is True, "app_identity_invalid")
     require(
         isinstance(frontmost.get("pid"), int)
