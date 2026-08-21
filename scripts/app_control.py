@@ -29,6 +29,7 @@ from typing import Any, Callable, MutableMapping
 SCHEMA = "agent_bridge.app_control.v0"
 OPERATION_SCHEMA = "agent_bridge.app_control.operation.v0"
 OPERATION_PREFLIGHT_SCHEMA = "agent_bridge.app_control.operation_preflight.v0"
+OPERATION_CONTEXT_SCHEMA = "agent_bridge.app_control.operation_context.v0"
 TRACK_SETTLEMENT_SCHEMA = "agent_bridge.app_control.track_settlement.v0"
 WRAPPER_CONTRACT_SCHEMA = "agent_bridge.app_control.wrapper_contract.v1"
 DEFAULT_OPERATION_TTL_SECS = 3600
@@ -1025,6 +1026,7 @@ def operation_record(
     player: str | None = None,
     baseline: dict[str, Any] | None = None,
     payload: dict[str, Any] | None = None,
+    workspace_sha256: str | None = None,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "schema": OPERATION_SCHEMA,
@@ -1039,6 +1041,11 @@ def operation_record(
         "resolved_player": player,
         "baseline": baseline,
     }
+    if workspace_sha256 is not None:
+        record["origin_context"] = {
+            "schema": OPERATION_CONTEXT_SCHEMA,
+            "workspace_sha256": workspace_sha256,
+        }
     if payload is not None:
         record["payload"] = payload
     return record
@@ -1912,6 +1919,7 @@ def execute(
     operation_id: str | None = None,
     operation_ttl_secs: int = DEFAULT_OPERATION_TTL_SECS,
     operation_preflight: bool = False,
+    workspace_sha256: str | None = None,
 ) -> dict[str, Any]:
     if operation_preflight:
         return preflight_operation(
@@ -1924,6 +1932,12 @@ def execute(
     if operation_id is None:
         return execute_once(
             action, player_selector, dry_run, verify_timeout, volume, playlist_id
+        )
+
+    if workspace_sha256 is not None and re.fullmatch(r"[0-9a-f]{64}", workspace_sha256) is None:
+        return operation_error(
+            action, operation_id, None, "invalid_workspace_sha256",
+            "workspace_sha256 must be a lowercase SHA-256 digest",
         )
 
     if not isinstance(operation_id, str) or OPERATION_ID_RE.fullmatch(operation_id) is None:
@@ -2014,6 +2028,7 @@ def execute(
             expires_at=expires_at,
             phase="fresh",
             dispatch_count=0,
+            workspace_sha256=workspace_sha256,
         )
         if existing is not None:
             if existing.get("operation_id") != operation_id:
@@ -2047,6 +2062,18 @@ def execute(
                     "operation_record_invalid",
                     "operation record canonical request binding is malformed",
                     phase="journal_error",
+                )
+            expected_context = (
+                {"schema": OPERATION_CONTEXT_SCHEMA, "workspace_sha256": workspace_sha256}
+                if workspace_sha256 is not None else None
+            )
+            if existing.get("origin_context") != expected_context:
+                return operation_error(
+                    action, operation_id, request_digest, "operation_context_conflict",
+                    "operation_id is bound to a different or absent workspace context",
+                    phase=str(existing.get("phase", "journal_error")),
+                    dispatch_count=existing.get("dispatch_count", 0),
+                    expires_at=existing.get("expires_at"),
                 )
             dispatch_count = existing.get("dispatch_count")
             if type(dispatch_count) is not int or dispatch_count not in (0, 1):
@@ -2126,6 +2153,7 @@ def execute(
                     expires_at=expires_at,
                     phase="fresh",
                     dispatch_count=0,
+                    workspace_sha256=workspace_sha256,
                 )
             elif phase != "dispatch_started":
                 return operation_error(
@@ -2264,6 +2292,7 @@ def execute(
                 dispatch_count=1,
                 player=player,
                 baseline=before,
+                workspace_sha256=workspace_sha256,
             )
             try:
                 atomic_write_json(record_path, base_record)
@@ -2351,6 +2380,7 @@ def execute(
                 phase="retryable",
                 dispatch_count=0,
                 payload=result,
+                workspace_sha256=workspace_sha256,
             )
             if retryable
             else terminal_record_from(base_record, result, dispatch_count)
@@ -2414,6 +2444,7 @@ def main() -> int:
     parser.add_argument("--operation-id")
     parser.add_argument("--operation-ttl-secs", type=int, default=DEFAULT_OPERATION_TTL_SECS)
     parser.add_argument("--operation-preflight", action="store_true")
+    parser.add_argument("--workspace-sha256")
     parser.add_argument("--wrapper-contract-version")
     args = parser.parse_args()
     contract_required = args.operation_preflight or (
@@ -2446,6 +2477,7 @@ def main() -> int:
         args.operation_id,
         args.operation_ttl_secs,
         args.operation_preflight,
+        args.workspace_sha256,
     )
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return 0 if payload.get("verdict") == "verified" else 2

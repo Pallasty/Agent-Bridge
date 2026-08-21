@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 SCHEMA = "agent_bridge.app_control.recovery_candidates.v0"
+INTENT_PREFLIGHT_SCHEMA = "agent_bridge.app_control.recovery_intent_preflight.v0"
 OPAQUE_ID_RE = re.compile(r"ab-episode-[0-9a-f]{32}")
 FILE_RE = re.compile(r"[0-9a-f]{64}\.json")
 MAX_RECORDS = 64
@@ -38,7 +39,9 @@ def _secure_file(fd: int, mode: int) -> bool:
 
 
 def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs: float = 5.0,
-             selected_operation_id: str | None = None, expected_record_sha256: str | None = None) -> dict[str, Any]:
+             selected_operation_id: str | None = None, expected_record_sha256: str | None = None,
+             intent_player: str | None = None, intent_ttl_secs: int | None = None,
+             workspace_sha256: str | None = None, intent_confirmed: bool = False) -> dict[str, Any]:
     now = time.time() if now is None else now
     result: dict[str, Any] = {
         "schema": SCHEMA, "status": "verified", "verdict": "verified", "recover": "proceed",
@@ -51,6 +54,20 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
         "scan_complete": True, "media_observed": False, "action_invoked": False,
         "automatic_recovery_authorized": False,
     }
+    intent_preflight = any(value is not None for value in (intent_player, intent_ttl_secs, workspace_sha256)) or intent_confirmed
+    if intent_preflight:
+        result["schema"] = INTENT_PREFLIGHT_SCHEMA
+        result["intent_binding"] = {
+            "source": "explicit_cli_arguments", "confirmed": intent_confirmed,
+            "authenticated": False, "action": "next", "player_selector": intent_player,
+            "operation_ttl_secs": intent_ttl_secs,
+        }
+        result["workspace_binding"] = {"declared_sha256": workspace_sha256, "recorded_sha256": None, "matches": False}
+        if not (selected_operation_id and expected_record_sha256 and intent_confirmed
+                and intent_player and type(intent_ttl_secs) is int and workspace_sha256):
+            result.update(admission="insufficient_context", recover="replan", selection_conflict=False)
+            result["error"] = {"code": "explicit_intent_context_required"}
+            return result
     if (selected_operation_id is None) != (expected_record_sha256 is None):
         result.update(admission="selection_conflict", recover="replan", selection_conflict=True)
         result["error"] = {"code": "selection_requires_operation_id_and_record_sha256_pair"}
@@ -97,7 +114,13 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                     raise OSError("record_filename_identity_mismatch")
                 if not backend.dispatch_started_record_valid(record):
                     result["skipped_count"] += 1; continue
-                if type(expires_at) not in (int, float) or isinstance(expires_at, bool) or float(expires_at) <= now:
+                if type(expires_at) not in (int, float) or isinstance(expires_at, bool):
+                    result["skipped_count"] += 1; continue
+                if float(expires_at) <= now:
+                    if intent_preflight:
+                        result.update(admission="expired", recover="replan")
+                        result["error"] = {"code": "candidate_expired"}
+                        return result
                     result["skipped_count"] += 1; continue
                 request = record.get("request")
                 ttl = request.get("operation_ttl_secs") if isinstance(request, dict) else None
@@ -117,6 +140,10 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                     result["skipped_count"] += 1; continue
                 remaining_secs = max(0.0, float(expires_at) - now)
                 if remaining_secs < minimum_recovery_secs:
+                    if intent_preflight:
+                        result.update(admission="expired", recover="replan")
+                        result["error"] = {"code": "insufficient_recovery_window"}
+                        return result
                     result["blocked_count"] += 1
                     result["blocked_operation_id_sha256"].append(hashlib.sha256(operation_id.encode("ascii")).hexdigest())
                     continue
@@ -128,6 +155,29 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                     result["candidates"] = []
                     result["candidate_count"] = 0
                     return result
+                origin_context = record.get("origin_context")
+                context_valid = (
+                    isinstance(origin_context, dict)
+                    and origin_context.get("schema") == backend.OPERATION_CONTEXT_SCHEMA
+                    and isinstance(origin_context.get("workspace_sha256"), str)
+                    and re.fullmatch(r"[0-9a-f]{64}", origin_context["workspace_sha256"]) is not None
+                )
+                recorded_workspace = origin_context["workspace_sha256"] if context_valid else None
+                if intent_preflight:
+                    result["workspace_binding"]["recorded_sha256"] = recorded_workspace
+                    result["workspace_binding"]["matches"] = recorded_workspace == workspace_sha256
+                    if origin_context is None:
+                        result.update(admission="insufficient_context", recover="replan")
+                        result["error"] = {"code": "candidate_has_no_workspace_binding"}
+                        return result
+                    if not context_valid:
+                        result.update(admission="conflict", recover="replan", selection_conflict=True)
+                        result["error"] = {"code": "candidate_workspace_binding_invalid"}
+                        return result
+                    if recorded_workspace != workspace_sha256 or selector != intent_player or ttl != intent_ttl_secs:
+                        result.update(admission="conflict", recover="replan", selection_conflict=True)
+                        result["error"] = {"code": "candidate_intent_context_conflict"}
+                        return result
                 result["candidates"].append({
                     "operation_id": operation_id,
                     "request": canonical_request,
@@ -139,6 +189,7 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                     "discovery_only": True, "revalidation_required": True,
                     "recommended_next": "explicitly_review_then_call_same_canonical_request",
                     "automatic_execution_allowed": False,
+                    "origin_context": origin_context,
                 })
             except (OSError, ValueError, json.JSONDecodeError):
                 result["status"] = "error"; result["verdict"] = "error"; result["recover"] = "replan"
@@ -157,7 +208,7 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
             result["selection_conflict"] = True
             return result
         if result["candidate_count"]:
-            result["admission"] = "eligible_candidate_present"
+            result["admission"] = "eligible" if intent_preflight else "eligible_candidate_present"
             result["recover"] = "proceed"
         elif result["blocked_count"]:
             result["admission"] = "blocked_insufficient_recovery_window"
@@ -178,6 +229,10 @@ def main() -> int:
     parser.add_argument("--minimum-recovery-secs", type=float, default=5.0)
     parser.add_argument("--operation-id")
     parser.add_argument("--expected-record-sha256")
+    parser.add_argument("--intent-confirmed", action="store_true")
+    parser.add_argument("--intent-player")
+    parser.add_argument("--intent-ttl-secs", type=int)
+    parser.add_argument("--workspace-root")
     args = parser.parse_args()
     directory = Path(args.journal)
     if not directory.is_absolute():
@@ -189,8 +244,27 @@ def main() -> int:
     if args.expected_record_sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", args.expected_record_sha256):
         print(json.dumps({"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "read_only": True, "error": {"code": "invalid_expected_record_sha256"}}, separators=(",", ":")))
         return 3
+    workspace_sha256 = None
+    if args.workspace_root is not None:
+        try:
+            supplied = Path(args.workspace_root)
+            resolved = supplied.resolve(strict=True)
+            if not supplied.is_absolute() or supplied != resolved or not resolved.is_dir():
+                raise OSError("workspace_root_must_be_a_canonical_absolute_directory")
+            workspace_sha256 = hashlib.sha256(str(resolved).encode()).hexdigest()
+        except OSError:
+            print(json.dumps({
+                "schema": INTENT_PREFLIGHT_SCHEMA, "status": "verified", "verdict": "verified",
+                "recover": "replan", "read_only": True, "admission": "insufficient_context",
+                "scan_complete": False, "media_observed": False, "action_invoked": False,
+                "automatic_recovery_authorized": False,
+                "error": {"code": "invalid_workspace_root"},
+            }, separators=(",", ":")))
+            return 0
     result = discover(directory, minimum_recovery_secs=args.minimum_recovery_secs,
-                      selected_operation_id=args.operation_id, expected_record_sha256=args.expected_record_sha256)
+                      selected_operation_id=args.operation_id, expected_record_sha256=args.expected_record_sha256,
+                      intent_player=args.intent_player, intent_ttl_secs=args.intent_ttl_secs,
+                      workspace_sha256=workspace_sha256, intent_confirmed=args.intent_confirmed)
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0 if result["verdict"] == "verified" else 3
 

@@ -27,12 +27,13 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
 
     def tearDown(self): self.temp.cleanup()
 
-    def write_candidate(self, **changes):
+    def write_candidate(self, workspace_sha256=None, **changes):
         request = APP.operation_request("next", "rhythmbox", 3600)
         record = APP.operation_record(
             self.operation_id, APP.operation_request_digest("next", "rhythmbox", 3600), request,
             created_at=1000.0, expires_at=4600.0, phase="dispatch_started", dispatch_count=1,
             player="rhythmbox", baseline={"player": "rhythmbox", "track_id": "/track/a"},
+            workspace_sha256=workspace_sha256,
         )
         record.update(changes)
         record_path = self.directory / f"{self.key}.json"
@@ -40,6 +41,14 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         record_path.write_text(json.dumps(record)); lock_path.write_text("")
         os.chmod(record_path, 0o600); os.chmod(lock_path, 0o600)
         return record_path, lock_path
+
+    def intent_preflight(self, record_path, workspace_sha256):
+        return INDEX.discover(
+            self.directory, now=1100.0, selected_operation_id=self.operation_id,
+            expected_record_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
+            intent_player="rhythmbox", intent_ttl_secs=3600,
+            workspace_sha256=workspace_sha256, intent_confirmed=True,
+        )
 
     def test_discovers_one_unexpired_recovery_anchor_without_mutation(self):
         record_path, lock_path = self.write_candidate()
@@ -156,6 +165,37 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         self.assertNotIn("recover_dispatch_started_operation", source)
         self.assertNotIn("playerctl", source)
         self.assertNotIn('"journal": str(directory)', source)
+
+    def test_explicit_intent_and_workspace_binding_is_eligible_but_never_authorizes(self):
+        workspace_sha256 = hashlib.sha256(b"/canonical/workspace").hexdigest()
+        record_path, _ = self.write_candidate(workspace_sha256=workspace_sha256)
+        result = self.intent_preflight(record_path, workspace_sha256)
+        self.assertEqual(result["schema"], INDEX.INTENT_PREFLIGHT_SCHEMA)
+        self.assertEqual(result["admission"], "eligible")
+        self.assertTrue(result["workspace_binding"]["matches"])
+        self.assertFalse(result["intent_binding"]["authenticated"])
+        self.assertFalse(result["automatic_recovery_authorized"])
+        self.assertFalse(result["action_invoked"])
+
+    def test_legacy_candidate_without_workspace_is_insufficient_context(self):
+        record_path, _ = self.write_candidate()
+        workspace_sha256 = hashlib.sha256(b"/canonical/workspace").hexdigest()
+        result = self.intent_preflight(record_path, workspace_sha256)
+        self.assertEqual(result["admission"], "insufficient_context")
+        self.assertEqual(result["error"]["code"], "candidate_has_no_workspace_binding")
+
+    def test_workspace_or_declared_intent_mismatch_is_conflict(self):
+        recorded = hashlib.sha256(b"/canonical/workspace").hexdigest()
+        record_path, _ = self.write_candidate(workspace_sha256=recorded)
+        result = self.intent_preflight(record_path, hashlib.sha256(b"/other").hexdigest())
+        self.assertEqual(result["admission"], "conflict")
+        result = INDEX.discover(
+            self.directory, now=1100.0, selected_operation_id=self.operation_id,
+            expected_record_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
+            intent_player="vlc", intent_ttl_secs=3600, workspace_sha256=recorded,
+            intent_confirmed=True,
+        )
+        self.assertEqual(result["admission"], "conflict")
 
     def test_readonly_evidence_records_empty_cold_start_without_authority(self):
         path = ROOT / "docs/design/evidence/app_control_recovery_candidate_index_readonly_2026_08_20.json"

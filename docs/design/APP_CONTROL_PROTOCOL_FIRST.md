@@ -235,6 +235,19 @@ one non-authoritative disappearance notice without claiming completion.
 The two selection arguments are an inseparable pair; a bare ID or bare digest,
 and any human-semantic ID, are rejected before the journal is inspected.
 
+New durable `next` operations may also carry an explicit canonical
+`workspace_root`. The MCP wrapper hashes that path and the backend stores only
+the digest in `origin_context`; a replay that omits or changes the binding is
+rejected. `app_control(recovery_preflight=true)` composes the locked exact-record
+check with explicit action, player, TTL, workspace, and caller-declared current
+intent. Its admission is one of `eligible`, `conflict`, `expired`, or
+`insufficient_context`. Legacy records deliberately produce
+`insufficient_context`, because their workspace cannot be reconstructed safely.
+Even `eligible` remains an unauthenticated, read-only advisory: it does not
+observe media, reserve the operation ID, authorize recovery, or dispatch an
+action. The subsequent normal durable call must still revalidate everything
+under its exclusive journal lock.
+
 The source-local cross-process synthetic gate exercises the complete handoff:
 one process is killed after its fake `playerctl next` child changes state, a
 second process discovers the exact anchor and canonical request, a third

@@ -11289,6 +11289,17 @@ impl McpTool for AppControlTool {
                         "default": 3600,
                         "description": "TTL for a durable operation_id. Expired operations fail closed and require a new identity; ignored requests are rejected rather than silently changing the journal contract."
                     },
+                    "workspace_root": {
+                        "type": "string",
+                        "description": "Canonical absolute workspace directory to bind into a durable next operation as a SHA-256 digest. Required for newly recoverable embodied episodes; the raw path is not journaled."
+                    },
+                    "recovery_preflight": {
+                        "type": "boolean", "default": false,
+                        "description": "Read-only exact recovery admission. Requires action=next, operation_id, expected_record_sha256, player, operation_ttl_secs, workspace_root, and intent_confirmed=true; never observes media or dispatches."
+                    },
+                    "expected_record_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    "intent_confirmed": {"type": "boolean", "default": false},
+                    "minimum_recovery_secs": {"type": "number", "minimum": 0.0, "maximum": 86400.0, "default": 5.0},
                     "dry_run": {
                         "type": "boolean", "default": false,
                         "description": "Discover the route and read current state without dispatching the action."
@@ -11314,6 +11325,11 @@ impl McpTool for AppControlTool {
             "playlist_id",
             "operation_id",
             "operation_ttl_secs",
+            "workspace_root",
+            "recovery_preflight",
+            "expected_record_sha256",
+            "intent_confirmed",
+            "minimum_recovery_secs",
             "dry_run",
             "verify_timeout_secs",
             "cwd",
@@ -11434,25 +11450,124 @@ impl McpTool for AppControlTool {
                 }),
             ));
         }
+        let workspace_sha256 = match args.get("workspace_root") {
+            None => None,
+            Some(Value::String(value)) => {
+                let supplied = PathBuf::from(value);
+                let canonical = match supplied.canonicalize() {
+                    Ok(path) if supplied.is_absolute() && path == supplied && path.is_dir() => path,
+                    _ => return Ok(app_control_error("replan", json!({
+                        "code": "invalid_workspace_root",
+                        "message": "workspace_root must be an existing canonical absolute directory"
+                    }))),
+                };
+                if operation_id.is_none() {
+                    return Ok(app_control_error("replan", json!({
+                        "code": "operation_id_required",
+                        "message": "workspace_root is only accepted for a durable operation_id"
+                    })));
+                }
+                Some(format!("{:x}", Sha256::digest(canonical.as_os_str().as_encoded_bytes())))
+            }
+            Some(_) => return Ok(app_control_error("replan", json!({"code": "invalid_workspace_root"}))),
+        };
         let player_selector = match args.get("player") {
             None => None,
             Some(Value::String(value)) => {
                 let value = value.trim();
                 if value.is_empty() {
-                    return Ok(app_control_error(
-                        "replan",
-                        json!({"code": "invalid_player"}),
-                    ));
+                    return Ok(app_control_error("replan", json!({"code": "invalid_player"})));
                 }
                 Some(value)
             }
-            Some(_) => {
-                return Ok(app_control_error(
-                    "replan",
-                    json!({"code": "invalid_player"}),
-                ))
-            }
+            Some(_) => return Ok(app_control_error("replan", json!({"code": "invalid_player"}))),
         };
+        let recovery_preflight = args.get("recovery_preflight").and_then(Value::as_bool).unwrap_or(false);
+        if !recovery_preflight && ["expected_record_sha256", "intent_confirmed", "minimum_recovery_secs"]
+            .iter().any(|key| args.get(*key).is_some())
+        {
+            return Ok(app_control_error("replan", json!({"code": "recovery_preflight_required"})));
+        }
+        if recovery_preflight {
+            let expected_record_sha256 = args.get("expected_record_sha256").and_then(Value::as_str)
+                .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+            let intent_confirmed = args.get("intent_confirmed").and_then(Value::as_bool) == Some(true);
+            let minimum = args.get("minimum_recovery_secs").and_then(Value::as_f64).unwrap_or(5.0);
+            let workspace_root = args.get("workspace_root").and_then(Value::as_str);
+            let Some(operation_id) = operation_id.as_deref() else {
+                return Ok(app_control_error("replan", json!({"code": "recovery_preflight_requires_operation_id"})));
+            };
+            let Some(player_selector) = player_selector else {
+                return Ok(app_control_error("replan", json!({"code": "recovery_preflight_requires_player"})));
+            };
+            if action != "next" || expected_record_sha256.is_none() || !intent_confirmed
+                || workspace_root.is_none() || workspace_sha256.is_none() || !(0.0..=86_400.0).contains(&minimum)
+            {
+                return Ok(app_control_error("replan", json!({"code": "recovery_preflight_requires_explicit_context"})));
+            }
+            let journal = match std::env::var("AB_APP_CONTROL_OPERATION_DIR") {
+                Ok(value) if Path::new(&value).is_absolute() => value,
+                _ => return Ok(app_control_error("replan", json!({"code": "operation_journal_unavailable"}))),
+            };
+            let script = app_control_recovery_candidates_script_path();
+            if !script.is_file() {
+                return Ok(app_control_error("replan", json!({"code": "recovery_preflight_script_missing"})));
+            }
+            let mut cmd = killable_command(std::env::var("PYTHON").ok()
+                .filter(|value| !value.trim().is_empty()).unwrap_or_else(|| "python3".into()));
+            cmd.arg(script).arg("--journal").arg(journal)
+                .arg("--minimum-recovery-secs").arg(minimum.to_string())
+                .arg("--operation-id").arg(operation_id)
+                .arg("--expected-record-sha256").arg(expected_record_sha256.unwrap())
+                .arg("--intent-confirmed").arg("--intent-player").arg(player_selector)
+                .arg("--intent-ttl-secs").arg(operation_ttl_secs.to_string())
+                .arg("--workspace-root").arg(workspace_root.unwrap())
+                .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+            let output = match tokio::time::timeout(Duration::from_millis(2_000), cmd.output()).await {
+                Ok(Ok(output)) => output,
+                _ => return Ok(app_control_error("retry", json!({"code": "recovery_preflight_unavailable"}))),
+            };
+            let mut payload: Value = match serde_json::from_slice(&output.stdout) {
+                Ok(value) => value,
+                Err(_) => return Ok(app_control_error("replan", json!({"code": "recovery_preflight_invalid_json"}))),
+            };
+            let safe = payload.get("schema").and_then(Value::as_str) == Some("agent_bridge.app_control.recovery_intent_preflight.v0")
+                && payload.get("verdict").and_then(Value::as_str) == Some("verified")
+                && payload.get("read_only").and_then(Value::as_bool) == Some(true)
+                && payload.get("media_observed").and_then(Value::as_bool) == Some(false)
+                && payload.get("action_invoked").and_then(Value::as_bool) == Some(false)
+                && payload.get("automatic_recovery_authorized").and_then(Value::as_bool) == Some(false)
+                && payload.get("selection_requested").and_then(Value::as_bool) == Some(true)
+                && payload.pointer("/intent_binding/confirmed").and_then(Value::as_bool) == Some(true)
+                && payload.pointer("/intent_binding/authenticated").and_then(Value::as_bool) == Some(false)
+                && payload.pointer("/intent_binding/action").and_then(Value::as_str) == Some("next")
+                && payload.pointer("/intent_binding/player_selector").and_then(Value::as_str) == Some(player_selector)
+                && payload.pointer("/intent_binding/operation_ttl_secs").and_then(Value::as_u64) == Some(operation_ttl_secs)
+                && matches!(payload.get("admission").and_then(Value::as_str), Some("eligible" | "conflict" | "expired" | "insufficient_context" | "selection_conflict"));
+            let eligible_contract = payload.get("admission").and_then(Value::as_str) != Some("eligible") || (
+                payload.get("recover").and_then(Value::as_str) == Some("proceed")
+                && payload.get("candidate_count").and_then(Value::as_u64) == Some(1)
+                && payload.pointer("/candidates/0/operation_id").and_then(Value::as_str) == Some(operation_id)
+                && payload.pointer("/candidates/0/record_sha256").and_then(Value::as_str) == expected_record_sha256
+                && payload.pointer("/candidates/0/request/action").and_then(Value::as_str) == Some("next")
+                && payload.pointer("/candidates/0/request/player_selector").and_then(Value::as_str) == Some(player_selector)
+                && payload.pointer("/candidates/0/request/operation_ttl_secs").and_then(Value::as_u64) == Some(operation_ttl_secs)
+                && payload.pointer("/workspace_binding/declared_sha256").and_then(Value::as_str) == workspace_sha256.as_deref()
+                && payload.pointer("/workspace_binding/recorded_sha256").and_then(Value::as_str) == workspace_sha256.as_deref()
+                && payload.pointer("/workspace_binding/matches").and_then(Value::as_bool) == Some(true)
+            );
+            let blocked_contract = payload.get("admission").and_then(Value::as_str) == Some("eligible")
+                || payload.get("recover").and_then(Value::as_str) == Some("replan");
+            if !safe || !eligible_contract || !blocked_contract {
+                return Ok(app_control_error("replan", json!({"code": "recovery_preflight_source_contract_mismatch"})));
+            }
+            if let Some(object) = payload.as_object_mut() {
+                object.insert("mcp_wrapper".into(), json!({"tool": "app_control", "mode": "recovery_intent_preflight", "source_contract_ok": true}));
+            }
+            let mut result = ToolResult::json_text(&payload);
+            result.is_error = payload.get("admission").and_then(Value::as_str) != Some("eligible");
+            return Ok(result);
+        }
         if operation_id.is_some() {
             if action != "next" {
                 return Ok(app_control_error(
@@ -11618,6 +11733,9 @@ impl McpTool for AppControlTool {
                 .arg(operation_id)
                 .arg("--operation-ttl-secs")
                 .arg(operation_ttl_secs.to_string());
+            if let Some(workspace_sha256) = workspace_sha256.as_deref() {
+                cmd.arg("--workspace-sha256").arg(workspace_sha256);
+            }
         }
         if dry_run {
             cmd.arg("--dry-run");

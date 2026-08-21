@@ -140,6 +140,7 @@ class AppControlTests(unittest.TestCase):
         player=None,
         baseline=None,
         payload=None,
+        workspace_sha256=None,
     ):
         mod.ensure_operation_directory(mod.operation_directory())
         self.create_operation_lock(mod, operation_id)
@@ -157,6 +158,7 @@ class AppControlTests(unittest.TestCase):
             player=player,
             baseline=baseline,
             payload=payload,
+            workspace_sha256=workspace_sha256,
         )
         record_path = mod.operation_record_path(operation_id)
         mod.atomic_write_json(record_path, record)
@@ -781,6 +783,24 @@ class AppControlTests(unittest.TestCase):
             "reusable_same_request",
         )
         self.assertTrue(payload["preflight"]["same_id_retry_allowed"])
+
+    def test_durable_operation_workspace_context_conflict_fails_before_player_access(self):
+        mod = load_module()
+        operation_id = "workspace-bound"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"AB_APP_CONTROL_OPERATION_DIR": tmp}
+        ):
+            self.write_operation_fixture(
+                mod, operation_id, phase="retryable", dispatch_count=0,
+                workspace_sha256="1" * 64,
+            )
+            with mock.patch.object(mod, "run", side_effect=AssertionError("must not call playerctl")):
+                payload = mod.execute(
+                    "next", "rhythmbox", False, 0.2, operation_id=operation_id,
+                    workspace_sha256="2" * 64,
+                )
+        self.assertEqual(payload["error"]["code"], "operation_context_conflict")
+        self.assertEqual(payload["recover"], "replan")
 
     def test_operation_preflight_cli_flag_is_backend_only_and_non_creating(self):
         with tempfile.TemporaryDirectory() as tmp:

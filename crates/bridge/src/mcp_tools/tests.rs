@@ -18254,6 +18254,17 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
         tool.input_schema["properties"]["operation_ttl_secs"]["minimum"],
         json!(60)
     );
+    assert_eq!(
+        tool.input_schema["properties"]["expected_record_sha256"]["pattern"],
+        json!("^[0-9a-f]{64}$")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["recovery_preflight"]["default"],
+        json!(false)
+    );
+    assert!(tool.input_schema["properties"]["workspace_root"]["description"]
+        .as_str()
+        .is_some_and(|description| description.contains("raw path is not journaled")));
     assert!(tool.input_schema["properties"]["operation_id"]["description"]
         .as_str()
         .is_some_and(|description| description.contains("never dispatches next a second time")));
