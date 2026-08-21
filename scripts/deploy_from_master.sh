@@ -99,6 +99,7 @@ SENTINELS=(
     "agent_bridge.app_control.operation_preflight.v0" # journal-only embodied episode admission
     "agent_bridge.app_control.track_settlement.v0" # bounded stable-track proof before durable verification
     "agent_bridge.app_control.wrapper_contract.v1" # action-before-version handshake for mutable media calls
+    "agent_bridge.avatar.native_linux.v1" # compiled transparent Linux avatar backend
     "agent_bridge.mobile_projection_wait.v1" # exact Android draw-report receipt, never host-served inference
     "desktop_steer.py"      # steer control plane / cross-process injection (item 3)
     "desktop_action.py"     # computer-use: coordinate action
