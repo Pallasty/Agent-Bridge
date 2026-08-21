@@ -369,7 +369,22 @@ class FocusContinuityEligibilityTests(unittest.TestCase):
                 value = probe()
                 value["captured_at"] = 1000
                 mutate(value)
-                self.assertFalse(ELIGIBILITY.summarize(value, now=now)["eligible_now"])
+                result = ELIGIBILITY.summarize(value, now=now)
+                self.assertFalse(result["eligible_now"])
+                self.assertTrue(result["ineligibility_reasons"])
+
+    def test_ineligibility_reasons_are_content_free_and_actionable(self):
+        value = probe()
+        value["captured_at"] = 1000
+        for item in value["windows"]:
+            item.pop("identity")
+            item.pop("ax_identifier")
+        result = ELIGIBILITY.summarize(value, now=1001)
+        self.assertFalse(result["eligible_now"])
+        self.assertIn("selector_attributes_incomplete", result["ineligibility_reasons"])
+        self.assertIn("fewer_than_two_stable_windows", result["ineligibility_reasons"])
+        self.assertNotIn("target-window", json.dumps(result))
+        self.assertNotIn("Target", json.dumps(result))
 
     def test_native_probe_source_is_read_only_and_has_no_system_events_dependency(self):
         source = (ROOT / "scripts/macos_ax_native_probe.swift").read_text(encoding="utf-8")
