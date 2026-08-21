@@ -3132,6 +3132,70 @@ async fn session_bootstrap_surfaces_work_memory_block() {
     assert!(text.contains("Bootstrap should surface this scratchpad note"));
 }
 
+fn recovery_candidate_fixture() -> Value {
+    json!({
+        "schema":"agent_bridge.app_control.recovery_candidates.v0", "status":"verified",
+        "verdict":"verified", "recover":"proceed", "read_only":true,
+        "scan_complete":true, "media_observed":false, "action_invoked":false,
+        "automatic_recovery_authorized":false, "selection_requested":false,
+        "admission":"eligible_candidate_present", "candidate_count":1,
+        "candidates":[{
+            "operation_id":format!("ab-episode-{}", "c".repeat(32)),
+            "request":{"schema":"agent_bridge.app_control.v0", "action":"next", "player_selector":"rhythmbox", "operation_ttl_secs":3600},
+            "request_digest":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "remaining_secs":90.0, "phase":"dispatch_started", "dispatch_count":1,
+            "record_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "discovery_only":true, "revalidation_required":true,
+            "automatic_execution_allowed":false
+        }]
+    })
+}
+
+#[test]
+fn session_bootstrap_recovery_candidate_hint_is_unselected_and_fail_closed() {
+    let mut payload = recovery_candidate_fixture();
+    let rendered = format_bootstrap_recovery_candidates(&payload, false).unwrap().join("\n");
+    assert!(rendered.contains("read-only, not selected"));
+    assert!(rendered.contains("Current workspace/intent binding: unverified"));
+    assert!(rendered.contains("Automatic execution: forbidden"));
+    assert!(rendered.contains("revalidate its exact operation_id + record_sha256"));
+    for pointer in ["/scan_complete", "/media_observed", "/action_invoked",
+        "/automatic_recovery_authorized", "/candidates/0/discovery_only",
+        "/candidates/0/revalidation_required", "/candidates/0/automatic_execution_allowed"] {
+        let original = payload.pointer(pointer).cloned().unwrap();
+        *payload.pointer_mut(pointer).unwrap() = json!(!original.as_bool().unwrap());
+        assert!(format_bootstrap_recovery_candidates(&payload, false).is_none(), "{pointer}");
+        *payload.pointer_mut(pointer).unwrap() = original;
+    }
+    payload["admission"] = json!("no_recovery_candidate");
+    assert!(format_bootstrap_recovery_candidates(&payload, false).is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn default_bootstrap_surfaces_recovery_hint_but_targeted_bootstrap_omits_it() {
+    let _env_lock = RUNTIME_ASSET_ADB_ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let runtime_dir = temp_dir.join("runtime");
+    let journal_dir = temp_dir.join("journal");
+    std::fs::create_dir_all(&runtime_dir).unwrap();
+    std::fs::create_dir_all(&journal_dir).unwrap();
+    let payload = recovery_candidate_fixture();
+    std::fs::write(runtime_dir.join("app-control-recovery-candidates.py"), format!(
+        "import json\nprint(json.dumps(json.loads(r'''{}''')))\n", serde_json::to_string(&payload).unwrap())).unwrap();
+    let _runtime = ScopedTestEnvVar::set("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &runtime_dir);
+    let _journal = ScopedTestEnvVar::set("AB_APP_CONTROL_OPERATION_DIR", &journal_dir);
+    let cwd = temp_dir.display().to_string();
+    let default = SessionBootstrapTool::new(hub.clone()).execute(
+        json!({"cwd":cwd, "frontend":"claude-code"}), &ToolContext::default()).await.unwrap();
+    let default_text = result_text(&default);
+    assert!(default_text.contains("Durable Media Recovery Candidates"), "{default_text}");
+    let targeted = SessionBootstrapTool::new(hub).execute(
+        json!({"cwd":cwd, "query":"continue repository work", "frontend":"claude-code"}),
+        &ToolContext::default()).await.unwrap();
+    assert!(!result_text(&targeted).contains("Durable Media Recovery Candidates"));
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
 #[tokio::test]
 async fn session_bootstrap_recovers_actionable_work_memory_after_store_restart() {
     use std::sync::Arc;

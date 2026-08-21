@@ -73,6 +73,7 @@ AUDIO_POLICY_ASSETS=(
 RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 RUNTIME_ASSETS=(
     app_control.py
+    app-control-recovery-candidates.py
     desktop_action.py
     desktop_confirm_store.py
     desktop_grant.py

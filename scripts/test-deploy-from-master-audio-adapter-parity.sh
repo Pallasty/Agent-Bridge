@@ -71,7 +71,7 @@ for asset in config/omnivoice-canary.json \
     test -f "$ROOT/$asset"
     cmp -s "$(dirname "$SCRIPT_DIR")/$asset" "$ROOT/$asset"
 done
-for asset in app_control.py desktop_action.py desktop_confirm_store.py desktop_grant.py \
+for asset in app_control.py app-control-recovery-candidates.py desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
     macos_ax_focus_window.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
     vision_grounding_ocr.py; do

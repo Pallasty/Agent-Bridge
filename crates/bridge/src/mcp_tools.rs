@@ -25753,6 +25753,8 @@ const BUDGET_GIT_CURRENTNESS: usize = 120;
 // cold start. Top 5 inert/failed actions × ~80 char ≈ 160 tokens; hidden when
 // none, so the budget only bites on a session that actually had a no-op.
 const BUDGET_INERT_ACTIONS: usize = 200;
+const BUDGET_RECOVERY_CANDIDATES: usize = 180;
+const APP_CONTROL_RECOVERY_CANDIDATES_SCHEMA: &str = "agent_bridge.app_control.recovery_candidates.v0";
 
 /// Trim a block of lines so the total estimated token count ≤ `budget`.
 ///
@@ -25867,6 +25869,85 @@ pub struct SessionBootstrapTool {
     hub: Hub,
 }
 
+fn app_control_recovery_candidates_script_path() -> PathBuf {
+    installed_runtime_script_path("app-control-recovery-candidates.py").unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app-control-recovery-candidates.py")
+    })
+}
+
+/// Render a non-authoritative hint only. The journal has no workspace identity,
+/// so a candidate is never treated as the current intent or dispatch authority.
+fn format_bootstrap_recovery_candidates(payload: &Value, is_compact: bool) -> Option<Vec<String>> {
+    if payload.get("schema").and_then(Value::as_str) != Some(APP_CONTROL_RECOVERY_CANDIDATES_SCHEMA)
+        || payload.get("status").and_then(Value::as_str) != Some("verified")
+        || payload.get("verdict").and_then(Value::as_str) != Some("verified")
+        || payload.get("recover").and_then(Value::as_str) != Some("proceed")
+        || payload.get("read_only").and_then(Value::as_bool) != Some(true)
+        || payload.get("scan_complete").and_then(Value::as_bool) != Some(true)
+        || payload.get("media_observed").and_then(Value::as_bool) != Some(false)
+        || payload.get("action_invoked").and_then(Value::as_bool) != Some(false)
+        || payload.get("automatic_recovery_authorized").and_then(Value::as_bool) != Some(false)
+        || payload.get("admission").and_then(Value::as_str) != Some("eligible_candidate_present")
+        || payload.get("selection_requested").and_then(Value::as_bool) != Some(false)
+    { return None; }
+    let candidates = payload.get("candidates")?.as_array()?;
+    if candidates.is_empty() || candidates.len() > 64
+        || payload.get("candidate_count").and_then(Value::as_u64) != Some(candidates.len() as u64)
+    { return None; }
+    let mut rendered = Vec::new();
+    for candidate in candidates.iter().take(3) {
+        let operation_id = candidate.get("operation_id")?.as_str()?;
+        let record_sha256 = candidate.get("record_sha256")?.as_str()?;
+        let request_digest = candidate.get("request_digest")?.as_str()?;
+        let request = candidate.get("request")?.as_object()?;
+        let player = request.get("player_selector")?.as_str()?;
+        let ttl = request.get("operation_ttl_secs")?.as_u64()?;
+        let remaining = candidate.get("remaining_secs")?.as_f64()?;
+        let lowercase_hex = |value: &str, len| value.len() == len
+            && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+        if !operation_id.starts_with("ab-episode-") || operation_id.len() != 43
+            || !lowercase_hex(&operation_id[11..], 32)
+            || !lowercase_hex(record_sha256, 64) || !lowercase_hex(request_digest, 64)
+            || request.get("schema").and_then(Value::as_str) != Some("agent_bridge.app_control.v0")
+            || request.get("action").and_then(Value::as_str) != Some("next")
+            || candidate.get("phase").and_then(Value::as_str) != Some("dispatch_started")
+            || candidate.get("dispatch_count").and_then(Value::as_u64) != Some(1)
+            || candidate.get("discovery_only").and_then(Value::as_bool) != Some(true)
+            || candidate.get("revalidation_required").and_then(Value::as_bool) != Some(true)
+            || candidate.get("automatic_execution_allowed").and_then(Value::as_bool) != Some(false)
+            || player.is_empty() || ttl == 0 || !remaining.is_finite() || remaining <= 0.0
+        { return None; }
+        let player = serde_json::to_string(player).ok()?;
+        rendered.push(format!("  • operation_id={operation_id} player={player} ttl={ttl}s remaining≈{}s record_sha256={record_sha256}", remaining.floor() as u64));
+    }
+    let mut out = vec![if is_compact {
+        format!("=== Media recovery candidates ({}) — not selected ===", candidates.len())
+    } else {
+        format!("=== Durable Media Recovery Candidates ({}) — read-only, not selected ===", candidates.len())
+    }];
+    out.push("Current workspace/intent binding: unverified. Automatic execution: forbidden.".into());
+    out.extend(rendered);
+    if candidates.len() > 3 { out.push(format!("  … {} more candidate(s) omitted", candidates.len() - 3)); }
+    out.push("Next: explicitly review one candidate, then revalidate its exact operation_id + record_sha256 before using the normal recovery path.".into());
+    out.push(String::new());
+    Some(out)
+}
+
+async fn bootstrap_recovery_candidates_block(is_compact: bool) -> Option<Vec<String>> {
+    let journal = std::env::var("AB_APP_CONTROL_OPERATION_DIR").ok()?;
+    if journal.trim().is_empty() || !Path::new(&journal).is_absolute() { return None; }
+    let script = app_control_recovery_candidates_script_path();
+    if !script.is_file() { return None; }
+    let mut cmd = killable_command(std::env::var("PYTHON").ok()
+        .filter(|value| !value.trim().is_empty()).unwrap_or_else(|| "python3".into()));
+    cmd.arg(script).arg("--journal").arg(journal)
+        .arg("--minimum-recovery-secs").arg("5")
+        .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    let output = tokio::time::timeout(Duration::from_millis(1_500), cmd.output()).await.ok()?.ok()?;
+    if !output.status.success() || output.stdout.len() > 256 * 1024 { return None; }
+    format_bootstrap_recovery_candidates(&serde_json::from_slice(&output.stdout).ok()?, is_compact)
+}
+
 /// A bootstrap with an explicit task query is a recovery packet, not a general
 /// cold-start dashboard. Keep the sections that answer "where am I and what
 /// blocks this task?" while leaving global letters and the
@@ -25908,7 +25989,12 @@ impl McpTool for SessionBootstrapTool {
                  AB_BOOTSTRAP_MMR_DISABLE=1 restores plain score order, \
                  AB_BOOTSTRAP_MMR_LAMBDA overrides lambda). Also \
                  surfaces an S1 distillation-candidates block (propose-only; \
-                 AB_DISTILL_SURFACING_DISABLE=1 drops it)."
+                 AB_DISTILL_SURFACING_DISABLE=1 drops it). A no-query cold start may \
+                 also surface read-only durable-media recovery candidates when the \
+                 owner-only journal is configured; these remain unselected, are not \
+                 workspace/current-intent bound, never authorize execution, and require \
+                 exact operation_id + record_sha256 revalidation. Query-targeted \
+                 bootstraps omit this global hint."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -26023,6 +26109,9 @@ impl McpTool for SessionBootstrapTool {
             .filter(|s| !s.is_empty())
             .map(str::to_string);
         let include_auxiliary_sections = include_bootstrap_auxiliary_sections(query.is_some());
+        let recovery_candidates_block = if include_auxiliary_sections {
+            bootstrap_recovery_candidates_block(is_compact).await
+        } else { None };
 
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
             // Semantic path: cosine-ranked results, with only current,
@@ -26122,7 +26211,7 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
-        if rows.is_empty() && error_section.is_empty() {
+        if rows.is_empty() && error_section.is_empty() && recovery_candidates_block.is_none() {
             let lifecycle_hint = session_lifecycle_hint();
             // SSB lifecycle producer: an empty-scope bootstrap injected nothing,
             // so it is honestly Unknown (ran, no effect) — not laundered green.
@@ -26436,6 +26525,10 @@ impl McpTool for SessionBootstrapTool {
                     lines.extend(cap_block_lines(block, BUDGET_CROSS_NODE_PEERS));
                 }
             }
+        }
+
+        if let Some(block) = recovery_candidates_block {
+            lines.extend(cap_block_lines(block, BUDGET_RECOVERY_CANDIDATES));
         }
 
         // B1 audit-gap v0 — project-state digest. Compact "where am I right

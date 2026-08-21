@@ -49,7 +49,7 @@ git init -q -b master "$SEED"
 git -C "$SEED" config user.name deploy-race-test
 git -C "$SEED" config user.email deploy-race-test@example.invalid
 mkdir -p "$SEED/scripts"
-for asset in deploy_from_master.sh audio_embody.py app_control.py desktop_action.py \
+for asset in deploy_from_master.sh audio_embody.py app_control.py app-control-recovery-candidates.py desktop_action.py \
     desktop_confirm_store.py desktop_grant.py desktop_invoke.py \
     desktop_snapshot.py desktop_steer.py desktop_verify.py \
     macos_ax_focus_window.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
