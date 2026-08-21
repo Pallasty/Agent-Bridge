@@ -18,6 +18,8 @@
     "original_player_selector_and_ttl_required": true,
     "minimum_recovery_window_is_explicit": true,
     "insufficient_window_is_blocked": true,
+    "explicit_selection_requires_record_sha": true,
+    "selection_drift_is_replan": true,
     "owner_only_journal_required": true,
     "shared_nonblocking_lock_required": true
   },

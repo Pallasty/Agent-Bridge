@@ -37,7 +37,8 @@ def _secure_file(fd: int, mode: int) -> bool:
     return stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.getuid() and stat.S_IMODE(metadata.st_mode) == mode
 
 
-def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs: float = 5.0) -> dict[str, Any]:
+def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs: float = 5.0,
+             selected_operation_id: str | None = None, expected_record_sha256: str | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
     result: dict[str, Any] = {
         "schema": SCHEMA, "status": "verified", "verdict": "verified", "recover": "proceed",
@@ -46,6 +47,7 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
         "candidate_count": 0, "candidates": [], "skipped_count": 0,
         "blocked_count": 0, "blocked_operation_id_sha256": [],
         "minimum_recovery_secs": minimum_recovery_secs,
+        "selection_requested": selected_operation_id is not None,
         "scan_complete": True, "media_observed": False, "action_invoked": False,
         "automatic_recovery_authorized": False,
     }
@@ -79,6 +81,8 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                 record = json.loads(raw)
                 operation_id = record.get("operation_id") if isinstance(record, dict) else None
                 expires_at = record.get("expires_at") if isinstance(record, dict) else None
+                if selected_operation_id is not None and operation_id != selected_operation_id:
+                    continue
                 if not (isinstance(operation_id, str) and OPAQUE_ID_RE.fullmatch(operation_id)):
                     result["skipped_count"] += 1; continue
                 if hashlib.sha256(operation_id.encode("ascii")).hexdigest() != name[:-5]:
@@ -108,6 +112,14 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                     result["blocked_count"] += 1
                     result["blocked_operation_id_sha256"].append(hashlib.sha256(operation_id.encode("ascii")).hexdigest())
                     continue
+                record_sha256 = hashlib.sha256(raw).hexdigest()
+                if expected_record_sha256 is not None and record_sha256 != expected_record_sha256:
+                    result["admission"] = "selection_conflict"
+                    result["recover"] = "replan"
+                    result["selection_conflict"] = True
+                    result["candidates"] = []
+                    result["candidate_count"] = 0
+                    return result
                 result["candidates"].append({
                     "operation_id": operation_id,
                     "request": canonical_request,
@@ -115,7 +127,7 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                     "expires_at": float(expires_at),
                     "remaining_secs": remaining_secs,
                     "phase": "dispatch_started", "dispatch_count": 1,
-                    "record_sha256": hashlib.sha256(raw).hexdigest(),
+                    "record_sha256": record_sha256,
                     "discovery_only": True, "revalidation_required": True,
                     "recommended_next": "explicitly_review_then_call_same_canonical_request",
                     "automatic_execution_allowed": False,
@@ -131,6 +143,11 @@ def discover(directory: Path, *, now: float | None = None, minimum_recovery_secs
                 if record_fd >= 0: os.close(record_fd)
                 if lock_fd >= 0: os.close(lock_fd)
         result["candidate_count"] = len(result["candidates"])
+        if selected_operation_id is not None and result["candidate_count"] == 0:
+            result["admission"] = "selection_conflict"
+            result["recover"] = "replan"
+            result["selection_conflict"] = True
+            return result
         if result["candidate_count"]:
             result["admission"] = "eligible_candidate_present"
             result["recover"] = "proceed"
@@ -151,6 +168,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal", required=True)
     parser.add_argument("--minimum-recovery-secs", type=float, default=5.0)
+    parser.add_argument("--operation-id")
+    parser.add_argument("--expected-record-sha256")
     args = parser.parse_args()
     directory = Path(args.journal)
     if not directory.is_absolute():
@@ -159,7 +178,11 @@ def main() -> int:
     if not (0.0 <= args.minimum_recovery_secs <= 86400.0):
         print(json.dumps({"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "read_only": True, "error": {"code": "invalid_minimum_recovery_secs"}}, separators=(",", ":")))
         return 3
-    result = discover(directory, minimum_recovery_secs=args.minimum_recovery_secs)
+    if args.expected_record_sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", args.expected_record_sha256):
+        print(json.dumps({"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "read_only": True, "error": {"code": "invalid_expected_record_sha256"}}, separators=(",", ":")))
+        return 3
+    result = discover(directory, minimum_recovery_secs=args.minimum_recovery_secs,
+                      selected_operation_id=args.operation_id, expected_record_sha256=args.expected_record_sha256)
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0 if result["verdict"] == "verified" else 3
 

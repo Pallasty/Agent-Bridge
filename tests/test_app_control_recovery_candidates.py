@@ -109,6 +109,24 @@ class RecoveryCandidateIndexTests(unittest.TestCase):
         self.assertEqual(result["admission"], "no_recovery_candidate")
         self.assertEqual(result["recover"], "replan")
 
+    def test_exact_selection_requires_unchanged_record_sha(self):
+        record_path, _ = self.write_candidate()
+        raw_sha = __import__("hashlib").sha256(record_path.read_bytes()).hexdigest()
+        selected = INDEX.discover(self.directory, now=1100.0, selected_operation_id=self.operation_id, expected_record_sha256=raw_sha)
+        self.assertEqual(selected["candidate_count"], 1)
+        record_path.write_text(record_path.read_text().replace('"phase": "dispatch_started"', '"phase": "retryable"'))
+        conflicted = INDEX.discover(self.directory, now=1100.0, selected_operation_id=self.operation_id, expected_record_sha256=raw_sha)
+        self.assertEqual(conflicted["candidate_count"], 0)
+        self.assertEqual(conflicted["admission"], "selection_conflict")
+        self.assertEqual(conflicted["recover"], "replan")
+
+    def test_selected_missing_or_bad_digest_never_becomes_candidate(self):
+        self.write_candidate()
+        missing = INDEX.discover(self.directory, now=1100.0, selected_operation_id="ab-episode-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(missing["admission"], "selection_conflict")
+        bad = INDEX.discover(self.directory, now=1100.0, selected_operation_id=self.operation_id, expected_record_sha256="0" * 64)
+        self.assertEqual(bad["admission"], "selection_conflict")
+
     def test_unsafe_or_corrupt_journal_fails_entire_scan_closed(self):
         record_path, _ = self.write_candidate()
         record_path.write_text("{")

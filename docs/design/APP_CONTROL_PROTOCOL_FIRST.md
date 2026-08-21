@@ -212,6 +212,11 @@ Scan integrity is separate from admission: a complete empty scan and a scan
 containing only blocked near-expiry records both retain `verdict=verified` for
 the read operation but return `recover=replan`. Only a non-empty eligible
 candidate set may return `recover=proceed`.
+For a restart handoff, callers may additionally provide the exact opaque
+operation ID and record SHA returned by the previous scan. The scanner then
+performs a locked read and returns `selection_conflict/replan` on any record
+drift, disappearance, expiry, or insufficient window. A stale candidate never
+becomes a recovery plan.
 
 The source-local cross-process synthetic gate exercises the complete handoff:
 one process is killed after its fake `playerctl next` child changes state, a
