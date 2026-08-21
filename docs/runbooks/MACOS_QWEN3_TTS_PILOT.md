@@ -76,6 +76,28 @@ embedding-only; they are not a TTS backend. This v1 transport is intentionally
 Unix-socket local-only. Cross-node access requires a separate authenticated,
 authorized transport and is not enabled by setting this environment variable.
 
+### LAN dispatcher (default-off)
+
+Linux can use the existing Mac worker over the LAN without exposing an HTTP
+endpoint. Select `--synth-backend qwen3-lan` only with explicit configuration:
+
+```sh
+export AB_QWEN3_LAN_REMOTE_HOST='pallasting@192.168.1.2'
+export AB_QWEN3_LAN_REMOTE_PYTHON='/Users/pallasting/.local/share/agent-bridge/qwen3-tts-venv/bin/python'
+export AB_QWEN3_LAN_WORKER_SOCKET='/Users/pallasting/.cache/agent-bridge/qwen3/worker.sock'
+export AB_QWEN3_LAN_HOST_KEY_ALIAS='192.168.1.2'
+```
+
+The adapter uses BatchMode SSH with strict host-key checking, a single-flight
+lock, bounded timeouts, a generated `/tmp` WAV path, `scp` return, and an
+explicit remote cleanup attempt. It does not change the default backend or
+fall back to local Qwen or macOS `say` when the LAN worker is unavailable.
+Health can be checked without synthesis:
+
+```sh
+python3 scripts/qwen3_lan_remote_synth.py --health
+```
+
 ## Worker contract validation
 
 Validate a worker without importing a model runtime or playing audio:

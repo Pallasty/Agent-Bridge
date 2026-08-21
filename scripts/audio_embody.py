@@ -872,6 +872,48 @@ def synth_qwen3(text, voice, speed, instruct=None, qwen_python=None, qwen_model=
     return wav, info
 
 
+def synth_qwen3_lan(text, voice, speed, instruct=None):
+    """Use the explicit LAN SSH Qwen worker; no local fallback is permitted."""
+    fd, wav = tempfile.mkstemp(prefix="ab_voice_qwen3_lan_", suffix=".wav")
+    os.close(fd)
+    os.unlink(wav)
+    adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "qwen3_lan_remote_synth.py")
+    if not os.path.exists(adapter):
+        return None, {"detail": f"Qwen3 LAN adapter not found: {adapter}"}
+    remote_host = os.environ.get("AB_QWEN3_LAN_REMOTE_HOST", "").strip()
+    remote_python = os.environ.get("AB_QWEN3_LAN_REMOTE_PYTHON", "").strip()
+    worker_socket = os.environ.get("AB_QWEN3_LAN_WORKER_SOCKET", "").strip()
+    if not remote_host or not remote_python or not worker_socket:
+        return None, {"detail": "Qwen3 LAN runtime not configured; set AB_QWEN3_LAN_REMOTE_HOST, AB_QWEN3_LAN_REMOTE_PYTHON, and AB_QWEN3_LAN_WORKER_SOCKET"}
+    cmd = [sys.executable, adapter, "--text", text, "--output", wav,
+           "--speaker", voice or "serena"]
+    if instruct:
+        cmd.extend(["--instruct", instruct])
+    try:
+        timeout_s = float(os.environ.get("AB_QWEN3_LAN_TIMEOUT_SECS", "180"))
+    except ValueError:
+        timeout_s = 180.0
+    timeout_s = max(30.0, min(timeout_s, 600.0))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return None, {"detail": f"Qwen3 LAN timed out after {timeout_s:g}s"}
+    try:
+        info = json.loads((proc.stdout or "").strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError):
+        info = {"detail": f"Qwen3 LAN produced no JSON receipt: {(proc.stderr or '')[:200]}"}
+    if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
+        if os.path.exists(wav):
+            try:
+                os.unlink(wav)
+            except OSError:
+                pass
+        return None, {"detail": info.get("detail", f"Qwen3 LAN rc={proc.returncode}")}
+    info["wpm"] = int(max(90, min(2.0, max(0.5, speed)) * 175))
+    return wav, info
+
+
 def synth_omnivoice(text, voice, speed, instruct=None, omnivoice_python=None,
                     omnivoice_manifest=None):
     """Run the default-off OmniVoice ONNX candidate through its pinned adapter."""
@@ -1099,6 +1141,8 @@ def synth_selected_backend(text, voice, speed, synth_backend="kokoro", synth_bin
     if synth_backend == "qwen3":
         return synth_qwen3(text, voice, speed, qwen_instruct,
                            qwen_python, qwen_model, qwen_worker)
+    if synth_backend == "qwen3-lan":
+        return synth_qwen3_lan(text, voice, speed, qwen_instruct)
     if synth_backend == "sherpa" and sherpa_worker:
         return synth_sherpa_worker(text, voice, speed, sherpa_worker)
     if synth_backend == "qwen3-rust":
@@ -1121,7 +1165,7 @@ def synth_selected_backend(text, voice, speed, synth_backend="kokoro", synth_bin
 def copy_backend_provenance(out, info, synth_backend):
     """Copy bounded runtime identity into a receipt without free-form prompts."""
     executed_backend = info.get("canary_executed_backend")
-    if synth_backend in {"qwen3", "qwen3-rust"} or (
+    if synth_backend in {"qwen3", "qwen3-lan", "qwen3-rust"} or (
             synth_backend == "canary" and executed_backend == "qwen3"):
         for field in ("model", "device", "dtype", "instruct_applied", "runtime",
                       "model_profile", "model_revision", "integrity_verified",
@@ -1440,10 +1484,14 @@ def run_render(text, voice, speed, synth_bin, synth_backend, output_file):
     out = {"mode": "render", "text": text, "voice": voice, "speed": speed,
            "synth_backend": synth_backend, "verified_to": None,
            "not_verified": "output bus and physical transducer (render mode never plays audio)"}
-    wav, info = synth_speech(text, voice, speed, synth_bin, backend=synth_backend)
+    if synth_backend == "qwen3-lan":
+        wav, info = synth_selected_backend(text, voice, speed, synth_backend, synth_bin)
+    else:
+        wav, info = synth_speech(text, voice, speed, synth_bin, backend=synth_backend)
     if wav is None:
         out.update(status="error", verify_status="error", detail=info.get("detail", "synth failed"))
         return out
+    copy_backend_provenance(out, info, synth_backend)
     target = os.path.abspath(output_file)
     try:
         target_dir = os.path.dirname(target)
@@ -1591,9 +1639,9 @@ def main():
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
     ap.add_argument("--output-file", default=None, help="render mode: durable WAV output path")
-    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust", "omnivoice", "canary"], default="kokoro",
+    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-lan", "qwen3-rust", "omnivoice", "canary"], default="kokoro",
                     help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | sherpa = Chinese multi-speaker VITS | say = macOS native | "
-                         "qwen3 = explicit Python CustomVoice | qwen3-rust = default-off local Rust gate | omnivoice = default-off ONNX pilot | canary = review-bound Qwen/OmniVoice selector; macOS uses synth_file STT verification)")
+                         "qwen3 = explicit Python CustomVoice | qwen3-lan = default-off LAN SSH Qwen worker | qwen3-rust = default-off local Rust gate | omnivoice = default-off ONNX pilot | canary = review-bound Qwen/OmniVoice selector; macOS uses synth_file STT verification)")
     ap.add_argument("--qwen-instruct", default=None, help="Qwen3 CustomVoice natural-language style instruction")
     ap.add_argument("--qwen-python", default=None, help="explicit isolated Python that has qwen-tts installed")
     ap.add_argument("--qwen-model", default=None, help="Qwen3 model id or local directory; defaults to 1.7B CustomVoice")
