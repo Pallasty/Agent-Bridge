@@ -8,7 +8,7 @@
 
 | Hook | CC 事件 | 源 | 职责 |
 |---|---|---|---|
-| `ab-memory-hook` | UserPromptSubmit | `crates/bridge/src/hooks/ab-memory-hook.sh`(setup.rs `include_str!`)| 注入记忆上下文(v5.0 起主路走 `session_bootstrap(query=<prompt>)` 语义排序,MCP 失败/超时退 v4 pure-SQL `static-fallback`;不再自增 always-inject 行的 access_count) |
+| `ab-memory-hook` | UserPromptSubmit | `crates/bridge/src/hooks/ab-memory-hook.sh`(setup.rs `include_str!`)| 注入记忆上下文(v5.0 起主路走 `session_bootstrap(query=<prompt>)` 语义排序，并携带只读、未选择、禁止自动执行的 durable-media recovery 候选提示；MCP 失败/超时退 v4 pure-SQL `static-fallback`;不再自增 always-inject 行的 access_count) |
 | `ab-seed-familiarity-hook` | UserPromptSubmit | ⚠️ 已部署,**源不在 setup.rs/repo**(孤儿,pre-existing)| substrate familiarity 探针 |
 | `ab-precompact-hook` | PreCompact | `crates/bridge/src/hooks/ab-precompact-hook.sh` | compact 前策展 |
 | `ab-session-end-hook` | Stop | `crates/bridge/src/hooks/ab-session-end-hook.sh` | session-end finalize |

@@ -217,6 +217,13 @@ operation ID and record SHA returned by the previous scan. The scanner then
 performs a locked read and returns `selection_conflict/replan` on any record
 drift, disappearance, expiry, or insufficient window. A stale candidate never
 becomes a recovery plan.
+
+`session_bootstrap` consumes this scanner as a bounded, read-only safety hint
+for both cold-start and query-targeted calls. This deliberately covers the
+default semantic `UserPromptSubmit` hook path without restoring unrelated
+global bootstrap panels. The rendered candidate remains explicitly unselected,
+workspace/intent-unbound, and forbidden from automatic execution; normal
+recovery still requires exact `operation_id` plus `record_sha256` revalidation.
 The two selection arguments are an inseparable pair; a bare ID or bare digest,
 and any human-semantic ID, are rejected before the journal is inspected.
 
