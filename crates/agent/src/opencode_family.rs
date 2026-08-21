@@ -270,6 +270,22 @@ fn is_provider_miss(output: &str) -> bool {
     output.contains("ProviderModelNotFoundError") || output.contains("Model not found")
 }
 
+/// OpenCode can print this expired-login error and still exit 0. Treat the
+/// proven provider message as a failed execution; broad user/model text such
+/// as `unauthorized` is intentionally not classified here.
+fn is_auth_failure(output: &str) -> bool {
+    let normalized = output.to_ascii_lowercase();
+    normalized.contains("token refresh failed: 401")
+}
+
+fn corrected_exit_code(exit_code: Option<i32>, stdout: &str, stderr: &str) -> Option<i32> {
+    if exit_code == Some(0) && (is_auth_failure(stdout) || is_auth_failure(stderr)) {
+        Some(1)
+    } else {
+        exit_code
+    }
+}
+
 /// Everything needed to (re)build the one-shot run Command, so the background
 /// wait loop can retry the SAME invocation on a free-pool miss without
 /// re-deriving it. `build()` only constructs the local/remote launch command;
@@ -674,6 +690,16 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                 None
                             }
                         });
+                        let auth_failure = exit_code == Some(0)
+                            && (is_auth_failure(&stdout) || is_auth_failure(&stderr));
+                        let exit_code = corrected_exit_code(exit_code, &stdout, &stderr);
+                        if auth_failure {
+                            warn!(
+                                session = %sid_bg,
+                                runtime = %runtime_id,
+                                "authentication failure reported by child; overriding successful exit status"
+                            );
+                        }
                         if let Some(store) = store_bg.clone() {
                             let _ = store
                                 .finalise_session(
@@ -914,6 +940,114 @@ mod tests {
         // a normal successful result must not look like a miss
         assert!(!is_provider_miss("4784d188c9f3\n"));
         assert!(!is_provider_miss(""));
+    }
+
+    #[test]
+    fn is_auth_failure_detects_success_exit_token_refresh_error() {
+        assert!(is_auth_failure("Error: Token refresh failed: 401"));
+        assert!(!is_auth_failure("authentication failed for provider"));
+        assert!(!is_auth_failure("request returned Unauthorized"));
+        assert!(!is_auth_failure("completed successfully"));
+        assert!(!is_auth_failure("ProviderModelNotFoundError"));
+    }
+
+    #[test]
+    fn corrected_exit_code_marks_auth_failure_even_when_child_exits_zero() {
+        assert_eq!(
+            corrected_exit_code(Some(0), "", "Error: Token refresh failed: 401"),
+            Some(1)
+        );
+        assert_eq!(corrected_exit_code(Some(7), "completed", ""), Some(7));
+        assert_eq!(
+            corrected_exit_code(Some(7), "", "Error: Token refresh failed: 401"),
+            Some(7)
+        );
+        assert_eq!(corrected_exit_code(None, "completed", ""), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn auth_refresh_failure_overrides_zero_in_persisted_session() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+        use std::sync::Arc;
+
+        let root = unique_temp_dir("ab-opencode-auth-failure");
+        fs::create_dir_all(&root).expect("mkdir root");
+        let binary = root.join("fake-opencode");
+        fs::write(
+            &binary,
+            "#!/bin/sh\nprintf '%s\\n' 'Error: Token refresh failed: 401' >&2\nexit 0\n",
+        )
+        .expect("write fake opencode");
+        let mut perms = fs::metadata(&binary).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&binary, perms).expect("chmod fake opencode");
+        let store = Arc::new(
+            SqliteStore::open(&root.join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let runtime = OpenCodeFamilyRuntime::opencode()
+            .with_binary(binary.display().to_string())
+            .with_store(store.clone());
+
+        runtime
+            .spawn(SpawnConfig {
+                cwd: root.display().to_string(),
+                initial_prompt: Some("hello".to_string()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn fake opencode");
+
+        let mut finalised = false;
+        let mut last_rows = Vec::new();
+        for _ in 0..80 {
+            let rows = store
+                .list_sessions(
+                    &SessionFilter {
+                        runtime_id: Some("opencode".to_string()),
+                        cwd_prefix: Some(root.display().to_string()),
+                        ..SessionFilter::default()
+                    },
+                    10,
+                )
+                .await
+                .expect("list sessions while waiting");
+            last_rows = rows.clone();
+            if rows
+                .first()
+                .is_some_and(|row| row.ended_at.is_some() && row.exit_code == Some(1))
+            {
+                finalised = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            finalised,
+            "auth refresh failure must persist as exit_code=1: {last_rows:?}"
+        );
+
+        let rows = store
+            .list_sessions(
+                &SessionFilter {
+                    runtime_id: Some("opencode".to_string()),
+                    cwd_prefix: Some(root.display().to_string()),
+                    ..SessionFilter::default()
+                },
+                10,
+            )
+            .await
+            .expect("list sessions");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].exit_code, Some(1));
+        assert!(rows[0]
+            .stderr
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Token refresh failed: 401"));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
