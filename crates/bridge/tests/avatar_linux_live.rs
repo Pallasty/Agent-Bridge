@@ -75,6 +75,13 @@ fn linux_live_dry_run_is_stable_non_mutating_and_action_free() {
     assert_eq!(payload["presence"]["heartbeat_interval_secs"], 5);
     assert_eq!(payload["renderer"]["duration_ms"], 1_000);
     assert_eq!(payload["renderer"]["state_poll"]["poll_ms"], 100);
+    assert_eq!(payload["observation"]["enabled"], true);
+    assert_eq!(payload["observation"]["read_only"], true);
+    assert_eq!(payload["observation"]["configured_poll_ms"], 100);
+    assert!(payload["observation"]["does_not_measure"]
+        .as_array()
+        .expect("observation exclusions")
+        .contains(&json!("physical_audio")));
     assert_eq!(
         payload["renderer"]["sprite"]["asset"],
         "xiao-shu-v3-ai-soft-bounce-v1"

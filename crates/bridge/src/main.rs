@@ -9137,6 +9137,26 @@ async fn run_avatar_linux_live(
         },
         "renderer": renderer_plan,
         "voice_feedback": voice_plan,
+        "observation": {
+            "enabled": true,
+            "read_only": true,
+            "configured_poll_ms": state_poll_ms,
+            "transition_sample_limit": 32,
+            "measures": [
+                "sidecar_poll_count",
+                "sidecar_read_failures",
+                "mode_transitions",
+                "max_observed_poll_gap_ms",
+                "process_peak_rss_bytes",
+                "voice_invocation_latency_ms"
+            ],
+            "does_not_measure": [
+                "compositor_pixels",
+                "physical_display",
+                "physical_audio",
+                "worker_vram"
+            ],
+        },
         "safety": {
             "foreground_only": true,
             "installs_service": false,
@@ -9221,6 +9241,17 @@ async fn run_avatar_linux_live(
     }
 
     let renderer_opts_for_run = renderer_opts.clone();
+    let observation_pet_id = pet_id.clone();
+    let observation_initial_mode = ab_bridge::avatar_live_voice::lifecycle_mode(&pet_state);
+    let observation_task = tokio::spawn(async move {
+        run_linux_live_observation(
+            observation_pet_id,
+            observation_initial_mode,
+            duration_ms,
+            state_poll_ms,
+        )
+        .await
+    });
     let voice_task = if voice_feedback {
         let voice_config = voice_config.clone();
         let voice_pet_id = pet_id.clone();
@@ -9266,6 +9297,10 @@ async fn run_avatar_linux_live(
         }
     };
     renderer_result.context("join Linux avatar native renderer")??;
+
+    let observation_receipt = observation_task
+        .await
+        .context("join Linux avatar live observation loop")?;
 
     let voice_receipt = match voice_task {
         Some(task) => task
@@ -9313,6 +9348,7 @@ async fn run_avatar_linux_live(
             "reason": "the native surface completed and polled the sidecar, but this foreground receipt does not capture compositor pixels or infer the final visible sprite",
         },
         "voice_feedback": voice_receipt,
+        "observation": observation_receipt,
         "safety": plan.get("safety").cloned().unwrap_or(Value::Null),
     });
     if as_json {
@@ -9326,6 +9362,35 @@ async fn run_avatar_linux_live(
         );
     }
     Ok(())
+}
+
+async fn run_linux_live_observation(
+    pet_id: String,
+    initial_mode: String,
+    duration_ms: u64,
+    poll_ms: u64,
+) -> Value {
+    let started = tokio::time::Instant::now();
+    let deadline = started + std::time::Duration::from_millis(duration_ms);
+    let mut poll = tokio::time::interval(std::time::Duration::from_millis(poll_ms));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut observation = ab_bridge::avatar_live_observation::LiveObservation::new(initial_mode);
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => break,
+            _ = poll.tick() => {
+                let elapsed = started.elapsed();
+                match ab_bridge::pet_state::read_pet_state(&pet_id) {
+                    Ok(Some(state)) => observation.observe(
+                        &ab_bridge::avatar_live_voice::lifecycle_mode(&state),
+                        elapsed,
+                    ),
+                    Ok(None) | Err(_) => observation.record_read_failure(elapsed),
+                }
+            }
+        }
+    }
+    observation.receipt(poll_ms, started.elapsed())
 }
 
 async fn run_linux_live_voice_feedback(
@@ -9345,6 +9410,8 @@ async fn run_linux_live_voice_feedback(
     let mut invocation_count = 0_u64;
     let mut utterance_count = 0_u64;
     let mut failure_count = 0_u64;
+    let mut invocation_elapsed_ms_total = 0_u64;
+    let mut invocation_elapsed_ms_max = 0_u64;
     let mut last_decision = Value::Null;
     let mut last_adapter_receipt = Value::Null;
 
@@ -9390,6 +9457,7 @@ async fn run_linux_live_voice_feedback(
                     continue;
                 }
                 invocation_count += 1;
+                let invocation_started = tokio::time::Instant::now();
                 let invocation_config = config.clone();
                 let args = ab_bridge::avatar_live_voice::invocation_args(
                     &invocation_config,
@@ -9405,6 +9473,13 @@ async fn run_linux_live_voice_feedback(
                         "detail": format!("voice adapter task failed: {error}"),
                     }),
                 };
+                let invocation_elapsed_ms = invocation_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u64::MAX as u128) as u64;
+                invocation_elapsed_ms_total =
+                    invocation_elapsed_ms_total.saturating_add(invocation_elapsed_ms);
+                invocation_elapsed_ms_max = invocation_elapsed_ms_max.max(invocation_elapsed_ms);
                 if ab_bridge::avatar_live_voice::adapter_receipt_emitted(&receipt) {
                     utterance_count += 1;
                     last_spoken_at = Some(linux_live_unix_time_secs());
@@ -9425,6 +9500,15 @@ async fn run_linux_live_voice_feedback(
         "invocation_count": invocation_count,
         "utterance_count": utterance_count,
         "failure_count": failure_count,
+        "invocation_latency_ms": {
+            "count": invocation_count,
+            "average": if invocation_count > 0 {
+                Some(invocation_elapsed_ms_total / invocation_count)
+            } else {
+                None
+            },
+            "max": if invocation_count > 0 { Some(invocation_elapsed_ms_max) } else { None },
+        },
         "emits_audio": utterance_count > 0,
         "cooldown_secs": config.cooldown_secs,
         "max_utterances": config.max_utterances,

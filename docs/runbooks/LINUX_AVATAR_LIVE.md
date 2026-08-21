@@ -115,3 +115,26 @@ reported as unverified at the output bus. `verified` uses the existing
 PipeWire-monitor falsifier and cannot claim output-bus delivery unless the
 captured envelope passes. Neither route proves headphone/speaker audibility;
 continuous microphone listening remains out of scope.
+
+## EAP-1C measurable trial receipt
+
+Every non-dry live run now includes an `observation` object in its final JSON
+receipt. Use `--json` and retain that stdout as the trial artifact. Observation
+is read-only and bounded to 32 transition samples; it records sidecar polling,
+read failures, observed mode transitions, the largest observed polling gap and
+this process's peak resident memory. When voice is enabled, the voice receipt
+also reports average and maximum adapter invocation time.
+
+For a useful promotion sample, run at least ten real task transitions and review:
+
+- `observation.sidecar.read_failures` is zero;
+- `observation.sidecar.max_observed_poll_gap_ms` remains close to the configured
+  polling interval under normal load;
+- transition samples match the task modes in sequence;
+- presence heartbeat failures remain zero;
+- voice invocation failures remain zero when the optional voice gate is used.
+
+These are process observations, not end-to-end sensory proof. The receipt keeps
+compositor pixels, the physical display, physical audio and worker VRAM marked
+unobserved. A compositor screenshot or human listening result must remain a
+separate evidence artifact.

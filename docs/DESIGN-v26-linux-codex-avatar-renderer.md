@@ -852,6 +852,13 @@ automatic service installation.
     Kokoro/Piper binary path. Audio remains opt-in and no service or worker is
     installed or started by the command.
 
+16. **Make bounded dogfood trials measurable.** Done for EAP-1C.
+    The foreground receipt now carries a read-only, bounded observation record:
+    sidecar poll/read-failure counts, mode-transition samples, maximum observed
+    poll gap, process peak RSS and Qwen adapter invocation latency. It explicitly
+    leaves compositor pixels, physical display/audio and worker VRAM unobserved,
+    so operational sampling cannot be mistaken for end-to-end proof.
+
 ---
 
 ## 12. Open Questions

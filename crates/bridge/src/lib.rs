@@ -13,6 +13,7 @@ pub mod avatar_alert;
 pub mod avatar_cortex;
 pub mod avatar_floater;
 pub mod avatar_health;
+pub mod avatar_live_observation;
 pub mod avatar_live_voice;
 pub mod avatar_native;
 pub mod avatar_renderer;
