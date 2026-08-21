@@ -2002,6 +2002,24 @@ raise SystemExit(2)
     assert_eq!(updated.title, "Media unavailable");
     assert!(updated.body.contains("More than one"));
     assert!(updated.media_context.is_none());
+
+    let repeated = tool
+        .execute(
+            json!({
+                "session_id": session_id,
+                "cwd": temp_dir,
+                "suppress_unchanged_display": true
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("repeated sync result");
+    assert!(!repeated.is_error);
+    let repeated_payload = result_text_as_json(&repeated);
+    assert_eq!(repeated_payload["status"], "unchanged_media_unavailable");
+    assert_eq!(repeated_payload["projection_update"]["revision"], 5);
+    let unchanged = mobile_projection_test_frame(&session_id).expect("unchanged frame");
+    assert_eq!(unchanged.revision, 5);
     mobile_projection_test_remove_state(&session_id);
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }

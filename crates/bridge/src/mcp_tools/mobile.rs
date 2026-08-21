@@ -2676,6 +2676,35 @@ impl McpTool for MobileProjectionSyncMediaTool {
             let Some(unavailable) = mobile_projection_media_unavailable(&payload) else {
                 return Ok(read_result);
             };
+            if args
+                .get("suppress_unchanged_display")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                let frame = state.frame.read().unwrap();
+                let unchanged = frame.title == unavailable["title"]
+                    && frame.body == unavailable["body"]
+                    && frame.status.as_deref() == unavailable["status"].as_str()
+                    && frame.media_context.is_none();
+                if unchanged {
+                    return Ok(ToolResult::json_text(&json!({
+                        "schema": "agent_bridge.mobile_projection_sync_media.v0",
+                        "status": "unchanged_media_unavailable",
+                        "verdict": "verified",
+                        "recover": "replan",
+                        "session_id": session_id,
+                        "media_context": Value::Null,
+                        "unavailable": unavailable,
+                        "app_control": mobile_projection_app_control_evidence(&payload),
+                        "projection_update": {
+                            "status": "unchanged",
+                            "revision": frame.revision,
+                            "changed_fields": []
+                        },
+                        "authority": {"attention": false, "memory": false, "sensor": false, "actuation": false}
+                    })));
+                }
+            }
             let update_args = json!({
                 "session_id": session_id,
                 "title": unavailable["title"],
