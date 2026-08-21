@@ -386,6 +386,43 @@ class FocusContinuityEligibilityTests(unittest.TestCase):
         self.assertNotIn("target-window", json.dumps(result))
         self.assertNotIn("Target", json.dumps(result))
 
+    def test_runtime_probe_shape_without_hardened_fields_stays_ineligible(self):
+        # This mirrors the deployed macos_ax_probe/v0 shape: it is useful for
+        # observation, but it is not an admission receipt by itself.
+        value = {
+            "schema": "macos_ax_probe/v0",
+            "captured_at": 1000,
+            "platform": {"system": "Darwin"},
+            "read_only": True,
+            "status": "ready",
+            "permission": {"ax_trusted": True, "prompted": False},
+            "frontmost_app": {"pid": 5722, "bundle_id": "com.openai.codex"},
+            "windows": [
+                {"index": 0, "title": "ChatGPT", "role": "AXWindow", "focused": False}
+            ],
+            "window_count": 1,
+            "source_window_count": 1,
+            "limits": {"max_windows": 16, "truncated": False, "include_windows": True},
+            "errors": [],
+        }
+        result = ELIGIBILITY.summarize(value, now=1001)
+        self.assertFalse(result["eligible_now"])
+        self.assertEqual(
+            result["ineligibility_reasons"],
+            [
+                "app_identity_invalid",
+                "counts_inconsistent",
+                "coverage_incomplete",
+                "fewer_than_two_stable_windows",
+                "incomplete_reasons_present",
+                "no_unfocused_stable_window",
+                "selector_attributes_incomplete",
+                "windows_not_readable",
+            ],
+        )
+        self.assertNotIn("ChatGPT", json.dumps(result))
+        self.assertNotIn("com.openai.codex", json.dumps(result))
+
     def test_native_probe_source_is_read_only_and_has_no_system_events_dependency(self):
         source = (ROOT / "scripts/macos_ax_native_probe.swift").read_text(encoding="utf-8")
         self.assertIn("NSWorkspace.shared.frontmostApplication", source)
