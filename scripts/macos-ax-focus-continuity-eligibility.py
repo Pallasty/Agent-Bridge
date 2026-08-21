@@ -21,7 +21,13 @@ def _digest(value: str | None) -> str | None:
 def summarize(value: Any, *, now: float | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
     if not isinstance(value, dict):
-        return {"schema": SCHEMA, "status": "ineligible", "reason": "probe_not_object"}
+        return {
+            "schema": SCHEMA,
+            "status": "ineligible",
+            "eligible_now": False,
+            "reason": "probe_not_object",
+            "ineligibility_reasons": ["probe_not_object"],
+        }
     windows = value.get("windows") if isinstance(value.get("windows"), list) else []
     stable: list[dict[str, Any]] = []
     complete = True
@@ -101,10 +107,59 @@ def summarize(value: Any, *, now: float | None = None) -> dict[str, Any]:
             age_ms is not None and age_ms <= 5000,
         )
     )
+    reasons: list[str] = []
+
+    def require(condition: bool, reason: str) -> None:
+        if not condition:
+            reasons.append(reason)
+
+    require(value.get("schema") == "macos_ax_probe/v0", "probe_schema_invalid")
+    require(value.get("status") == "ready", "probe_not_ready")
+    require(value.get("read_only") is True, "probe_not_read_only")
+    require(
+        isinstance(value.get("platform"), dict)
+        and value["platform"].get("system") == "Darwin",
+        "platform_not_darwin",
+    )
+    require(permission.get("ax_trusted") is True, "ax_not_trusted")
+    require(permission.get("prompted") is False, "permission_prompted")
+    require(value.get("windows_read_ok") is True, "windows_not_readable")
+    require(value.get("coverage_complete") is True, "coverage_incomplete")
+    require(value.get("counts_consistent") is True, "counts_inconsistent")
+    require(limits.get("truncated") is False, "window_list_truncated")
+    if "errors" not in value:
+        reasons.append("probe_errors_missing")
+    else:
+        require(value.get("errors") == [], "probe_errors_present")
+    if "incomplete_reasons" not in value:
+        reasons.append("incomplete_reasons_missing")
+    else:
+        require(value.get("incomplete_reasons") == [], "incomplete_reasons_present")
+    require(value.get("app_identity_valid") is True, "app_identity_invalid")
+    require(
+        isinstance(frontmost.get("pid"), int)
+        and not isinstance(frontmost.get("pid"), bool)
+        and frontmost["pid"] > 0,
+        "frontmost_pid_invalid",
+    )
+    require(value.get("window_count") == len(windows), "window_count_mismatch")
+    require(
+        value.get("source_window_count") == len(windows),
+        "source_window_count_mismatch",
+    )
+    require(complete, "selector_attributes_incomplete")
+    require(len(stable) >= 2, "fewer_than_two_stable_windows")
+    require(len(identities) == len(set(identities)), "stable_window_ids_not_unique")
+    require(len(unfocused) >= 1, "no_unfocused_stable_window")
+    require(age_ms is not None and age_ms <= 5000, "probe_stale_or_timestamp_invalid")
+    # Keep the reducer's output deterministic and content-free even if several
+    # independent admission checks fail at once.
+    reasons = sorted(set(reasons))
     return {
         "schema": SCHEMA,
         "status": "eligible" if eligible else "ineligible",
         "eligible_now": eligible,
+        "ineligibility_reasons": reasons,
         "probe_schema": value.get("schema"),
         "probe_status": value.get("status"),
         "platform_system": value.get("platform", {}).get("system")
