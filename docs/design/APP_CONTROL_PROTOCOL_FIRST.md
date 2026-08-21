@@ -224,6 +224,14 @@ default semantic `UserPromptSubmit` hook path without restoring unrelated
 global bootstrap panels. The rendered candidate remains explicitly unselected,
 workspace/intent-unbound, and forbidden from automatic execution; normal
 recovery still requires exact `operation_id` plus `record_sha256` revalidation.
+The default prompt hook applies presentation-only, session-local deduplication:
+an unchanged candidate set is shown once per frontend session and is surfaced
+again when its record identity changes or its remaining TTL crosses the
+five-minute or one-minute urgency boundary. A new session still sees the full
+cold-start hint. The owner-only atomic presentation state records no dispatch
+authority, and filter failure preserves the original hint. When a previously
+shown set is absent from a later successful bootstrap output, the hook emits
+one non-authoritative disappearance notice without claiming completion.
 The two selection arguments are an inseparable pair; a bare ID or bare digest,
 and any human-semantic ID, are rejected before the journal is inspected.
 

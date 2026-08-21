@@ -74,6 +74,7 @@ RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-brid
 RUNTIME_ASSETS=(
     app_control.py
     app-control-recovery-candidates.py
+    app-control-recovery-hint-dedupe.py
     desktop_action.py
     desktop_confirm_store.py
     desktop_grant.py

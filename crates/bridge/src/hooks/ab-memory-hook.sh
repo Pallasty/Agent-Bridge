@@ -205,7 +205,10 @@ CWD="${PWD:-/}"
 AB_BIN="${AB_MEMORY_HOOK_AB_BIN:-$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")}"
 OUTPUT=""
 if [[ "${AB_MEMORY_HOOK_STATIC:-}" != "1" && -x "$AB_BIN" ]]; then
-    OUTPUT=$(AB_HOOK_PAYLOAD="$HOOK_PAYLOAD" timeout 4 python3 - "$AB_BIN" <<'PY' 2>/dev/null
+    OUTPUT=$(AB_HOOK_PAYLOAD="$HOOK_PAYLOAD" \
+        AB_RECOVERY_HINT_SESSION_ID="$SESSION_ID" \
+        AB_RECOVERY_HINT_STATE_DIR="$_AB_STATE_DIR/recovery-hint-presentations" \
+        timeout 4 python3 - "$AB_BIN" <<'PY' 2>/dev/null
 import json, os, re, subprocess, sys
 
 AB = sys.argv[1]
@@ -253,6 +256,25 @@ for line in proc.stdout.splitlines():
 text = text.strip()
 if not text or text.startswith("(no scoped memories"):
     sys.exit(1)
+
+# Presentation-only dedupe. Failure preserves the original safety hint; the
+# helper never reads the operation journal and cannot authorize an action.
+runtime_dir = os.environ.get("AGENT_BRIDGE_RUNTIME_ASSET_DIR") or os.path.expanduser(
+    "~/.local/lib/agent-bridge/scripts"
+)
+helper = os.path.join(runtime_dir, "app-control-recovery-hint-dedupe.py")
+session_id = os.environ.get("AB_RECOVERY_HINT_SESSION_ID", "")
+state_dir = os.environ.get("AB_RECOVERY_HINT_STATE_DIR", "")
+if session_id and state_dir and os.path.isfile(helper):
+    try:
+        filtered = subprocess.run(
+            [sys.executable, helper, "--state-dir", state_dir, "--session-id", session_id],
+            input=text, capture_output=True, text=True, timeout=0.25,
+        )
+        if filtered.returncode == 0 and filtered.stdout.strip():
+            text = filtered.stdout.strip()
+    except Exception:
+        pass
 
 print(json.dumps({
     "hookSpecificOutput": {

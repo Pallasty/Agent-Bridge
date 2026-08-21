@@ -39,6 +39,7 @@ merge settings.json 的 `UserPromptSubmit/Stop/PreCompact`。
 | Env | Hook | 默认 | 含义 |
 |---|---|---|---|
 | `AB_MEMORY_COOLDOWN_TURNS` | memory | `8`(P-A1 locked)| 记忆注入间隔轮数;`999999` ≈ 还原 one-shot |
+| `AGENT_BRIDGE_RUNTIME_ASSET_DIR` | memory | `~/.local/lib/agent-bridge/scripts` | 查找只读 recovery hint 去重过滤器；缺失或失败时保留原始提示（fail-open for visibility） |
 | `AB_PET_AUTO_TTS` | session-end | unset(关)| TTS spec |
 | `AB_PET_AUTO_TTS_CHANNEL` | session-end | `tts` | TTS 通道 |
 | `AB_PET_AUTO_TTS_COOLDOWN_SECONDS` | session-end | `1800` | TTS 冷却秒 |
