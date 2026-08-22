@@ -30,6 +30,21 @@ export AB_FACE_OUTPUT="${AB_FACE_OUTPUT:-}"            # Wayland output name (e.
 export AB_FACE_SESSION_ID="${AB_FACE_SESSION_ID:-com.agentbridge.avatar-face.agent-bridge}"
 export AB_FACE_HEARTBEAT_SECS="${AB_FACE_HEARTBEAT_SECS:-15}"
 export AB_FACE_ACTIVITY_STATE="${AB_FACE_ACTIVITY_STATE:-idle}"
+# Sparse voice is an independent observer and remains explicitly default-off.
+# When enabled, the launcher fail-closes unless its dry-run plan reports ready.
+export AB_FACE_VOICE_ENABLED="${AB_FACE_VOICE_ENABLED:-0}"
+export AB_FACE_VOICE_BACKEND="${AB_FACE_VOICE_BACKEND:-qwen3}"
+export AB_FACE_VOICE_SEG="${AB_FACE_VOICE_SEGMENT_MS:-86400000}"
+export AB_FACE_VOICE_POLL_MS="${AB_FACE_VOICE_POLL_MS:-500}"
+export AB_FACE_VOICE_COOLDOWN_SECS="${AB_FACE_VOICE_COOLDOWN_SECS:-300}"
+export AB_FACE_VOICE_MAX_UTTERANCES="${AB_FACE_VOICE_MAX_UTTERANCES:-3}"
+export AB_FACE_QWEN_WORKER="${AB_FACE_QWEN_WORKER:-${AB_QWEN3_TTS_WORKER_SOCKET:-}}"
+export AB_FACE_VOICE_SCRIPT="${AB_FACE_VOICE_SCRIPT:-}"
+export AB_FACE_VOICE_SINK="${AB_FACE_VOICE_SINK:-}"
+if [ "$AB_FACE_VOICE_ENABLED" != "0" ] && [ "$AB_FACE_VOICE_ENABLED" != "1" ]; then
+  echo "AB_FACE_VOICE_ENABLED must be 0 or 1." >&2
+  exit 2
+fi
 
 # Single-instance lock + supervise-loop pidfile. Prefer XDG_RUNTIME_DIR (already
 # user-private); the /tmp fallback is namespaced by uid so it isn't a shared
@@ -38,6 +53,7 @@ AB_FACE_RUNDIR="${XDG_RUNTIME_DIR:-/tmp/ab-face-$(id -u)}"
 mkdir -p "$AB_FACE_RUNDIR" 2>/dev/null || true
 AB_FACE_LOCK="$AB_FACE_RUNDIR/ab-face-native.lock"
 AB_FACE_PIDFILE="$AB_FACE_RUNDIR/ab-face-native.pid"
+export AB_FACE_VOICE_PIDFILE="$AB_FACE_RUNDIR/ab-face-voice-observer.pid"
 
 native_cmd_for_pid() {
   local pid="$1"
@@ -47,6 +63,16 @@ native_cmd_for_pid() {
   local exe="${cmd%% *}"
   [ "$(basename "$exe")" = "$(basename "$AB_FACE_BIN")" ] \
     && [[ "$cmd" == *" avatar linux-native-transparent "* ]]
+}
+
+voice_cmd_for_pid() {
+  local pid="$1"
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  local cmd
+  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  local exe="${cmd%% *}"
+  [ "$(basename "$exe")" = "$(basename "$AB_FACE_BIN")" ] \
+    && [[ "$cmd" == *" avatar voice-observe "* ]]
 }
 
 supervisor_cmd_for_pid() {
@@ -66,18 +92,31 @@ supervisor_pid() {
   fi
 }
 
+voice_supervisor_pid() {
+  local pid
+  pid="$(cat "$AB_FACE_VOICE_PIDFILE" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
+      && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'voice_loop' \
+      && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'voice-observe'; then
+    printf '%s\n' "$pid"
+  fi
+}
+
 if [ "${1:-}" = "--status" ]; then
   json_status=0
   [ "${2:-}" = "--json" ] && json_status=1
   supervisor="$(supervisor_pid)"
+  voice_supervisor="$(voice_supervisor_pid)"
   child=""
+  voice_child=""
   for face_cmdline in /proc/[0-9]*/cmdline; do
     [ -r "$face_cmdline" ] || continue
     face_pid="${face_cmdline#/proc/}"
     face_pid="${face_pid%/cmdline}"
     if native_cmd_for_pid "$face_pid"; then
       child="$face_pid"
-      break
+    elif voice_cmd_for_pid "$face_pid"; then
+      voice_child="$face_pid"
     fi
   done
   endpoint="unreachable"
@@ -92,12 +131,16 @@ if [ "${1:-}" = "--status" ]; then
     state="stopped"
   fi
   if [ "$json_status" -eq 1 ]; then
-    printf '{"surface":"linux_avatar_native_entrypoint_status","state":"%s","supervisor_pid":%s,"renderer_pid":%s,"state_endpoint":"%s"}\n' \
-      "$state" "${supervisor:-null}" "${child:-null}" "$endpoint"
+    printf '{"surface":"linux_avatar_native_entrypoint_status","state":"%s","supervisor_pid":%s,"renderer_pid":%s,"voice_supervisor_pid":%s,"voice_observer_pid":%s,"voice_configured":%s,"state_endpoint":"%s"}\n' \
+      "$state" "${supervisor:-null}" "${child:-null}" "${voice_supervisor:-null}" "${voice_child:-null}" \
+      "$([ "$AB_FACE_VOICE_ENABLED" = "1" ] && printf true || printf false)" "$endpoint"
   else
     printf 'native Face status: %s\n' "$state"
     printf '  supervisor_pid: %s\n' "${supervisor:-none}"
     printf '  renderer_pid:   %s\n' "${child:-none}"
+    printf '  voice_pid:      %s\n' "${voice_child:-none}"
+    printf '  voice_supervisor_pid: %s\n' "${voice_supervisor:-none}"
+    printf '  voice_config:   %s\n' "$([ "$AB_FACE_VOICE_ENABLED" = "1" ] && printf enabled || printf disabled)"
     printf '  state_endpoint: %s\n' "$endpoint"
   fi
   exit 0
@@ -123,11 +166,11 @@ if [ "${1:-}" = "--stop" ]; then
     face_pid="${face_pid%/cmdline}"
     if supervisor_cmd_for_pid "$face_pid"; then
       kill -- "-$face_pid" 2>/dev/null || kill "$face_pid" 2>/dev/null || true
-    elif native_cmd_for_pid "$face_pid"; then
+    elif native_cmd_for_pid "$face_pid" || voice_cmd_for_pid "$face_pid"; then
       kill "$face_pid" 2>/dev/null || true
     fi
   done
-  rm -f "$AB_FACE_PIDFILE"
+  rm -f "$AB_FACE_PIDFILE" "$AB_FACE_VOICE_PIDFILE"
   exit 0
 fi
 
@@ -169,6 +212,27 @@ if ! curl -s -o /dev/null "${AB_FACE_STATE_URL%%\?*}" 2>/dev/null; then
   exit 1
 fi
 
+if [ "$AB_FACE_VOICE_ENABLED" = "1" ]; then
+  voice_preflight=(
+    avatar voice-observe --pet-id "$AB_FACE_PET_ID"
+    --voice-backend "$AB_FACE_VOICE_BACKEND"
+    --duration-ms "$AB_FACE_VOICE_SEG" --state-poll-ms "$AB_FACE_VOICE_POLL_MS"
+    --voice-cooldown-secs "$AB_FACE_VOICE_COOLDOWN_SECS"
+    --voice-max-utterances "$AB_FACE_VOICE_MAX_UTTERANCES" --dry-run --json
+  )
+  [ -n "$AB_FACE_QWEN_WORKER" ] && voice_preflight+=(--qwen-worker "$AB_FACE_QWEN_WORKER")
+  [ -n "$AB_FACE_VOICE_SCRIPT" ] && voice_preflight+=(--voice-script "$AB_FACE_VOICE_SCRIPT")
+  [ -n "$AB_FACE_VOICE_SINK" ] && voice_preflight+=(--voice-sink "$AB_FACE_VOICE_SINK")
+  voice_plan="$("$AB_FACE_BIN" "${voice_preflight[@]}" 2>/dev/null)" || {
+    echo "voice observer preflight failed — native Face was not started." >&2
+    exit 1
+  }
+  if ! grep -Eq '"ready"[[:space:]]*:[[:space:]]*true' <<<"$voice_plan"; then
+    echo "voice observer is not ready — native Face was not started." >&2
+    exit 1
+  fi
+fi
+
 # supervise loop, detached. The bounded probe exits after each segment; respawn
 # it so the face stays up. setsid bash -c inherits the exported AB_FACE_* env, so
 # no fragile quote-splicing. A short sleep avoids a hot respawn loop on failure.
@@ -187,10 +251,37 @@ setsid bash -c '
       sleep "$AB_FACE_HEARTBEAT_SECS"
     done
   }
+  voice_loop() {
+    while true; do
+      voice_args=(
+        avatar voice-observe --pet-id "$AB_FACE_PET_ID"
+        --voice-backend "$AB_FACE_VOICE_BACKEND"
+        --duration-ms "$AB_FACE_VOICE_SEG" --state-poll-ms "$AB_FACE_VOICE_POLL_MS"
+        --voice-cooldown-secs "$AB_FACE_VOICE_COOLDOWN_SECS"
+        --voice-max-utterances "$AB_FACE_VOICE_MAX_UTTERANCES" --json
+      )
+      [ -n "$AB_FACE_QWEN_WORKER" ] && voice_args+=(--qwen-worker "$AB_FACE_QWEN_WORKER")
+      [ -n "$AB_FACE_VOICE_SCRIPT" ] && voice_args+=(--voice-script "$AB_FACE_VOICE_SCRIPT")
+      [ -n "$AB_FACE_VOICE_SINK" ] && voice_args+=(--voice-sink "$AB_FACE_VOICE_SINK")
+      "$AB_FACE_BIN" "${voice_args[@]}" >/dev/null 2>&1 || true
+      sleep 1
+    done
+  }
   heartbeat_loop &
   AB_FACE_HEARTBEAT_PID=$!
-  trap "kill $AB_FACE_HEARTBEAT_PID 2>/dev/null || true" EXIT
-  trap "kill $AB_FACE_HEARTBEAT_PID 2>/dev/null || true; exit 143" INT TERM
+  AB_FACE_VOICE_PID=""
+  if [ "$AB_FACE_VOICE_ENABLED" = "1" ]; then
+    voice_loop &
+    AB_FACE_VOICE_PID=$!
+    printf "%s\n" "$AB_FACE_VOICE_PID" >"$AB_FACE_VOICE_PIDFILE" 2>/dev/null || true
+  fi
+  cleanup_children() {
+    kill "$AB_FACE_HEARTBEAT_PID" 2>/dev/null || true
+    [ -z "$AB_FACE_VOICE_PID" ] || kill "$AB_FACE_VOICE_PID" 2>/dev/null || true
+    rm -f "$AB_FACE_VOICE_PIDFILE"
+  }
+  trap cleanup_children EXIT
+  trap "cleanup_children; exit 143" INT TERM
   while true; do
     "$AB_FACE_BIN" avatar linux-native-transparent \
       --mode "$AB_FACE_MODE" --pet-id "$AB_FACE_PET_ID" --state-url "$AB_FACE_STATE_URL" \
@@ -208,5 +299,6 @@ disown
 printf '%s\n' "$AB_FACE_LOOP_PID" >"$AB_FACE_PIDFILE" 2>/dev/null || true
 
 echo "native Face up (supervised, detached) — anchor=$AB_FACE_ANCHOR ${AB_FACE_W}x${AB_FACE_H} segment=${AB_FACE_SEG}ms"
+echo "  sparse voice: $([ "$AB_FACE_VOICE_ENABLED" = "1" ] && printf enabled || printf disabled)"
 echo "  stop with: $0 --stop   # self-validating: group-kills only if the recorded pid is alive AND ours"
 echo "  (do NOT 'pkill -f face-native-launch' — that -f pattern matches your own shell and self-kills)"

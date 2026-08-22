@@ -14,6 +14,24 @@ The supervisor also refreshes a dedicated `native-face` presence session every
 15 seconds, so the renderer-state source remains fresh instead of displaying a
 stale session row. Override the interval with `AB_FACE_HEARTBEAT_SECS`.
 
+Sparse voice remains disabled unless the owner explicitly enables its separate
+read-only observer. For the authenticated Mac LAN route:
+
+```bash
+export AB_FACE_VOICE_ENABLED=1
+export AB_FACE_VOICE_BACKEND=qwen3-lan
+# Also export the four AB_QWEN3_LAN_* values from MACOS_QWEN3_TTS_PILOT.md.
+./scripts/dock/face-native-launch.sh
+```
+
+Before detaching anything, the launcher runs `avatar voice-observe --dry-run`
+and fails closed unless the plan reports `ready=true`. The observer starts no
+renderer, writes neither presence nor pet state, begins silently, and shares
+the renderer's process group only for reliable lifecycle teardown. Override its
+bounded segment, poll, cooldown, and budget with `AB_FACE_VOICE_SEGMENT_MS`,
+`AB_FACE_VOICE_POLL_MS`, `AB_FACE_VOICE_COOLDOWN_SECS`, and
+`AB_FACE_VOICE_MAX_UTTERANCES`.
+
 Check the lifecycle without parsing process listings:
 
 ```bash
@@ -22,8 +40,10 @@ Check the lifecycle without parsing process listings:
 ```
 
 The JSON status distinguishes `running`, `supervisor_only`, and `stopped`, and
-reports whether the renderer-state endpoint is reachable. A renderer restart
-changes `renderer_pid` while retaining the same supervisor.
+reports the renderer PID, stable optional `voice_supervisor_pid`, transient
+`voice_observer_pid`, current invocation's `voice_configured` flag, and
+renderer-state endpoint reachability. A voice worker restart changes only the
+transient PID while retaining its voice supervisor.
 
 Stop the session-owned Avatar explicitly:
 
