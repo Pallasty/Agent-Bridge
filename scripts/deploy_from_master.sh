@@ -195,32 +195,58 @@ preflight_macos_launchagent() {
 }
 
 refresh_macos_launchagent() {
-    local label="$1" expected_inode="$2" domain="gui/$(id -u)" target dump pid loaded_inode attempt
+    local label="$1" expected_inode="$2" health_url="${3:-}" domain="gui/$(id -u)" target
+    local dump pid loaded_inode attempt stable_pid stable_count health_ok
     target="$domain/$label"
     say ">> refreshing launchd service -> $label"
     launchctl kickstart -k "$target" || die "failed to restart launchd service: $label"
 
     attempt=0
-    while [ "$attempt" -lt 40 ]; do
+    stable_pid=""
+    stable_count=0
+    while [ "$attempt" -lt "${AGENT_BRIDGE_SERVICE_VERIFY_ATTEMPTS:-200}" ]; do
         dump="$(launchctl print "$target" 2>/dev/null || true)"
         pid="$(printf '%s\n' "$dump" | awk -F ' = ' '$1 ~ /^[[:space:]]*pid$/ { print $2; exit }')"
+        loaded_inode=""
+        health_ok=0
         if [ -n "$pid" ]; then
             loaded_inode="$({ lsof -a -p "$pid" -d txt -F in 2>/dev/null || true; } |
                 awk -v want="$REAL_PATH" '
                     /^i[0-9]+$/ { inode=substr($0, 2); next }
                     /^n/ && substr($0, 2) == want { print inode; exit }
                 ')"
-            if [ "$loaded_inode" = "$expected_inode" ]; then
-                say "launchd service inode: OK ($label pid=$pid inode=$loaded_inode)"
+            if [ -z "$health_url" ]; then
+                health_ok=1
+            elif lsof -nP -a -p "$pid" -iTCP:7878 -sTCP:LISTEN -F p 2>/dev/null |
+                    grep -qx "p$pid" &&
+                    curl -fsS --max-time 0.2 "$health_url" 2>/dev/null | grep -qx 'ok'; then
+                health_ok=1
+            fi
+            if [ "$loaded_inode" = "$expected_inode" ] && [ "$health_ok" -eq 1 ]; then
+                if [ "$pid" = "$stable_pid" ]; then
+                    stable_count=$((stable_count + 1))
+                else
+                    stable_pid="$pid"
+                    stable_count=1
+                fi
+            else
+                stable_pid=""
+                stable_count=0
+            fi
+            if [ "$stable_count" -ge 8 ]; then
+                say "launchd service stable: OK ($label pid=$pid inode=$loaded_inode${health_url:+ health=$health_url})"
                 SERVICE_REFRESHED=$((SERVICE_REFRESHED + 1))
                 return 0
             fi
+        else
+            stable_pid=""
+            stable_count=0
         fi
         attempt=$((attempt + 1))
         sleep 0.25
     done
 
-    die "launchd service did not adopt deployed inode: $label (expected $expected_inode, observed ${loaded_inode:-none})"
+    die "launchd service did not become stable and healthy: $label (expected inode $expected_inode, observed ${loaded_inode:-none}${health_url:+, health $health_url})"
 }
 
 # The anti-regression gate depends on `strings` (binutils). If it is missing,
@@ -260,12 +286,34 @@ markers_in() {
 CLEANUP_WT=""
 CLEANUP_RUNTIME_STAGE=""
 CLEANUP_PKG_CONFIG=""
+CLEANUP_DEPLOY_LOCK=""
 cleanup() {
     [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
     [ -n "$CLEANUP_RUNTIME_STAGE" ] && rm -rf "$CLEANUP_RUNTIME_STAGE" 2>/dev/null || true
     [ -n "$CLEANUP_PKG_CONFIG" ] && rm -rf "$CLEANUP_PKG_CONFIG" 2>/dev/null || true
+    if [ -n "$CLEANUP_DEPLOY_LOCK" ] &&
+            [ "$(cat "$CLEANUP_DEPLOY_LOCK/pid" 2>/dev/null || true)" = "$$" ]; then
+        rm -rf "$CLEANUP_DEPLOY_LOCK" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
+
+# Serialize the complete build/install/restart transaction. Per-SHA Cargo
+# targets prevent build corruption, but the installed binary, assets, backups,
+# and launchd jobs are shared mutable state.
+mkdir -p "$INSTALL_DIR"
+deploy_lock="$INSTALL_DIR/.agent-bridge-deploy.lock"
+if ! mkdir "$deploy_lock" 2>/dev/null; then
+    lock_pid="$(cat "$deploy_lock/pid" 2>/dev/null || true)"
+    [ -n "$lock_pid" ] || die "deploy lock exists without an owner: $deploy_lock"
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+        die "another agent-bridge deploy is running (pid $lock_pid)"
+    fi
+    rm -rf "$deploy_lock" 2>/dev/null || die "cannot reclaim stale deploy lock: $deploy_lock"
+    mkdir "$deploy_lock" 2>/dev/null || die "another agent-bridge deploy acquired the lock"
+fi
+printf '%s\n' "$$" > "$deploy_lock/pid"
+CLEANUP_DEPLOY_LOCK="$deploy_lock"
 
 # ---- 1. obtain the NEW binary (build from latest master, or --use-binary) ----
 NEW_BIN=""
@@ -584,12 +632,17 @@ if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
     if [ "$refresh_daemon" -eq 1 ] || [ "$refresh_daemon_http" -eq 1 ]; then
         command -v lsof >/dev/null 2>&1 ||
             die "lsof is required to verify refreshed launchd service inodes"
+        if [ "$refresh_daemon_http" -eq 1 ]; then
+            command -v curl >/dev/null 2>&1 ||
+                die "curl is required to verify daemon-http health"
+        fi
         deployed_inode="$(file_inode "$REAL_PATH")" ||
             die "cannot read deployed binary inode for launchd verification: $REAL_PATH"
         [ "$refresh_daemon" -eq 0 ] ||
             refresh_macos_launchagent "com.pallasting.agent-bridge.daemon" "$deployed_inode"
         [ "$refresh_daemon_http" -eq 0 ] ||
-            refresh_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "$deployed_inode"
+            refresh_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "$deployed_inode" \
+                "http://127.0.0.1:7878/healthz"
     fi
     say "launchd service refresh: $SERVICE_REFRESHED service(s) adopted the deployed binary"
 fi

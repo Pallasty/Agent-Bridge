@@ -33,6 +33,7 @@ RUNTIME_ASSET_DIR="$TEST_ROOT/lib/agent-bridge/scripts"
 TARGET_ROOT="$TEST_ROOT/target"
 LAUNCHCTL_LOG="$TEST_ROOT/launchctl.log"
 LSOF_COUNT="$TEST_ROOT/lsof.count"
+CURL_COUNT="$TEST_ROOT/curl.count"
 
 mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR"
 git init -q --bare "$REMOTE"
@@ -120,6 +121,9 @@ chmod +x "$FAKE_BIN/launchctl"
 cat > "$FAKE_BIN/lsof" <<'FAKE_LSOF'
 #!/usr/bin/env bash
 set -euo pipefail
+case " $* " in
+    *" -iTCP:7878 "*) printf 'p4242\n'; exit 0 ;;
+esac
 count=0
 [ ! -f "$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT" ] || count="$(cat "$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT")"
 count=$((count + 1))
@@ -129,6 +133,20 @@ inode="$(stat -f %i "$AB_DEPLOY_SERVICE_TEST_REAL" 2>/dev/null || stat -c %i "$A
 printf 'p4242\nftxt\ni999\nn/tmp/not-the-agent-bridge-binary\nftxt\ni%s\nn%s\n' "$inode" "$AB_DEPLOY_SERVICE_TEST_REAL"
 FAKE_LSOF
 chmod +x "$FAKE_BIN/lsof"
+
+cat > "$FAKE_BIN/curl" <<'FAKE_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+count=0
+[ ! -f "$AB_DEPLOY_SERVICE_TEST_CURL_COUNT" ] || count="$(cat "$AB_DEPLOY_SERVICE_TEST_CURL_COUNT")"
+count=$((count + 1))
+printf '%s\n' "$count" > "$AB_DEPLOY_SERVICE_TEST_CURL_COUNT"
+[ "${!#}" = "http://127.0.0.1:7878/healthz" ] || exit 2
+[ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" != never_healthy ] || exit 22
+[ "$count" -gt 4 ] || exit 22
+printf 'ok\n'
+FAKE_CURL
+chmod +x "$FAKE_BIN/curl"
 
 cat > "$FAKE_BIN/uname" <<'FAKE_UNAME'
 #!/usr/bin/env bash
@@ -153,7 +171,9 @@ AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
 AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
 AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
 AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
     "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
+[ "$(cat "$CURL_COUNT")" -ge 12 ] || fail "daemon-http health recovery was not polled to stability"
 
 expected="$TEST_ROOT/expected"
 git -C "$REPO" show origin/master:scripts/audio_embody.py > "$expected"
@@ -214,6 +234,7 @@ AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
 AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
 AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
 AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
 AB_DEPLOY_SERVICE_TEST_CASE=unrelated \
     "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
 [ ! -s "$LAUNCHCTL_LOG" ] || fail "unrelated launchd program was restarted"
@@ -234,6 +255,7 @@ malformed_output="$({
     AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
     AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
     AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+    AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
     AB_DEPLOY_SERVICE_TEST_CASE=malformed_second \
         "$REPO/scripts/deploy_from_master.sh" --yes
 } 2>&1)"
@@ -244,6 +266,62 @@ set -e
 case "$malformed_output" in
     *"launchd service argument program mismatch"*) ;;
     *) fail "malformed launchd failure reason missing" ;;
+esac
+
+# A process with the deployed inode but no healthy HTTP endpoint must fail
+# closed. Keep the test timeout short via the deployment's testable poll cap.
+: > "$LAUNCHCTL_LOG"
+: > "$CURL_COUNT"
+set +e
+unhealthy_output="$({
+    HOME="$ISOLATED_HOME" \
+    PATH="$FAKE_BIN:$PATH" \
+    CARGO_TARGET_DIR="$TARGET_ROOT" \
+    AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+    AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+    AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
+    AGENT_BRIDGE_SERVICE_VERIFY_ATTEMPTS=3 \
+    AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
+    AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
+    AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
+    AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
+    AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+    AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
+    AB_DEPLOY_SERVICE_TEST_CASE=never_healthy \
+        "$REPO/scripts/deploy_from_master.sh" --yes
+} 2>&1)"
+unhealthy_status=$?
+set -e
+[ "$unhealthy_status" -ne 0 ] || fail "unhealthy daemon-http was accepted"
+case "$unhealthy_output" in
+    *"did not become stable and healthy"*) ;;
+    *) fail "unhealthy daemon-http failure reason missing" ;;
+esac
+
+# A live deploy owner must block a second invocation before any launchd job is
+# mutated. This is the shared install-state serialization boundary.
+: > "$LAUNCHCTL_LOG"
+mkdir -p "$INSTALL_DIR/.agent-bridge-deploy.lock"
+printf '%s\n' "$$" > "$INSTALL_DIR/.agent-bridge-deploy.lock/pid"
+set +e
+locked_output="$({
+    HOME="$ISOLATED_HOME" \
+    PATH="$FAKE_BIN:$PATH" \
+    CARGO_TARGET_DIR="$TARGET_ROOT" \
+    AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+    AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+    AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
+    AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
+        "$REPO/scripts/deploy_from_master.sh" --yes
+} 2>&1)"
+locked_status=$?
+set -e
+rm -rf "$INSTALL_DIR/.agent-bridge-deploy.lock"
+[ "$locked_status" -ne 0 ] || fail "concurrent deploy lock was ignored"
+[ ! -s "$LAUNCHCTL_LOG" ] || fail "launchd mutated while deploy lock was held"
+case "$locked_output" in
+    *"another agent-bridge deploy is running"*) ;;
+    *) fail "concurrent deploy failure reason missing" ;;
 esac
 
 printf '%s\n' "pinned-master-runtime-assets-ok"
