@@ -133,6 +133,27 @@ PipeWire-monitor falsifier and cannot claim output-bus delivery unless the
 captured envelope passes. Neither route proves headphone/speaker audibility;
 continuous microphone listening remains out of scope.
 
+The accepted voice-profile set is versioned in `avatar_live_voice.rs`. When
+voice feedback is explicitly enabled, `cute_playful` is the default expression
+profile and `soft_reference` remains an instruction-level fallback. Plan JSON
+reports `voice_profile` and `voice_profile_version`; any other instruction is
+reported as `custom`. This does not change the global default-off policy.
+
+Do not add a second `avatar linux-live` process to the persistent native-face
+launcher. `linux-live` currently owns both rendering and voice observation, so
+that composition would create two renderers. Persistent sparse voice remains
+disabled until a voice-only sidecar observer is extracted and independently
+supervised.
+
+When a producer writes `mode=verified` through `pet_state_set`, it must also
+provide `verification_outcome_id`. The value is a bounded opaque identifier
+(ASCII letters/digits plus `._:/-`), not free-form evidence. The writer rejects
+verified states without this field and rejects the field on non-verified states.
+The sidecar and presence projections retain the identifier so the sparse voice
+gate can ground “验证已经通过” in the same structured outcome. The separate
+`evidence` field remains display-only context and cannot authorize verified
+speech.
+
 ## EAP-1C measurable trial receipt
 
 Every non-dry live run now includes an `observation` object in its final JSON

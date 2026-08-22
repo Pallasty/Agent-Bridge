@@ -11,7 +11,12 @@ pub const DEFAULT_COOLDOWN_SECS: i64 = 300;
 pub const DEFAULT_MAX_UTTERANCES: u64 = 3;
 pub const DEFAULT_VOICE: &str = "Serena";
 pub const DEFAULT_BACKEND: &str = "qwen3";
-pub const DEFAULT_INSTRUCT: &str = "用温暖、清晰、简短的普通话播报，语速自然，不要添加额外内容。";
+pub const VOICE_PROFILE_VERSION: u64 = 1;
+pub const DEFAULT_PROFILE: &str = "cute_playful";
+pub const CUTE_PLAYFUL_INSTRUCT: &str = "用俏皮、可爱、明亮但不过分夸张的年轻女声普通话播报，语速轻快自然，咬字清楚，句尾干净，不要添加额外内容。";
+pub const SOFT_REFERENCE_INSTRUCT: &str =
+    "用温暖、清晰、简短的普通话播报，语速自然，不要添加额外内容。";
+pub const DEFAULT_INSTRUCT: &str = CUTE_PLAYFUL_INSTRUCT;
 pub const ADAPTER_CONTRACT_MARKER: &str = "agent_bridge.linux_live_qwen_voice.v1";
 
 #[derive(Clone, Debug)]
@@ -50,6 +55,14 @@ pub fn fixed_line(mode: &str) -> Option<&'static str> {
         "waiting_for_user" => Some("需要你的确认。"),
         "handoff" => Some("任务已经准备交接。"),
         _ => None,
+    }
+}
+
+pub fn voice_profile_name(instruct: &str) -> &'static str {
+    match instruct.trim() {
+        CUTE_PLAYFUL_INSTRUCT => "cute_playful",
+        SOFT_REFERENCE_INSTRUCT => "soft_reference",
+        _ => "custom",
     }
 }
 
@@ -276,6 +289,8 @@ pub fn plan_json(config: &LinuxLiveVoiceConfig) -> Value {
         "backend_ready": backend_ready,
         "voice": config.voice,
         "voice_ready": voice_ready,
+        "voice_profile": voice_profile_name(&config.instruct),
+        "voice_profile_version": VOICE_PROFILE_VERSION,
         "worker_socket": config.qwen_worker,
         "worker_socket_ready": worker_ready,
         "worker_is_socket": worker_is_socket,
@@ -365,6 +380,23 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("no_mode_transition")));
+    }
+
+    #[test]
+    fn accepted_voice_profiles_are_named_and_default_to_cute_playful() {
+        assert_eq!(DEFAULT_PROFILE, "cute_playful");
+        assert_eq!(DEFAULT_INSTRUCT, CUTE_PLAYFUL_INSTRUCT);
+        assert_eq!(voice_profile_name(DEFAULT_INSTRUCT), "cute_playful");
+        assert_eq!(
+            voice_profile_name(SOFT_REFERENCE_INSTRUCT),
+            "soft_reference"
+        );
+        assert_eq!(voice_profile_name("自定义播报风格"), "custom");
+        assert_eq!(plan_json(&config(false))["voice_profile"], "cute_playful");
+        assert_eq!(
+            plan_json(&config(false))["voice_profile_version"],
+            VOICE_PROFILE_VERSION
+        );
     }
 
     #[test]

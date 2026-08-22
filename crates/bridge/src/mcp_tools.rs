@@ -28262,6 +28262,32 @@ const PET_STATE_BEHAVIOR_FACET_KEYS: &[&str] = &[
     "next_action",
 ];
 
+fn pet_state_valid_verification_outcome_id(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 200
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/')
+        })
+}
+
+fn pet_state_verification_outcome_id<'a>(
+    mode: &str,
+    args: &'a Value,
+) -> std::result::Result<Option<&'a str>, &'static str> {
+    let outcome_id = pet_state_optional_string(args, "verification_outcome_id");
+    if mode == "verified" && outcome_id.is_none() {
+        return Err("mode=verified requires verification_outcome_id");
+    }
+    if mode != "verified" && outcome_id.is_some() {
+        return Err("verification_outcome_id is only valid when mode=verified");
+    }
+    if outcome_id.is_some_and(|value| !pet_state_valid_verification_outcome_id(value)) {
+        return Err("invalid verification_outcome_id");
+    }
+    Ok(outcome_id)
+}
+
 fn pet_state_insert_behavior_facets(state: &mut Value, args: &Value) {
     let Some(state) = state.as_object_mut() else {
         return;
@@ -28385,6 +28411,12 @@ impl McpTool for PetStateSetTool {
                     "risk_level": { "type": "string", "description": "Optional low/medium/high risk hint for UI and presence surfaces." },
                     "blocked_reason": { "type": "string", "description": "Optional compact human-actionable reason when input is needed." },
                     "evidence": { "type": "string", "description": "Optional compact proof string, not a command transcript." },
+                    "verification_outcome_id": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+                        "description": "Required when mode=verified. Opaque structured identifier for the real verification outcome; free-text evidence is not a substitute. Rejected for other modes."
+                    },
                     "next_action": { "type": "string", "description": "Optional next local step for presence and read-only panels." },
                     "session_id": { "type": "string" },
                     "voice_line": { "type": "string", "description": "Optional one-line voice cue. Empty means null." },
@@ -28425,6 +28457,10 @@ impl McpTool for PetStateSetTool {
                 "pet_state_set: invalid mode '{mode}'"
             )));
         }
+        let verification_outcome_id = match pet_state_verification_outcome_id(&mode, &args) {
+            Ok(value) => value,
+            Err(reason) => return Ok(ToolResult::error(format!("pet_state_set: {reason}"))),
+        };
 
         let pet_id =
             crate::pet_state::normalize_pet_id(args.get("pet_id").and_then(|v| v.as_str()));
@@ -28481,6 +28517,9 @@ impl McpTool for PetStateSetTool {
             "updated_at": now,
         });
         pet_state_insert_behavior_facets(&mut state, &args);
+        if let Some(outcome_id) = verification_outcome_id {
+            state["verification_outcome_id"] = json!(outcome_id);
+        }
 
         match crate::pet_state::write_pet_state_value(&pet_id, &state) {
             Ok(path) => {

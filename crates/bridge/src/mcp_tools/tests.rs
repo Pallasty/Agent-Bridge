@@ -4020,6 +4020,35 @@ fn pet_state_insert_behavior_facets_only_persists_provided_values() {
 }
 
 #[test]
+fn pet_state_verification_outcome_id_is_bounded_and_opaque() {
+    assert!(pet_state_valid_verification_outcome_id(
+        "verification:test-suite/20260822:outcome-7"
+    ));
+    assert!(!pet_state_valid_verification_outcome_id("human said it passed"));
+    assert!(!pet_state_valid_verification_outcome_id("outcome#7"));
+    assert!(!pet_state_valid_verification_outcome_id("   "));
+    assert!(!pet_state_valid_verification_outcome_id(&"a".repeat(201)));
+
+    let free_text_only = serde_json::json!({"evidence": "tests passed"});
+    assert_eq!(
+        pet_state_verification_outcome_id("verified", &free_text_only),
+        Err("mode=verified requires verification_outcome_id")
+    );
+    let grounded = serde_json::json!({
+        "evidence": "tests passed",
+        "verification_outcome_id": "verification:test-suite/20260822:outcome-7"
+    });
+    assert_eq!(
+        pet_state_verification_outcome_id("verified", &grounded),
+        Ok(Some("verification:test-suite/20260822:outcome-7"))
+    );
+    assert_eq!(
+        pet_state_verification_outcome_id("working", &grounded),
+        Err("verification_outcome_id is only valid when mode=verified")
+    );
+}
+
+#[test]
 fn pet_presence_capabilities_reads_behavior_facets_from_state() {
     let args = serde_json::json!({
         "capabilities": { "forum": true },
@@ -4033,6 +4062,7 @@ fn pet_presence_capabilities_reads_behavior_facets_from_state() {
         "risk_level": "low",
         "blocked_reason": null,
         "evidence": "cargo test -p ab-bridge pet_state passed",
+        "verification_outcome_id": "verification:cargo/20260822:passed",
         "next_action": "sync presence",
         "mood": "calm",
         "project": "agent-bridge",
@@ -4056,6 +4086,10 @@ fn pet_presence_capabilities_reads_behavior_facets_from_state() {
         "cargo test -p ab-bridge pet_state passed"
     );
     assert_eq!(capabilities["pet_state"]["next_action"], "sync presence");
+    assert_eq!(
+        capabilities["pet_state"]["verification_outcome_id"],
+        "verification:cargo/20260822:passed"
+    );
     assert_eq!(capabilities["avatar_state"]["agent_avatar_protocol"], 1);
     assert_eq!(capabilities["avatar_state"]["avatar_id"], "xiao-shu-dev");
     assert_eq!(capabilities["avatar_state"]["mode"], "working");
@@ -4063,6 +4097,10 @@ fn pet_presence_capabilities_reads_behavior_facets_from_state() {
     assert_eq!(capabilities["avatar_state"]["focus"], "cargo-tests");
     assert_eq!(capabilities["avatar_state"]["risk_level"], "low");
     assert_eq!(capabilities["avatar_state"]["next_action"], "sync presence");
+    assert_eq!(
+        capabilities["avatar_state"]["verification_outcome_id"],
+        "verification:cargo/20260822:passed"
+    );
     assert_eq!(capabilities["voice_policy"]["current_voice"], "Flo");
     assert_eq!(capabilities["voice_policy"]["current_rate"], 190);
 }

@@ -233,6 +233,7 @@ pub fn avatar_state_project(args: &Value, pet_id: &str, state: &Value, state_pat
         "risk_level": string_arg_state_or_null(args, state, "risk_level"),
         "blocked_reason": string_arg_state_or_null(args, state, "blocked_reason"),
         "evidence": string_arg_state_or_null(args, state, "evidence"),
+        "verification_outcome_id": string_arg_state_or_null(args, state, "verification_outcome_id"),
         "next_action": string_arg_state_or_null(args, state, "next_action"),
         "voice_policy": voice_policy,
         "compat": {
@@ -266,6 +267,7 @@ pub fn pet_presence_capabilities(args: &Value, pet_id: &str, state: &Value) -> V
             "risk_level": string_from_args_or_state_or_null(args, state, "risk_level"),
             "blocked_reason": string_from_args_or_state_or_null(args, state, "blocked_reason"),
             "evidence": string_from_args_or_state_or_null(args, state, "evidence"),
+            "verification_outcome_id": string_from_args_or_state_or_null(args, state, "verification_outcome_id"),
             "next_action": string_from_args_or_state_or_null(args, state, "next_action"),
             "mode": mode,
             "mood": state.get("mood").cloned().unwrap_or(Value::Null),

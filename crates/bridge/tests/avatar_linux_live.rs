@@ -167,6 +167,8 @@ fn linux_live_voice_feedback_is_explicit_bounded_and_fail_closed() {
     assert_eq!(payload["voice_feedback"]["max_utterances"], 10);
     assert_eq!(payload["voice_feedback"]["initial_state_silent"], true);
     assert_eq!(payload["voice_feedback"]["fixed_lines_only"], true);
+    assert_eq!(payload["voice_feedback"]["voice_profile"], "cute_playful");
+    assert_eq!(payload["voice_feedback"]["voice_profile_version"], 1);
     assert_eq!(payload["safety"]["audio_default_off"], true);
     assert_eq!(payload["safety"]["emits_audio"], true);
     assert_eq!(payload["safety"]["writes_presence_only"], false);

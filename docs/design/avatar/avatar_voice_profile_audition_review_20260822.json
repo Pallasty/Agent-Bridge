@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "audition_manifest": "docs/design/avatar/avatar_voice_profile_audition_20260822.json",
+  "status": "accepted_with_deferred_refinement",
+  "human_review": {
+    "A": {
+      "verdict": "rejected_as_default",
+      "notes": "Clear, but too dark; needs more brightness and cuteness."
+    },
+    "B": {
+      "verdict": "accepted_as_cute_alternative",
+      "notes": "Much better, brighter and cuter; requested a younger perceived age."
+    },
+    "B2": {
+      "verdict": "accepted_without_age_claim",
+      "notes": "Perceived age remained effectively unchanged. Keep the current result and defer dedicated voice-candidate work."
+    },
+    "C": {
+      "verdict": "retained_as_soft_alternative",
+      "notes": "Previously verified as clear, natural and non-disruptive, but too soft for the default announcement role."
+    }
+  },
+  "decision": {
+    "default_profile": "cute_playful",
+    "alternatives": ["cute_playful", "soft_reference"],
+    "avatar_trigger_policy_changed": false,
+    "dedicated_voice_search_deferred": true,
+    "persistent_voice_integration_enabled": false,
+    "persistent_voice_integration_blocker": "The current linux-live command couples voice observation with a renderer; adding it to the existing native-face supervisor would create a second renderer. Extract a voice-only observer first.",
+    "unsupported_claims": ["five_to_six_year_old_perceived_voice"]
+  },
+  "next_gate": "Provide structured verification outcome IDs before enabling verified-state speech or persistent default integration."
+}

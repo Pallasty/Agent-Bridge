@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "purpose": "Bounded blind audition for the Avatar sparse status-announcement voice profile.",
+  "text": "任务已经准备好了，需要你确认后我再继续。",
+  "speaker": "Serena",
+  "backend": "qwen3-lan",
+  "profiles": {
+    "A": {
+      "profile": "bright_broadcast",
+      "instruction": "用明亮、亲切、利落的年轻女声普通话播报，音量感充足，语速自然，咬字清楚，句尾收稳，不要过度柔和，不要添加额外内容。"
+    },
+    "B": {
+      "profile": "cute_playful",
+      "instruction": "用俏皮、可爱、明亮但不过分夸张的年轻女声普通话播报，语速轻快自然，咬字清楚，句尾干净，不要添加额外内容。"
+    },
+    "C": {
+      "profile": "soft_reference",
+      "instruction": "用温暖、清晰、简短的普通话播报，语速自然，不要添加额外内容。"
+    },
+    "B2": {
+      "profile": "cute_young_refinement",
+      "instruction": "用五到六岁左右、天真可爱、明亮清甜的女童声音说普通话，语气俏皮但自然，不要夸张卡通化；咬字清楚，音量适中，语速轻快，句尾干净，不要添加额外内容。"
+    }
+  },
+  "decision_scope": "Select one default announcement profile and retain acceptable alternatives; do not change Avatar trigger policy."
+}
