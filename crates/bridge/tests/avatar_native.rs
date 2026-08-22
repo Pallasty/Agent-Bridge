@@ -103,6 +103,25 @@ fn native_transparent_plan_describes_read_only_layer_shell_probe() {
 }
 
 #[test]
+fn native_transparent_plan_describes_draggable_xdg_toplevel() {
+    let opts = NativeTransparentOptions {
+        width: 90,
+        height: 130,
+        sprite_scale_percent: 39,
+        draggable: true,
+        ..NativeTransparentOptions::default()
+    };
+
+    let plan = native_transparent_plan_json(&opts, false);
+
+    assert_eq!(plan["backend"], "wayland_xdg_toplevel");
+    assert_eq!(plan["draggable"], true);
+    assert_eq!(plan["width"], 90);
+    assert_eq!(plan["height"], 130);
+    assert_eq!(plan["sprite"]["scale_percent"], 39);
+}
+
+#[test]
 fn native_transparent_plan_describes_pet_state_polling_when_enabled() {
     let opts = NativeTransparentOptions {
         state_pet_id: Some("xiao-shu-dev".to_string()),
@@ -286,6 +305,22 @@ fn sprite_cell_extracts_one_atlas_frame() {
         cell.rgba,
         vec![40, 41, 42, 43, 44, 45, 46, 47, 56, 57, 58, 59, 60, 61, 62, 63]
     );
+}
+
+#[test]
+fn sprite_paint_accepts_wayland_pool_padding() {
+    let sprite = RgbaSprite {
+        width: 1,
+        height: 1,
+        rgba: vec![255, 0, 0, 255],
+    };
+    let mut canvas = vec![0; 2 * 2 * 4 + 64];
+
+    paint_rgba_sprite_centered(&mut canvas, 2, 2, &sprite, 1.0)
+        .expect("paint into padded Wayland pool allocation");
+    paint_transparent_probe_frame(&mut canvas, 2, 2);
+
+    assert!(canvas[2 * 2 * 4..].iter().all(|byte| *byte == 0));
 }
 
 #[test]

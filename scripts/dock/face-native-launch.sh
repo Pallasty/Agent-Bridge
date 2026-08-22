@@ -24,8 +24,10 @@ export AB_FACE_MODE="${AB_FACE_MODE:-idle}"
 export AB_FACE_ANCHOR="${AB_FACE_ANCHOR:-bottom-right}"
 export AB_FACE_MR="${AB_FACE_MARGIN_RIGHT:-96}"
 export AB_FACE_MB="${AB_FACE_MARGIN_BOTTOM:-96}"
-export AB_FACE_W="${AB_FACE_WIDTH:-360}"
-export AB_FACE_H="${AB_FACE_HEIGHT:-520}"
+export AB_FACE_W="${AB_FACE_WIDTH:-90}"
+export AB_FACE_H="${AB_FACE_HEIGHT:-130}"
+export AB_FACE_SPRITE_SCALE="${AB_FACE_SPRITE_SCALE_PERCENT:-39}"
+export AB_FACE_DRAGGABLE="${AB_FACE_DRAGGABLE:-1}"
 export AB_FACE_SEG="${AB_FACE_SEGMENT_MS:-86400000}"   # 24h per probe segment; loop re-spawns
 export AB_FACE_OUTPUT="${AB_FACE_OUTPUT:-}"            # Wayland output name (e.g. DP-1); empty = compositor default
 export AB_FACE_SESSION_ID="${AB_FACE_SESSION_ID:-com.agentbridge.avatar-face.agent-bridge}"
@@ -45,6 +47,10 @@ export AB_FACE_VOICE_SCRIPT="${AB_FACE_VOICE_SCRIPT:-}"
 export AB_FACE_VOICE_SINK="${AB_FACE_VOICE_SINK:-}"
 if [ "$AB_FACE_VOICE_ENABLED" != "0" ] && [ "$AB_FACE_VOICE_ENABLED" != "1" ]; then
   echo "AB_FACE_VOICE_ENABLED must be 0 or 1." >&2
+  exit 2
+fi
+if [ "$AB_FACE_DRAGGABLE" != "0" ] && [ "$AB_FACE_DRAGGABLE" != "1" ]; then
+  echo "AB_FACE_DRAGGABLE must be 0 or 1." >&2
   exit 2
 fi
 
@@ -198,7 +204,7 @@ for face_cmdline in /proc/[0-9]*/cmdline; do
   face_pid="${face_pid%/cmdline}"
   face_cmd="$(tr '\0' ' ' <"$face_cmdline" 2>/dev/null || true)"
   face_exe="${face_cmd%% *}"
-  if [ "$(basename "$face_exe")" = "$(basename "$AB_FACE_BIN")" ] \
+  if [ "${face_exe##*/}" = "$AB_FACE_BIN_BASENAME" ] \
       && native_cmd_for_pid "$face_pid"; then
     face_running=1
     break
@@ -207,6 +213,17 @@ done
 if [ "$face_running" -eq 1 ]; then
   echo "native Face already running."
   exit 0
+fi
+
+# An XDG toplevel is a real Sway container, unlike layer-shell. Register the
+# exact app_id before it maps so Sway keeps it floating, sticky and borderless;
+# the session's `floating_modifier $mod normal` then provides Super+left-drag.
+if [ "$AB_FACE_DRAGGABLE" = "1" ]; then
+  swaymsg 'for_window [app_id="^agent-bridge-avatar$"] floating enable, sticky enable, border none' \
+    >/dev/null 2>&1 || {
+      echo "draggable Face requires a reachable Sway IPC socket." >&2
+      exit 1
+    }
 fi
 
 # renderer-state endpoint reachable? (daemon-http must be up)
@@ -288,11 +305,14 @@ setsid bash -c '
   trap cleanup_children EXIT
   trap "cleanup_children; exit 143" INT TERM
   while true; do
-    "$AB_FACE_BIN" avatar linux-native-transparent \
+    render_args=(avatar linux-native-transparent \
       --mode "$AB_FACE_MODE" --pet-id "$AB_FACE_PET_ID" --state-url "$AB_FACE_STATE_URL" \
       --anchor "$AB_FACE_ANCHOR" --margin-right "$AB_FACE_MR" --margin-bottom "$AB_FACE_MB" \
       --width "$AB_FACE_W" --height "$AB_FACE_H" --duration-ms "$AB_FACE_SEG" \
-      ${AB_FACE_OUTPUT:+--output "$AB_FACE_OUTPUT"} >/dev/null 2>&1 || true
+      --sprite-scale-percent "$AB_FACE_SPRITE_SCALE")
+    [ "$AB_FACE_DRAGGABLE" = "1" ] && render_args+=(--draggable)
+    [ -n "$AB_FACE_OUTPUT" ] && render_args+=(--output "$AB_FACE_OUTPUT")
+    "$AB_FACE_BIN" "${render_args[@]}" >/dev/null 2>&1 || true
     sleep 1
   done
 ' </dev/null >/dev/null 2>&1 &
@@ -304,6 +324,7 @@ disown
 printf '%s\n' "$AB_FACE_LOOP_PID" >"$AB_FACE_PIDFILE" 2>/dev/null || true
 
 echo "native Face up (supervised, detached) — anchor=$AB_FACE_ANCHOR ${AB_FACE_W}x${AB_FACE_H} segment=${AB_FACE_SEG}ms"
+echo "  draggable: $([ "$AB_FACE_DRAGGABLE" = "1" ] && printf 'Super+left mouse' || printf disabled)"
 echo "  sparse voice: $([ "$AB_FACE_VOICE_ENABLED" = "1" ] && printf enabled || printf disabled)"
 echo "  sparse voice gain: ${AB_FACE_VOICE_GAIN_DB}dB (adapter clamps to 0..8dB)"
 echo "  stop with: $0 --stop   # self-validating: group-kills only if the recorded pid is alive AND ours"

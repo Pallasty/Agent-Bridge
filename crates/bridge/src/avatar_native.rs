@@ -65,6 +65,8 @@ pub struct NativeTransparentOptions {
     /// Wayland output to place the layer surface on, by name (e.g. "DP-1").
     /// None = the compositor's default output.
     pub output: Option<String>,
+    /// Use a transparent XDG toplevel so the compositor can move the avatar.
+    pub draggable: bool,
 }
 
 impl Default for NativeTransparentOptions {
@@ -93,6 +95,7 @@ impl Default for NativeTransparentOptions {
             state_poll_ms: DEFAULT_NATIVE_STATE_POLL_MS,
             state_http_timeout_ms: DEFAULT_NATIVE_STATE_HTTP_TIMEOUT_MS,
             output: None,
+            draggable: false,
         }
     }
 }
@@ -396,8 +399,8 @@ pub fn paint_rgba_sprite_centered(
     scale: f32,
 ) -> anyhow::Result<()> {
     let expected_len = width as usize * height as usize * 4;
-    if canvas.len() != expected_len {
-        anyhow::bail!("ARGB8888 canvas length must match width * height * 4");
+    if canvas.len() < expected_len {
+        anyhow::bail!("ARGB8888 canvas length must cover width * height * 4");
     }
     if sprite.rgba.len() != sprite.width as usize * sprite.height as usize * 4 {
         anyhow::bail!("RGBA sprite length must match width * height * 4");
@@ -445,11 +448,11 @@ pub fn paint_rgba_sprite_centered(
 
 pub fn paint_transparent_probe_frame(canvas: &mut [u8], width: u32, height: u32) {
     let expected_len = width as usize * height as usize * 4;
-    assert_eq!(
-        canvas.len(),
-        expected_len,
-        "ARGB8888 canvas length must match width * height * 4"
+    assert!(
+        canvas.len() >= expected_len,
+        "ARGB8888 canvas length must cover width * height * 4"
     );
+    let canvas = &mut canvas[..expected_len];
 
     for chunk in canvas.chunks_exact_mut(4) {
         chunk.copy_from_slice(&argb8888_le(0, 0, 0, 0));
@@ -535,9 +538,10 @@ pub fn native_transparent_plan_json(opts: &NativeTransparentOptions, spawned: bo
     };
     json!({
         "surface": "linux_avatar_native_transparent_plan",
-        "backend": "wayland_wlr_layer_shell",
+        "backend": if opts.draggable { "wayland_xdg_toplevel" } else { "wayland_wlr_layer_shell" },
         "read_only": true,
         "transparent": true,
+        "draggable": opts.draggable,
         "spawned": spawned,
         "title": opts.title,
         "width": opts.width,
@@ -641,6 +645,7 @@ mod wayland_probe {
     use smithay_client_toolkit::{
         compositor::{CompositorHandler, CompositorState},
         delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
+        delegate_xdg_shell, delegate_xdg_window,
         output::{OutputHandler, OutputState},
         registry::{ProvidesRegistryState, RegistryState},
         registry_handlers,
@@ -648,6 +653,10 @@ mod wayland_probe {
             wlr_layer::{
                 Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
                 LayerSurfaceConfigure,
+            },
+            xdg::{
+                window::{Window, WindowConfigure, WindowDecorations, WindowHandler},
+                XdgShell,
             },
             WaylandSurface,
         },
@@ -675,9 +684,18 @@ mod wayland_probe {
 
         let compositor =
             CompositorState::bind(&globals, &qh).context("bind wl_compositor global")?;
-        let layer_shell = LayerShell::bind(&globals, &qh).context(
-            "bind zwlr_layer_shell_v1 global; this compositor may not support wlr layer-shell",
-        )?;
+        let layer_shell = if opts.draggable {
+            None
+        } else {
+            Some(LayerShell::bind(&globals, &qh).context(
+                "bind zwlr_layer_shell_v1 global; this compositor may not support wlr layer-shell",
+            )?)
+        };
+        let xdg_shell = if opts.draggable {
+            Some(XdgShell::bind(&globals, &qh).context("bind xdg_wm_base global")?)
+        } else {
+            None
+        };
         let shm = Shm::bind(&globals, &qh).context("bind wl_shm global")?;
 
         let sprite_animation = sprite_animation_from_options(&opts)
@@ -706,6 +724,7 @@ mod wayland_probe {
             state_poll_interval: Duration::from_millis(opts.state_poll_ms.max(50)),
             next_state_poll_at: Instant::now() + Duration::from_millis(opts.state_poll_ms.max(50)),
             layer: None,
+            window: None,
         };
 
         // Enumerate outputs BEFORE binding the layer surface: a layer-shell
@@ -737,30 +756,42 @@ mod wayland_probe {
         };
 
         let surface = compositor.create_surface(&qh);
-        let layer = layer_shell.create_layer_surface(
-            &qh,
-            surface,
-            to_sctk_layer(opts.layer),
-            Some("agent-bridge-avatar"),
-            target_output.as_ref(),
-        );
-        layer.set_anchor(to_sctk_anchor(opts.anchor));
-        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer.set_margin(
-            opts.margin_top,
-            opts.margin_right,
-            opts.margin_bottom,
-            opts.margin_left,
-        );
-        layer.set_exclusive_zone(0);
-        layer.set_size(opts.width, opts.height);
-        layer.commit();
-        app.layer = Some(layer);
+        if let Some(xdg_shell) = xdg_shell {
+            let window = xdg_shell.create_window(surface, WindowDecorations::None, &qh);
+            window.set_title(opts.title.clone());
+            window.set_app_id("agent-bridge-avatar");
+            window.set_min_size(Some((opts.width, opts.height)));
+            window.set_max_size(Some((opts.width, opts.height)));
+            window.commit();
+            app.window = Some(window);
+        } else {
+            let layer = layer_shell
+                .expect("layer shell bound for anchored mode")
+                .create_layer_surface(
+                    &qh,
+                    surface,
+                    to_sctk_layer(opts.layer),
+                    Some("agent-bridge-avatar"),
+                    target_output.as_ref(),
+                );
+            layer.set_anchor(to_sctk_anchor(opts.anchor));
+            layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            layer.set_margin(
+                opts.margin_top,
+                opts.margin_right,
+                opts.margin_bottom,
+                opts.margin_left,
+            );
+            layer.set_exclusive_zone(0);
+            layer.set_size(opts.width, opts.height);
+            layer.commit();
+            app.layer = Some(layer);
+        }
 
         while !app.configured && !app.exit {
             event_queue
                 .blocking_dispatch(&mut app)
-                .context("wait for layer-shell configure")?;
+                .context("wait for native surface configure")?;
         }
 
         let deadline = Instant::now() + Duration::from_millis(opts.duration_ms);
@@ -802,6 +833,7 @@ mod wayland_probe {
         state_poll_interval: Duration,
         next_state_poll_at: Instant,
         layer: Option<LayerSurface>,
+        window: Option<Window>,
     }
 
     struct SpriteAnimation {
@@ -1083,17 +1115,17 @@ mod wayland_probe {
             } else {
                 paint_transparent_probe_frame(canvas, width, height);
             }
-            let layer = self
+            let surface = self
                 .layer
                 .as_ref()
-                .expect("layer surface initialized before draw");
-            layer
-                .wl_surface()
-                .damage_buffer(0, 0, width as i32, height as i32);
+                .map(WaylandSurface::wl_surface)
+                .or_else(|| self.window.as_ref().map(WaylandSurface::wl_surface))
+                .expect("native surface initialized before draw");
+            surface.damage_buffer(0, 0, width as i32, height as i32);
             buffer
-                .attach_to(layer.wl_surface())
+                .attach_to(surface)
                 .context("attach ARGB8888 buffer")?;
-            layer.commit();
+            surface.commit();
             Ok(())
         }
     }
@@ -1196,6 +1228,26 @@ mod wayland_probe {
         }
     }
 
+    impl WindowHandler for NativeProbeApp {
+        fn request_close(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _window: &Window) {
+            self.exit = true;
+        }
+
+        fn configure(
+            &mut self,
+            _conn: &Connection,
+            _qh: &QueueHandle<Self>,
+            _window: &Window,
+            configure: WindowConfigure,
+            _serial: u32,
+        ) {
+            self.width = configure.new_size.0.map_or(self.width, NonZeroU32::get);
+            self.height = configure.new_size.1.map_or(self.height, NonZeroU32::get);
+            self.configured = true;
+            self.draw();
+        }
+    }
+
     impl ShmHandler for NativeProbeApp {
         fn shm_state(&mut self) -> &mut Shm {
             &mut self.shm
@@ -1222,6 +1274,8 @@ mod wayland_probe {
     delegate_output!(NativeProbeApp);
     delegate_shm!(NativeProbeApp);
     delegate_layer!(NativeProbeApp);
+    delegate_xdg_shell!(NativeProbeApp);
+    delegate_xdg_window!(NativeProbeApp);
     delegate_registry!(NativeProbeApp);
 
     impl ProvidesRegistryState for NativeProbeApp {

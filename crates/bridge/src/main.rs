@@ -994,6 +994,9 @@ enum AvatarOp {
         /// compositor's default output.
         #[arg(long)]
         output: Option<String>,
+        /// Use a transparent XDG toplevel movable with the compositor's floating modifier.
+        #[arg(long)]
+        draggable: bool,
         /// Print the launch plan without opening the native surface.
         #[arg(long)]
         dry_run: bool,
@@ -4998,6 +5001,7 @@ async fn real_main() -> Result<()> {
                 frame_count,
                 frame_interval_ms,
                 output,
+                draggable,
                 dry_run,
                 json: as_json,
             } => {
@@ -5025,6 +5029,7 @@ async fn real_main() -> Result<()> {
                     *frame_count,
                     *frame_interval_ms,
                     output.clone(),
+                    *draggable,
                     *dry_run,
                     *as_json,
                 )
@@ -8987,6 +8992,7 @@ async fn run_avatar_linux_native_transparent(
     frame_count: u32,
     frame_interval_ms: u64,
     output: Option<String>,
+    draggable: bool,
     dry_run: bool,
     as_json: bool,
 ) -> Result<()> {
@@ -9033,6 +9039,7 @@ async fn run_avatar_linux_native_transparent(
         state_poll_ms,
         state_http_timeout_ms,
         output,
+        draggable,
         ..ab_bridge::avatar_native::NativeTransparentOptions::default()
     };
     if let Some(pet_id) = state_pet_id.as_deref() {

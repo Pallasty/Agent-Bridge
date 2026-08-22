@@ -10,6 +10,14 @@ Avatar, use the session-owned supervisor:
 It keeps one native renderer alive in a detached process group, respawns the
 renderer if it exits, and does not install a system service or emit audio.
 The default placement is the bottom-right of the compositor's default output.
+Its compact desktop projection is `90x130` with a 39% sprite scale—one quarter
+of the original `360x520` dimensions while retaining the complete figure.
+Override these together with `AB_FACE_WIDTH`, `AB_FACE_HEIGHT`, and
+`AB_FACE_SPRITE_SCALE_PERCENT` when a different projection size is desired.
+The default native surface is an XDG toplevel with app id
+`agent-bridge-avatar`; the launcher makes it floating, sticky, and borderless
+under Sway. Hold Super and drag with the left mouse button to reposition it.
+Set `AB_FACE_DRAGGABLE=0` to retain the anchored layer-shell surface instead.
 The supervisor also refreshes a dedicated `native-face` presence session every
 15 seconds, so the renderer-state source remains fresh instead of displaying a
 stale session row. Override the interval with `AB_FACE_HEARTBEAT_SECS`.
