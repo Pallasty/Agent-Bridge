@@ -32,6 +32,11 @@ bounded segment, poll, cooldown, and budget with `AB_FACE_VOICE_SEGMENT_MS`,
 `AB_FACE_VOICE_POLL_MS`, `AB_FACE_VOICE_COOLDOWN_SECS`, and
 `AB_FACE_VOICE_MAX_UTTERANCES`.
 
+The launcher defaults sparse voice to `AB_FACE_VOICE_GAIN_DB=8`. The adapter
+applies gain only to an ephemeral playback copy, then peak-limits it with
+automatic output normalization disabled. It never changes the sink, music, or
+system master volume; the adapter hard-clamps the setting to `0..8 dB`.
+
 Check the lifecycle without parsing process listings:
 
 ```bash

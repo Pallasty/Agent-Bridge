@@ -38,6 +38,7 @@ export AB_FACE_VOICE_SEG="${AB_FACE_VOICE_SEGMENT_MS:-86400000}"
 export AB_FACE_VOICE_POLL_MS="${AB_FACE_VOICE_POLL_MS:-500}"
 export AB_FACE_VOICE_COOLDOWN_SECS="${AB_FACE_VOICE_COOLDOWN_SECS:-300}"
 export AB_FACE_VOICE_MAX_UTTERANCES="${AB_FACE_VOICE_MAX_UTTERANCES:-3}"
+export AB_FACE_VOICE_GAIN_DB="${AB_FACE_VOICE_GAIN_DB:-8}"
 export AB_FACE_QWEN_WORKER="${AB_FACE_QWEN_WORKER:-${AB_QWEN3_TTS_WORKER_SOCKET:-}}"
 export AB_FACE_VOICE_SCRIPT="${AB_FACE_VOICE_SCRIPT:-}"
 export AB_FACE_VOICE_SINK="${AB_FACE_VOICE_SINK:-}"
@@ -263,7 +264,8 @@ setsid bash -c '
       [ -n "$AB_FACE_QWEN_WORKER" ] && voice_args+=(--qwen-worker "$AB_FACE_QWEN_WORKER")
       [ -n "$AB_FACE_VOICE_SCRIPT" ] && voice_args+=(--voice-script "$AB_FACE_VOICE_SCRIPT")
       [ -n "$AB_FACE_VOICE_SINK" ] && voice_args+=(--voice-sink "$AB_FACE_VOICE_SINK")
-      "$AB_FACE_BIN" "${voice_args[@]}" >/dev/null 2>&1 || true
+      AB_TTS_PLAYBACK_GAIN_DB="$AB_FACE_VOICE_GAIN_DB" \
+        "$AB_FACE_BIN" "${voice_args[@]}" >/dev/null 2>&1 || true
       sleep 1
     done
   }
@@ -300,5 +302,6 @@ printf '%s\n' "$AB_FACE_LOOP_PID" >"$AB_FACE_PIDFILE" 2>/dev/null || true
 
 echo "native Face up (supervised, detached) — anchor=$AB_FACE_ANCHOR ${AB_FACE_W}x${AB_FACE_H} segment=${AB_FACE_SEG}ms"
 echo "  sparse voice: $([ "$AB_FACE_VOICE_ENABLED" = "1" ] && printf enabled || printf disabled)"
+echo "  sparse voice gain: ${AB_FACE_VOICE_GAIN_DB}dB (adapter clamps to 0..8dB)"
 echo "  stop with: $0 --stop   # self-validating: group-kills only if the recorded pid is alive AND ours"
 echo "  (do NOT 'pkill -f face-native-launch' — that -f pattern matches your own shell and self-kills)"

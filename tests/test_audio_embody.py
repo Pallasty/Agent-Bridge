@@ -1238,6 +1238,33 @@ def test_synth_file_5plus_degrade_is_gated_on_duration_confirmation():
                                          synth_dur_s=1.0, expected_dur_s=5.25) == "mismatch"
 
 
+def test_sparse_voice_playback_gain_is_bounded(monkeypatch):
+    monkeypatch.setenv("AB_TTS_PLAYBACK_GAIN_DB", "99")
+    assert ae.playback_gain_db() == 8.0
+    monkeypatch.setenv("AB_TTS_PLAYBACK_GAIN_DB", "-3")
+    assert ae.playback_gain_db() == 0.0
+    monkeypatch.setenv("AB_TTS_PLAYBACK_GAIN_DB", "invalid")
+    assert ae.playback_gain_db() == 0.0
+
+
+def test_sparse_voice_gain_uses_limiter_without_auto_level(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setenv("AB_TTS_PLAYBACK_GAIN_DB", "8")
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    played, gain_db, error = ae.play_wav_with_bounded_gain("/tmp/source.wav", "sink.test")
+    assert played.returncode == 0
+    assert gain_db == 8.0
+    assert error is None
+    assert "volume=8dB" in calls[0][calls[0].index("-af") + 1]
+    assert "level=false" in calls[0][calls[0].index("-af") + 1]
+    assert calls[1][0] == "paplay"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

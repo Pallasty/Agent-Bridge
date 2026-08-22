@@ -25,6 +25,54 @@ import argparse, array, fcntl, hashlib, json, math, os, re, socket, subprocess, 
 # Version marker consumed by `avatar linux-live` preflight. A new binary paired
 # with an older deployed adapter must fail closed before audio is attempted.
 AB_LINUX_LIVE_QWEN_VOICE_V1 = "agent_bridge.linux_live_qwen_voice.v1"
+MAX_PLAYBACK_GAIN_DB = 8.0
+
+
+def playback_gain_db():
+    """Bounded opt-in gain for sparse voice playback; system volume is untouched."""
+    try:
+        value = float(os.environ.get("AB_TTS_PLAYBACK_GAIN_DB", "0"))
+    except ValueError:
+        value = 0.0
+    return max(0.0, min(value, MAX_PLAYBACK_GAIN_DB))
+
+
+def play_wav_with_bounded_gain(wav_path, sink):
+    """Play a temporary gained copy with peak limiting, preserving the source WAV."""
+    gain_db = playback_gain_db()
+    playback_path = wav_path
+    gained_path = None
+    if gain_db > 0:
+        handle = tempfile.NamedTemporaryFile(prefix="ab_voice_gain_", suffix=".wav", delete=False)
+        gained_path = handle.name
+        handle.close()
+        audio_filter = (
+            f"volume={gain_db:g}dB,"
+            "alimiter=limit=0.944:attack=5:release=50:level=false"
+        )
+        converted = subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", wav_path,
+             "-af", audio_filter, gained_path], capture_output=True, text=True,
+        )
+        if converted.returncode != 0:
+            try:
+                os.unlink(gained_path)
+            except OSError:
+                pass
+            return converted, gain_db, "gain preparation failed"
+        playback_path = gained_path
+    try:
+        played = subprocess.run(
+            ["paplay", f"--device={sink}", "--stream-name=agent-bridge-sparse-voice", playback_path],
+            capture_output=True, text=True,
+        )
+        return played, gain_db, None
+    finally:
+        if gained_path:
+            try:
+                os.unlink(gained_path)
+            except OSError:
+                pass
 
 # Platform routing: macOS has NO PipeWire sink `.monitor` loopback, so present_voice
 # verifies the SYNTHESIZED FILE (via STT) instead of a bus readback — a different,
@@ -1284,7 +1332,10 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
     try:
         cap = capture_async(src, secs, cap_path)
         time.sleep(0.4)  # let capture spin up before playback
-        _sh(f"paplay --device={sink} {wav}")  # blocks ~played_dur, to the target sink
+        play, gain_db, gain_error = play_wav_with_bounded_gain(wav, sink)
+        if play.returncode != 0:
+            raise RuntimeError(gain_error or (play.stderr or "paplay failed")[:200])
+        out["playback_gain_db"] = gain_db
         cap.wait()
     except Exception as e:  # noqa
         out.update(status="error", verify_status="error", detail=f"orchestration: {e}")
@@ -1465,8 +1516,11 @@ def run_emit(text, voice, speed, sink_arg, synth_bin, synth_backend="kokoro",
     played_dur = (played["frames"] / (played["sr"] or 24000)) if played else 0.0
     out["played_dur_s"] = round(played_dur, 3)
     try:
-        play = _sh(f"paplay --device={sink} {wav}")  # blocks ~played_dur (no capture)
+        play, gain_db, gain_error = play_wav_with_bounded_gain(wav, sink)
         play_ok = play.returncode == 0
+        out["playback_gain_db"] = gain_db
+        if gain_error:
+            out["playback_gain_error"] = gain_error
     except Exception as e:  # noqa
         status, verify_status, _ = emit_claim_fields(False)
         out.update(status=status, verify_status=verify_status, detail=f"playback: {e}")
