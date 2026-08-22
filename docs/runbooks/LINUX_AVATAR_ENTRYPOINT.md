@@ -48,6 +48,20 @@ evidence identifiers, engine identity and playback gain fields only—no audio,
 spoken text, LAN address, socket path, or credentials. The log rotates to one
 `.1` file at 1 MiB.
 
+Summarize the current and rotated logs without emitting audio or exposing
+spoken text:
+
+```bash
+./scripts/dock/face-voice-observation.sh
+```
+
+The observation remains `collecting` until it contains at least six naturally
+occurring successful speech decisions spanning 24 hours. These are sampling
+thresholds, not proof of physical audibility or future delivery. Override them
+only for an explicitly labelled experiment with
+`AB_FACE_OBSERVATION_MIN_SPOKEN` and
+`AB_FACE_OBSERVATION_MIN_WINDOW_SECS`.
+
 Check the lifecycle without parsing process listings:
 
 ```bash
