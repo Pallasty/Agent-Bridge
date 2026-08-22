@@ -896,6 +896,37 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Move Xiao Shu near the focused Sway window after explicit owner confirmation.
+    /// Default is a dry-run; affects only the exact Avatar app_id and never the pointer.
+    FocusFollowAction {
+        /// Gap between Xiao Shu and the focused window.
+        #[arg(long, default_value_t = 24)]
+        margin_px: i64,
+        /// Maximum distance between bounded movement steps.
+        #[arg(long, default_value_t = 48)]
+        max_step_px: i64,
+        /// Maximum total movement on either axis.
+        #[arg(long, default_value_t = 900)]
+        max_travel_px: i64,
+        /// Delay between movement steps.
+        #[arg(long, default_value_t = 90)]
+        step_interval_ms: u64,
+        /// Optional marker file; creating it cancels before the next step.
+        #[arg(long)]
+        cancel_file: Option<PathBuf>,
+        /// Request execution. Without this flag the command only previews.
+        #[arg(long)]
+        execute: bool,
+        /// Confirm this individual movement request.
+        #[arg(long, requires = "execute")]
+        confirm: bool,
+        /// Operator reason; required with --execute.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Emit raw JSON instead of a human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Open the Linux avatar renderer in a small browser app window.
     LinuxFloater {
         /// Base URL for a running daemon-http instance.
@@ -4972,6 +5003,27 @@ async fn real_main() -> Result<()> {
                 *max_step_px,
                 *as_json,
             ),
+            AvatarOp::FocusFollowAction {
+                margin_px,
+                max_step_px,
+                max_travel_px,
+                step_interval_ms,
+                cancel_file,
+                execute,
+                confirm,
+                reason,
+                json: as_json,
+            } => run_avatar_focus_follow_action(
+                *margin_px,
+                *max_step_px,
+                *max_travel_px,
+                *step_interval_ms,
+                cancel_file.as_deref(),
+                *execute,
+                *confirm,
+                reason.as_deref(),
+                *as_json,
+            ),
             AvatarOp::LinuxFloater {
                 base_url,
                 project,
@@ -8852,18 +8904,7 @@ fn run_avatar_focus_follow_plan(
     max_step_px: i64,
     as_json: bool,
 ) -> Result<()> {
-    let output = std::process::Command::new("swaymsg")
-        .args(["-t", "get_tree", "-r"])
-        .output()
-        .context("run read-only swaymsg get_tree for Avatar focus-follow plan")?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "read-only swaymsg get_tree failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let tree: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("decode Sway tree for Avatar focus-follow plan")?;
+    let tree = read_sway_tree_for_avatar()?;
     let opts = ab_bridge::avatar_focus_follow::FocusFollowOptions {
         avatar_app_id,
         margin_px,
@@ -8888,6 +8929,238 @@ fn run_avatar_focus_follow_plan(
         {
             println!("  path_points: {}", points);
         }
+    }
+    Ok(())
+}
+
+fn read_sway_tree_for_avatar() -> Result<serde_json::Value> {
+    let output = std::process::Command::new("swaymsg")
+        .args(["-t", "get_tree", "-r"])
+        .output()
+        .context("run read-only swaymsg get_tree for Avatar focus-follow")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "read-only swaymsg get_tree failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    serde_json::from_slice(&output.stdout).context("decode Sway tree for Avatar focus-follow")
+}
+
+struct AvatarMotionOverrideGuard {
+    path: PathBuf,
+}
+
+impl AvatarMotionOverrideGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn set(&self, action: &str) -> Result<()> {
+        let (mode, asset) = match action {
+            "turn_left" | "turn_right" => ("orienting", "xiao-shu-v3-ai-alert-peek-v3"),
+            "walk_left" | "walk_right" => ("working", "xiao-shu-v3-ai-soft-bounce-v1"),
+            "arrive_settle" => ("verified", "xiao-shu-v3-ai-completion-nod-v1"),
+            _ => anyhow::bail!("unbound Xiao Shu motion action: {action}"),
+        };
+        let expires_at_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+            + 10_000;
+        let payload = serde_json::json!({
+            "schema": ab_bridge::avatar_native::NATIVE_MOTION_OVERRIDE_SCHEMA,
+            "expires_at_unix_ms": expires_at_unix_ms,
+            "state": {"mode": mode},
+            "plan": {
+                "asset_route": format!("/avatar-surface/sidecar-spritesheet?asset={asset}")
+            }
+        });
+        let temp_path = self.path.with_extension(format!("tmp-{}", std::process::id()));
+        std::fs::write(&temp_path, serde_json::to_vec(&payload)?)
+            .with_context(|| format!("write Avatar motion override {}", temp_path.display()))?;
+        std::fs::rename(&temp_path, &self.path)
+            .with_context(|| format!("publish Avatar motion override {}", self.path.display()))
+    }
+}
+
+impl Drop for AvatarMotionOverrideGuard {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_file(&self.path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "agent-bridge could not clear Avatar motion override {}: {err}",
+                    self.path.display()
+                );
+            }
+        }
+    }
+}
+
+struct AvatarActionCancellation {
+    requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl AvatarActionCancellation {
+    fn install() -> Self {
+        let requested = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let signal_flag = requested.clone();
+        let task = tokio::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                signal_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        Self { requested, task }
+    }
+
+    fn requested(&self) -> bool {
+        self.requested.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for AvatarActionCancellation {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_avatar_focus_follow_action(
+    margin_px: i64,
+    max_step_px: i64,
+    max_travel_px: i64,
+    step_interval_ms: u64,
+    cancel_file: Option<&std::path::Path>,
+    execute: bool,
+    confirm: bool,
+    reason: Option<&str>,
+    as_json: bool,
+) -> Result<()> {
+    let avatar_app_id = ab_bridge::avatar_focus_follow::DEFAULT_AVATAR_APP_ID.to_string();
+    let opts = ab_bridge::avatar_focus_follow::FocusFollowOptions {
+        avatar_app_id: avatar_app_id.clone(),
+        margin_px,
+        max_step_px,
+    };
+    let tree = read_sway_tree_for_avatar()?;
+    let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&tree, &opts);
+    let cancel_file_text = cancel_file.map(|path| path.to_string_lossy().into_owned());
+    let mut action = ab_bridge::avatar_focus_follow::focus_follow_action_preflight(
+        &plan,
+        execute,
+        confirm,
+        reason,
+        max_travel_px,
+        cancel_file_text.as_deref(),
+    );
+
+    if action.get("ready").and_then(serde_json::Value::as_bool) == Some(true) {
+        let target_id = plan.pointer("/target/node_id").and_then(serde_json::Value::as_i64);
+        let points = plan
+            .pointer("/path/points")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut executed_steps = 0_u64;
+        let mut final_status = "completed";
+        let mut stopped_reason: Option<&str> = None;
+        if cancel_file.is_some_and(std::path::Path::exists) {
+            final_status = "cancelled";
+            stopped_reason = Some("cancel_file_present");
+        } else {
+            let cancellation = AvatarActionCancellation::install();
+            let override_path = ab_bridge::avatar_native::default_native_motion_override_path()
+                .context("XDG_RUNTIME_DIR is required for bounded Avatar motion override")?;
+            let override_guard = AvatarMotionOverrideGuard::new(override_path.clone());
+            let turn_action = plan
+                .pointer("/choreography/0")
+                .and_then(serde_json::Value::as_str)
+                .context("focus-follow plan turn action")?;
+            let walk_action = plan
+                .pointer("/choreography/1")
+                .and_then(serde_json::Value::as_str)
+                .context("focus-follow plan walk action")?;
+            override_guard.set(turn_action)?;
+            std::thread::sleep(std::time::Duration::from_millis(520));
+            if cancellation.requested() {
+                final_status = "cancelled";
+                stopped_reason = Some("sigint");
+            } else {
+                override_guard.set(walk_action)?;
+            }
+
+            for point in points {
+                if final_status != "completed" {
+                    break;
+                }
+                if cancellation.requested() {
+                    final_status = "cancelled";
+                    stopped_reason = Some("sigint");
+                    break;
+                }
+                if cancel_file.is_some_and(std::path::Path::exists) {
+                    final_status = "cancelled";
+                    stopped_reason = Some("cancel_file_present");
+                    break;
+                }
+                let current_tree = read_sway_tree_for_avatar()?;
+                let current_plan =
+                    ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&current_tree, &opts);
+                if current_plan.pointer("/target/node_id").and_then(serde_json::Value::as_i64)
+                    != target_id
+                {
+                    final_status = "cancelled";
+                    stopped_reason = Some("focus_target_changed");
+                    break;
+                }
+                let x = point.get("x").and_then(serde_json::Value::as_i64).context("path point x")?;
+                let y = point.get("y").and_then(serde_json::Value::as_i64).context("path point y")?;
+                let command = format!("move position {x} {y}");
+                let output = std::process::Command::new("swaymsg")
+                    .arg(format!("[app_id=\"^{}$\"]", avatar_app_id))
+                    .arg(&command)
+                    .output()
+                    .with_context(|| format!("move Xiao Shu with swaymsg: {command}"))?;
+                if !output.status.success() {
+                    final_status = "failed";
+                    stopped_reason = Some("swaymsg_move_failed");
+                    break;
+                }
+                executed_steps += 1;
+                std::thread::sleep(std::time::Duration::from_millis(
+                    step_interval_ms.clamp(32, 250),
+                ));
+            }
+            if final_status == "completed" {
+                override_guard.set("arrive_settle")?;
+                std::thread::sleep(std::time::Duration::from_millis(520));
+            }
+            action["motion_override_path"] = serde_json::json!(override_path);
+            drop(override_guard);
+        }
+        action["preflight_ready"] = action["ready"].clone();
+        action["ready"] = serde_json::json!(false);
+        action["status"] = serde_json::json!(final_status);
+        action["executed"] = serde_json::json!(executed_steps > 0);
+        action["executed_steps"] = serde_json::json!(executed_steps);
+        action["stopped_reason"] = serde_json::json!(stopped_reason);
+    } else {
+        action["executed"] = serde_json::json!(false);
+        action["executed_steps"] = serde_json::json!(0);
+    }
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&action)?);
+    } else {
+        println!(
+            "Xiao Shu focus-follow action: {}",
+            action.get("status").and_then(serde_json::Value::as_str).unwrap_or("unknown")
+        );
+        println!("  ready: {}", action.get("ready").and_then(serde_json::Value::as_bool).unwrap_or(false));
+        println!("  executed_steps: {}", action.get("executed_steps").and_then(serde_json::Value::as_u64).unwrap_or(0));
+        println!("  moves_pointer: false");
+        println!("  changes_focus: false");
     }
     Ok(())
 }

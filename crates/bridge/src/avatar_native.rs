@@ -6,6 +6,7 @@
 //! contract is testable without a compositor.
 
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
 use serde_json::{json, Value};
@@ -23,6 +24,43 @@ pub const NATIVE_FEATURE_CONTRACT: &str = "agent_bridge.avatar.native_linux.v1";
 #[cfg(not(all(target_os = "linux", feature = "linux-native-avatar")))]
 pub const NATIVE_FEATURE_CONTRACT: &str = "agent_bridge.avatar.native_linux.uncompiled.v1";
 pub const DEFAULT_NATIVE_STATE_HTTP_TIMEOUT_MS: u64 = 800;
+pub const NATIVE_MOTION_OVERRIDE_FILE: &str = "ab-face-motion-override.json";
+pub const NATIVE_MOTION_OVERRIDE_SCHEMA: &str = "agent_bridge.avatar_native_motion_override.v1";
+
+pub fn default_native_motion_override_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .map(|path| path.join(NATIVE_MOTION_OVERRIDE_FILE))
+}
+
+pub fn native_motion_override_plan(path: &Path) -> anyhow::Result<Option<NativeSpritePlan>> {
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let value: Value = serde_json::from_slice(&bytes)
+                .with_context(|| format!("decode native motion override {}", path.display()))?;
+            if value.get("schema").and_then(Value::as_str) != Some(NATIVE_MOTION_OVERRIDE_SCHEMA) {
+                bail!("native motion override schema is missing or unsupported");
+            }
+            let expires_at = value
+                .get("expires_at_unix_ms")
+                .and_then(Value::as_u64)
+                .context("native motion override is missing expires_at_unix_ms")?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            if expires_at <= now {
+                return Ok(None);
+            }
+            Ok(Some(native_sprite_plan_from_state_value(&value)))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => {
+            Err(err).with_context(|| format!("read native motion override {}", path.display()))
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeLayer {
@@ -639,6 +677,7 @@ mod wayland_probe {
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::num::NonZeroU32;
+    use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
     use anyhow::{bail, Context, Result};
@@ -670,6 +709,7 @@ mod wayland_probe {
 
     use super::{
         animated_frame_coords, animation_frame_index, clear_argb8888, decode_sidecar_sprite_asset,
+        default_native_motion_override_path, native_motion_override_plan,
         native_sprite_plan_from_state_value, native_state_http_request_parts,
         paint_rgba_sprite_centered, paint_transparent_probe_frame, sprite_atlas_columns,
         sprite_cell, NativeAnchor, NativeLayer, NativeSpritePlan, NativeTransparentOptions,
@@ -723,6 +763,7 @@ mod wayland_probe {
             state_http_timeout: Duration::from_millis(opts.state_http_timeout_ms.max(50)),
             state_poll_interval: Duration::from_millis(opts.state_poll_ms.max(50)),
             next_state_poll_at: Instant::now() + Duration::from_millis(opts.state_poll_ms.max(50)),
+            motion_override_path: default_native_motion_override_path(),
             layer: None,
             window: None,
         };
@@ -832,6 +873,7 @@ mod wayland_probe {
         state_http_timeout: Duration,
         state_poll_interval: Duration,
         next_state_poll_at: Instant,
+        motion_override_path: Option<PathBuf>,
         layer: Option<LayerSurface>,
         window: Option<Window>,
     }
@@ -914,7 +956,10 @@ mod wayland_probe {
         }
 
         fn poll_state_if_due(&mut self) -> bool {
-            if self.state_url.is_none() && self.state_pet_id.is_none() {
+            if self.state_url.is_none()
+                && self.state_pet_id.is_none()
+                && self.motion_override_path.is_none()
+            {
                 return false;
             }
             let now = Instant::now();
@@ -922,6 +967,21 @@ mod wayland_probe {
                 return false;
             }
             self.next_state_poll_at = now + self.state_poll_interval;
+
+            if let Some(path) = self.motion_override_path.clone() {
+                match native_motion_override_plan(&path) {
+                    Ok(Some(plan)) => {
+                        return self.apply_sprite_plan(&plan);
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        eprintln!(
+                            "agent-bridge native transparent motion override failed for {}: {err:#}",
+                            path.display()
+                        );
+                    }
+                }
+            }
 
             if let Some(url) = self.state_url.clone() {
                 match self.fetch_http_sprite_plan(&url) {

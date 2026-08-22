@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const FOCUS_FOLLOW_SCHEMA: &str = "agent_bridge.avatar_focus_follow_plan.v1";
+pub const FOCUS_FOLLOW_ACTION_SCHEMA: &str = "agent_bridge.avatar_focus_follow_action.v1";
 pub const DEFAULT_AVATAR_APP_ID: &str = "agent-bridge-avatar";
 pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
     "turn_left",
@@ -17,6 +18,41 @@ pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
     "arrive_settle",
     "wave",
 ];
+
+pub fn focus_follow_runtime_bindings() -> Value {
+    json!({
+        "turn_left": {
+            "asset": "xiao-shu-v3-ai-alert-peek-v3",
+            "alpha_ready": true,
+            "dedicated_motion": false,
+        },
+        "turn_right": {
+            "asset": "xiao-shu-v3-ai-alert-peek-v3",
+            "alpha_ready": true,
+            "dedicated_motion": false,
+        },
+        "walk_left": {
+            "asset": "xiao-shu-v3-ai-soft-bounce-v1",
+            "alpha_ready": true,
+            "dedicated_motion": false,
+        },
+        "walk_right": {
+            "asset": "xiao-shu-v3-ai-soft-bounce-v1",
+            "alpha_ready": true,
+            "dedicated_motion": false,
+        },
+        "arrive_settle": {
+            "asset": "xiao-shu-v3-ai-completion-nod-v1",
+            "alpha_ready": true,
+            "dedicated_motion": true,
+        },
+        "wave": {
+            "asset": null,
+            "alpha_ready": false,
+            "dedicated_motion": false,
+        },
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FocusRect {
@@ -234,7 +270,9 @@ fn base_plan(status: &str) -> Value {
             "actions": FOCUS_FOLLOW_ACTIONS,
             "concept_asset": "xiao-shu-v3-ai-focus-follow-actions-v1-contact",
             "concept_only": true,
-            "production_alpha_ready": false,
+            "runtime_bindings": focus_follow_runtime_bindings(),
+            "runtime_baseline_alpha_ready": true,
+            "dedicated_walk_atlas_ready": false,
             "runtime_bound": false,
         },
     })
@@ -304,4 +342,78 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
     ]);
     plan["recommended_action"] = json!("review_plan_only_no_dispatch");
     plan
+}
+
+pub fn focus_follow_action_preflight(
+    plan: &Value,
+    execute: bool,
+    confirm: bool,
+    reason: Option<&str>,
+    max_travel_px: i64,
+    cancel_file: Option<&str>,
+) -> Value {
+    let plan_status = plan
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let current = plan.pointer("/avatar/current_rect");
+    let destination = plan.pointer("/avatar/destination_rect");
+    let travel_px = current.zip(destination).and_then(|(from, to)| {
+        Some(
+            (to.get("x")?.as_i64()? - from.get("x")?.as_i64()?)
+                .abs()
+                .max((to.get("y")?.as_i64()? - from.get("y")?.as_i64()?).abs()),
+        )
+    });
+    let bounded_max = max_travel_px.clamp(48, 2_048);
+    let reason = reason.map(str::trim).filter(|value| !value.is_empty());
+    let blocked_reason = if !matches!(plan_status, "planned" | "already_near_focus") {
+        Some("focus_follow_plan_not_actionable")
+    } else if travel_px.is_none() {
+        Some("focus_follow_plan_missing_rects")
+    } else if travel_px.is_some_and(|distance| distance > bounded_max) {
+        Some("travel_exceeds_bound")
+    } else if execute && !confirm {
+        Some("explicit_confirmation_required")
+    } else if execute && reason.is_none() {
+        Some("operator_reason_required")
+    } else {
+        None
+    };
+    let ready = execute && blocked_reason.is_none();
+    let status = match (execute, blocked_reason) {
+        (_, Some(_)) => "blocked",
+        (false, None) => "dry_run",
+        (true, None) => "ready",
+    };
+
+    json!({
+        "schema": FOCUS_FOLLOW_ACTION_SCHEMA,
+        "status": status,
+        "ready": ready,
+        "default_enabled": false,
+        "execute_requested": execute,
+        "explicitly_confirmed": confirm,
+        "reason_present": reason.is_some(),
+        "blocked_reason": blocked_reason,
+        "movement_scope": "avatar_window_only",
+        "moves_pointer": false,
+        "changes_focus": false,
+        "emits_keyboard_input": false,
+        "max_travel_px": bounded_max,
+        "travel_px": travel_px,
+        "cancel": {
+            "sigint": true,
+            "cancel_file": cancel_file,
+        },
+        "state_machine": [
+            {"state":"turning", "actions": plan.get("choreography").and_then(Value::as_array).and_then(|items| items.first()).cloned()},
+            {"state":"walking", "actions": plan.get("choreography").and_then(Value::as_array).and_then(|items| items.get(1)).cloned()},
+            {"state":"arriving", "actions": "arrive_settle"},
+            {"state":"completed", "actions": "idle_breathe"},
+        ],
+        "runtime_bindings": focus_follow_runtime_bindings(),
+        "renderer_override_bound": true,
+        "plan": plan,
+    })
 }

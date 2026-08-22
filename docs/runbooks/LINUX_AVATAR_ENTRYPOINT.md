@@ -108,6 +108,27 @@ input. The feature is default-off and fail-closed. Its action registry also
 lists `wave`, but the generated v3 action sheet is a concept asset only: it
 failed transparent-alpha validation and is not bound to the renderer.
 
+Execute one explicitly authorized focus move:
+
+```bash
+agent-bridge avatar focus-follow-action \
+  --execute --confirm --reason "owner requested attention move" --json
+```
+
+Without `--execute`, this command is a dry-run. Execution additionally requires
+`--confirm` and a non-empty `--reason`, moves only the exact
+`agent-bridge-avatar` Sway window, revalidates the focused target before every
+step, and never moves the pointer or keyboard focus. The default bounds are 48
+pixels per step and 900 pixels total. `Ctrl-C` cancels the foreground action;
+`--cancel-file PATH` also cancels before the next step whenever PATH exists.
+
+During an authorized action the native renderer reads the user-runtime file
+`$XDG_RUNTIME_DIR/ab-face-motion-override.json`. The action publishes only
+known RGBA v3 asset identifiers and removes the override on completion,
+cancellation, or handled failure. The current baseline reuses alert-peek for
+turning, soft-bounce for walking rhythm, and completion-nod for arrival. A
+dedicated transparent walk atlas and wave remain intentionally unavailable.
+
 This is intentionally a foreground-session workflow with a detached child,
 not a launchd/systemd installation. The launcher uses a user-private runtime
 lock and validates process identity before suppressing duplicate starts.
