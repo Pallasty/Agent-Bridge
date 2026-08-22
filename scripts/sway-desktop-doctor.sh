@@ -128,7 +128,7 @@ check_user_unit() {
 doctor() {
     : >"$tmp_checks"
 
-    for cmd in jq swaymsg systemctl notify-send; do
+    for cmd in jq swaymsg systemctl notify-send nmcli uxplay; do
         check_command "$cmd"
     done
 
@@ -146,6 +146,7 @@ doctor() {
         sway-idle-display \
         sway-lid-display \
         sway-power-button \
+        sway-iphone-audio-setup \
         sway-desktop-doctor \
         sway-desktop-watchdog
     do
@@ -181,6 +182,10 @@ doctor() {
     check_logind_rule "power_ignore" "/etc/systemd/logind.conf.d/90-local-power-button.conf" "HandlePowerKey=ignore"
     check_logind_rule "lid_ignore" "/etc/systemd/logind.conf.d/90-local-lid-display-only.conf" "HandleLidSwitch=ignore"
     check_user_unit "sway-desktop-watchdog.timer"
+    check_user_unit "agentbridge-iphone-usb.timer"
+    if command -v uxplay >/dev/null 2>&1; then
+        check_user_unit "agentbridge-airplay.service"
+    fi
 
     if [ -r "$setup_script" ]; then
         add_check "setup_script.present" "ok" "$setup_script"
@@ -364,6 +369,22 @@ heal() {
         add_heal_action "service.sway_desktop_watchdog" "ok" "enabled and started sway-desktop-watchdog.timer"
     else
         add_heal_action "service.sway_desktop_watchdog" "warn" "could not enable/start sway-desktop-watchdog.timer"
+    fi
+
+    if systemctl --user enable --now agentbridge-iphone-usb.timer >/dev/null 2>&1; then
+        add_heal_action "service.iphone_usb" "ok" "enabled and started agentbridge-iphone-usb.timer"
+    else
+        add_heal_action "service.iphone_usb" "warn" "could not enable/start agentbridge-iphone-usb.timer"
+    fi
+
+    if command -v uxplay >/dev/null 2>&1; then
+        if systemctl --user enable --now agentbridge-airplay.service >/dev/null 2>&1; then
+            add_heal_action "service.airplay" "ok" "enabled and started agentbridge-airplay.service"
+        else
+            add_heal_action "service.airplay" "warn" "could not enable/start agentbridge-airplay.service"
+        fi
+    else
+        add_heal_action "service.airplay" "skipped" "uxplay is not installed"
     fi
 
     if systemctl is-active --quiet NetworkManager.service 2>/dev/null; then

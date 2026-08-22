@@ -32,6 +32,47 @@ changing one of the helper scripts generated under `~/.local/bin`.
 - Clickable status bar blocks for Wi-Fi and Agent-Bridge actions.
 - Battery status with `+BAT` when charging.
 - Desktop doctor, heal, watchdog, snapshot history, diagnosis, and status report.
+- iPhone audio recovery: AirPlay receiver, dynamic Type-C tether discovery, and
+  Bluetooth audio/control dependencies.
+
+## iPhone Audio Recovery
+
+The setup script installs and enables two user-level components:
+
+- `agentbridge-airplay.service` runs UxPlay as `AgentBridge-<hostname>` and sends
+  received audio to PipeWire through the PulseAudio sink.
+- `agentbridge-iphone-usb.timer` discovers interfaces backed by the `ipheth`
+  driver and maintains the `AgentBridge-iPhone-USB` NetworkManager profile.
+
+The USB profile uses DHCP but is marked `never-default` for IPv4 and IPv6. It
+therefore carries AirPlay traffic without replacing Ethernet, Wi-Fi, WARP, or the
+node's normal default route. The helper intentionally stores neither an iPhone
+MAC address nor an `enx*` interface name.
+
+After restoring a node:
+
+1. Run `setup-sway-workstation.sh` once.
+2. Connect the iPhone over Type-C, accept **Trust This Computer**, and enable
+   Personal Hotspot. Wi-Fi on the node may remain off.
+3. Select `AgentBridge-<hostname>` from the iPhone's AirPlay output menu.
+4. Pair and trust the iPhone once over Bluetooth if keyboard play/pause,
+   next, and previous control is required. Bluetooth bond keys are deliberately
+   not stored in the repository.
+
+The verified transport boundary is intentional: AirPlay (over USB or Wi-Fi)
+carries audio; Bluetooth AVRCP carries keyboard media control and player
+telemetry; Bluetooth A2DP remains the fallback audio path. AirPlay alone does not
+provide the current `playerctl` media-key path.
+
+Useful checks:
+
+```sh
+systemctl --user status agentbridge-airplay.service
+systemctl --user status agentbridge-iphone-usb.timer
+~/.local/bin/sway-iphone-audio-setup
+nmcli connection show AgentBridge-iPhone-USB
+playerctl -l
+```
 
 ## Daily Checks
 
@@ -142,7 +183,8 @@ block. Middle-click shows status summary; right-click opens audit output.
 At the time this runbook was added, a healthy machine reports:
 
 - `agent-bridge.real doctor`: `9 ok / 0 warn / 0 fail`
-- `desktop doctor`: `40 ok / 0 warn / 0 fail`
+- `desktop doctor`: no failed checks; iPhone audio checks are healthy when UxPlay
+  is installed and its user services are running.
 - `status report`: latest `desktop=ok`, `watchdog=ok`, services all `ok`
 
 If `status report` shows `recent_degradation` but the latest line is healthy, the

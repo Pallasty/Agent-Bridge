@@ -39,6 +39,14 @@ if command -v apt-get >/dev/null 2>&1; then
         mako libnotify-bin rfkill wdisplays wlr-randr
     need_sudo apt-get install -y \
         mate-calc thunar rhythmbox xfce4-settings wmenu network-manager-gnome || true
+    # iPhone audio recovery stack. UxPlay provides the AirPlay receiver;
+    # ipheth/usbmuxd and NetworkManager carry AirPlay over the Type-C tether;
+    # BlueZ + PipeWire keep AVRCP media-key control and A2DP fallback available.
+    # Keep this optional so a mirror without uxplay cannot block the rest of the
+    # workstation recovery.
+    need_sudo apt-get install -y \
+        bluez libspa-0.2-bluetooth usbmuxd libimobiledevice-utils uxplay || \
+        echo "warning: iPhone audio packages were not fully installed; rerun after apt sources are available" >&2
 fi
 
 # Wired-Ethernet priority. Root cause of a real outage on this workstation: the OS
@@ -237,6 +245,76 @@ if pactl list cards 2>/dev/null | awk '
     'HiFi (HDMI1, HDMI2, HDMI3, Headphones, Mic1, Mic2)' 2>/dev/null || true
 fi
 SWAY_AUDIO_AUTOSWITCH
+
+cat > "$target_home/.local/bin/sway-iphone-audio-setup" <<'SWAY_IPHONE_AUDIO_SETUP'
+#!/usr/bin/env bash
+# Discover an iPhone USB tether by its kernel driver and keep a reusable,
+# non-default NetworkManager profile attached to it. No phone MAC address or
+# generated enx* interface name is persisted, so this survives node restores.
+
+set -euo pipefail
+
+profile="${AB_IPHONE_USB_PROFILE:-AgentBridge-iPhone-USB}"
+net_class_root="${AB_IPHONE_NET_CLASS_ROOT:-/sys/class/net}"
+
+if ! command -v nmcli >/dev/null 2>&1; then
+    echo "warning: nmcli is unavailable; cannot configure iPhone USB networking" >&2
+    exit 0
+fi
+
+ipheth_interfaces=()
+for net_path in "$net_class_root"/*; do
+    [ -e "$net_path" ] || continue
+    driver_path="$(readlink -f "$net_path/device/driver" 2>/dev/null || true)"
+    if [ "${driver_path##*/}" = "ipheth" ]; then
+        ipheth_interfaces+=("${net_path##*/}")
+    fi
+done
+
+case "${#ipheth_interfaces[@]}" in
+    0)
+        # Normal while the phone is unplugged. The user timer will retry.
+        exit 0
+        ;;
+    1)
+        iface="${ipheth_interfaces[0]}"
+        ;;
+    *)
+        printf 'warning: multiple iPhone USB interfaces found: %s\n' "${ipheth_interfaces[*]}" >&2
+        exit 1
+        ;;
+esac
+
+if nmcli -t -f NAME connection show | grep -Fxq "$profile"; then
+    nmcli connection modify "$profile" \
+        connection.interface-name "$iface" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 50 \
+        ipv4.method auto ipv4.never-default yes \
+        ipv6.method auto ipv6.never-default yes
+else
+    nmcli connection add \
+        type ethernet \
+        ifname "$iface" \
+        con-name "$profile" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 50 \
+        ipv4.method auto ipv4.never-default yes \
+        ipv6.method auto ipv6.never-default yes
+fi
+
+active_profile="$(nmcli -g GENERAL.CONNECTION device show "$iface" 2>/dev/null || true)"
+if [ "$active_profile" = "$profile" ]; then
+    exit 0
+fi
+
+# Carrier appears after the iPhone has trusted the node and Personal Hotspot is
+# active. Do not turn a temporarily unplugged/not-ready phone into a failed timer.
+if [ "$(cat "$net_class_root/$iface/carrier" 2>/dev/null || true)" = "1" ]; then
+    nmcli connection up "$profile" ifname "$iface" >/dev/null || \
+        echo "warning: iPhone USB profile is ready but not active yet; unlock the phone and enable Personal Hotspot" >&2
+fi
+SWAY_IPHONE_AUDIO_SETUP
 
 cat > "$target_home/.local/bin/sway-status" <<'SWAY_STATUS'
 #!/usr/bin/env bash
@@ -1918,7 +1996,7 @@ check_user_unit() {
 doctor() {
     : >"$tmp_checks"
 
-    for cmd in jq swaymsg systemctl notify-send; do
+    for cmd in jq swaymsg systemctl notify-send nmcli uxplay; do
         check_command "$cmd"
     done
 
@@ -1937,6 +2015,7 @@ doctor() {
         sway-lid-display \
         sway-power-button \
         sway-audio-autoswitch \
+        sway-iphone-audio-setup \
         sway-desktop-doctor \
         sway-desktop-watchdog
     do
@@ -1979,6 +2058,10 @@ doctor() {
         add_check "wireplumber.audio_autoswitch" "warn" "WirePlumber speaker/headphone auto-switch rule missing" "rerun setup-sway-workstation.sh"
     fi
     check_user_unit "sway-desktop-watchdog.timer"
+    check_user_unit "agentbridge-iphone-usb.timer"
+    if command -v uxplay >/dev/null 2>&1; then
+        check_user_unit "agentbridge-airplay.service"
+    fi
 
     if [ -r "$setup_script" ]; then
         add_check "setup_script.present" "ok" "$setup_script"
@@ -2162,6 +2245,22 @@ heal() {
         add_heal_action "service.sway_desktop_watchdog" "ok" "enabled and started sway-desktop-watchdog.timer"
     else
         add_heal_action "service.sway_desktop_watchdog" "warn" "could not enable/start sway-desktop-watchdog.timer"
+    fi
+
+    if systemctl --user enable --now agentbridge-iphone-usb.timer >/dev/null 2>&1; then
+        add_heal_action "service.iphone_usb" "ok" "enabled and started agentbridge-iphone-usb.timer"
+    else
+        add_heal_action "service.iphone_usb" "warn" "could not enable/start agentbridge-iphone-usb.timer"
+    fi
+
+    if command -v uxplay >/dev/null 2>&1; then
+        if systemctl --user enable --now agentbridge-airplay.service >/dev/null 2>&1; then
+            add_heal_action "service.airplay" "ok" "enabled and started agentbridge-airplay.service"
+        else
+            add_heal_action "service.airplay" "warn" "could not enable/start agentbridge-airplay.service"
+        fi
+    else
+        add_heal_action "service.airplay" "skipped" "uxplay is not installed"
     fi
 
     if systemctl is-active --quiet NetworkManager.service 2>/dev/null; then
@@ -3019,6 +3118,44 @@ Unit=sway-desktop-watchdog.service
 WantedBy=timers.target
 SWAY_DESKTOP_WATCHDOG_TIMER
 
+cat > "$target_home/.config/systemd/user/agentbridge-airplay.service" <<'AGENTBRIDGE_AIRPLAY_SERVICE'
+[Unit]
+Description=AgentBridge AirPlay audio receiver
+After=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/uxplay -n AgentBridge-%H -nh -vs 0 -as pulsesink -nohold -reset 10
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+AGENTBRIDGE_AIRPLAY_SERVICE
+
+cat > "$target_home/.config/systemd/user/agentbridge-iphone-usb.service" <<'AGENTBRIDGE_IPHONE_USB_SERVICE'
+[Unit]
+Description=Configure iPhone USB tethering for AgentBridge audio
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/sway-iphone-audio-setup
+AGENTBRIDGE_IPHONE_USB_SERVICE
+
+cat > "$target_home/.config/systemd/user/agentbridge-iphone-usb.timer" <<'AGENTBRIDGE_IPHONE_USB_TIMER'
+[Unit]
+Description=Detect iPhone USB tethering for AgentBridge audio
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=agentbridge-iphone-usb.service
+
+[Install]
+WantedBy=timers.target
+AGENTBRIDGE_IPHONE_USB_TIMER
+
 logind_power_rule="$(mktemp)"
 cat > "$logind_power_rule" <<'LOGIND_POWER'
 [Login]
@@ -3074,7 +3211,8 @@ need_sudo chown "$target_user:$target_user" \
     "$target_home/.local/bin/sway-battery-charge-limit" \
     "$target_home/.local/bin/sway-battery-menu" \
     "$target_home/.local/bin/thunar-copy-file-address" \
-    "$target_home/.local/bin/sway-audio-autoswitch"
+    "$target_home/.local/bin/sway-audio-autoswitch" \
+    "$target_home/.local/bin/sway-iphone-audio-setup"
 need_sudo chmod 755 "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/Thunar" "$target_home/.config/wireplumber" "$target_home/.config/wireplumber/wireplumber.conf.d"
 need_sudo chmod 755 \
     "$target_home/.local/bin/ab-system-control" \
@@ -3095,14 +3233,18 @@ need_sudo chmod 755 \
     "$target_home/.local/bin/sway-battery-charge-limit" \
     "$target_home/.local/bin/sway-battery-menu" \
     "$target_home/.local/bin/thunar-copy-file-address" \
-    "$target_home/.local/bin/sway-audio-autoswitch"
+    "$target_home/.local/bin/sway-audio-autoswitch" \
+    "$target_home/.local/bin/sway-iphone-audio-setup"
 need_sudo chmod 644 "$target_home/.config/sway/config"
 need_sudo chmod 644 "$target_home/.config/wireplumber/wireplumber.conf.d/51-alsa-auto-switch.conf"
 need_sudo chmod 644 "$target_home/.config/mako/config"
 need_sudo chmod 644 "$target_home/.config/Thunar/uca.xml"
 need_sudo chmod 644 \
     "$target_home/.config/systemd/user/sway-desktop-watchdog.service" \
-    "$target_home/.config/systemd/user/sway-desktop-watchdog.timer"
+    "$target_home/.config/systemd/user/sway-desktop-watchdog.timer" \
+    "$target_home/.config/systemd/user/agentbridge-airplay.service" \
+    "$target_home/.config/systemd/user/agentbridge-iphone-usb.service" \
+    "$target_home/.config/systemd/user/agentbridge-iphone-usb.timer"
 
 as_user bash -n "$target_home/.local/bin/ab-system-control"
 as_user bash -n "$target_home/.local/bin/sway-status"
@@ -3122,12 +3264,20 @@ as_user bash -n "$target_home/.local/bin/sway-battery-menu"
 as_user bash -n "$target_home/.local/bin/thunar-copy-file-address"
 as_user bash -n "$target_home/.local/bin/sway-wifi-menu"
 as_user sh -n "$target_home/.local/bin/sway-audio-autoswitch"
+as_user bash -n "$target_home/.local/bin/sway-iphone-audio-setup"
 as_user python3 -m py_compile "$target_home/.local/bin/sway-display-cycle"
 
 if as_user systemctl --user daemon-reload >/dev/null 2>&1; then
     as_user systemctl --user enable --now sway-desktop-watchdog.timer >/dev/null 2>&1 || true
+    as_user systemctl --user enable --now agentbridge-iphone-usb.timer >/dev/null 2>&1 || true
+    if [ -x /usr/bin/uxplay ]; then
+        as_user systemctl --user enable --now agentbridge-airplay.service >/dev/null 2>&1 || \
+            echo "warning: could not enable/start agentbridge-airplay.service" >&2
+    else
+        echo "warning: /usr/bin/uxplay is unavailable; AirPlay service was installed but not enabled" >&2
+    fi
 else
-    echo "Could not reload user systemd; enable sway-desktop-watchdog.timer after login if needed." >&2
+    echo "Could not reload user systemd; enable the Sway, iPhone USB, and AirPlay units after login if needed." >&2
 fi
 
 if [ "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
