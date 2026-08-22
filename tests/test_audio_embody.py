@@ -1265,6 +1265,25 @@ def test_sparse_voice_gain_uses_limiter_without_auto_level(monkeypatch):
     assert calls[1][0] == "paplay"
 
 
+def test_sparse_voice_receipt_log_is_private_bounded_and_sanitized(monkeypatch, tmp_path):
+    path = tmp_path / "receipts.jsonl"
+    monkeypatch.setenv("AB_TTS_VOICE_RECEIPT_LOG", str(path))
+    ae.append_voice_receipt_log({
+        "status": "played_unverified",
+        "decision": "allowed",
+        "playback_gain_db": 8.0,
+        "text_hash": "abc",
+        "qwen_model": "/private/model",
+        "detail": "must not persist arbitrary detail",
+    })
+    record = __import__("json").loads(path.read_text())
+    assert record["schema"] == "agent_bridge.sparse_voice_receipt.v1"
+    assert record["playback_gain_db"] == 8.0
+    assert "qwen_model" not in record
+    assert "detail" not in record
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

@@ -55,6 +55,7 @@ mkdir -p "$AB_FACE_RUNDIR" 2>/dev/null || true
 AB_FACE_LOCK="$AB_FACE_RUNDIR/ab-face-native.lock"
 AB_FACE_PIDFILE="$AB_FACE_RUNDIR/ab-face-native.pid"
 export AB_FACE_VOICE_PIDFILE="$AB_FACE_RUNDIR/ab-face-voice-observer.pid"
+export AB_FACE_VOICE_RECEIPT_LOG="${AB_FACE_VOICE_RECEIPT_LOG:-$AB_FACE_RUNDIR/ab-face-voice-receipts.jsonl}"
 
 native_cmd_for_pid() {
   local pid="$1"
@@ -265,6 +266,7 @@ setsid bash -c '
       [ -n "$AB_FACE_VOICE_SCRIPT" ] && voice_args+=(--voice-script "$AB_FACE_VOICE_SCRIPT")
       [ -n "$AB_FACE_VOICE_SINK" ] && voice_args+=(--voice-sink "$AB_FACE_VOICE_SINK")
       AB_TTS_PLAYBACK_GAIN_DB="$AB_FACE_VOICE_GAIN_DB" \
+      AB_TTS_VOICE_RECEIPT_LOG="$AB_FACE_VOICE_RECEIPT_LOG" \
         "$AB_FACE_BIN" "${voice_args[@]}" >/dev/null 2>&1 || true
       sleep 1
     done

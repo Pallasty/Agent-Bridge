@@ -41,6 +41,13 @@ The first owner-heard live acceptance of this baseline is recorded in
 fast pace is a deferred profile preference; do not silently change the frozen
 gain or instruction while operating this baseline.
 
+Each actual adapter decision is appended to the user-private runtime log
+`$XDG_RUNTIME_DIR/ab-face-voice-receipts.jsonl` (override with
+`AB_FACE_VOICE_RECEIPT_LOG`). Records contain bounded status, decision,
+evidence identifiers, engine identity and playback gain fields only—no audio,
+spoken text, LAN address, socket path, or credentials. The log rotates to one
+`.1` file at 1 MiB.
+
 Check the lifecycle without parsing process listings:
 
 ```bash

@@ -26,6 +26,7 @@ import argparse, array, fcntl, hashlib, json, math, os, re, socket, subprocess, 
 # with an older deployed adapter must fail closed before audio is attempted.
 AB_LINUX_LIVE_QWEN_VOICE_V1 = "agent_bridge.linux_live_qwen_voice.v1"
 MAX_PLAYBACK_GAIN_DB = 8.0
+VOICE_RECEIPT_LOG_MAX_BYTES = 1_048_576
 
 
 def playback_gain_db():
@@ -73,6 +74,34 @@ def play_wav_with_bounded_gain(wav_path, sink):
                 os.unlink(gained_path)
             except OSError:
                 pass
+
+
+def append_voice_receipt_log(receipt):
+    """Append a bounded, credential-free voice receipt to an explicit private log."""
+    path = os.environ.get("AB_TTS_VOICE_RECEIPT_LOG", "").strip()
+    if not path:
+        return
+    allowed = [
+        "status", "verify_status", "play_ok", "tier", "decision", "evidence_ids",
+        "voice_line_id", "text_hash", "playback_gain_db", "worker_protocol",
+        "worker_engine", "qwen_device", "qwen_dtype",
+    ]
+    record = {"schema": "agent_bridge.sparse_voice_receipt.v1", "ts": int(time.time())}
+    for key in allowed:
+        if key in receipt:
+            record[key] = receipt[key]
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    try:
+        if os.path.getsize(path) >= VOICE_RECEIPT_LOG_MAX_BYTES:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(fd, (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
+    finally:
+        os.close(fd)
 
 # Platform routing: macOS has NO PipeWire sink `.monitor` loopback, so present_voice
 # verifies the SYNTHESIZED FILE (via STT) instead of a bus readback — a different,
@@ -1743,6 +1772,7 @@ def main():
                             canary_subject=a.canary_subject,
                             canary_request_id=a.canary_request_id,
                             canary_policy=a.canary_policy)
+        append_voice_receipt_log(res)
         if a.json:
             print(json.dumps(res))
         else:
