@@ -1097,6 +1097,56 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Observe one pet sidecar in a bounded foreground session and emit sparse
+    /// voice without starting a renderer, writing presence, or modifying pet state.
+    VoiceObserve {
+        /// Pet sidecar id. Defaults to AB_PET_ID/current Codex avatar/xiao-shu-v2.
+        #[arg(long)]
+        pet_id: Option<String>,
+        /// Stable Agent Avatar Protocol agent_id used by the audio receipt.
+        #[arg(long)]
+        agent_id: Option<String>,
+        /// Foreground observation lifetime in milliseconds (clamped to 1s..24h).
+        #[arg(long, default_value_t = 1_800_000)]
+        duration_ms: u64,
+        /// Pet sidecar polling interval in milliseconds (clamped to 100..5000ms).
+        #[arg(long, default_value_t = ab_bridge::avatar_native::DEFAULT_NATIVE_STATE_POLL_MS)]
+        state_poll_ms: u64,
+        /// Explicit Qwen route: owner-local socket or authenticated LAN dispatcher.
+        #[arg(long, default_value = ab_bridge::avatar_live_voice::DEFAULT_BACKEND,
+              value_parser = ["qwen3", "qwen3-lan"])]
+        voice_backend: String,
+        /// Owner-only local Qwen3-TTS worker socket. Required for the qwen3 route.
+        #[arg(long, env = "AB_QWEN3_TTS_WORKER_SOCKET")]
+        qwen_worker: Option<PathBuf>,
+        /// Python used to run the bounded audio adapter.
+        #[arg(long, default_value = "python3")]
+        voice_python: String,
+        /// audio_embody.py override. Defaults to the deployed or repository adapter.
+        #[arg(long)]
+        voice_script: Option<PathBuf>,
+        /// Qwen CustomVoice speaker name.
+        #[arg(long, default_value = ab_bridge::avatar_live_voice::DEFAULT_VOICE)]
+        voice_name: String,
+        /// Fixed expression instruction sent to Qwen; spoken text remains template-only.
+        #[arg(long, default_value = ab_bridge::avatar_live_voice::DEFAULT_INSTRUCT)]
+        voice_instruct: String,
+        /// Optional PipeWire/PulseAudio sink for voice playback.
+        #[arg(long)]
+        voice_sink: Option<String>,
+        /// Global voice cooldown in seconds (clamped to 30..3600s).
+        #[arg(long, default_value_t = ab_bridge::avatar_live_voice::DEFAULT_COOLDOWN_SECS)]
+        voice_cooldown_secs: i64,
+        /// Maximum successful utterances in one observer run (clamped to 1..10).
+        #[arg(long, default_value_t = ab_bridge::avatar_live_voice::DEFAULT_MAX_UTTERANCES)]
+        voice_max_utterances: u64,
+        /// Print the bounded observer plan without polling or emitting audio.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit JSON instead of a compact human summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Sync the current pet sidecar into a presence row for CLI/launchd heartbeats.
     SyncPresence {
         /// Pet id to sync. Defaults to AB_PET_ID, current Codex avatar, then xiao-shu-v2.
@@ -5041,6 +5091,42 @@ async fn real_main() -> Result<()> {
                     *margin_bottom,
                     *margin_left,
                     output.clone(),
+                    *dry_run,
+                    *as_json,
+                )
+                .await
+            }
+            AvatarOp::VoiceObserve {
+                pet_id,
+                agent_id,
+                duration_ms,
+                state_poll_ms,
+                voice_backend,
+                qwen_worker,
+                voice_python,
+                voice_script,
+                voice_name,
+                voice_instruct,
+                voice_sink,
+                voice_cooldown_secs,
+                voice_max_utterances,
+                dry_run,
+                json: as_json,
+            } => {
+                run_avatar_voice_observe(
+                    pet_id.clone(),
+                    agent_id.clone(),
+                    *duration_ms,
+                    *state_poll_ms,
+                    voice_backend.clone(),
+                    qwen_worker.clone(),
+                    voice_python.clone(),
+                    voice_script.clone(),
+                    voice_name.clone(),
+                    voice_instruct.clone(),
+                    voice_sink.clone(),
+                    *voice_cooldown_secs,
+                    *voice_max_utterances,
                     *dry_run,
                     *as_json,
                 )
@@ -9400,6 +9486,148 @@ async fn run_linux_live_observation(
         }
     }
     observation.receipt(poll_ms, started.elapsed())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_voice_observe(
+    pet_id: Option<String>,
+    agent_id: Option<String>,
+    duration_ms: u64,
+    state_poll_ms: u64,
+    voice_backend: String,
+    qwen_worker: Option<PathBuf>,
+    voice_python: String,
+    voice_script: Option<PathBuf>,
+    voice_name: String,
+    voice_instruct: String,
+    voice_sink: Option<String>,
+    voice_cooldown_secs: i64,
+    voice_max_utterances: u64,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<()> {
+    let pet_id = ab_bridge::pet_state::normalize_pet_id(pet_id.as_deref());
+    let state = ab_bridge::pet_state::read_pet_state(&pet_id)
+        .with_context(|| format!("read voice observer pet sidecar for {pet_id}"))?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Avatar voice observer requires pet sidecar {}",
+                ab_bridge::pet_state::pet_state_path(&pet_id).display()
+            )
+        })?;
+    let duration_ms = duration_ms.clamp(1_000, 86_400_000);
+    let state_poll_ms = state_poll_ms.clamp(100, 5_000);
+    let voice_cooldown_secs = voice_cooldown_secs.clamp(30, 3_600);
+    let voice_max_utterances = voice_max_utterances.clamp(1, 10);
+    let voice_script = voice_script.unwrap_or_else(|| {
+        ab_bridge::avatar_live_voice::default_script_path(
+            std::env::var_os("HOME")
+                .as_deref()
+                .map(std::path::Path::new),
+        )
+    });
+    let agent_id = agent_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("com.agentbridge.avatar-voice.{pet_id}"));
+    let voice_config = ab_bridge::avatar_live_voice::LinuxLiveVoiceConfig {
+        enabled: true,
+        backend: voice_backend.trim().to_string(),
+        python: voice_python.trim().to_string(),
+        script_path: voice_script,
+        qwen_worker: qwen_worker.unwrap_or_default(),
+        voice: voice_name.trim().to_string(),
+        instruct: voice_instruct.trim().to_string(),
+        sink: voice_sink,
+        cooldown_secs: voice_cooldown_secs,
+        max_utterances: voice_max_utterances,
+        agent_id,
+    };
+    let voice_plan = ab_bridge::avatar_live_voice::plan_json(&voice_config);
+    let ready = voice_plan
+        .get("ready")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let plan = json!({
+        "surface": "linux_avatar_voice_observer_plan",
+        "schema": 1,
+        "dry_run": true,
+        "ready": ready,
+        "pet_id": pet_id,
+        "initial_mode": ab_bridge::avatar_live_voice::lifecycle_mode(&state),
+        "duration_ms": duration_ms,
+        "state_poll_ms": state_poll_ms,
+        "voice_feedback": voice_plan,
+        "ownership": {
+            "renderer": false,
+            "presence": false,
+            "pet_state": false,
+            "desktop_control": false,
+            "voice_observer": true,
+        },
+        "safety": {
+            "foreground_only": true,
+            "bounded_duration": true,
+            "initial_state_silent": true,
+            "fixed_lines_only": true,
+            "continuous_listening": false,
+            "installs_service": false,
+            "starts_renderer": false,
+            "writes_presence": false,
+            "writes_pet_sidecar": false,
+            "controls_desktop": false,
+            "emits_audio_when_live": true,
+        },
+    });
+
+    if dry_run {
+        if as_json {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!(
+                "Avatar voice observer plan ready={} pet_id={} duration_ms={} renderer=false presence=false",
+                ready, pet_id, duration_ms
+            );
+        }
+        return Ok(());
+    }
+    if !ready {
+        anyhow::bail!(
+            "avatar voice-observe requires a ready audio adapter and explicit qwen3 or qwen3-lan configuration"
+        );
+    }
+
+    let started = tokio::time::Instant::now();
+    let voice_receipt = run_linux_live_voice_feedback(
+        voice_config,
+        pet_id.clone(),
+        ab_bridge::avatar_live_voice::lifecycle_mode(&state),
+        duration_ms,
+        state_poll_ms,
+    )
+    .await;
+    let receipt = json!({
+        "surface": "linux_avatar_voice_observer_receipt",
+        "schema": 1,
+        "dry_run": false,
+        "completed": true,
+        "pet_id": pet_id,
+        "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+        "voice_feedback": voice_receipt,
+        "ownership": plan.get("ownership").cloned().unwrap_or(Value::Null),
+        "safety": plan.get("safety").cloned().unwrap_or(Value::Null),
+    });
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+    } else {
+        println!(
+            "Avatar voice observer completed pet_id={} utterances={} elapsed_ms={}",
+            pet_id,
+            receipt["voice_feedback"]["utterance_count"],
+            receipt["elapsed_ms"]
+        );
+    }
+    Ok(())
 }
 
 async fn run_linux_live_voice_feedback(

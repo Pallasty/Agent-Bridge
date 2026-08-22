@@ -140,10 +140,25 @@ reports `voice_profile` and `voice_profile_version`; any other instruction is
 reported as `custom`. This does not change the global default-off policy.
 
 Do not add a second `avatar linux-live` process to the persistent native-face
-launcher. `linux-live` currently owns both rendering and voice observation, so
-that composition would create two renderers. Persistent sparse voice remains
-disabled until a voice-only sidecar observer is extracted and independently
-supervised.
+launcher. `linux-live` owns rendering, so that composition would create two
+renderers. Use the extracted voice-only observer instead. First inspect its
+bounded, non-owning plan (this does not poll or emit audio):
+
+```bash
+agent-bridge avatar voice-observe \
+  --pet-id xiao-shu-v2 \
+  --voice-backend qwen3-lan \
+  --duration-ms 1800000 \
+  --dry-run --json
+```
+
+The plan must report `ready=true`, `ownership.renderer=false`,
+`ownership.presence=false`, and `ownership.pet_state=false`. Removing
+`--dry-run` starts one foreground, duration-bounded observer. Its initial state
+is silent and it reuses the same fixed-line, evidence, cooldown, and utterance
+budget gates as `linux-live --voice-feedback`. Extraction does not itself
+install or enable a persistent service; persistent supervision remains a
+separate deployment and acceptance step.
 
 When a producer writes `mode=verified` through `pet_state_set`, it must also
 provide `verification_outcome_id`. The value is a bounded opaque identifier
