@@ -219,7 +219,7 @@ fi
 # exact app_id before it maps so Sway keeps it floating, sticky and borderless;
 # the session's `floating_modifier $mod normal` then provides Super+left-drag.
 if [ "$AB_FACE_DRAGGABLE" = "1" ]; then
-  swaymsg 'for_window [app_id="^agent-bridge-avatar$"] floating enable, sticky enable, border none' \
+  swaymsg 'for_window [app_id="^agent-bridge-avatar$"] floating enable, border none' \
     >/dev/null 2>&1 || {
       echo "draggable Face requires a reachable Sway IPC socket." >&2
       exit 1
@@ -322,6 +322,18 @@ disown
 # session/group leader, so its PGID == its PID — killing the group takes down
 # the loop AND the live probe child it spawned.
 printf '%s\n' "$AB_FACE_LOOP_PID" >"$AB_FACE_PIDFILE" 2>/dev/null || true
+
+# Sway accepts `sticky enable` reliably after the XDG toplevel is mapped. Keep
+# the window sticky across workspaces while retaining compositor-managed drag.
+if [ "$AB_FACE_DRAGGABLE" = "1" ]; then
+  for _ in $(seq 1 30); do
+    if swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": "agent-bridge-avatar"'; then
+      swaymsg '[app_id="^agent-bridge-avatar$"] sticky enable' >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 0.2
+  done
+fi
 
 echo "native Face up (supervised, detached) — anchor=$AB_FACE_ANCHOR ${AB_FACE_W}x${AB_FACE_H} segment=${AB_FACE_SEG}ms"
 echo "  draggable: $([ "$AB_FACE_DRAGGABLE" = "1" ] && printf 'Super+left mouse' || printf disabled)"
