@@ -152,6 +152,77 @@ done
 say()  { printf '%s\n' "$*"; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+file_inode() {
+    stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null
+}
+
+preflight_macos_launchagent() {
+    local label="$1" expected_mode="$2" domain="gui/$(id -u)" target dump program arguments arg_program arg_mode
+    target="$domain/$label"
+    if ! dump="$(launchctl print "$target" 2>&1)"; then
+        case "$dump" in
+            *"Could not find service"*|*"service not found"*)
+                say "launchd service refresh: skipped $label (not loaded)"
+                return 1
+                ;;
+            *) die "cannot inspect launchd service $label: $dump" ;;
+        esac
+    fi
+    program="$(printf '%s\n' "$dump" | awk -F ' = ' '$1 ~ /^[[:space:]]*program$/ { print $2; exit }')"
+    [ -n "$program" ] || die "launchd service has no parseable program: $label"
+
+    # Test installs and alternate roots must not restart the host's real jobs.
+    case "$program" in
+        "$WRAPPER_PATH"|"$REAL_PATH") ;;
+        *)
+            say "launchd service refresh: skipped $label (program=$program)"
+            return 1
+            ;;
+    esac
+
+    arguments="$(printf '%s\n' "$dump" | awk '
+        /^[[:space:]]*arguments = \{/ { inside=1; next }
+        inside && /^[[:space:]]*}/ { exit }
+        inside { sub(/^[[:space:]]*/, ""); print }
+    ')"
+    arg_program="$(printf '%s\n' "$arguments" | sed -n '1p')"
+    arg_mode="$(printf '%s\n' "$arguments" | sed -n '2p')"
+    [ "$arg_program" = "$program" ] ||
+        die "launchd service argument program mismatch: $label"
+    [ "$arg_mode" = "$expected_mode" ] ||
+        die "launchd service mode mismatch: $label (expected $expected_mode, observed ${arg_mode:-none})"
+    return 0
+}
+
+refresh_macos_launchagent() {
+    local label="$1" expected_inode="$2" domain="gui/$(id -u)" target dump pid loaded_inode attempt
+    target="$domain/$label"
+    say ">> refreshing launchd service -> $label"
+    launchctl kickstart -k "$target" || die "failed to restart launchd service: $label"
+
+    attempt=0
+    while [ "$attempt" -lt 40 ]; do
+        dump="$(launchctl print "$target" 2>/dev/null || true)"
+        pid="$(printf '%s\n' "$dump" | awk -F ' = ' '$1 ~ /^[[:space:]]*pid$/ { print $2; exit }')"
+        if [ -n "$pid" ]; then
+            loaded_inode="$({ lsof -a -p "$pid" -d txt -F in 2>/dev/null || true; } |
+                awk -v want="$REAL_PATH" '
+                    /^i[0-9]+$/ { inode=substr($0, 2); next }
+                    /^n/ && substr($0, 2) == want { print inode; exit }
+                ')"
+            if [ "$loaded_inode" = "$expected_inode" ]; then
+                say "launchd service inode: OK ($label pid=$pid inode=$loaded_inode)"
+                SERVICE_REFRESHED=$((SERVICE_REFRESHED + 1))
+                return 0
+            fi
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.25
+    done
+
+    die "launchd service did not adopt deployed inode: $label (expected $expected_inode, observed ${loaded_inode:-none})"
+}
+
 # The anti-regression gate depends on `strings` (binutils). If it is missing,
 # markers_in would return EMPTY for every binary and the gate would falsely pass
 # ("superset" of nothing) — deploying completely unguarded. Fail closed instead.
@@ -283,7 +354,13 @@ EOF
     fi
     say ">> cargo build --release --bin agent-bridge ${CARGO_FEATURE_ARGS[*]-}"
     say "   (target dir: $DEPLOY_TARGET_DIR — off /Data; takes several minutes) ..."
-    ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge "${CARGO_FEATURE_ARGS[@]}" )
+    if [ "${#CARGO_FEATURE_ARGS[@]}" -gt 0 ]; then
+        ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge "${CARGO_FEATURE_ARGS[@]}" )
+    else
+        # macOS ships Bash 3.2, where expanding an empty array under `set -u`
+        # raises "unbound variable" instead of yielding zero arguments.
+        ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge )
+    fi
     NEW_BIN="$DEPLOY_TARGET_DIR/release/agent-bridge"
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
     BUILT_VERSION="$("$NEW_BIN" --version 2>&1)" ||
@@ -488,6 +565,33 @@ if [ "$(uname -s)" = "Darwin" ]; then
     codesign --force --sign - "$REAL_PATH" >/dev/null
     say ">> ad-hoc signed macOS binary -> $REAL_PATH"
     new_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+fi
+
+# Replacing a Mach-O does not refresh long-lived launchd processes: they keep
+# the old inode. Refresh only canonical jobs bound to this deployment, then
+# prove that each new process maps the installed binary. MCP stdio children stay
+# under their owning clients and remain covered by the reconnect report below.
+SERVICE_REFRESHED=0
+if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
+    refresh_daemon=0
+    refresh_daemon_http=0
+    if preflight_macos_launchagent "com.pallasting.agent-bridge.daemon" "daemon"; then
+        refresh_daemon=1
+    fi
+    if preflight_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "daemon-http"; then
+        refresh_daemon_http=1
+    fi
+    if [ "$refresh_daemon" -eq 1 ] || [ "$refresh_daemon_http" -eq 1 ]; then
+        command -v lsof >/dev/null 2>&1 ||
+            die "lsof is required to verify refreshed launchd service inodes"
+        deployed_inode="$(file_inode "$REAL_PATH")" ||
+            die "cannot read deployed binary inode for launchd verification: $REAL_PATH"
+        [ "$refresh_daemon" -eq 0 ] ||
+            refresh_macos_launchagent "com.pallasting.agent-bridge.daemon" "$deployed_inode"
+        [ "$refresh_daemon_http" -eq 0 ] ||
+            refresh_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "$deployed_inode"
+    fi
+    say "launchd service refresh: $SERVICE_REFRESHED service(s) adopted the deployed binary"
 fi
 
 # ---- 7. post-deploy verification ----
