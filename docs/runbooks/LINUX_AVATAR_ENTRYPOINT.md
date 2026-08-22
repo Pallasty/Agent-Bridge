@@ -92,6 +92,22 @@ Stop the session-owned Avatar explicitly:
 Stop validates the supervisor and also sweeps only exact native renderer
 processes, so an orphaned Wayland child cannot leave a visible face behind.
 
+## Read-only focus-follow planning
+
+Preview where Xiao Shu could move when explicitly asked to attend to the
+currently focused Sway window:
+
+```bash
+agent-bridge avatar focus-follow-plan --json
+```
+
+This command reads the Sway tree and returns a bounded docking path plus a
+`turn_*`, `walk_*`, `arrive_settle` choreography. It never dispatches that
+path, moves the Avatar, follows the pointer, changes keyboard focus, or emits
+input. The feature is default-off and fail-closed. Its action registry also
+lists `wave`, but the generated v3 action sheet is a concept asset only: it
+failed transparent-alpha validation and is not bound to the renderer.
+
 This is intentionally a foreground-session workflow with a detached child,
 not a launchd/systemd installation. The launcher uses a user-private runtime
 lock and validates process identity before suppressing duplicate starts.

@@ -880,6 +880,22 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Plan where Xiao Shu could dock near the focused Sway window.
+    /// Read-only: never moves a window, pointer, or keyboard focus.
+    FocusFollowPlan {
+        /// Exact Sway app_id of the Avatar window.
+        #[arg(long, default_value = ab_bridge::avatar_focus_follow::DEFAULT_AVATAR_APP_ID)]
+        avatar_app_id: String,
+        /// Gap between Xiao Shu and the focused window.
+        #[arg(long, default_value_t = 24)]
+        margin_px: i64,
+        /// Maximum distance between proposed path points.
+        #[arg(long, default_value_t = 48)]
+        max_step_px: i64,
+        /// Emit raw JSON instead of the human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Open the Linux avatar renderer in a small browser app window.
     LinuxFloater {
         /// Base URL for a running daemon-http instance.
@@ -4945,6 +4961,17 @@ async fn real_main() -> Result<()> {
                 .await
             }
             AvatarOp::BackendProbe { json: as_json } => run_avatar_backend_probe(*as_json),
+            AvatarOp::FocusFollowPlan {
+                avatar_app_id,
+                margin_px,
+                max_step_px,
+                json: as_json,
+            } => run_avatar_focus_follow_plan(
+                avatar_app_id.clone(),
+                *margin_px,
+                *max_step_px,
+                *as_json,
+            ),
             AvatarOp::LinuxFloater {
                 base_url,
                 project,
@@ -8817,6 +8844,52 @@ fn run_avatar_backend_probe(as_json: bool) -> Result<()> {
     let info = ab_bridge::avatar_floater::detect_compositor();
     let rec = ab_bridge::avatar_floater::recommend_backend(&info);
     cli::render_avatar_backend_probe_result(&info, &rec, as_json)
+}
+
+fn run_avatar_focus_follow_plan(
+    avatar_app_id: String,
+    margin_px: i64,
+    max_step_px: i64,
+    as_json: bool,
+) -> Result<()> {
+    let output = std::process::Command::new("swaymsg")
+        .args(["-t", "get_tree", "-r"])
+        .output()
+        .context("run read-only swaymsg get_tree for Avatar focus-follow plan")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "read-only swaymsg get_tree failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let tree: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .context("decode Sway tree for Avatar focus-follow plan")?;
+    let opts = ab_bridge::avatar_focus_follow::FocusFollowOptions {
+        avatar_app_id,
+        margin_px,
+        max_step_px,
+    };
+    let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&tree, &opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        println!(
+            "Xiao Shu focus-follow plan: {}",
+            plan.get("status").and_then(serde_json::Value::as_str).unwrap_or("unknown")
+        );
+        println!("  read_only: true");
+        println!("  movement_authorized: false");
+        if let Some(edge) = plan.pointer("/docking/edge").and_then(serde_json::Value::as_str) {
+            println!("  proposed_edge: {}", edge);
+        }
+        if let Some(points) = plan
+            .pointer("/path/point_count")
+            .and_then(serde_json::Value::as_u64)
+        {
+            println!("  path_points: {}", points);
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
