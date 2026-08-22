@@ -36,6 +36,10 @@ The launcher defaults sparse voice to `AB_FACE_VOICE_GAIN_DB=8`. The adapter
 applies gain only to an ephemeral playback copy, then peak-limits it with
 automatic output normalization disabled. It never changes the sink, music, or
 system master volume; the adapter hard-clamps the setting to `0..8 dB`.
+The first owner-heard live acceptance of this baseline is recorded in
+`docs/reports/avatar/2026-08-22-sparse-voice-live-acceptance.md`. Its slightly
+fast pace is a deferred profile preference; do not silently change the frozen
+gain or instruction while operating this baseline.
 
 Check the lifecycle without parsing process listings:
 
