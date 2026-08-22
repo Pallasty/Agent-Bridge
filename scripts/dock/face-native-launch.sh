@@ -17,6 +17,7 @@
 # specific output is tracked as a follow-up (needs a CLI flag).
 set -uo pipefail
 export AB_FACE_BIN="${AB_BIN:-$HOME/.local/bin/agent-bridge.real}"
+AB_FACE_BIN_BASENAME="${AB_FACE_BIN##*/}"
 export AB_FACE_STATE_URL="${AB_FACE_STATE_URL:-http://127.0.0.1:7878/avatar-surface/linux-renderer-state?project=agent-bridge}"
 export AB_FACE_PET_ID="${AB_FACE_PET_ID:-xiao-shu-v2}"
 export AB_FACE_MODE="${AB_FACE_MODE:-idle}"
@@ -63,7 +64,7 @@ native_cmd_for_pid() {
   local cmd
   cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
   local exe="${cmd%% *}"
-  [ "$(basename "$exe")" = "$(basename "$AB_FACE_BIN")" ] \
+  [ "${exe##*/}" = "$AB_FACE_BIN_BASENAME" ] \
     && [[ "$cmd" == *" avatar linux-native-transparent "* ]]
 }
 
@@ -73,7 +74,7 @@ voice_cmd_for_pid() {
   local cmd
   cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
   local exe="${cmd%% *}"
-  [ "$(basename "$exe")" = "$(basename "$AB_FACE_BIN")" ] \
+  [ "${exe##*/}" = "$AB_FACE_BIN_BASENAME" ] \
     && [[ "$cmd" == *" avatar voice-observe "* ]]
 }
 
