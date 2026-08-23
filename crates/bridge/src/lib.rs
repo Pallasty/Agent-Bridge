@@ -10,6 +10,7 @@ pub mod a2ui;
 pub mod operator_request;
 pub mod anthropic_api;
 pub mod avatar_alert;
+pub mod avatar_asset_audit;
 pub mod avatar_cortex;
 pub mod avatar_floater;
 pub mod avatar_focus_follow;

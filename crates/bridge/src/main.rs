@@ -42,7 +42,7 @@ use ab_terminal::{auto_backend, TerminalBackend};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{json, Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -845,6 +845,21 @@ enum InstinctOp {
 
 #[derive(Subcommand, Debug)]
 enum AvatarOp {
+    /// Validate a candidate sprite atlas before it may be bound to the Avatar.
+    SpriteAssetAudit {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long, default_value_t = 6)]
+        columns: u32,
+        #[arg(long, default_value_t = 1)]
+        rows: u32,
+        #[arg(long, default_value_t = 192)]
+        cell_width: u32,
+        #[arg(long, default_value_t = 208)]
+        cell_height: u32,
+        #[arg(long)]
+        json: bool,
+    },
     /// Render the Agent Avatar Protocol surface from local presence rows.
     Surface {
         /// Filter by project slug.
@@ -4969,6 +4984,21 @@ async fn real_main() -> Result<()> {
     // Avatar subcommand: short-lived read-only terminal surface over presence rows.
     if let Cmd::Avatar { op } = &cmd {
         return match op {
+            AvatarOp::SpriteAssetAudit {
+                path,
+                columns,
+                rows,
+                cell_width,
+                cell_height,
+                json: as_json,
+            } => run_avatar_sprite_asset_audit(
+                path,
+                *columns,
+                *rows,
+                *cell_width,
+                *cell_height,
+                *as_json,
+            ),
             AvatarOp::Surface {
                 project,
                 role,
@@ -8896,6 +8926,44 @@ fn run_avatar_backend_probe(as_json: bool) -> Result<()> {
     let info = ab_bridge::avatar_floater::detect_compositor();
     let rec = ab_bridge::avatar_floater::recommend_backend(&info);
     cli::render_avatar_backend_probe_result(&info, &rec, as_json)
+}
+
+fn run_avatar_sprite_asset_audit(
+    path: &Path,
+    columns: u32,
+    rows: u32,
+    cell_width: u32,
+    cell_height: u32,
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::avatar_asset_audit::audit_sprite_asset(
+        path,
+        columns,
+        rows,
+        cell_width,
+        cell_height,
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "Xiao Shu sprite asset: {} ({}, {}x{}, expected {}x{})",
+            if report.accepted { "accepted" } else { "rejected" },
+            report.color_type,
+            report.width,
+            report.height,
+            report.expected_width,
+            report.expected_height,
+        );
+        for failure in &report.failures {
+            println!("- {failure}");
+        }
+    }
+    if report.accepted {
+        Ok(())
+    } else {
+        anyhow::bail!("sprite asset failed admission checks")
+    }
 }
 
 fn run_avatar_focus_follow_plan(
