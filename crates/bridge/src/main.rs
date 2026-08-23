@@ -9185,7 +9185,8 @@ impl AvatarMotionOverrideGuard {
         let (mode, asset) = match action {
             "turn_left" => ("orienting", "xiao-shu-v3-focus-turn-left-v1"),
             "turn_right" => ("orienting", "xiao-shu-v3-focus-turn-right-v1"),
-            "walk_left" | "walk_right" => ("working", "xiao-shu-v3-ai-soft-bounce-v1"),
+            "walk_left" => ("working", "xiao-shu-v3-focus-walk-left-v1"),
+            "walk_right" => ("working", "xiao-shu-v3-focus-walk-right-v1"),
             "arrive_settle" => ("verified", "xiao-shu-v3-ai-completion-nod-v1"),
             "wave" => ("verified", "xiao-shu-v3-focus-wave-v1"),
             _ => anyhow::bail!("unbound Xiao Shu motion action: {action}"),

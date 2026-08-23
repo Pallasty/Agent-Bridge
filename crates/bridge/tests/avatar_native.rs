@@ -288,6 +288,27 @@ fn sidecar_sprite_assets_decode_paired_focus_turn_atlases() {
 }
 
 #[test]
+fn sidecar_sprite_assets_decode_paired_focus_walk_atlases() {
+    for asset in [
+        "xiao-shu-v3-focus-walk-left-v1",
+        "xiao-shu-v3-focus-walk-right-v1",
+    ] {
+        let sprite = decode_sidecar_sprite_asset(asset).expect("decode Xiao Shu focus walk atlas");
+        assert_eq!((sprite.width, sprite.height), (1536, 208));
+        assert_eq!(sprite.rgba.len(), 1536 * 208 * 4);
+        assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] == 0));
+        assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+
+        let plan = native_sprite_plan_from_state_value(&json!({
+            "state": {"mode": "working"},
+            "plan": {"asset_route": format!("/avatar-surface/sidecar-spritesheet?asset={asset}")}
+        }));
+        assert_eq!(plan.frame_count, 8);
+        assert_eq!(plan.frame_interval_ms, 140);
+    }
+}
+
+#[test]
 fn rgba_sprite_paints_centered_over_transparent_argb_canvas() {
     let sprite = RgbaSprite {
         width: 2,

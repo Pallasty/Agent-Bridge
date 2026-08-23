@@ -3319,6 +3319,16 @@ fn avatar_sidecar_spritesheet_png(asset: &str) -> Option<&'static [u8]> {
             "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-turn-right-v1-atlas.png"
         ));
     }
+    if asset == "xiao-shu-v3-focus-walk-left-v1" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-walk-left-v1-atlas.png"
+        ));
+    }
+    if asset == "xiao-shu-v3-focus-walk-right-v1" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-walk-right-v1-atlas.png"
+        ));
+    }
     None
 }
 
@@ -9433,6 +9443,10 @@ mod tests {
             avatar_sidecar_spritesheet_png("xiao-shu-v3-focus-turn-left-v1").unwrap();
         let v3_focus_turn_right_png =
             avatar_sidecar_spritesheet_png("xiao-shu-v3-focus-turn-right-v1").unwrap();
+        let v3_focus_walk_left_png =
+            avatar_sidecar_spritesheet_png("xiao-shu-v3-focus-walk-left-v1").unwrap();
+        let v3_focus_walk_right_png =
+            avatar_sidecar_spritesheet_png("xiao-shu-v3-focus-walk-right-v1").unwrap();
         let canonical_svg = avatar_sidecar_spritesheet_svg("xiao-shu-canonical-peek-v3").unwrap();
         let soft_bounce_svg =
             avatar_sidecar_spritesheet_svg("xiao-shu-motion-canonical-soft-bounce-v1").unwrap();
@@ -9486,6 +9500,10 @@ mod tests {
         assert!(v3_focus_turn_left_png.len() > 4096);
         assert!(v3_focus_turn_right_png.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert!(v3_focus_turn_right_png.len() > 4096);
+        assert!(v3_focus_walk_left_png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(v3_focus_walk_left_png.len() > 4096);
+        assert!(v3_focus_walk_right_png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(v3_focus_walk_right_png.len() > 4096);
         assert!(canonical_svg.contains("Xiao Shu canonical alert peek sidecar v3 sprite atlas"));
         assert!(canonical_svg.contains(r#"id="frame-7""#));
         assert!(canonical_svg.contains("xs3-robe"));

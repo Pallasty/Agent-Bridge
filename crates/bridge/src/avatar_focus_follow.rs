@@ -32,14 +32,14 @@ pub fn focus_follow_runtime_bindings() -> Value {
             "dedicated_motion": true,
         },
         "walk_left": {
-            "asset": "xiao-shu-v3-ai-soft-bounce-v1",
+            "asset": "xiao-shu-v3-focus-walk-left-v1",
             "alpha_ready": true,
-            "dedicated_motion": false,
+            "dedicated_motion": true,
         },
         "walk_right": {
-            "asset": "xiao-shu-v3-ai-soft-bounce-v1",
+            "asset": "xiao-shu-v3-focus-walk-right-v1",
             "alpha_ready": true,
-            "dedicated_motion": false,
+            "dedicated_motion": true,
         },
         "arrive_settle": {
             "asset": "xiao-shu-v3-ai-completion-nod-v1",
@@ -269,13 +269,13 @@ fn base_plan(status: &str) -> Value {
         "action_registry": {
             "actions": FOCUS_FOLLOW_ACTIONS,
             "concept_asset": "xiao-shu-v3-ai-focus-follow-actions-v1-contact",
-            "concept_only": true,
+            "concept_only": false,
             "runtime_bindings": focus_follow_runtime_bindings(),
             "runtime_baseline_alpha_ready": true,
             "dedicated_turn_atlases_ready": true,
-            "dedicated_walk_atlas_ready": false,
+            "dedicated_walk_atlases_ready": true,
             "dedicated_wave_atlas_ready": true,
-            "runtime_bound": false,
+            "runtime_bound": true,
         },
     })
 }
