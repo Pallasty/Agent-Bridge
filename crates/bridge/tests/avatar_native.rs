@@ -256,6 +256,18 @@ fn sidecar_sprite_asset_decodes_known_png_atlas() {
 }
 
 #[test]
+fn sidecar_sprite_asset_decodes_focus_wave_atlas() {
+    let sprite = decode_sidecar_sprite_asset("xiao-shu-v3-focus-wave-v1")
+        .expect("decode Xiao Shu focus wave atlas");
+
+    assert_eq!(sprite.width, 1152);
+    assert_eq!(sprite.height, 208);
+    assert_eq!(sprite.rgba.len(), 1152 * 208 * 4);
+    assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] == 0));
+    assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+}
+
+#[test]
 fn rgba_sprite_paints_centered_over_transparent_argb_canvas() {
     let sprite = RgbaSprite {
         width: 2,

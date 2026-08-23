@@ -248,6 +248,9 @@ pub fn sidecar_sprite_asset_png(asset: &str) -> Option<&'static [u8]> {
         "xiao-shu-v3-ai-completion-nod-v1" => Some(include_bytes!(
             "../assets/xiao-shu-prototypes/xiao-shu-v3-ai-completion-nod-v1-atlas.png"
         )),
+        "xiao-shu-v3-focus-wave-v1" => Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-wave-v1-atlas.png"
+        )),
         _ => None,
     }
 }

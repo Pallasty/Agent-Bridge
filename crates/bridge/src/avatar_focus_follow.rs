@@ -47,9 +47,9 @@ pub fn focus_follow_runtime_bindings() -> Value {
             "dedicated_motion": true,
         },
         "wave": {
-            "asset": null,
-            "alpha_ready": false,
-            "dedicated_motion": false,
+            "asset": "xiao-shu-v3-focus-wave-v1",
+            "alpha_ready": true,
+            "dedicated_motion": true,
         },
     })
 }
@@ -273,6 +273,7 @@ fn base_plan(status: &str) -> Value {
             "runtime_bindings": focus_follow_runtime_bindings(),
             "runtime_baseline_alpha_ready": true,
             "dedicated_walk_atlas_ready": false,
+            "dedicated_wave_atlas_ready": true,
             "runtime_bound": false,
         },
     })
@@ -410,6 +411,7 @@ pub fn focus_follow_action_preflight(
             {"state":"turning", "actions": plan.get("choreography").and_then(Value::as_array).and_then(|items| items.first()).cloned()},
             {"state":"walking", "actions": plan.get("choreography").and_then(Value::as_array).and_then(|items| items.get(1)).cloned()},
             {"state":"arriving", "actions": "arrive_settle"},
+            {"state":"acknowledging", "actions": "wave"},
             {"state":"completed", "actions": "idle_breathe"},
         ],
         "runtime_bindings": focus_follow_runtime_bindings(),

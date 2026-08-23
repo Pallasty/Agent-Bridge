@@ -93,10 +93,12 @@ fn focus_follow_action_requires_execute_confirm_and_reason() {
     assert_eq!(ready["moves_pointer"], false);
     assert_eq!(ready["changes_focus"], false);
     assert_eq!(ready["renderer_override_bound"], true);
+    assert_eq!(ready["state_machine"][3]["state"], "acknowledging");
+    assert_eq!(ready["state_machine"][3]["actions"], "wave");
 }
 
 #[test]
-fn runtime_bindings_are_alpha_ready_but_wave_stays_closed() {
+fn runtime_bindings_are_alpha_ready_including_dedicated_wave() {
     let bindings = focus_follow_runtime_bindings();
     for action in [
         "turn_left",
@@ -104,6 +106,7 @@ fn runtime_bindings_are_alpha_ready_but_wave_stays_closed() {
         "walk_left",
         "walk_right",
         "arrive_settle",
+        "wave",
     ] {
         let asset = bindings[action]["asset"].as_str().unwrap();
         let sprite = ab_bridge::avatar_native::decode_sidecar_sprite_asset(asset).unwrap();
@@ -111,8 +114,8 @@ fn runtime_bindings_are_alpha_ready_but_wave_stays_closed() {
         assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
         assert_eq!(bindings[action]["alpha_ready"], true);
     }
-    assert!(bindings["wave"]["asset"].is_null());
-    assert_eq!(bindings["wave"]["alpha_ready"], false);
+    assert_eq!(bindings["wave"]["asset"], "xiao-shu-v3-focus-wave-v1");
+    assert_eq!(bindings["wave"]["dedicated_motion"], true);
 }
 
 #[test]

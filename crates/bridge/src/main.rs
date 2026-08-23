@@ -845,6 +845,30 @@ enum InstinctOp {
 
 #[derive(Subcommand, Debug)]
 enum AvatarOp {
+    /// Compile a generated chroma-background sprite strip into a deterministic
+    /// RGBA atlas. Default is a read-only preview; writing requires confirmation.
+    SpriteAssetCompile {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 6)]
+        frame_count: u32,
+        #[arg(long, default_value_t = 192)]
+        cell_width: u32,
+        #[arg(long, default_value_t = 208)]
+        cell_height: u32,
+        #[arg(long, default_value_t = 6)]
+        padding_px: u32,
+        #[arg(long, default_value_t = 201)]
+        baseline_y: u32,
+        #[arg(long)]
+        execute: bool,
+        #[arg(long, requires = "execute")]
+        confirm: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Report the machine-readable production contract and readiness of all
     /// dedicated focus-follow sprite atlases.
     SpriteAssetContract {
@@ -5005,6 +5029,29 @@ async fn real_main() -> Result<()> {
     // Avatar subcommand: short-lived read-only terminal surface over presence rows.
     if let Cmd::Avatar { op } = &cmd {
         return match op {
+            AvatarOp::SpriteAssetCompile {
+                input,
+                output,
+                frame_count,
+                cell_width,
+                cell_height,
+                padding_px,
+                baseline_y,
+                execute,
+                confirm,
+                json: as_json,
+            } => run_avatar_sprite_asset_compile(
+                input,
+                output,
+                *frame_count,
+                *cell_width,
+                *cell_height,
+                *padding_px,
+                *baseline_y,
+                *execute,
+                *confirm,
+                *as_json,
+            ),
             AvatarOp::SpriteAssetContract {
                 asset_root,
                 json: as_json,
@@ -9026,6 +9073,49 @@ fn run_avatar_sprite_asset_contract(asset_root: &Path, as_json: bool) -> Result<
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_avatar_sprite_asset_compile(
+    input: &Path,
+    output: &Path,
+    frame_count: u32,
+    cell_width: u32,
+    cell_height: u32,
+    padding_px: u32,
+    baseline_y: u32,
+    execute: bool,
+    confirm: bool,
+    as_json: bool,
+) -> Result<()> {
+    anyhow::ensure!(!execute || confirm, "--execute requires --confirm");
+    let report = ab_bridge::avatar_asset_compile::compile_sprite_atlas(
+        input,
+        output,
+        ab_bridge::avatar_asset_compile::SpriteCompileOptions {
+            frame_count,
+            cell_width,
+            cell_height,
+            padding_px,
+            baseline_y,
+        },
+        execute,
+    )?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "Xiao Shu sprite compile: {} {}x{} -> {}x{} ({} frames)",
+            if report.executed { "written" } else { "preview" },
+            report.source_width,
+            report.source_height,
+            report.output_width,
+            report.output_height,
+            report.frame_count,
+        );
+        println!("output: {}", report.output);
+    }
+    Ok(())
+}
+
 fn run_avatar_focus_follow_plan(
     avatar_app_id: String,
     margin_px: i64,
@@ -9089,6 +9179,7 @@ impl AvatarMotionOverrideGuard {
             "turn_left" | "turn_right" => ("orienting", "xiao-shu-v3-ai-alert-peek-v3"),
             "walk_left" | "walk_right" => ("working", "xiao-shu-v3-ai-soft-bounce-v1"),
             "arrive_settle" => ("verified", "xiao-shu-v3-ai-completion-nod-v1"),
+            "wave" => ("verified", "xiao-shu-v3-focus-wave-v1"),
             _ => anyhow::bail!("unbound Xiao Shu motion action: {action}"),
         };
         let expires_at_unix_ms = std::time::SystemTime::now()
@@ -9263,6 +9354,8 @@ fn run_avatar_focus_follow_action(
             if final_status == "completed" {
                 override_guard.set("arrive_settle")?;
                 std::thread::sleep(std::time::Duration::from_millis(520));
+                override_guard.set("wave")?;
+                std::thread::sleep(std::time::Duration::from_millis(960));
             }
             action["motion_override_path"] = serde_json::json!(override_path);
             drop(override_guard);
