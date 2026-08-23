@@ -268,6 +268,18 @@ fn sidecar_sprite_asset_decodes_focus_wave_atlas() {
 }
 
 #[test]
+fn sidecar_sprite_asset_decodes_normalized_completion_nod_atlas() {
+    let sprite = decode_sidecar_sprite_asset("xiao-shu-v3-ai-completion-nod-v1")
+        .expect("decode normalized Xiao Shu completion nod atlas");
+
+    assert_eq!(sprite.width, 1536);
+    assert_eq!(sprite.height, 208);
+    assert_eq!(sprite.rgba.len(), 1536 * 208 * 4);
+    assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] == 0));
+    assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+}
+
+#[test]
 fn sidecar_sprite_assets_decode_paired_focus_turn_atlases() {
     for asset in [
         "xiao-shu-v3-focus-turn-left-v1",
@@ -489,6 +501,6 @@ fn native_sprite_plan_updates_transparent_options_without_moving_window() {
         opts.sprite_asset.as_deref(),
         Some("xiao-shu-v3-ai-completion-nod-v1")
     );
-    assert_eq!(opts.frame_count, 6);
+    assert_eq!(opts.frame_count, 8);
     assert_eq!(opts.frame_interval_ms, 160);
 }

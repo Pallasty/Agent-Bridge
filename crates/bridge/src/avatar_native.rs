@@ -326,6 +326,7 @@ pub fn native_sprite_plan_from_state_value(value: &Value) -> NativeSpritePlan {
     let asset =
         native_asset_from_renderer_payload(value).or_else(|| native_sprite_asset_for_mode(mode));
     let (frame_count, frame_interval_ms) = match asset.as_deref() {
+        Some("xiao-shu-v3-ai-completion-nod-v1") => (8, 160),
         Some("xiao-shu-v3-focus-turn-left-v1" | "xiao-shu-v3-focus-turn-right-v1") => (6, 160),
         Some("xiao-shu-v3-focus-walk-left-v1" | "xiao-shu-v3-focus-walk-right-v1") => (8, 140),
         _ => native_frame_timing_for_mode(mode),
