@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+base="${1:-${GOVERNANCE_BASE_SHA:-}}"
+head="${2:-HEAD}"
+if [[ -z "$base" ]]; then
+  echo "usage: $0 <base-ref> [head-ref]" >&2
+  echo "or set GOVERNANCE_BASE_SHA" >&2
+  exit 2
+fi
+
+python3 scripts/eval/cli_composition_root_governance.py self-test
+python3 scripts/eval/cli_composition_root_governance.py validate \
+  --base "$base" \
+  --head "$head"

@@ -41,6 +41,35 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  composition-root-governance:
+    name: CLI composition-root governance
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve comparison base
+        id: governance-base
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE_SHA"
+          elif [[ "$EVENT_NAME" == "push" && ! "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
+            base="$PUSH_BEFORE_SHA"
+          else
+            base="HEAD^"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Validate composition-root governance
+        run: scripts/check-cli-composition-root-governance.sh "${{ steps.governance-base.outputs.base }}"
+
   build-and-test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
