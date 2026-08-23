@@ -6,10 +6,10 @@ Accepted on 2026-08-23.
 
 - Decision scope: governance of `crates/bridge/src/main.rs`; this unit changes no
   Rust source, runtime behavior, deployment, or client process
-- Audited source base: `6b041fbbdff5cd525cae4303fd50eeda086dad55`
+- Audited source base: `d4b8707099b10d84e04e4fb0facba886b2eef474`
 - Source remote: `github/master`
 - Remote state at audit: `origin/master` remained at
-  `fd60af7d8cc125a6bc55d2dffa08581bec345164`, two commits behind the audited
+  `fd60af7d8cc125a6bc55d2dffa08581bec345164`, ten commits behind the audited
   source base
 - Predecessors: S0-S1 through S13, especially S7 Avatar inventory
 - Next units: S14-B continuous gates, S15 daemon supervisors, S16 Avatar
@@ -25,16 +25,16 @@ dispatch, and effect custody visible at the root.
 
 That direction worked. The accepted S0 base contained 21,700 lines. S13 reduced
 the file to 18,246 lines, a reduction of 3,454 lines (15.9%). The current file
-is still 2,002 lines smaller than the S0 base, but it has regrown to 19,698
+is still 1,793 lines smaller than the S0 base, but it has regrown to 19,907
 lines. The regression is not evidence that the earlier architecture was wrong;
 it shows that the finite extraction campaign did not install a continuous
 admission rule for new composition-root code.
 
 The current source also invalidates the earlier S14 planning snapshot at
-`fd60af7d8cc1`. Two newer GitHub commits add `SpriteAssetAudit`, increasing the
-Avatar command family from 47 to 48 variants and adding 96 net lines to
-`main.rs`. This ADR therefore uses the fetched GitHub head, records the GitLab
-lag explicitly, and does not claim dual-remote agreement.
+`fd60af7d8cc1`. Ten newer GitHub commits add three sprite asset commands and a
+focus-follow recommendation command, increasing the Avatar family from 47 to
+51 variants. This ADR therefore uses the fetched GitHub head, records the
+GitLab lag explicitly, and does not claim dual-remote agreement.
 
 ## Reproducible baseline
 
@@ -53,13 +53,13 @@ Observed results:
 
 | Measure | S0 | S13 | Current |
 | --- | ---: | ---: | ---: |
-| `main.rs` lines | 21,700 | 18,246 | 19,698 |
-| `main.rs` bytes | not recorded | not recorded | 785,546 |
-| Change from S0 | baseline | -3,454 | -2,002 |
-| Change from S13 | n/a | baseline | +1,452 net |
-| `AvatarOp` variants | not separately frozen | 43 at S7; later growth | 48 |
+| `main.rs` lines | 21,700 | 18,246 | 19,907 |
+| `main.rs` bytes | not recorded | not recorded | 792,430 |
+| Change from S0 | baseline | -3,454 | -1,793 |
+| Change from S13 | n/a | baseline | +1,661 net |
+| `AvatarOp` variants | not separately frozen | 43 at S7; later growth | 51 |
 
-The exact post-S13 `main.rs` diff is `+1453/-1`. The commits are:
+The exact post-S13 `main.rs` diff is `+1736/-75`. The commits are:
 
 | Commit | Net source purpose | `main.rs` delta |
 | --- | --- | ---: |
@@ -74,6 +74,12 @@ The exact post-S13 `main.rs` diff is `+1453/-1`. The commits are:
 | `0a59340bc` | focus-follow action executor | +285/-12 |
 | `9f227a0af` | sprite atlas admission | +69/-1 |
 | `6b041fbbd` | sprite readability metrics | +26/-0 |
+| `bd5999ed4` | focus-follow asset contract | +34/-0 |
+| `4cf47a34f` | production wave atlas binding | +93/-0 |
+| `29219b394` | paired focus-turn binding | +9/-1 |
+| `20f95c6a6` | complete focus-follow motion set | +2/-1 |
+| `239d23d39` | completion nod frame correction | +1/-1 |
+| `d4b870709` | read-only focus move recommendation | +73/-0 |
 
 All post-S13 growth is in Avatar-facing integration. This concentration, not
 the absolute line count, is the reason to reopen governance.
@@ -86,13 +92,13 @@ The current physical regions are:
 | --- | ---: | ---: | --- |
 | CLI schema and conversions | approximately `90-4465` | approximately 4,376 | public CLI contract |
 | process entry and startup helpers | `4499-4784` | 286 | process boundary |
-| `real_main` dispatch and mode startup | `4785-8721` | 3,937 | routing and runtime authority |
-| Avatar schema | `847-2289` | 1,443 | 48 variants |
-| Avatar early dispatch | `4994-6092` | 1,099 | 48 unique `AvatarOp` arms |
-| Avatar executors and helpers | `8800-12927` | 4,128 | mixed projection and effects |
-| BioCortex executor area | `12930-14568` | approximately 1,639 | mixed status and policy |
-| Dream executor area | `14469-19040` | overlapping start, approximately 4,572 | reports and store workflows |
-| Hub construction | `19042-19184` | 143 | dependency composition |
+| `real_main` dispatch and mode startup | `4842-8820` | 3,979 | routing and runtime authority |
+| Avatar schema | `847-2346` | 1,500 | 51 variants |
+| Avatar early dispatch | `5051-6191` | 1,141 | 51 unique `AvatarOp` arms |
+| Avatar executors and helpers | `8899-13136` | 4,238 | mixed projection and effects |
+| BioCortex executor area | `13139-14677` | approximately 1,539 | mixed status and policy |
+| Dream executor area | `14678-19261` | approximately 4,584 | reports and store workflows |
+| Hub construction | `19263-19393` | 131 | dependency composition |
 
 The regions are physical review surfaces, not owned-line counts. Helpers and
 families overlap at some boundaries; line count must not be used as proof that
@@ -101,7 +107,7 @@ a whole region can move safely.
 ### Avatar delta since S7
 
 S7 froze 43 schema variants, 43 dispatch arms, and their executor/effect map.
-The five later variants are:
+The eight later variants are:
 
 | Command | Character | Root-owned effects or inputs | S16 disposition |
 | --- | --- | --- | --- |
@@ -110,6 +116,9 @@ The five later variants are:
 | `LinuxLive` | long-running actuator | Sway/process/audio/network/retry and task lifecycle | keep effect custody at root; completed receipt formatting may move |
 | `VoiceObserve` | observation with process boundary | invokes voice adapter and parses receipt | keep invocation and timeout/error ordering at root |
 | `SpriteAssetAudit` | read-only admission | reads caller-selected image and controls exit status | renderer may move; path read and accepted/rejected exit contract stay explicit |
+| `SpriteAssetCompile` | preview plus confirmed writer | reads input and may write an output atlas | keep execute/confirm, path custody, write, and exit ordering at root |
+| `SpriteAssetContract` | read-only aggregation | reads the production asset set and renders readiness | completed contract formatting is eligible after characterization |
+| `FocusFollowRecommend` | read-only recommendation | invokes `swaymsg`, constructs a plan, and renders a recommendation | pure recommendation/result projection is eligible; Sway acquisition stays at root |
 
 The command family therefore remains unsuitable for a wholesale
 `cli::avatar` move. The newer read-only `SpriteAssetAudit` does not make the
@@ -175,7 +184,7 @@ shared contract beyond both using `tokio::time::interval`.
 
 ### S16: Avatar new-growth control
 
-Characterize the five post-S7 commands before movement. Extract only pure plan
+Characterize the eight post-S7 commands before movement. Extract only pure plan
 construction, completed-result projection, and receipt formatting. Keep file,
 Sway, process, audio, network, timeout, confirmation, retry, and Presence/store
 custody at the composition/effect boundary.
@@ -201,7 +210,7 @@ contract:
 - shared dependency composition in `build_hub`;
 - final daemon/MCP server startup.
 
-`build_hub` is 143 lines of legitimate composition-root wiring. Its size is
+`build_hub` is 131 lines of legitimate composition-root wiring. Its size is
 not a current extraction trigger.
 
 BioCortex and Dream are not reopened solely because their physical regions are
@@ -218,7 +227,7 @@ by S1-S13.
 
 ### Continue feature delivery without governance
 
-Rejected. The +1,452 net lines after S13 show that periodic extraction alone
+Rejected. The +1,661 net lines after S13 show that periodic extraction alone
 does not prevent pure logic from returning to the composition root.
 
 ### Enforce a hard line-count ceiling
@@ -266,7 +275,7 @@ contracts.
 
 This S14-A unit is valid when:
 
-- its source SHA, remote divergence, line/byte count, post-S13 diff, and 48
+- its source SHA, remote divergence, line/byte count, post-S13 diff, and 51
   Avatar variants are reproducible;
 - it changes documentation only;
 - `git diff --check` passes;
