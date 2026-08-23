@@ -55,6 +55,10 @@ fn focus_follow_plan_is_bounded_read_only_and_pointer_safe() {
         true
     );
     assert_eq!(plan["action_registry"]["dedicated_walk_atlas_ready"], false);
+    assert_eq!(
+        plan["action_registry"]["dedicated_turn_atlases_ready"],
+        true
+    );
     assert_eq!(plan["action_registry"]["runtime_bound"], false);
     assert_eq!(plan["action_registry"]["actions"][5], "wave");
     assert_eq!(plan["target"]["workspace"], "2");
@@ -116,6 +120,16 @@ fn runtime_bindings_are_alpha_ready_including_dedicated_wave() {
     }
     assert_eq!(bindings["wave"]["asset"], "xiao-shu-v3-focus-wave-v1");
     assert_eq!(bindings["wave"]["dedicated_motion"], true);
+    assert_eq!(
+        bindings["turn_left"]["asset"],
+        "xiao-shu-v3-focus-turn-left-v1"
+    );
+    assert_eq!(
+        bindings["turn_right"]["asset"],
+        "xiao-shu-v3-focus-turn-right-v1"
+    );
+    assert_eq!(bindings["turn_left"]["dedicated_motion"], true);
+    assert_eq!(bindings["turn_right"]["dedicated_motion"], true);
 }
 
 #[test]

@@ -862,6 +862,9 @@ enum AvatarOp {
         padding_px: u32,
         #[arg(long, default_value_t = 201)]
         baseline_y: u32,
+        /// Mirror each frame inside its own cell without reversing frame order.
+        #[arg(long)]
+        flip_horizontal: bool,
         #[arg(long)]
         execute: bool,
         #[arg(long, requires = "execute")]
@@ -5037,6 +5040,7 @@ async fn real_main() -> Result<()> {
                 cell_height,
                 padding_px,
                 baseline_y,
+                flip_horizontal,
                 execute,
                 confirm,
                 json: as_json,
@@ -5048,6 +5052,7 @@ async fn real_main() -> Result<()> {
                 *cell_height,
                 *padding_px,
                 *baseline_y,
+                *flip_horizontal,
                 *execute,
                 *confirm,
                 *as_json,
@@ -9082,6 +9087,7 @@ fn run_avatar_sprite_asset_compile(
     cell_height: u32,
     padding_px: u32,
     baseline_y: u32,
+    flip_horizontal: bool,
     execute: bool,
     confirm: bool,
     as_json: bool,
@@ -9096,6 +9102,7 @@ fn run_avatar_sprite_asset_compile(
             cell_height,
             padding_px,
             baseline_y,
+            flip_horizontal,
         },
         execute,
     )?;
@@ -9176,7 +9183,8 @@ impl AvatarMotionOverrideGuard {
 
     fn set(&self, action: &str) -> Result<()> {
         let (mode, asset) = match action {
-            "turn_left" | "turn_right" => ("orienting", "xiao-shu-v3-ai-alert-peek-v3"),
+            "turn_left" => ("orienting", "xiao-shu-v3-focus-turn-left-v1"),
+            "turn_right" => ("orienting", "xiao-shu-v3-focus-turn-right-v1"),
             "walk_left" | "walk_right" => ("working", "xiao-shu-v3-ai-soft-bounce-v1"),
             "arrive_settle" => ("verified", "xiao-shu-v3-ai-completion-nod-v1"),
             "wave" => ("verified", "xiao-shu-v3-focus-wave-v1"),

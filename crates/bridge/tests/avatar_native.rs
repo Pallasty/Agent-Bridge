@@ -268,6 +268,26 @@ fn sidecar_sprite_asset_decodes_focus_wave_atlas() {
 }
 
 #[test]
+fn sidecar_sprite_assets_decode_paired_focus_turn_atlases() {
+    for asset in [
+        "xiao-shu-v3-focus-turn-left-v1",
+        "xiao-shu-v3-focus-turn-right-v1",
+    ] {
+        let sprite = decode_sidecar_sprite_asset(asset).expect("decode Xiao Shu focus turn atlas");
+        assert_eq!((sprite.width, sprite.height), (1152, 208));
+        assert_eq!(sprite.rgba.len(), 1152 * 208 * 4);
+        assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] == 0));
+        assert!(sprite.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+
+        let plan = native_sprite_plan_from_state_value(&json!({
+            "state": {"mode": "orienting"},
+            "plan": {"asset_route": format!("/avatar-surface/sidecar-spritesheet?asset={asset}")}
+        }));
+        assert_eq!(plan.frame_count, 6);
+    }
+}
+
+#[test]
 fn rgba_sprite_paints_centered_over_transparent_argb_canvas() {
     let sprite = RgbaSprite {
         width: 2,

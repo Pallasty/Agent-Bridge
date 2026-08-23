@@ -22,14 +22,14 @@ pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
 pub fn focus_follow_runtime_bindings() -> Value {
     json!({
         "turn_left": {
-            "asset": "xiao-shu-v3-ai-alert-peek-v3",
+            "asset": "xiao-shu-v3-focus-turn-left-v1",
             "alpha_ready": true,
-            "dedicated_motion": false,
+            "dedicated_motion": true,
         },
         "turn_right": {
-            "asset": "xiao-shu-v3-ai-alert-peek-v3",
+            "asset": "xiao-shu-v3-focus-turn-right-v1",
             "alpha_ready": true,
-            "dedicated_motion": false,
+            "dedicated_motion": true,
         },
         "walk_left": {
             "asset": "xiao-shu-v3-ai-soft-bounce-v1",
@@ -272,6 +272,7 @@ fn base_plan(status: &str) -> Value {
             "concept_only": true,
             "runtime_bindings": focus_follow_runtime_bindings(),
             "runtime_baseline_alpha_ready": true,
+            "dedicated_turn_atlases_ready": true,
             "dedicated_walk_atlas_ready": false,
             "dedicated_wave_atlas_ready": true,
             "runtime_bound": false,

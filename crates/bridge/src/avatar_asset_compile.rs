@@ -9,6 +9,7 @@ pub struct SpriteCompileOptions {
     pub cell_height: u32,
     pub padding_px: u32,
     pub baseline_y: u32,
+    pub flip_horizontal: bool,
 }
 
 impl Default for SpriteCompileOptions {
@@ -19,6 +20,7 @@ impl Default for SpriteCompileOptions {
             cell_height: 208,
             padding_px: 6,
             baseline_y: 201,
+            flip_horizontal: false,
         }
     }
 }
@@ -40,6 +42,7 @@ pub struct SpriteCompileReport {
     pub output_width: u32,
     pub output_height: u32,
     pub frame_count: u32,
+    pub flip_horizontal: bool,
     pub frames: Vec<SpriteCompileFrame>,
 }
 
@@ -252,7 +255,12 @@ pub fn compile_sprite_atlas(
                 let sx = src_x as f32 + (dx as f32 + 0.5) * src_w as f32 / dst_w as f32 - 0.5;
                 let sy = src_y as f32 + (dy as f32 + 0.5) * src_h as f32 / dst_h as f32 - 0.5;
                 let pixel = sample_bilinear(&source, sx, sy);
-                let offset = (((dst_y + dy) * output_width + dst_x + dx) * 4) as usize;
+                let output_dx = if options.flip_horizontal {
+                    dst_w - 1 - dx
+                } else {
+                    dx
+                };
+                let offset = (((dst_y + dy) * output_width + dst_x + output_dx) * 4) as usize;
                 atlas[offset..offset + 4].copy_from_slice(&pixel);
             }
         }
@@ -288,6 +296,7 @@ pub fn compile_sprite_atlas(
         output_width,
         output_height,
         frame_count: options.frame_count,
+        flip_horizontal: options.flip_horizontal,
         frames,
     })
 }
@@ -305,6 +314,8 @@ mod tests {
             .as_nanos();
         let input = std::env::temp_dir().join(format!("ab-sprite-source-{nonce}.png"));
         let output = std::env::temp_dir().join(format!("ab-sprite-output-{nonce}.png"));
+        let mirrored_output =
+            std::env::temp_dir().join(format!("ab-sprite-output-mirrored-{nonce}.png"));
         let mut rgb = vec![0_u8; 8 * 4 * 3];
         for pixel in rgb.chunks_exact_mut(3) {
             pixel.copy_from_slice(&[255, 0, 255]);
@@ -334,6 +345,7 @@ mod tests {
                 cell_height: 4,
                 padding_px: 0,
                 baseline_y: 3,
+                flip_horizontal: false,
             },
             true,
         )
@@ -341,9 +353,50 @@ mod tests {
         let audit =
             crate::avatar_asset_audit::audit_sprite_asset(&output, 2, 1, 4, 4, Some(2), 4, 4, 0)
                 .unwrap();
+        let mirrored_report = compile_sprite_atlas(
+            &input,
+            &mirrored_output,
+            SpriteCompileOptions {
+                frame_count: 2,
+                cell_width: 4,
+                cell_height: 4,
+                padding_px: 0,
+                baseline_y: 3,
+                flip_horizontal: true,
+            },
+            true,
+        )
+        .unwrap();
+        let decode = |path: &Path| {
+            let decoder = png::Decoder::new(BufReader::new(File::open(path).unwrap()));
+            let mut reader = decoder.read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size()];
+            let info = reader.next_frame(&mut pixels).unwrap();
+            pixels.truncate(info.buffer_size());
+            pixels
+        };
+        let normal = decode(&output);
+        let mirrored = decode(&mirrored_output);
+        for frame in 0..2_usize {
+            for y in 0..4_usize {
+                let [bounds_x, _, bounds_width, _] = report.frames[frame].output_bounds_xywh;
+                for x in 0..bounds_width as usize {
+                    let normal_x = frame * 4 + bounds_x as usize + x;
+                    let mirrored_x = frame * 4 + bounds_x as usize + bounds_width as usize - 1 - x;
+                    let normal_offset = (y * 8 + normal_x) * 4;
+                    let mirrored_offset = (y * 8 + mirrored_x) * 4;
+                    assert_eq!(
+                        &normal[normal_offset..normal_offset + 4],
+                        &mirrored[mirrored_offset..mirrored_offset + 4]
+                    );
+                }
+            }
+        }
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(output).unwrap();
+        std::fs::remove_file(mirrored_output).unwrap();
         assert!(report.executed);
+        assert!(mirrored_report.flip_horizontal);
         assert!(audit.accepted, "{:?}", audit.failures);
         assert_eq!(audit.baseline_drift_px, 0);
         assert!(audit.transparent_pixels > 0);

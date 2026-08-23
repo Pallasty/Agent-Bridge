@@ -251,6 +251,12 @@ pub fn sidecar_sprite_asset_png(asset: &str) -> Option<&'static [u8]> {
         "xiao-shu-v3-focus-wave-v1" => Some(include_bytes!(
             "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-wave-v1-atlas.png"
         )),
+        "xiao-shu-v3-focus-turn-left-v1" => Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-turn-left-v1-atlas.png"
+        )),
+        "xiao-shu-v3-focus-turn-right-v1" => Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-turn-right-v1-atlas.png"
+        )),
         _ => None,
     }
 }
@@ -311,11 +317,15 @@ pub fn native_frame_timing_for_mode(mode: &str) -> (u32, u64) {
 pub fn native_sprite_plan_from_state_value(value: &Value) -> NativeSpritePlan {
     let state = native_state_from_state_value(value);
     let mode = native_non_empty_str(state, "mode").unwrap_or("idle");
-    let (frame_count, frame_interval_ms) = native_frame_timing_for_mode(mode);
+    let asset =
+        native_asset_from_renderer_payload(value).or_else(|| native_sprite_asset_for_mode(mode));
+    let (frame_count, frame_interval_ms) = match asset.as_deref() {
+        Some("xiao-shu-v3-focus-turn-left-v1" | "xiao-shu-v3-focus-turn-right-v1") => (6, 160),
+        _ => native_frame_timing_for_mode(mode),
+    };
     NativeSpritePlan {
         mode: mode.to_string(),
-        asset: native_asset_from_renderer_payload(value)
-            .or_else(|| native_sprite_asset_for_mode(mode)),
+        asset,
         frame_col: 0,
         frame_row: 0,
         frame_count,
