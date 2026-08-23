@@ -959,6 +959,25 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Recommend whether Xiao Shu should stay or offer a confirmed focus move.
+    /// Read-only: never dispatches movement or writes observer state.
+    FocusFollowRecommend {
+        /// Last acknowledged focused Sway node id, when known.
+        #[arg(long)]
+        last_target_node_id: Option<i64>,
+        /// Suppress movement recommendations below this distance.
+        #[arg(long, default_value_t = 96)]
+        min_travel_px: i64,
+        /// Gap between Xiao Shu and the focused window.
+        #[arg(long, default_value_t = 24)]
+        margin_px: i64,
+        /// Maximum distance between proposed path points.
+        #[arg(long, default_value_t = 48)]
+        max_step_px: i64,
+        /// Emit raw JSON instead of the human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Move Xiao Shu near the focused Sway window after explicit owner confirmation.
     /// Default is a dry-run; affects only the exact Avatar app_id and never the pointer.
     FocusFollowAction {
@@ -5118,6 +5137,19 @@ async fn real_main() -> Result<()> {
                 *max_step_px,
                 *as_json,
             ),
+            AvatarOp::FocusFollowRecommend {
+                last_target_node_id,
+                min_travel_px,
+                margin_px,
+                max_step_px,
+                json: as_json,
+            } => run_avatar_focus_follow_recommend(
+                *last_target_node_id,
+                *min_travel_px,
+                *margin_px,
+                *max_step_px,
+                *as_json,
+            ),
             AvatarOp::FocusFollowAction {
                 margin_px,
                 max_step_px,
@@ -9154,6 +9186,47 @@ fn run_avatar_focus_follow_plan(
         {
             println!("  path_points: {}", points);
         }
+    }
+    Ok(())
+}
+
+fn run_avatar_focus_follow_recommend(
+    last_target_node_id: Option<i64>,
+    min_travel_px: i64,
+    margin_px: i64,
+    max_step_px: i64,
+    as_json: bool,
+) -> Result<()> {
+    let tree = read_sway_tree_for_avatar()?;
+    let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
+        &tree,
+        &ab_bridge::avatar_focus_follow::FocusFollowOptions {
+            avatar_app_id: ab_bridge::avatar_focus_follow::DEFAULT_AVATAR_APP_ID.to_string(),
+            margin_px,
+            max_step_px,
+        },
+    );
+    let recommendation = ab_bridge::avatar_focus_follow::focus_follow_recommendation(
+        &plan,
+        last_target_node_id,
+        min_travel_px,
+    );
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&recommendation)?);
+    } else {
+        println!(
+            "Xiao Shu focus-follow recommendation: {} ({})",
+            recommendation
+                .get("decision")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("suppress"),
+            recommendation
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!("  read_only: true");
+        println!("  dispatch: none");
     }
     Ok(())
 }

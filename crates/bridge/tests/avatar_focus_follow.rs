@@ -1,6 +1,7 @@
 use ab_bridge::avatar_focus_follow::{
-    focus_follow_action_preflight, focus_follow_plan_from_sway_tree, focus_follow_runtime_bindings,
-    FocusFollowOptions, FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_SCHEMA,
+    focus_follow_action_preflight, focus_follow_plan_from_sway_tree, focus_follow_recommendation,
+    focus_follow_runtime_bindings, FocusFollowOptions, FOCUS_FOLLOW_ACTION_SCHEMA,
+    FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
 };
 use serde_json::json;
 
@@ -102,6 +103,39 @@ fn focus_follow_action_requires_execute_confirm_and_reason() {
     assert_eq!(ready["renderer_override_bound"], true);
     assert_eq!(ready["state_machine"][3]["state"], "acknowledging");
     assert_eq!(ready["state_machine"][3]["actions"], "wave");
+}
+
+#[test]
+fn focus_follow_recommendation_is_read_only_and_change_sensitive() {
+    let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
+    let recommendation = focus_follow_recommendation(&plan, Some(7), 96);
+
+    assert_eq!(recommendation["schema"], FOCUS_FOLLOW_RECOMMEND_SCHEMA);
+    assert_eq!(recommendation["decision"], "recommend_move");
+    assert_eq!(recommendation["reason"], "new_focus_target_outside_threshold");
+    assert_eq!(recommendation["read_only"], true);
+    assert_eq!(recommendation["writes_state"], false);
+    assert_eq!(recommendation["moves_avatar"], false);
+    assert!(recommendation["dispatch"].is_null());
+    assert_eq!(recommendation["requires_explicit_action_confirmation"], true);
+
+    let unchanged = focus_follow_recommendation(&plan, Some(41), 96);
+    assert_eq!(unchanged["decision"], "stay");
+    assert_eq!(unchanged["reason"], "target_unchanged");
+    assert_eq!(unchanged["requires_explicit_action_confirmation"], false);
+}
+
+#[test]
+fn focus_follow_recommendation_suppresses_non_actionable_plan() {
+    let mut tree = sway_tree();
+    tree["nodes"][0]["nodes"][0]["floating_nodes"] = json!([]);
+    let plan = focus_follow_plan_from_sway_tree(&tree, &FocusFollowOptions::default());
+    let recommendation = focus_follow_recommendation(&plan, None, 96);
+
+    assert_eq!(recommendation["decision"], "suppress");
+    assert_eq!(recommendation["reason"], "plan_not_actionable");
+    assert_eq!(recommendation["moves_pointer"], false);
+    assert_eq!(recommendation["changes_focus"], false);
 }
 
 #[test]

@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 
 pub const FOCUS_FOLLOW_SCHEMA: &str = "agent_bridge.avatar_focus_follow_plan.v1";
 pub const FOCUS_FOLLOW_ACTION_SCHEMA: &str = "agent_bridge.avatar_focus_follow_action.v1";
+pub const FOCUS_FOLLOW_RECOMMEND_SCHEMA: &str =
+    "agent_bridge.avatar_focus_follow_recommendation.v1";
 pub const DEFAULT_AVATAR_APP_ID: &str = "agent-bridge-avatar";
 pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
     "turn_left",
@@ -344,6 +346,69 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
     ]);
     plan["recommended_action"] = json!("review_plan_only_no_dispatch");
     plan
+}
+
+pub fn focus_follow_recommendation(
+    plan: &Value,
+    last_target_node_id: Option<i64>,
+    min_travel_px: i64,
+) -> Value {
+    let plan_status = plan
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let target_node_id = plan.pointer("/target/node_id").and_then(Value::as_i64);
+    let current = plan.pointer("/avatar/current_rect");
+    let destination = plan.pointer("/avatar/destination_rect");
+    let travel_px = current.zip(destination).and_then(|(from, to)| {
+        Some(
+            (to.get("x")?.as_i64()? - from.get("x")?.as_i64()?)
+                .abs()
+                .max((to.get("y")?.as_i64()? - from.get("y")?.as_i64()?).abs()),
+        )
+    });
+    let min_travel_px = min_travel_px.clamp(24, 512);
+    let same_target = last_target_node_id.is_some() && last_target_node_id == target_node_id;
+    let (decision, reason) = if !matches!(plan_status, "planned" | "already_near_focus") {
+        ("suppress", "plan_not_actionable")
+    } else if target_node_id.is_none() || travel_px.is_none() {
+        ("suppress", "plan_missing_target_or_rects")
+    } else if same_target {
+        ("stay", "target_unchanged")
+    } else if plan_status == "already_near_focus"
+        || travel_px.is_some_and(|distance| distance < min_travel_px)
+    {
+        ("stay", "movement_below_threshold")
+    } else {
+        ("recommend_move", "new_focus_target_outside_threshold")
+    };
+
+    json!({
+        "schema": FOCUS_FOLLOW_RECOMMEND_SCHEMA,
+        "status": "ready",
+        "read_only": true,
+        "default_enabled": false,
+        "dispatch": null,
+        "writes_state": false,
+        "moves_avatar": false,
+        "moves_pointer": false,
+        "changes_focus": false,
+        "emits_input": false,
+        "decision": decision,
+        "reason": reason,
+        "last_target_node_id": last_target_node_id,
+        "target_node_id": target_node_id,
+        "target_changed": last_target_node_id.is_some() && !same_target,
+        "min_travel_px": min_travel_px,
+        "travel_px": travel_px,
+        "requires_explicit_action_confirmation": decision == "recommend_move",
+        "recommended_command": if decision == "recommend_move" {
+            Some("agent-bridge avatar focus-follow-action --execute --confirm --reason <reason>")
+        } else {
+            None
+        },
+        "plan": plan,
+    })
 }
 
 pub fn focus_follow_action_preflight(
