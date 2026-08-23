@@ -9187,7 +9187,7 @@ impl AvatarMotionOverrideGuard {
             "turn_right" => ("orienting", "xiao-shu-v3-focus-turn-right-v1"),
             "walk_left" => ("working", "xiao-shu-v3-focus-walk-left-v1"),
             "walk_right" => ("working", "xiao-shu-v3-focus-walk-right-v1"),
-            "arrive_settle" => ("verified", "xiao-shu-v3-ai-completion-nod-v1"),
+            "arrive_settle" => ("verified", "xiao-shu-v3-ai-completion-nod-v2"),
             "wave" => ("verified", "xiao-shu-v3-focus-wave-v1"),
             _ => anyhow::bail!("unbound Xiao Shu motion action: {action}"),
         };

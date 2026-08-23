@@ -3304,6 +3304,11 @@ fn avatar_sidecar_spritesheet_png(asset: &str) -> Option<&'static [u8]> {
             "../assets/xiao-shu-prototypes/xiao-shu-v3-ai-completion-nod-v1-atlas.png"
         ));
     }
+    if asset == "xiao-shu-v3-ai-completion-nod-v2" {
+        return Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-ai-completion-nod-v2-atlas.png"
+        ));
+    }
     if asset == "xiao-shu-v3-focus-wave-v1" {
         return Some(include_bytes!(
             "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-wave-v1-atlas.png"
@@ -8185,7 +8190,7 @@ mod tests {
             "plan": {
                 "track": "completion_nod",
                 "renderer_token": "xiao_shu::completion_nod::low",
-                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1",
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v2",
                 "fallback_reason": null
             },
             "safety": {
@@ -8206,7 +8211,7 @@ mod tests {
         assert!(html.contains("background:transparent"));
         assert!(html.contains(".debug-panel { display:none; }"));
         assert!(html.contains("data-track=\"completion_nod\""));
-        assert!(html.contains("xiao-shu-v3-ai-completion-nod-v1"));
+        assert!(html.contains("xiao-shu-v3-ai-completion-nod-v2"));
     }
 
     fn presence_fixture() -> AgentPresenceRecord {
@@ -9247,7 +9252,7 @@ mod tests {
         assert!(html
             .contains("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-soft-bounce-v1"));
         assert!(html.contains(
-            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1"
+            "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v2"
         ));
         assert!(html.contains(
             "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-motion-canonical-idle-breathe-v1"
@@ -9324,7 +9329,7 @@ mod tests {
         );
         assert!(html.contains("\"asset_id\":\"xiao-shu-alert-peek-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-v3-ai-soft-bounce-v1\""));
-        assert!(html.contains("\"asset_id\":\"xiao-shu-v3-ai-completion-nod-v1\""));
+        assert!(html.contains("\"asset_id\":\"xiao-shu-v3-ai-completion-nod-v2\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-v3-ai-idle-breathe-v1\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-motion-canonical-peek-v4\""));
         assert!(html.contains("\"asset_id\":\"xiao-shu-ai-alert-peek-v1\""));
@@ -9436,7 +9441,7 @@ mod tests {
         let v3_soft_bounce_png =
             avatar_sidecar_spritesheet_png("xiao-shu-v3-ai-soft-bounce-v1").unwrap();
         let v3_completion_nod_png =
-            avatar_sidecar_spritesheet_png("xiao-shu-v3-ai-completion-nod-v1").unwrap();
+            avatar_sidecar_spritesheet_png("xiao-shu-v3-ai-completion-nod-v2").unwrap();
         let v3_focus_wave_png =
             avatar_sidecar_spritesheet_png("xiao-shu-v3-focus-wave-v1").unwrap();
         let v3_focus_turn_left_png =

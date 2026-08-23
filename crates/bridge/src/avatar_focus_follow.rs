@@ -42,7 +42,7 @@ pub fn focus_follow_runtime_bindings() -> Value {
             "dedicated_motion": true,
         },
         "arrive_settle": {
-            "asset": "xiao-shu-v3-ai-completion-nod-v1",
+            "asset": "xiao-shu-v3-ai-completion-nod-v2",
             "alpha_ready": true,
             "dedicated_motion": true,
         },

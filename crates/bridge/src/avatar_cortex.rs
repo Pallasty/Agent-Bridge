@@ -2337,8 +2337,8 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                 "default": false,
                 "intent": "v3 Xiao Shu anchored completion acknowledgement; body and hands stay fixed while the face performs a small nod, blink, and smile",
                 "sidecar_asset": {
-                    "asset_id": "xiao-shu-v3-ai-completion-nod-v1",
-                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1",
+                    "asset_id": "xiao-shu-v3-ai-completion-nod-v2",
+                    "route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v2",
                     "format": "image/png",
                     "atlas": "1536x1872",
                     "cell": "192x208",
@@ -2346,7 +2346,7 @@ fn avatar_cortex_renderer_view_track_variants(token: &str) -> Vec<Value> {
                     "official_pet_package_mutation": false,
                     "art_pass": "v3_ai_completion_nod_v1"
                 },
-                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1",
+                "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v2",
                 "frame_choreography": {
                     "schema": 1,
                     "choreography_id": "completion_nod_v3_ai_frame_v1_choreo",
@@ -8700,7 +8700,7 @@ mod tests {
         );
         assert_eq!(
             first["semantic_variants"][2]["sidecar_asset"]["asset_id"],
-            "xiao-shu-v3-ai-completion-nod-v1"
+            "xiao-shu-v3-ai-completion-nod-v2"
         );
         assert_eq!(
             first["semantic_variants"][2]["frame_choreography"]["choreography_id"],

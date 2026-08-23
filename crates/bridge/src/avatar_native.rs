@@ -248,6 +248,9 @@ pub fn sidecar_sprite_asset_png(asset: &str) -> Option<&'static [u8]> {
         "xiao-shu-v3-ai-completion-nod-v1" => Some(include_bytes!(
             "../assets/xiao-shu-prototypes/xiao-shu-v3-ai-completion-nod-v1-atlas.png"
         )),
+        "xiao-shu-v3-ai-completion-nod-v2" => Some(include_bytes!(
+            "../assets/xiao-shu-prototypes/xiao-shu-v3-ai-completion-nod-v2-atlas.png"
+        )),
         "xiao-shu-v3-focus-wave-v1" => Some(include_bytes!(
             "../assets/xiao-shu-prototypes/xiao-shu-v3-focus-wave-v1-atlas.png"
         )),
@@ -280,7 +283,7 @@ pub fn native_sprite_asset_for_mode(mode: &str) -> Option<String> {
     }
 
     let fallback = match mode {
-        "verified" => "xiao-shu-v3-ai-completion-nod-v1",
+        "verified" => "xiao-shu-v3-ai-completion-nod-v2",
         "working" => "xiao-shu-v3-ai-soft-bounce-v1",
         "orienting" | "reviewing" | "waiting_for_user" | "failed" => "xiao-shu-v3-ai-alert-peek-v3",
         _ => DEFAULT_NATIVE_SPRITE_ASSET,
@@ -326,7 +329,7 @@ pub fn native_sprite_plan_from_state_value(value: &Value) -> NativeSpritePlan {
     let asset =
         native_asset_from_renderer_payload(value).or_else(|| native_sprite_asset_for_mode(mode));
     let (frame_count, frame_interval_ms) = match asset.as_deref() {
-        Some("xiao-shu-v3-ai-completion-nod-v1") => (8, 160),
+        Some("xiao-shu-v3-ai-completion-nod-v1" | "xiao-shu-v3-ai-completion-nod-v2") => (8, 160),
         Some("xiao-shu-v3-focus-turn-left-v1" | "xiao-shu-v3-focus-turn-right-v1") => (6, 160),
         Some("xiao-shu-v3-focus-walk-left-v1" | "xiao-shu-v3-focus-walk-right-v1") => (8, 140),
         _ => native_frame_timing_for_mode(mode),

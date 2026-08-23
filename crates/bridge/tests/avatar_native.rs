@@ -238,9 +238,9 @@ fn sidecar_asset_id_is_extracted_from_renderer_asset_route() {
     );
     assert_eq!(
         sidecar_asset_id_from_route(
-            "/avatar-surface/sidecar-spritesheet?ignored=1&asset=xiao-shu-v3-ai-completion-nod-v1"
+            "/avatar-surface/sidecar-spritesheet?ignored=1&asset=xiao-shu-v3-ai-completion-nod-v2"
         ),
-        Some("xiao-shu-v3-ai-completion-nod-v1".to_string())
+        Some("xiao-shu-v3-ai-completion-nod-v2".to_string())
     );
     assert_eq!(sidecar_asset_id_from_route("/avatar-surface/panel"), None);
 }
@@ -269,7 +269,7 @@ fn sidecar_sprite_asset_decodes_focus_wave_atlas() {
 
 #[test]
 fn sidecar_sprite_asset_decodes_normalized_completion_nod_atlas() {
-    let sprite = decode_sidecar_sprite_asset("xiao-shu-v3-ai-completion-nod-v1")
+    let sprite = decode_sidecar_sprite_asset("xiao-shu-v3-ai-completion-nod-v2")
         .expect("decode normalized Xiao Shu completion nod atlas");
 
     assert_eq!(sprite.width, 1536);
@@ -420,7 +420,7 @@ fn native_sprite_asset_follows_renderer_mode_with_png_fallbacks() {
     );
     assert_eq!(
         native_sprite_asset_for_mode("verified").as_deref(),
-        Some("xiao-shu-v3-ai-completion-nod-v1")
+        Some("xiao-shu-v3-ai-completion-nod-v2")
     );
     assert_eq!(
         native_sprite_asset_for_mode("working").as_deref(),
@@ -450,7 +450,7 @@ fn native_sprite_plan_uses_renderer_payload_png_route_when_available() {
             "mode": "verified"
         },
         "plan": {
-            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1"
+            "asset_route": "/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v2"
         }
     });
 
@@ -459,7 +459,7 @@ fn native_sprite_plan_uses_renderer_payload_png_route_when_available() {
     assert_eq!(plan.mode, "verified");
     assert_eq!(
         plan.asset.as_deref(),
-        Some("xiao-shu-v3-ai-completion-nod-v1")
+        Some("xiao-shu-v3-ai-completion-nod-v2")
     );
 }
 
@@ -499,7 +499,7 @@ fn native_sprite_plan_updates_transparent_options_without_moving_window() {
     assert_eq!(opts.sprite_scale_percent, 140);
     assert_eq!(
         opts.sprite_asset.as_deref(),
-        Some("xiao-shu-v3-ai-completion-nod-v1")
+        Some("xiao-shu-v3-ai-completion-nod-v2")
     );
     assert_eq!(opts.frame_count, 8);
     assert_eq!(opts.frame_interval_ms, 160);

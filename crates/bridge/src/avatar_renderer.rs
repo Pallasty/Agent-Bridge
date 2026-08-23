@@ -348,7 +348,7 @@ pub fn renderer_plan_from_state(state: &Value) -> RendererPlan {
         "verified" => (
             "completion_nod",
             "xiao_shu::completion_nod::low",
-            Some("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v1"),
+            Some("/avatar-surface/sidecar-spritesheet?asset=xiao-shu-v3-ai-completion-nod-v2"),
             None,
         ),
         "handoff" => (
