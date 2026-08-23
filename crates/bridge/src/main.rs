@@ -857,6 +857,16 @@ enum AvatarOp {
         cell_width: u32,
         #[arg(long, default_value_t = 208)]
         cell_height: u32,
+        /// Number of populated cells, in row-major order. Defaults to all cells.
+        #[arg(long)]
+        frame_count: Option<u32>,
+        /// Final Avatar viewport used for projected readability metrics.
+        #[arg(long, default_value_t = 90)]
+        target_width: u32,
+        #[arg(long, default_value_t = 130)]
+        target_height: u32,
+        #[arg(long, default_value_t = 8)]
+        max_baseline_drift_px: u32,
         #[arg(long)]
         json: bool,
     },
@@ -4990,6 +5000,10 @@ async fn real_main() -> Result<()> {
                 rows,
                 cell_width,
                 cell_height,
+                frame_count,
+                target_width,
+                target_height,
+                max_baseline_drift_px,
                 json: as_json,
             } => run_avatar_sprite_asset_audit(
                 path,
@@ -4997,6 +5011,10 @@ async fn real_main() -> Result<()> {
                 *rows,
                 *cell_width,
                 *cell_height,
+                *frame_count,
+                *target_width,
+                *target_height,
+                *max_baseline_drift_px,
                 *as_json,
             ),
             AvatarOp::Surface {
@@ -8934,6 +8952,10 @@ fn run_avatar_sprite_asset_audit(
     rows: u32,
     cell_width: u32,
     cell_height: u32,
+    frame_count: Option<u32>,
+    target_width: u32,
+    target_height: u32,
+    max_baseline_drift_px: u32,
     as_json: bool,
 ) -> Result<()> {
     let report = ab_bridge::avatar_asset_audit::audit_sprite_asset(
@@ -8942,6 +8964,10 @@ fn run_avatar_sprite_asset_audit(
         rows,
         cell_width,
         cell_height,
+        frame_count,
+        target_width,
+        target_height,
+        max_baseline_drift_px,
     )?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
