@@ -2,6 +2,187 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::{fs::File, io::BufReader, path::Path};
 
+pub const FOCUS_FOLLOW_ASSET_CONTRACT_SCHEMA: &str =
+    "agent_bridge.avatar_focus_follow_asset_contract.v1";
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct FocusFollowAssetSpec {
+    pub action: &'static str,
+    pub filename: &'static str,
+    pub columns: u32,
+    pub rows: u32,
+    pub frame_count: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub target_width: u32,
+    pub target_height: u32,
+    pub max_baseline_drift_px: u32,
+    pub frame_sequence: &'static [&'static str],
+}
+
+const WAVE_FRAMES: &[&str] = &["neutral", "raise", "out", "in", "out", "settle"];
+const TURN_LEFT_FRAMES: &[&str] = &[
+    "front",
+    "quarter",
+    "profile",
+    "profile_hold",
+    "quarter",
+    "front",
+];
+const TURN_RIGHT_FRAMES: &[&str] = &[
+    "front",
+    "quarter",
+    "profile",
+    "profile_hold",
+    "quarter",
+    "front",
+];
+const WALK_FRAMES: &[&str] = &[
+    "contact", "down", "passing", "up", "contact", "down", "passing", "up",
+];
+
+pub const FOCUS_FOLLOW_ASSET_SPECS: [FocusFollowAssetSpec; 5] = [
+    FocusFollowAssetSpec {
+        action: "wave",
+        filename: "xiao-shu-v3-focus-wave-v1-atlas.png",
+        columns: 6,
+        rows: 1,
+        frame_count: 6,
+        cell_width: 192,
+        cell_height: 208,
+        target_width: 90,
+        target_height: 130,
+        max_baseline_drift_px: 8,
+        frame_sequence: WAVE_FRAMES,
+    },
+    FocusFollowAssetSpec {
+        action: "turn_left",
+        filename: "xiao-shu-v3-focus-turn-left-v1-atlas.png",
+        columns: 6,
+        rows: 1,
+        frame_count: 6,
+        cell_width: 192,
+        cell_height: 208,
+        target_width: 90,
+        target_height: 130,
+        max_baseline_drift_px: 8,
+        frame_sequence: TURN_LEFT_FRAMES,
+    },
+    FocusFollowAssetSpec {
+        action: "turn_right",
+        filename: "xiao-shu-v3-focus-turn-right-v1-atlas.png",
+        columns: 6,
+        rows: 1,
+        frame_count: 6,
+        cell_width: 192,
+        cell_height: 208,
+        target_width: 90,
+        target_height: 130,
+        max_baseline_drift_px: 8,
+        frame_sequence: TURN_RIGHT_FRAMES,
+    },
+    FocusFollowAssetSpec {
+        action: "walk_left",
+        filename: "xiao-shu-v3-focus-walk-left-v1-atlas.png",
+        columns: 8,
+        rows: 1,
+        frame_count: 8,
+        cell_width: 192,
+        cell_height: 208,
+        target_width: 90,
+        target_height: 130,
+        max_baseline_drift_px: 16,
+        frame_sequence: WALK_FRAMES,
+    },
+    FocusFollowAssetSpec {
+        action: "walk_right",
+        filename: "xiao-shu-v3-focus-walk-right-v1-atlas.png",
+        columns: 8,
+        rows: 1,
+        frame_count: 8,
+        cell_width: 192,
+        cell_height: 208,
+        target_width: 90,
+        target_height: 130,
+        max_baseline_drift_px: 16,
+        frame_sequence: WALK_FRAMES,
+    },
+];
+
+#[derive(Debug, Serialize)]
+pub struct FocusFollowAssetStatus {
+    pub spec: FocusFollowAssetSpec,
+    pub path: String,
+    pub status: String,
+    pub audit: Option<SpriteAssetAudit>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FocusFollowAssetContract {
+    pub schema: &'static str,
+    pub asset_root: String,
+    pub ready: bool,
+    pub accepted: usize,
+    pub missing: usize,
+    pub rejected: usize,
+    pub assets: Vec<FocusFollowAssetStatus>,
+}
+
+pub fn focus_follow_asset_contract(asset_root: &Path) -> FocusFollowAssetContract {
+    let mut assets = Vec::with_capacity(FOCUS_FOLLOW_ASSET_SPECS.len());
+    for spec in FOCUS_FOLLOW_ASSET_SPECS {
+        let path = asset_root.join(spec.filename);
+        let (status, audit, error) = if !path.is_file() {
+            ("missing", None, None)
+        } else {
+            match audit_sprite_asset(
+                &path,
+                spec.columns,
+                spec.rows,
+                spec.cell_width,
+                spec.cell_height,
+                Some(spec.frame_count),
+                spec.target_width,
+                spec.target_height,
+                spec.max_baseline_drift_px,
+            ) {
+                Ok(report) if report.accepted => ("accepted", Some(report), None),
+                Ok(report) => ("rejected", Some(report), None),
+                Err(err) => ("rejected", None, Some(format!("{err:#}"))),
+            }
+        };
+        assets.push(FocusFollowAssetStatus {
+            spec,
+            path: path.display().to_string(),
+            status: status.to_string(),
+            audit,
+            error,
+        });
+    }
+    let accepted = assets
+        .iter()
+        .filter(|item| item.status == "accepted")
+        .count();
+    let missing = assets
+        .iter()
+        .filter(|item| item.status == "missing")
+        .count();
+    let rejected = assets
+        .iter()
+        .filter(|item| item.status == "rejected")
+        .count();
+    FocusFollowAssetContract {
+        schema: FOCUS_FOLLOW_ASSET_CONTRACT_SCHEMA,
+        asset_root: asset_root.display().to_string(),
+        ready: accepted == assets.len(),
+        accepted,
+        missing,
+        rejected,
+        assets,
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SpriteFrameAudit {
     pub index: u32,
@@ -244,5 +425,31 @@ mod tests {
         assert_eq!(report.baseline_drift_px, 0);
         assert!(report.failures.iter().any(|item| item.contains("frame 1")));
         assert!(!report.failures.iter().any(|item| item.contains("frame 3")));
+    }
+
+    #[test]
+    fn focus_follow_contract_is_complete_and_fail_closed_when_assets_are_missing() {
+        let root = std::env::temp_dir().join(format!(
+            "ab-avatar-contract-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let contract = focus_follow_asset_contract(&root);
+        std::fs::remove_dir(root).unwrap();
+        assert!(!contract.ready);
+        assert_eq!(contract.accepted, 0);
+        assert_eq!(contract.missing, 5);
+        assert_eq!(contract.rejected, 0);
+        assert_eq!(
+            contract
+                .assets
+                .iter()
+                .map(|item| item.spec.action)
+                .collect::<Vec<_>>(),
+            vec!["wave", "turn_left", "turn_right", "walk_left", "walk_right"]
+        );
     }
 }

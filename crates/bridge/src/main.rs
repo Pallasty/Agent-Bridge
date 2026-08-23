@@ -845,6 +845,17 @@ enum InstinctOp {
 
 #[derive(Subcommand, Debug)]
 enum AvatarOp {
+    /// Report the machine-readable production contract and readiness of all
+    /// dedicated focus-follow sprite atlases.
+    SpriteAssetContract {
+        #[arg(
+            long,
+            default_value = "crates/bridge/assets/xiao-shu-prototypes"
+        )]
+        asset_root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Validate a candidate sprite atlas before it may be bound to the Avatar.
     SpriteAssetAudit {
         #[arg(long)]
@@ -4994,6 +5005,10 @@ async fn real_main() -> Result<()> {
     // Avatar subcommand: short-lived read-only terminal surface over presence rows.
     if let Cmd::Avatar { op } = &cmd {
         return match op {
+            AvatarOp::SpriteAssetContract {
+                asset_root,
+                json: as_json,
+            } => run_avatar_sprite_asset_contract(asset_root, *as_json),
             AvatarOp::SpriteAssetAudit {
                 path,
                 columns,
@@ -8990,6 +9005,25 @@ fn run_avatar_sprite_asset_audit(
     } else {
         anyhow::bail!("sprite asset failed admission checks")
     }
+}
+
+fn run_avatar_sprite_asset_contract(asset_root: &Path, as_json: bool) -> Result<()> {
+    let contract = ab_bridge::avatar_asset_audit::focus_follow_asset_contract(asset_root);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&contract)?);
+    } else {
+        println!(
+            "Xiao Shu focus-follow assets: {}/{} accepted, {} missing, {} rejected",
+            contract.accepted,
+            contract.assets.len(),
+            contract.missing,
+            contract.rejected,
+        );
+        for item in &contract.assets {
+            println!("- {}: {} ({})", item.spec.action, item.status, item.path);
+        }
+    }
+    Ok(())
 }
 
 fn run_avatar_focus_follow_plan(
