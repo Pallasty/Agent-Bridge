@@ -5,6 +5,7 @@
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
 pub mod agent_task_contract;
+pub mod agent_task_outcome;
 pub mod agent_world_trajectory;
 pub mod a2ui;
 pub mod operator_request;

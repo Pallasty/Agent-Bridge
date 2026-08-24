@@ -19,6 +19,7 @@ Agent-Bridge should reduce the cost of using several local AI development tools:
 - **R2 — lower coordination ceremony (dogfooding):** ordinary single-developer work uses the local plan, optional work memory, and final result; forum is reserved for parallel agents, cross-device handoff, shared high-risk changes, or active incidents. A single short-lived coordination registry holds at most five genuinely active shared threads. Historical forum `open` status is not the product backlog. See `docs/R2-LOW-CEREMONY-OPERATING-MODE.md`.
 - **R3 — continuity dogfood:** keep bootstrap orientation exact-project and actionable across both semantic results and the Project State Digest; validate the behavior in daily tasks before adding new memory mechanisms. See `docs/R3-CONTINUITY-DOGFOOD.md`.
 - **R4 — continuity and embodiment benefit dogfood (collection pending):** freeze the current capability surface and collect one privacy-minimal, owner-local evidence set across resumed tasks, foreground Avatar sessions, paired embodied tasks, and explicit Qwen voice sessions. The reducer has no runtime influence and exports only a hash-bound content-free aggregate. A complete sample leads to one owner decision: review one bounded shortcut for adoption, or retain the current on-demand commands and end expansion. See `docs/BENEFIT-DOGFOOD-V1.md`.
+- **R5 — agent-beneficiary closure (owner-reopened bounded source slice):** on 2026-08-24 the owner explicitly reopened one evidence-closure increment: add an optional agent-reported task outcome to `session_finalize`, expose it only as provenance-labeled claims in `practical_workflow_scorecard`, and admit privacy-minimal non-mutating `BodyOperationEnvelope` receipts to an atomic advisory ledger through the existing record-only embodiment surface. Reuse Tool Atlas for tool pressure; do not add dynamic routing or a second tool-health system. This is source implementation and review, not runtime enablement, authenticated owner/harness evidence, executor authority, deployment, or admission of a production body registry. See `docs/design/AGENT-BENEFICIARY-CLOSURE-V1.md`.
 
 ## Admission rule for new work
 
@@ -35,3 +36,6 @@ External papers and repositories may produce one value decision, one reusable pr
 - Voice or avatar expansion without observed recurring use.
 
 Frozen work is retained and remains searchable. Freeze means “not an active product goal,” not rejection or deletion.
+The explicitly owner-reopened R5 source slice is the only current exception for
+embodiment-contract work; it does not reopen embodiment runtime admission or
+the broader protocol backlog.

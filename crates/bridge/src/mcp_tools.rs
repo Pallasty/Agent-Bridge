@@ -31974,6 +31974,9 @@ impl McpTool for EmbodimentSnapshotTool {
             return Ok(ToolResult::error("no store configured"));
         };
         let events = store.recent_semantic_events(90 * 86_400, 500).await?;
+        let operation_receipts = store
+            .recent_body_operation_receipts(90 * 86_400, 500)
+            .await?;
         let mut snapshot = crate::embodiment_projection::project_embodiment_snapshot(
             &events,
             &crate::body_telemetry::body_status_snapshot(),
@@ -31990,6 +31993,21 @@ impl McpTool for EmbodimentSnapshotTool {
             })
         });
         snapshot["write_lease_complete"] = Value::Bool(true);
+        snapshot["operation_receipt_ledger"] = json!({
+            "admitted_count": operation_receipts.len(),
+            "source_truncated_possible": operation_receipts.len() == 500,
+            "trust_level": "advisory_only",
+            "authority_authenticated": false,
+            "adapter_attestation_authenticated": false,
+            "receipts": operation_receipts.iter().take(20).map(|receipt| json!({
+                "operation_id": receipt.operation_id,
+                "recorded_at": receipt.recorded_at,
+                "body_id": receipt.body_id,
+                "claimed_status": receipt.terminal_status,
+                "claimed_verification_status": receipt.claimed_verification_status,
+                "admission_provenance": receipt.admission_provenance,
+            })).collect::<Vec<_>>(),
+        });
         Ok(ToolResult::json_text(&snapshot))
     }
 }
@@ -32164,7 +32182,22 @@ impl McpTool for EmbodimentRecordTool {
         "embodiment_record"
     }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { name: self.name().into(), description: "Append an intent or receipt fact to the embodiment event spine. This never executes, resumes, or authorizes an action.".into(), input_schema: json!({"type":"object","required":["kind","body_id","facts"],"properties":{"kind":{"enum":["intent_opened","action_receipt","intent_needs_confirmation_after_restart"]},"body_id":{"type":"string","minLength":1,"maxLength":128},"facts":{"type":"object"},"verdict":{"enum":["verified","not_verified","unknown"]}}}) }
+        ToolSchema {
+            name: self.name().into(),
+            description: "Record an intent or legacy receipt in Event Spine, or admit a structurally validated BodyOperationEnvelope to the dedicated atomic receipt ledger. Public operation_receipt claims are advisory and non-mutating only: they cannot authenticate authority, an owner, an adapter, or a verifier. This records evidence only; it never executes, resumes, or authorizes an action.".into(),
+            input_schema: json!({
+                "type":"object",
+                "required":["kind","body_id"],
+                "additionalProperties":false,
+                "properties":{
+                    "kind":{"enum":["intent_opened","action_receipt","intent_needs_confirmation_after_restart","operation_receipt"]},
+                    "body_id":{"type":"string","minLength":1,"maxLength":128},
+                    "facts":{"type":"object","description":"Required for legacy intent/action kinds; ignored for operation_receipt."},
+                    "verdict":{"enum":["verified","not_verified","unknown"],"description":"Legacy intent/action kinds only."},
+                    "operation":{"type":"object","description":"Required for operation_receipt; agent_bridge.body_operation_envelope.v1. The public route accepts non-mutating, agent-reported advisory receipts only."}
+                }
+            }),
+        }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let Some(store) = &self.hub.store else {
@@ -32175,7 +32208,10 @@ impl McpTool for EmbodimentRecordTool {
         };
         if !matches!(
             kind,
-            "intent_opened" | "action_receipt" | "intent_needs_confirmation_after_restart"
+            "intent_opened"
+                | "action_receipt"
+                | "intent_needs_confirmation_after_restart"
+                | "operation_receipt"
         ) {
             return Ok(ToolResult::error("unsupported 'kind'"));
         }
@@ -32186,6 +32222,137 @@ impl McpTool for EmbodimentRecordTool {
         else {
             return Ok(ToolResult::error("missing 'body_id'"));
         };
+        if kind == "operation_receipt" {
+            let Some(operation_value) = args.get("operation") else {
+                return Ok(ToolResult::error("missing 'operation'"));
+            };
+            let operation = match serde_json::from_value::<ab_world_core::BodyOperationEnvelope>(
+                operation_value.clone(),
+            ) {
+                Ok(operation) => operation,
+                Err(error) => {
+                    return Ok(ToolResult::error(format!(
+                        "invalid body operation envelope: {error}"
+                    )))
+                }
+            };
+            if operation.body_id.as_str() != body_id {
+                return Ok(ToolResult::error(
+                    "body_id does not match operation.body_id",
+                ));
+            }
+            if !operation.is_terminal() {
+                return Ok(ToolResult::error(
+                    "operation_receipt requires a terminal operation status",
+                ));
+            }
+            let now_unix_ms = u64::try_from(dispatch_now_secs())
+                .unwrap_or_default()
+                .saturating_mul(1_000);
+            if let Err(violations) =
+                ab_world_core::validate_body_operation_at(&operation, now_unix_ms)
+            {
+                let mut rejected = ToolResult::json_text(&json!({
+                    "recorded": false,
+                    "executed": false,
+                    "resumes_action": false,
+                    "status": "rejected_contract",
+                    "violations": violations,
+                }));
+                rejected.is_error = true;
+                return Ok(rejected);
+            }
+            if operation.mutation || operation.lease_id.is_some() {
+                let mut rejected = ToolResult::json_text(&json!({
+                    "recorded": false,
+                    "executed": false,
+                    "resumes_action": false,
+                    "status": "trusted_runtime_required",
+                    "reason": "the public MCP transport has no authenticated principal or fenced body lease; mutation or lease-bearing receipts require a future trusted runtime producer",
+                }));
+                rejected.is_error = true;
+                return Ok(rejected);
+            }
+            let mut facts = operation.redacted_facts();
+            if let Some(facts) = facts.as_object_mut() {
+                facts.insert(
+                    "admission_provenance".into(),
+                    json!("public_mcp_agent_reported"),
+                );
+                facts.insert("trust_level".into(), json!("advisory_only"));
+                facts.insert("authority_authenticated".into(), json!(false));
+                facts.insert("adapter_attestation_authenticated".into(), json!(false));
+            }
+            let canonical_facts = match serde_json_canonicalizer::to_vec(&facts) {
+                Ok(facts) => facts,
+                Err(error) => {
+                    return Ok(ToolResult::error(format!(
+                        "could not canonicalize body operation receipt: {error}"
+                    )))
+                }
+            };
+            let record_sha256 = format!("sha256:{:x}", Sha256::digest(&canonical_facts));
+            let redacted_facts_json = match String::from_utf8(canonical_facts) {
+                Ok(facts) => facts,
+                Err(_) => {
+                    return Ok(ToolResult::error(
+                        "canonical body operation receipt was not UTF-8",
+                    ))
+                }
+            };
+            let claimed_verification_status = match operation.postcondition_verification.status {
+                ab_world_core::BodyVerificationStatus::Verified => "verified",
+                ab_world_core::BodyVerificationStatus::NotVerified => "not_verified",
+                ab_world_core::BodyVerificationStatus::Unknown => "unknown",
+            };
+            let terminal_status = match operation.status {
+                ab_world_core::BodyOperationStatus::Succeeded => "succeeded",
+                ab_world_core::BodyOperationStatus::Failed => "failed",
+                ab_world_core::BodyOperationStatus::Abandoned => "abandoned",
+                _ => unreachable!("terminal status checked above"),
+            };
+            let write_status = store
+                .record_body_operation_receipt(ab_store::BodyOperationReceiptRecord {
+                    schema_version: "agent_bridge.body_operation_receipt.v1".into(),
+                    operation_id: operation.operation_id.clone(),
+                    recorded_at: dispatch_now_secs(),
+                    body_id: body_id.to_string(),
+                    terminal_status: terminal_status.to_string(),
+                    claimed_verification_status: claimed_verification_status.to_string(),
+                    admission_provenance: "public_mcp_agent_reported".into(),
+                    redacted_facts_json,
+                    record_sha256,
+                })
+                .await?;
+            let duplicate = match write_status {
+                ab_store::BodyOperationReceiptWriteStatus::Inserted => false,
+                ab_store::BodyOperationReceiptWriteStatus::Duplicate => true,
+                ab_store::BodyOperationReceiptWriteStatus::Conflict => {
+                    return Ok(ToolResult::error(
+                        "operation_id conflict; existing receipt was not overwritten",
+                    ))
+                }
+            };
+            return Ok(ToolResult::json_text(&json!({
+                "recorded": !duplicate,
+                "duplicate": duplicate,
+                "executed": false,
+                "resumes_action": false,
+                "kind": kind,
+                "body_id": body_id,
+                "operation_id": operation.operation_id,
+                "claimed_status": terminal_status,
+                "claimed_verification_status": claimed_verification_status,
+                "trust_level": "advisory_only",
+                "authority_authenticated": false,
+                "adapter_attestation_authenticated": false,
+                "storage": "body_operation_receipts",
+                "projected_to_event_spine": false,
+            })));
+        }
+        if args.get("facts").and_then(Value::as_object).is_none() {
+            return Ok(ToolResult::error("missing 'facts'"));
+        }
         let facts = args.get("facts").cloned().unwrap_or(Value::Null);
         let verdict = match args
             .get("verdict")
@@ -43598,7 +43765,7 @@ impl McpTool for SessionFinalizeTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "older_than_days": { "type": "integer", "minimum": 1, "default": 90 },
+                    "older_than_days": { "type": "integer", "minimum": 1, "maximum": 36500, "default": 90 },
                     "min_uses": { "type": "integer", "minimum": 0 },
                     "dry_run": { "type": "boolean", "default": false },
                     "decay_half_life_days": {
@@ -43656,6 +43823,41 @@ impl McpTool for SessionFinalizeTool {
                         "items": { "type": "string" },
                         "description": "Explicit work_memory keys whose tasks completed in this session. Each key is type-checked before deletion; missing keys and non-work_memory rows are reported, never guessed. dry_run previews without deleting. Omit to leave scratch lanes unchanged."
                     },
+                    "task_outcome": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "description": "Optional privacy-minimal, agent-reported agent_bridge.agent_task_outcome.v1 closure claim. This public route fixes owner acceptance to unknown and cannot assert trusted harness/owner provenance. The ledger admission is an independent durable transaction before maintenance; a later maintenance failure returns a structured partial_failure containing its write status. Lifecycle finalization alone never implies goal completion. dry_run performs a read-only duplicate/conflict preview.",
+                        "properties": {
+                            "schema_version": { "const": "agent_bridge.agent_task_outcome.v1" },
+                            "outcome_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+                            "contract_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+                            "revision": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+                            "status": { "enum": ["achieved", "partially_achieved", "blocked", "abandoned"] },
+                            "verification": { "enum": ["verified", "not_verified", "unknown"] },
+                            "verification_method": { "enum": ["tests", "postcondition", "none"] },
+                            "user_acceptance": { "const": "unknown" },
+                            "acceptance_provenance": { "const": "unavailable" },
+                            "rollback_status": { "enum": ["not_needed", "available", "completed", "failed", "unknown"] },
+                            "provenance": { "const": "agent_reported" },
+                            "agent_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+                            "body_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+                            "environment_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+                            "evidence_sha256": {
+                                "type": "array", "maxItems": 16, "uniqueItems": true,
+                                "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+                            },
+                            "counts": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "manual_interventions": { "type": "integer", "minimum": 0, "maximum": 1000 },
+                                    "owner_restatements": { "type": "integer", "minimum": 0, "maximum": 1000 },
+                                    "repeated_authorization_prompts": { "type": "integer", "minimum": 0, "maximum": 1000 }
+                                }
+                            }
+                        },
+                        "required": ["schema_version", "outcome_id", "contract_id", "revision", "status", "verification", "verification_method", "user_acceptance", "acceptance_provenance", "rollback_status", "provenance"]
+                    },
                     "apply_outcome_gated": {
                         "type": "boolean",
                         "default": false,
@@ -43691,20 +43893,91 @@ impl McpTool for SessionFinalizeTool {
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
         };
-        let older_than_days = args
-            .get("older_than_days")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(90);
+        // MCP dispatch does not enforce JSON Schema. Validate the compaction
+        // horizon before admitting an independent task outcome so an invalid
+        // maintenance argument can never leave a hidden partial commit or
+        // overflow the seconds conversion.
+        const MAX_FINALIZE_OLDER_THAN_DAYS: i64 = 36_500;
+        let older_than_days = match args.get("older_than_days") {
+            None => 90,
+            Some(value) => match value.as_i64() {
+                Some(days) if (1..=MAX_FINALIZE_OLDER_THAN_DAYS).contains(&days) => days,
+                _ => {
+                    return Ok(ToolResult::error(format!(
+                        "older_than_days must be an integer between 1 and {MAX_FINALIZE_OLDER_THAN_DAYS}"
+                    )))
+                }
+            },
+        };
+        let Some(older_than_secs) = older_than_days.checked_mul(86_400) else {
+            return Ok(ToolResult::error(
+                "older_than_days could not be converted safely",
+            ));
+        };
         let min_uses = args.get("min_uses").and_then(|v| v.as_u64());
         let dry_run = args
             .get("dry_run")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        // Goal closure is explicit evidence, not a consequence of calling
+        // finalize. Validate and resolve its idempotency status before any
+        // maintenance mutation so a conflicting retry fails closed.
+        let task_outcome = if let Some(raw_claim) = args.get("task_outcome") {
+            let claim = match serde_json::from_value::<crate::agent_task_outcome::AgentTaskOutcome>(
+                raw_claim.clone(),
+            ) {
+                Ok(claim) => claim,
+                Err(_) => return Ok(ToolResult::error("invalid task_outcome schema")),
+            };
+            if let Err(violations) = claim.validate_agent_reported_admission() {
+                return Ok(ToolResult::error(format!(
+                    "task_outcome is not admissible on the agent-reported finalize route: {}",
+                    serde_json::to_string(&violations).unwrap_or_else(|_| "[]".into())
+                )));
+            }
+            let record = match claim.to_store_record(dispatch_now_secs()) {
+                Ok(record) => record,
+                Err(violations) => {
+                    return Ok(ToolResult::error(format!(
+                        "invalid task_outcome: {}",
+                        serde_json::to_string(&violations).unwrap_or_else(|_| "[]".into())
+                    )))
+                }
+            };
+            let write_status = if dry_run {
+                match store.check_agent_task_outcome(record).await? {
+                    ab_store::AgentTaskOutcomeWriteStatus::Inserted => "would_record",
+                    ab_store::AgentTaskOutcomeWriteStatus::Duplicate => "duplicate",
+                    ab_store::AgentTaskOutcomeWriteStatus::Conflict => {
+                        return Ok(ToolResult::error(
+                            "task_outcome dry-run conflict: outcome_id already has a different immutable claim",
+                        ))
+                    }
+                }
+            } else {
+                match store.record_agent_task_outcome(record).await? {
+                    ab_store::AgentTaskOutcomeWriteStatus::Inserted => "inserted",
+                    ab_store::AgentTaskOutcomeWriteStatus::Duplicate => "duplicate",
+                    ab_store::AgentTaskOutcomeWriteStatus::Conflict => {
+                        return Ok(ToolResult::error(
+                            "task_outcome conflict: outcome_id already has a different immutable claim",
+                        ))
+                    }
+                }
+            };
+            let summary = claim.summary();
+            Some(json!({
+                "write_status": write_status,
+                "outcome": summary,
+            }))
+        } else {
+            None
+        };
         let half_life = args
             .get("decay_half_life_days")
             .and_then(|v| v.as_f64())
@@ -43732,14 +44005,32 @@ impl McpTool for SessionFinalizeTool {
         let mut work_memory_missing = Vec::new();
         let mut work_memory_rejected = Vec::new();
         for key in &completed_work_memory_keys {
-            match store.memory_get(key).await? {
+            let row = match store.memory_get(key).await {
+                Ok(row) => row,
+                Err(error) => {
+                    return Ok(session_finalize_maintenance_error(
+                        &task_outcome,
+                        "work_memory_lookup",
+                        error,
+                    ))
+                }
+            };
+            match row {
                 Some(row) if row.kind == WORK_MEMORY_KIND => {
                     if dry_run {
                         work_memory_would_clear.push(key.clone());
-                    } else if store.memory_delete(key).await? {
-                        work_memory_cleared.push(key.clone());
                     } else {
-                        work_memory_missing.push(key.clone());
+                        match store.memory_delete(key).await {
+                            Ok(true) => work_memory_cleared.push(key.clone()),
+                            Ok(false) => work_memory_missing.push(key.clone()),
+                            Err(error) => {
+                                return Ok(session_finalize_maintenance_error(
+                                    &task_outcome,
+                                    "work_memory_delete",
+                                    error,
+                                ))
+                            }
+                        }
                     }
                 }
                 Some(row) => work_memory_rejected.push(json!({
@@ -43778,7 +44069,7 @@ impl McpTool for SessionFinalizeTool {
                 sub_args["confirm_apply"] = json!(false);
             }
             let apply_tool = OutcomeGatedConsolidationApplyTool::new(self.hub.clone());
-            match apply_tool.execute(sub_args, _ctx).await {
+            match apply_tool.execute(sub_args, ctx).await {
                 Ok(res) => tool_result_first_json(&res).unwrap_or(Value::Null),
                 Err(e) => json!({ "error": e.to_string() }),
             }
@@ -43799,16 +44090,34 @@ impl McpTool for SessionFinalizeTool {
         // 2. Compact stale memories
         let policy = CompactPolicy {
             min_uses,
-            older_than_secs: Some(older_than_days * 86_400),
+            older_than_secs: Some(older_than_secs),
             dry_run,
         };
-        let removed = store.memory_compact(policy).await?;
+        let removed = match store.memory_compact(policy).await {
+            Ok(removed) => removed,
+            Err(error) => {
+                return Ok(session_finalize_maintenance_error(
+                    &task_outcome,
+                    "memory_compact",
+                    error,
+                ))
+            }
+        };
 
         // 3. Optional export
         let mut export_summary = Value::Null;
         if let Some(path) = args.get("export_path").and_then(|v| v.as_str()) {
             let filter = MemoryExportFilter::default();
-            let exported = store.memory_export(&filter, &PathBuf::from(path)).await?;
+            let exported = match store.memory_export(&filter, &PathBuf::from(path)).await {
+                Ok(exported) => exported,
+                Err(error) => {
+                    return Ok(session_finalize_maintenance_error(
+                        &task_outcome,
+                        "memory_export",
+                        error,
+                    ))
+                }
+            };
             export_summary = json!({
                 "path": path,
                 "exported": exported.memories_written,
@@ -44035,8 +44344,32 @@ impl McpTool for SessionFinalizeTool {
                 "rejected": work_memory_rejected,
             });
         }
+        if let Some(task_outcome) = task_outcome {
+            payload["task_outcome"] = task_outcome;
+        }
         Ok(ToolResult::json_text(&payload))
     }
+}
+
+fn session_finalize_maintenance_error(
+    task_outcome: &Option<Value>,
+    failed_stage: &str,
+    error: impl std::fmt::Display,
+) -> ToolResult {
+    let Some(task_outcome) = task_outcome else {
+        return ToolResult::error(format!("session_finalize {failed_stage} failed: {error}"));
+    };
+    let mut result = ToolResult::json_text(&json!({
+        "status": "partial_failure",
+        "failed_stage": failed_stage,
+        "maintenance_error": error.to_string(),
+        "maintenance_may_be_partial": true,
+        "task_outcome": task_outcome,
+        "task_outcome_commit": "independent_durable_transaction",
+        "retry_note": "retrying the same immutable outcome returns duplicate; use a new outcome_id only for a genuinely different claim",
+    }));
+    result.is_error = true;
+    result
 }
 
 fn tool_result_first_json(tr: &ToolResult) -> Option<Value> {
@@ -47261,6 +47594,7 @@ pub struct PracticalWorkflowScorecard {
     pub completion: PracticalCompletionMetrics,
     pub recovery: PracticalRecoveryMetrics,
     pub coordination: PracticalCoordinationMetrics,
+    pub task_outcomes: PracticalTaskOutcomeMetrics,
     pub operator_burden: PracticalOperatorBurdenMetrics,
     pub recommendations: Vec<String>,
 }
@@ -47317,7 +47651,41 @@ pub struct PracticalCoordinationMetrics {
 pub struct PracticalOperatorBurdenMetrics {
     pub repeated_authorization_prompts: Option<usize>,
     pub manual_interventions: Option<usize>,
+    pub owner_restatements: Option<usize>,
+    pub repeated_authorization_prompt_observations: usize,
+    pub manual_intervention_observations: usize,
+    pub owner_restatement_observations: usize,
     pub instrumentation_status: &'static str,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalTaskOutcomeMetrics {
+    pub input_record_count: usize,
+    pub admitted_outcome_count: usize,
+    pub invalid_record_count: usize,
+    pub conflicting_outcome_count: usize,
+    pub agent_reported_provenance: u64,
+    pub harness_verified_provenance_claims: u64,
+    pub owner_attested_provenance_claims: u64,
+    pub reported_achieved: u64,
+    pub reported_partially_achieved: u64,
+    pub reported_blocked: u64,
+    pub reported_abandoned: u64,
+    pub reported_verified: u64,
+    pub reported_not_verified: u64,
+    pub reported_unknown_verification: u64,
+    pub reported_verified_achieved: u64,
+    pub reported_verification_coverage: Option<f64>,
+    pub reported_owner_accepted: u64,
+    pub reported_owner_corrected: u64,
+    pub reported_owner_rejected: u64,
+    pub reported_acceptance_unknown: u64,
+    pub reported_rollback_not_needed: u64,
+    pub reported_rollback_available: u64,
+    pub reported_rollback_completed: u64,
+    pub reported_rollback_failed: u64,
+    pub reported_rollback_unknown: u64,
     pub interpretation: &'static str,
 }
 
@@ -47327,8 +47695,25 @@ pub fn compute_practical_workflow_scorecard(
     followup_window_secs: i64,
     as_of_ts: i64,
 ) -> PracticalWorkflowScorecard {
+    compute_practical_workflow_scorecard_with_outcomes(
+        calls,
+        &[],
+        window_secs,
+        followup_window_secs,
+        as_of_ts,
+    )
+}
+
+pub fn compute_practical_workflow_scorecard_with_outcomes(
+    calls: &[ab_store::McpToolCallRow],
+    outcomes: &[ab_store::AgentTaskOutcomeRecord],
+    window_secs: i64,
+    followup_window_secs: i64,
+    as_of_ts: i64,
+) -> PracticalWorkflowScorecard {
     let successful_calls = calls.iter().filter(|call| call.ok).count();
     let failed_calls = calls.len().saturating_sub(successful_calls);
+    let task_outcomes = crate::agent_task_outcome::aggregate_agent_task_outcomes(outcomes);
     let all_bootstraps: Vec<_> = calls
         .iter()
         .filter(|call| call.ok && call.tool_name == "session_bootstrap")
@@ -47448,16 +47833,57 @@ pub fn compute_practical_workflow_scorecard(
         recommendations.push("Historical pre-attribution bootstraps are reported as legacy and excluded from the same-session rate.".into());
     }
     if repeated_failure_loops > 0 {
-        recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
+        recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again; use tool_atlas_snapshot or mcp_dispatch_audit for tool-surface diagnostics.".into());
     }
     if calls.len() >= 20 && coordination_calls.saturating_mul(5) >= calls.len().saturating_mul(2)
     {
         recommendations.push("At least two in five observed calls are workflow coordination (forum read/post, memory save, capability checks, or context snapshots); inspect repeated gates and keep only milestone coordination.".into());
     }
-    recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
+    if task_outcomes.accepted_outcome_count == 0 {
+        recommendations.push("No explicit task-outcome record exists in this window; completion remains a lifecycle proxy, and operator burden stays unavailable rather than estimated.".into());
+    } else {
+        if task_outcomes.status_counts.achieved
+            > task_outcomes.reported_verified_achieved_count
+        {
+            recommendations.push("Some reported achieved claims lack reported verification evidence; attach digest-bound tests or an independent postcondition, while retaining the result as a claim until a trusted producer verifies it.".into());
+        }
+        if task_outcomes.user_acceptance_counts.corrected > 0
+            || task_outcomes.user_acceptance_counts.rejected > 0
+        {
+            recommendations.push("Review explicitly corrected or rejected outcomes before repeating the same workflow.".into());
+        }
+        if task_outcomes.operator_counts.manual_interventions > 0
+            || task_outcomes.operator_counts.owner_restatements > 0
+            || task_outcomes.operator_counts.repeated_authorization_prompts > 0
+        {
+            recommendations.push("Inspect outcome-reported manual interventions, owner restatements, and repeated authorization prompts for reducible operator burden.".into());
+        }
+    }
+
+    let verification_coverage = if task_outcomes.accepted_outcome_count == 0 {
+        None
+    } else {
+        Some(
+            task_outcomes.verification_counts.verified as f64
+                / task_outcomes.accepted_outcome_count as f64,
+        )
+    };
+    let manual_observations = task_outcomes.operator_count_coverage.manual_interventions;
+    let restatement_observations = task_outcomes.operator_count_coverage.owner_restatements;
+    let authorization_observations = task_outcomes
+        .operator_count_coverage
+        .repeated_authorization_prompts;
+    let any_burden_observation = manual_observations > 0
+        || restatement_observations > 0
+        || authorization_observations > 0;
+    let complete_burden_observation = task_outcomes.accepted_outcome_count > 0
+        && manual_observations == task_outcomes.accepted_outcome_count as u64
+        && restatement_observations == task_outcomes.accepted_outcome_count as u64
+        && authorization_observations == task_outcomes.accepted_outcome_count as u64;
+    let as_usize = |value: u64| value.min(usize::MAX as u64) as usize;
 
     PracticalWorkflowScorecard {
-        schema_version: 5,
+        schema_version: 6,
         read_only: true,
         window_secs,
         total_calls: calls.len(),
@@ -47505,11 +47931,55 @@ pub fn compute_practical_workflow_scorecard(
             context_snapshots,
             interpretation: "Coordination calls keep work aligned, but a sustained majority suggests process overhead is crowding out task execution. The ratio is descriptive and does not judge individual call value.",
         },
+        task_outcomes: PracticalTaskOutcomeMetrics {
+            input_record_count: task_outcomes.input_record_count,
+            admitted_outcome_count: task_outcomes.accepted_outcome_count,
+            invalid_record_count: task_outcomes.invalid_record_count,
+            conflicting_outcome_count: task_outcomes.conflicting_outcome_count,
+            agent_reported_provenance: task_outcomes.provenance_counts.agent_reported,
+            harness_verified_provenance_claims: task_outcomes
+                .provenance_counts
+                .harness_verified,
+            owner_attested_provenance_claims: task_outcomes.provenance_counts.owner_attested,
+            reported_achieved: task_outcomes.status_counts.achieved,
+            reported_partially_achieved: task_outcomes.status_counts.partially_achieved,
+            reported_blocked: task_outcomes.status_counts.blocked,
+            reported_abandoned: task_outcomes.status_counts.abandoned,
+            reported_verified: task_outcomes.verification_counts.verified,
+            reported_not_verified: task_outcomes.verification_counts.not_verified,
+            reported_unknown_verification: task_outcomes.verification_counts.unknown,
+            reported_verified_achieved: task_outcomes.reported_verified_achieved_count,
+            reported_verification_coverage: verification_coverage,
+            reported_owner_accepted: task_outcomes.user_acceptance_counts.accepted,
+            reported_owner_corrected: task_outcomes.user_acceptance_counts.corrected,
+            reported_owner_rejected: task_outcomes.user_acceptance_counts.rejected,
+            reported_acceptance_unknown: task_outcomes.user_acceptance_counts.unknown,
+            reported_rollback_not_needed: task_outcomes.rollback_counts.not_needed,
+            reported_rollback_available: task_outcomes.rollback_counts.available,
+            reported_rollback_completed: task_outcomes.rollback_counts.completed,
+            reported_rollback_failed: task_outcomes.rollback_counts.failed,
+            reported_rollback_unknown: task_outcomes.rollback_counts.unknown,
+            interpretation: "Only explicit immutable task-outcome claims contribute here. Every value is reported provenance, not authenticated truth. Achieved, verified, and owner-accepted claims are separate dimensions; neither finalize nor plan-update telemetry is promoted into an outcome.",
+        },
         operator_burden: PracticalOperatorBurdenMetrics {
-            repeated_authorization_prompts: None,
-            manual_interventions: None,
-            instrumentation_status: "unavailable",
-            interpretation: "Codex-native approval prompts and out-of-band operator actions are outside Agent-Bridge MCP telemetry.",
+            repeated_authorization_prompts: (authorization_observations > 0).then(|| {
+                as_usize(task_outcomes.operator_counts.repeated_authorization_prompts)
+            }),
+            manual_interventions: (manual_observations > 0)
+                .then(|| as_usize(task_outcomes.operator_counts.manual_interventions)),
+            owner_restatements: (restatement_observations > 0)
+                .then(|| as_usize(task_outcomes.operator_counts.owner_restatements)),
+            repeated_authorization_prompt_observations: as_usize(authorization_observations),
+            manual_intervention_observations: as_usize(manual_observations),
+            owner_restatement_observations: as_usize(restatement_observations),
+            instrumentation_status: if complete_burden_observation {
+                "reported_complete"
+            } else if any_burden_observation {
+                "reported_partial"
+            } else {
+                "unavailable"
+            },
+            interpretation: "Each total is present only when that field was explicitly reported; observation counts show coverage across admitted outcome claims. Codex-native UI prompts and out-of-band actions remain unavailable otherwise, and missing values are never treated as zero.",
         },
         recommendations,
     }
@@ -47534,7 +48004,7 @@ impl McpTool for PracticalWorkflowScorecardTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Read-only practical continuity scorecard over existing MCP telemetry. Reports anonymous same-MCP-session bootstrap follow-up, right-censoring, legacy attribution coverage, completion signals, failure recovery and retry loops. Authorization prompts and manual interventions stay explicitly unavailable because Codex-native UI events are not in this telemetry.".into(),
+            description: "Read-only practical continuity scorecard over MCP telemetry plus the dedicated immutable task-outcome ledger. Reports anonymous same-MCP-session continuation proxies, agent-reported outcome and verification claims, failure recovery, retry loops, and per-field operator-burden coverage. Public session_finalize claims cannot assert owner acceptance or trusted harness provenance; all outcome values remain claims until a future authenticated producer verifies them. Missing burden remains unavailable rather than zero.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -47572,8 +48042,17 @@ impl McpTool for PracticalWorkflowScorecardTool {
             Ok(calls) => calls,
             Err(error) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {error}"))),
         };
-        let report = compute_practical_workflow_scorecard(
+        let outcomes = match store.recent_agent_task_outcomes(window_secs, 2_000).await {
+            Ok(outcomes) => outcomes,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "recent_agent_task_outcomes: {error}"
+                )))
+            }
+        };
+        let report = compute_practical_workflow_scorecard_with_outcomes(
             &calls,
+            &outcomes,
             window_secs,
             followup_window_secs,
             std::time::SystemTime::now()
