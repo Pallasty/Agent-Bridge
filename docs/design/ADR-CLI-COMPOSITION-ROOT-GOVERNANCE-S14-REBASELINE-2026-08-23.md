@@ -6,10 +6,10 @@ Accepted on 2026-08-23.
 
 - Decision scope: governance of `crates/bridge/src/main.rs`; this unit changes no
   Rust source, runtime behavior, deployment, or client process
-- Audited source base: `eb5718b61fd9097ece725c6d1d494c367669cc00`
+- Audited source base: `77600c9170703fbf9f93a5d9c91a5312c51df372`
 - Source remote: `github/master`
-- Remote state at audit: `origin/master` remained at
-  `fd60af7d8cc125a6bc55d2dffa08581bec345164`, twelve commits behind the audited
+- Remote state at publication audit: `origin/master` remains at
+  `eb5718b61fd9097ece725c6d1d494c367669cc00`, two commits behind the audited
   source base
 - Predecessors: S0-S1 through S13, especially S7 Avatar inventory
 - Next units: S14-B continuous gates, S15 daemon supervisors, S16 Avatar
@@ -25,16 +25,16 @@ dispatch, and effect custody visible at the root.
 
 That direction worked. The accepted S0 base contained 21,700 lines. S13 reduced
 the file to 18,246 lines, a reduction of 3,454 lines (15.9%). The current file
-is still 1,642 lines smaller than the S0 base, but it has regrown to 20,058
+is still 1,608 lines smaller than the S0 base, but it has regrown to 20,092
 lines. The regression is not evidence that the earlier architecture was wrong;
 it shows that the finite extraction campaign did not install a continuous
 admission rule for new composition-root code.
 
 The current source also invalidates the earlier S14 planning snapshot at
-`fd60af7d8cc1`. Twelve newer GitHub commits add three sprite asset commands,
-focus-follow recommendation, and a gated passive focus prompt, increasing the
-Avatar family from 47 to 52 variants. This ADR therefore uses the fetched GitHub head, records the
-GitLab lag explicitly, and does not claim dual-remote agreement.
+`fd60af7d8cc1`. Fourteen newer commits add three sprite asset commands,
+focus-follow recommendation, a gated passive focus prompt, and native prompt
+anchoring and containment, increasing the Avatar family from 47 to 52 variants. This ADR
+therefore uses the fetched GitHub head and records the GitLab lag explicitly.
 
 ## Reproducible baseline
 
@@ -53,13 +53,13 @@ Observed results:
 
 | Measure | S0 | S13 | Current |
 | --- | ---: | ---: | ---: |
-| `main.rs` lines | 21,700 | 18,246 | 20,058 |
-| `main.rs` bytes | not recorded | not recorded | 798,305 |
-| Change from S0 | baseline | -3,454 | -1,642 |
-| Change from S13 | n/a | baseline | +1,812 net |
+| `main.rs` lines | 21,700 | 18,246 | 20,092 |
+| `main.rs` bytes | not recorded | not recorded | 800,131 |
+| Change from S0 | baseline | -3,454 | -1,608 |
+| Change from S13 | n/a | baseline | +1,846 net |
 | `AvatarOp` variants | not separately frozen | 43 at S7; later growth | 52 |
 
-The exact post-S13 `main.rs` diff is `+1839/-27`. The commits are:
+The exact post-S13 `main.rs` diff is `+1905/-59`. The commits are:
 
 | Commit | Net source purpose | `main.rs` delta |
 | --- | --- | ---: |
@@ -81,6 +81,7 @@ The exact post-S13 `main.rs` diff is `+1839/-27`. The commits are:
 | `239d23d39` | completion nod frame correction | +1/-1 |
 | `d4b870709` | read-only focus move recommendation | +73/-0 |
 | `eb5718b61` | gated passive focus prompt | +151/-0 |
+| `a6dce01a5` | anchor native focus prompt above Xiao Shu | +92/-55 |
 
 All post-S13 growth is in Avatar-facing integration. This concentration, not
 the absolute line count, is the reason to reopen governance.
@@ -229,7 +230,7 @@ by S1-S13.
 
 ### Continue feature delivery without governance
 
-Rejected. The +1,812 net lines after S13 show that periodic extraction alone
+Rejected. The +1,846 net lines after S13 show that periodic extraction alone
 does not prevent pure logic from returning to the composition root.
 
 ### Enforce a hard line-count ceiling
