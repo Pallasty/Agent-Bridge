@@ -113,12 +113,18 @@ fn focus_follow_recommendation_is_read_only_and_change_sensitive() {
 
     assert_eq!(recommendation["schema"], FOCUS_FOLLOW_RECOMMEND_SCHEMA);
     assert_eq!(recommendation["decision"], "recommend_move");
-    assert_eq!(recommendation["reason"], "new_focus_target_outside_threshold");
+    assert_eq!(
+        recommendation["reason"],
+        "new_focus_target_outside_threshold"
+    );
     assert_eq!(recommendation["read_only"], true);
     assert_eq!(recommendation["writes_state"], false);
     assert_eq!(recommendation["moves_avatar"], false);
     assert!(recommendation["dispatch"].is_null());
-    assert_eq!(recommendation["requires_explicit_action_confirmation"], true);
+    assert_eq!(
+        recommendation["requires_explicit_action_confirmation"],
+        true
+    );
 
     let unchanged = focus_follow_recommendation(&plan, Some(41), 96);
     assert_eq!(unchanged["decision"], "stay");
@@ -153,12 +159,20 @@ fn focus_follow_prompt_requires_recommendation_and_explicit_show_confirmation() 
 
     let unconfirmed = focus_follow_prompt_preflight(&recommendation, true, false, false, 8_000);
     assert_eq!(unconfirmed["status"], "blocked");
-    assert_eq!(unconfirmed["blocked_reason"], "explicit_confirmation_required");
+    assert_eq!(
+        unconfirmed["blocked_reason"],
+        "explicit_confirmation_required"
+    );
 
     let ready = focus_follow_prompt_preflight(&recommendation, true, true, false, 8_000);
     assert_eq!(ready["status"], "ready");
     assert_eq!(ready["ready"], true);
-    assert_eq!(ready["presentation"]["dismissible"], true);
+    assert_eq!(ready["presentation"]["kind"], "avatar_anchored_bubble");
+    assert_eq!(ready["presentation"]["anchor"], "above_avatar");
+    assert_eq!(
+        ready["presentation"]["fallback"],
+        "desktop_notification_bubble"
+    );
 
     let cooling = focus_follow_prompt_preflight(&recommendation, true, true, true, 8_000);
     assert_eq!(cooling["status"], "suppressed");

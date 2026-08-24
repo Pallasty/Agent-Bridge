@@ -1,14 +1,77 @@
 use ab_bridge::avatar_native::{
     alpha_bbox, animated_frame_coords, animation_frame_index, apply_native_sprite_plan,
-    argb8888_le, decode_sidecar_sprite_asset, native_sprite_asset_for_mode,
+    argb8888_le, decode_sidecar_sprite_asset, native_prompt_plan, native_sprite_asset_for_mode,
     native_sprite_plan_from_state_value, native_state_http_request_parts,
-    native_transparent_plan_json, paint_rgba_sprite_centered, paint_transparent_probe_frame,
-    parse_native_anchor, parse_native_layer, sidecar_asset_id_from_route, sprite_cell,
-    NativeAnchor, NativeLayer, NativeTransparentOptions, RgbaSprite, DEFAULT_NATIVE_FRAME_COUNT,
-    DEFAULT_NATIVE_FRAME_INTERVAL_MS, DEFAULT_NATIVE_SPRITE_CELL_HEIGHT,
-    DEFAULT_NATIVE_SPRITE_CELL_WIDTH, DEFAULT_NATIVE_TRANSPARENT_TITLE,
+    native_transparent_plan_json, paint_native_prompt_bubble, paint_rgba_sprite_centered,
+    paint_transparent_probe_frame, parse_native_anchor, parse_native_layer,
+    sidecar_asset_id_from_route, sprite_cell, NativeAnchor, NativeLayer, NativeTransparentOptions,
+    RgbaSprite, DEFAULT_NATIVE_FRAME_COUNT, DEFAULT_NATIVE_FRAME_INTERVAL_MS,
+    DEFAULT_NATIVE_SPRITE_CELL_HEIGHT, DEFAULT_NATIVE_SPRITE_CELL_WIDTH,
+    DEFAULT_NATIVE_TRANSPARENT_TITLE, NATIVE_PROMPT_SCHEMA,
 };
 use serde_json::json;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[test]
+fn native_prompt_state_is_bounded_and_expires() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("prompt.json");
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("wall clock")
+        .as_millis() as u64;
+    fs::write(
+        &path,
+        serde_json::to_vec(&json!({
+            "schema": NATIVE_PROMPT_SCHEMA,
+            "text": "需要我过去吗？",
+            "expires_at_unix_ms": now_ms + 60_000,
+        }))
+        .expect("serialize prompt"),
+    )
+    .expect("write prompt");
+    let prompt = native_prompt_plan(&path)
+        .expect("parse prompt")
+        .expect("unexpired prompt");
+    assert_eq!(prompt.text, "需要我过去吗？");
+
+    fs::write(
+        &path,
+        serde_json::to_vec(&json!({
+            "schema": NATIVE_PROMPT_SCHEMA,
+            "text": "需要我过去吗？",
+            "expires_at_unix_ms": now_ms.saturating_sub(1),
+        }))
+        .expect("serialize expired prompt"),
+    )
+    .expect("write expired prompt");
+    assert!(native_prompt_plan(&path)
+        .expect("parse expired prompt")
+        .is_none());
+}
+
+#[test]
+fn native_prompt_bubble_paints_visible_chinese_glyphs_when_noto_is_available() {
+    let path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+    if !std::path::Path::new(path).is_file() {
+        return;
+    }
+    let font = fontdue::Font::from_bytes(
+        fs::read(path).expect("read Noto CJK"),
+        fontdue::FontSettings::default(),
+    )
+    .expect("decode Noto CJK collection");
+    let mut canvas = vec![0_u8; 90 * 130 * 4];
+    paint_native_prompt_bubble(&mut canvas, 90, 130, "需要我过去吗？", &font);
+    let opaque = canvas.chunks_exact(4).filter(|pixel| pixel[3] > 0).count();
+    let dark_glyph_pixels = canvas
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] > 0 && pixel[0] < 120 && pixel[1] < 120 && pixel[2] < 120)
+        .count();
+    assert!(opaque > 2_000, "bubble and glyphs should be visible");
+    assert!(dark_glyph_pixels > 80, "Chinese glyphs should be visible");
+}
 
 #[test]
 fn native_transparent_options_default_to_overlay_probe_shape() {

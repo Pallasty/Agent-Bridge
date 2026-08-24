@@ -26,6 +26,57 @@ pub const NATIVE_FEATURE_CONTRACT: &str = "agent_bridge.avatar.native_linux.unco
 pub const DEFAULT_NATIVE_STATE_HTTP_TIMEOUT_MS: u64 = 800;
 pub const NATIVE_MOTION_OVERRIDE_FILE: &str = "ab-face-motion-override.json";
 pub const NATIVE_MOTION_OVERRIDE_SCHEMA: &str = "agent_bridge.avatar_native_motion_override.v1";
+pub const NATIVE_PROMPT_FILE: &str = "ab-avatar-prompt.json";
+pub const NATIVE_PROMPT_SCHEMA: &str = "agent_bridge.avatar_native_prompt.v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativePromptPlan {
+    pub text: String,
+    pub expires_at_unix_ms: u64,
+}
+
+pub fn default_native_prompt_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .map(|path| path.join(NATIVE_PROMPT_FILE))
+}
+
+pub fn native_prompt_plan(path: &Path) -> anyhow::Result<Option<NativePromptPlan>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(err).with_context(|| format!("read native prompt {}", path.display()))
+        }
+    };
+    let value: Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("decode native prompt {}", path.display()))?;
+    if value.get("schema").and_then(Value::as_str) != Some(NATIVE_PROMPT_SCHEMA) {
+        bail!("native prompt schema is missing or unsupported");
+    }
+    let expires_at_unix_ms = value
+        .get("expires_at_unix_ms")
+        .and_then(Value::as_u64)
+        .context("native prompt is missing expires_at_unix_ms")?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    if expires_at_unix_ms <= now {
+        return Ok(None);
+    }
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty() && text.chars().count() <= 32)
+        .context("native prompt text must contain 1 through 32 characters")?;
+    Ok(Some(NativePromptPlan {
+        text: text.to_string(),
+        expires_at_unix_ms,
+    }))
+}
 
 pub fn default_native_motion_override_path() -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR")
@@ -460,6 +511,17 @@ pub fn paint_rgba_sprite_centered(
     sprite: &RgbaSprite,
     scale: f32,
 ) -> anyhow::Result<()> {
+    paint_rgba_sprite_centered_with_y_offset(canvas, width, height, sprite, scale, 0)
+}
+
+pub fn paint_rgba_sprite_centered_with_y_offset(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    sprite: &RgbaSprite,
+    scale: f32,
+    y_offset: i32,
+) -> anyhow::Result<()> {
     let expected_len = width as usize * height as usize * 4;
     if canvas.len() < expected_len {
         anyhow::bail!("ARGB8888 canvas length must cover width * height * 4");
@@ -474,7 +536,7 @@ pub fn paint_rgba_sprite_centered(
     let dest_w = ((sprite.width as f32 * scale).round() as u32).max(1);
     let dest_h = ((sprite.height as f32 * scale).round() as u32).max(1);
     let origin_x = (width as i32 - dest_w as i32) / 2;
-    let origin_y = (height as i32 - dest_h as i32) / 2;
+    let origin_y = (height as i32 - dest_h as i32) / 2 + y_offset;
 
     for dy in 0..dest_h {
         let y = origin_y + dy as i32;
@@ -506,6 +568,90 @@ pub fn paint_rgba_sprite_centered(
     }
 
     Ok(())
+}
+
+fn blend_argb8888_pixel(canvas: &mut [u8], width: u32, x: i32, y: i32, rgba: [u8; 4]) {
+    if x < 0 || y < 0 || x >= width as i32 {
+        return;
+    }
+    let offset = ((y as u32 * width + x as u32) * 4) as usize;
+    if offset + 4 > canvas.len() {
+        return;
+    }
+    let a = rgba[3] as u16;
+    let inv = 255 - a;
+    let old_b = canvas[offset] as u16;
+    let old_g = canvas[offset + 1] as u16;
+    let old_r = canvas[offset + 2] as u16;
+    let old_a = canvas[offset + 3] as u16;
+    canvas[offset] = ((rgba[2] as u16 * a + old_b * inv) / 255) as u8;
+    canvas[offset + 1] = ((rgba[1] as u16 * a + old_g * inv) / 255) as u8;
+    canvas[offset + 2] = ((rgba[0] as u16 * a + old_r * inv) / 255) as u8;
+    canvas[offset + 3] = (a + old_a * inv / 255).min(255) as u8;
+}
+
+pub fn paint_native_prompt_bubble(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    text: &str,
+    font: &fontdue::Font,
+) {
+    if width < 48 || height < 48 {
+        return;
+    }
+    let left = 2_i32;
+    let right = width as i32 - 3;
+    let top = 2_i32;
+    let bottom = 43_i32.min(height as i32 - 8);
+    let radius = 7_i32;
+    for y in top..=bottom {
+        for x in left..=right {
+            let cx = x.clamp(left + radius, right - radius);
+            let cy = y.clamp(top + radius, bottom - radius);
+            if (x - cx).pow(2) + (y - cy).pow(2) <= radius.pow(2) {
+                blend_argb8888_pixel(canvas, width, x, y, [255, 250, 238, 238]);
+            }
+        }
+    }
+    let mid = width as i32 / 2;
+    for dy in 0..6_i32 {
+        for dx in -dy..=dy {
+            blend_argb8888_pixel(canvas, width, mid + dx, bottom + dy, [255, 250, 238, 238]);
+        }
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let split = chars.len().min(5);
+    let lines = [&chars[..split], &chars[split..]];
+    for (line_index, line) in lines.into_iter().enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let px = 12.0_f32;
+        let widths: Vec<usize> = line
+            .iter()
+            .map(|c| font.metrics(*c, px).advance_width.ceil() as usize)
+            .collect();
+        let line_width: usize = widths.iter().sum();
+        let mut pen_x = ((width as usize).saturating_sub(line_width) / 2) as i32;
+        let baseline_y = 5 + line_index as i32 * 17;
+        for (ch, advance) in line.iter().zip(widths) {
+            let (metrics, bitmap) = font.rasterize(*ch, px);
+            for gy in 0..metrics.height {
+                for gx in 0..metrics.width {
+                    let alpha = bitmap[gy * metrics.width + gx];
+                    blend_argb8888_pixel(
+                        canvas,
+                        width,
+                        pen_x + metrics.xmin + gx as i32,
+                        baseline_y - metrics.height as i32 - metrics.ymin + gy as i32,
+                        [45, 55, 72, alpha],
+                    );
+                }
+            }
+            pen_x += advance as i32;
+        }
+    }
 }
 
 pub fn paint_transparent_probe_frame(canvas: &mut [u8], width: u32, height: u32) {
@@ -733,12 +879,27 @@ mod wayland_probe {
 
     use super::{
         animated_frame_coords, animation_frame_index, clear_argb8888, decode_sidecar_sprite_asset,
-        default_native_motion_override_path, native_motion_override_plan,
-        native_sprite_plan_from_state_value, native_state_http_request_parts,
-        paint_rgba_sprite_centered, paint_transparent_probe_frame, sprite_atlas_columns,
-        sprite_cell, NativeAnchor, NativeLayer, NativeSpritePlan, NativeTransparentOptions,
-        RgbaSprite,
+        default_native_motion_override_path, default_native_prompt_path,
+        native_motion_override_plan, native_prompt_plan, native_sprite_plan_from_state_value,
+        native_state_http_request_parts, paint_native_prompt_bubble,
+        paint_rgba_sprite_centered_with_y_offset, paint_transparent_probe_frame,
+        sprite_atlas_columns, sprite_cell, NativeAnchor, NativeLayer, NativePromptPlan,
+        NativeSpritePlan, NativeTransparentOptions, RgbaSprite,
     };
+
+    fn load_prompt_font() -> Option<fontdue::Font> {
+        [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        .into_iter()
+        .find_map(|path| {
+            std::fs::read(path).ok().and_then(|bytes| {
+                fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
+            })
+        })
+    }
 
     pub fn run(opts: NativeTransparentOptions) -> Result<()> {
         let conn = Connection::connect_to_env().context("connect to Wayland compositor")?;
@@ -788,6 +949,9 @@ mod wayland_probe {
             state_poll_interval: Duration::from_millis(opts.state_poll_ms.max(50)),
             next_state_poll_at: Instant::now() + Duration::from_millis(opts.state_poll_ms.max(50)),
             motion_override_path: default_native_motion_override_path(),
+            prompt_path: default_native_prompt_path(),
+            prompt: None,
+            prompt_font: load_prompt_font(),
             layer: None,
             window: None,
         };
@@ -898,6 +1062,9 @@ mod wayland_probe {
         state_poll_interval: Duration,
         next_state_poll_at: Instant,
         motion_override_path: Option<PathBuf>,
+        prompt_path: Option<PathBuf>,
+        prompt: Option<NativePromptPlan>,
+        prompt_font: Option<fontdue::Font>,
         layer: Option<LayerSurface>,
         window: Option<Window>,
     }
@@ -983,6 +1150,7 @@ mod wayland_probe {
             if self.state_url.is_none()
                 && self.state_pet_id.is_none()
                 && self.motion_override_path.is_none()
+                && self.prompt_path.is_none()
             {
                 return false;
             }
@@ -992,10 +1160,26 @@ mod wayland_probe {
             }
             self.next_state_poll_at = now + self.state_poll_interval;
 
+            let next_prompt =
+                self.prompt_path
+                    .as_deref()
+                    .and_then(|path| match native_prompt_plan(path) {
+                        Ok(plan) => plan,
+                        Err(err) => {
+                            eprintln!(
+                                "agent-bridge native prompt poll failed for {}: {err:#}",
+                                path.display()
+                            );
+                            None
+                        }
+                    });
+            let prompt_changed = next_prompt != self.prompt;
+            self.prompt = next_prompt;
+
             if let Some(path) = self.motion_override_path.clone() {
                 match native_motion_override_plan(&path) {
                     Ok(Some(plan)) => {
-                        return self.apply_sprite_plan(&plan);
+                        return self.apply_sprite_plan(&plan) || (prompt_changed && self.draw());
                     }
                     Ok(None) => {}
                     Err(err) => {
@@ -1009,7 +1193,9 @@ mod wayland_probe {
 
             if let Some(url) = self.state_url.clone() {
                 match self.fetch_http_sprite_plan(&url) {
-                    Ok(plan) => return self.apply_sprite_plan(&plan),
+                    Ok(plan) => {
+                        return self.apply_sprite_plan(&plan) || (prompt_changed && self.draw())
+                    }
                     Err(err) => {
                         eprintln!(
                             "agent-bridge native transparent probe HTTP state poll failed for {url}: {err:#}"
@@ -1019,19 +1205,19 @@ mod wayland_probe {
             }
 
             let Some(pet_id) = self.state_pet_id.clone() else {
-                return false;
+                return prompt_changed && self.draw();
             };
             match crate::pet_state::read_pet_state(&pet_id) {
                 Ok(Some(state)) => {
                     let plan = native_sprite_plan_from_state_value(&state);
-                    self.apply_sprite_plan(&plan)
+                    self.apply_sprite_plan(&plan) || (prompt_changed && self.draw())
                 }
-                Ok(None) => false,
+                Ok(None) => prompt_changed && self.draw(),
                 Err(err) => {
                     eprintln!(
                         "agent-bridge native transparent probe state poll failed for {pet_id}: {err}"
                     );
-                    false
+                    prompt_changed && self.draw()
                 }
             }
         }
@@ -1194,10 +1380,16 @@ mod wayland_probe {
 
             if let Some((sprite, scale, frame_index)) = sprite_to_paint {
                 clear_argb8888(canvas);
-                paint_rgba_sprite_centered(canvas, width, height, &sprite, scale)?;
+                let y_offset = if self.prompt.is_some() { 18 } else { 0 };
+                paint_rgba_sprite_centered_with_y_offset(
+                    canvas, width, height, &sprite, scale, y_offset,
+                )?;
                 self.last_frame_index = Some(frame_index);
             } else {
                 paint_transparent_probe_frame(canvas, width, height);
+            }
+            if let (Some(prompt), Some(font)) = (&self.prompt, &self.prompt_font) {
+                paint_native_prompt_bubble(canvas, width, height, &prompt.text, font);
             }
             let surface = self
                 .layer

@@ -4974,13 +4974,13 @@ async fn real_main() -> Result<()> {
                 dry_run,
                 json,
             } => skills::run_refresh(
-                *verbose,
-                src.as_deref(),
-                r#ref.as_deref(),
-                *prune,
-                *dry_run,
-                *json,
-            )
+                    *verbose,
+                    src.as_deref(),
+                    r#ref.as_deref(),
+                    *prune,
+                    *dry_run,
+                    *json,
+                )
             .await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
@@ -9326,43 +9326,77 @@ fn run_avatar_focus_follow_prompt(
 
     if prompt.get("ready").and_then(serde_json::Value::as_bool) == Some(true) {
         let bounded_timeout = timeout_ms.clamp(2_000, 30_000);
-        let output = std::process::Command::new("notify-send")
-            .args([
-                "--print-id",
-                "--app-name=Xiao Shu",
-                "--urgency=low",
-                "--transient",
-                &format!("--expire-time={bounded_timeout}"),
-                "小舒",
-                "需要我过去吗？",
-            ])
-            .output()
-            .context("show passive Xiao Shu focus-follow prompt")?;
-        if !output.status.success() {
-            prompt["status"] = serde_json::json!("failed");
-            prompt["blocked_reason"] = serde_json::json!("notification_backend_failed");
-            prompt["ready"] = serde_json::json!(false);
+        let avatar_visible = tree.to_string().contains("agent-bridge-avatar");
+        let mut notification_id = None;
+        let presentation_backend;
+        if avatar_visible {
+            let prompt_path = ab_bridge::avatar_native::default_native_prompt_path()
+                .context("XDG_RUNTIME_DIR is required for Avatar anchored prompt")?;
+            let expires_at_unix_ms = now.saturating_mul(1_000).saturating_add(bounded_timeout);
+            let payload = serde_json::json!({
+                "schema": ab_bridge::avatar_native::NATIVE_PROMPT_SCHEMA,
+                "text": "需要我过去吗？",
+                "expires_at_unix_ms": expires_at_unix_ms,
+            });
+            let temp_path = prompt_path.with_extension(format!("tmp-{}", std::process::id()));
+            std::fs::write(&temp_path, serde_json::to_vec(&payload)?)
+                .with_context(|| format!("write Avatar prompt state {}", temp_path.display()))?;
+            std::fs::rename(&temp_path, &prompt_path).with_context(|| {
+                format!("publish Avatar prompt state {}", prompt_path.display())
+            })?;
+            prompt["prompt_state_path"] = serde_json::json!(prompt_path);
+            presentation_backend = "avatar_renderer";
         } else {
-            let notification_id = String::from_utf8_lossy(&output.stdout)
+            let output = std::process::Command::new("notify-send")
+                .args([
+                    "--print-id",
+                    "--app-name=Xiao Shu",
+                    "--urgency=low",
+                    "--transient",
+                    &format!("--expire-time={bounded_timeout}"),
+                    "小舒",
+                    "需要我过去吗？",
+                ])
+                .output()
+                .context("show fallback Xiao Shu desktop prompt")?;
+            if !output.status.success() {
+                prompt["status"] = serde_json::json!("failed");
+                prompt["blocked_reason"] = serde_json::json!("presentation_backend_failed");
+                prompt["ready"] = serde_json::json!(false);
+                if as_json {
+                    println!("{}", serde_json::to_string_pretty(&prompt)?);
+                }
+                return Ok(());
+            }
+            notification_id = String::from_utf8_lossy(&output.stdout)
                 .trim()
                 .parse::<u64>()
                 .ok();
+            presentation_backend = "desktop_notification_fallback";
+        }
+        {
             let receipt = serde_json::json!({
                 "schema": "agent_bridge.avatar_focus_follow_prompt_receipt.v1",
                 "emitted_at_unix_secs": now,
                 "notification_id": notification_id,
+                "presentation_backend": presentation_backend,
                 "target_node_id": recommendation.get("target_node_id"),
             });
             let temp_path = receipt_path.with_extension(format!("tmp-{}", std::process::id()));
-            std::fs::write(&temp_path, serde_json::to_vec_pretty(&receipt)?)
-                .with_context(|| format!("write focus-follow prompt receipt {}", temp_path.display()))?;
+            std::fs::write(&temp_path, serde_json::to_vec_pretty(&receipt)?).with_context(
+                || format!("write focus-follow prompt receipt {}", temp_path.display()),
+            )?;
             std::fs::rename(&temp_path, &receipt_path).with_context(|| {
-                format!("publish focus-follow prompt receipt {}", receipt_path.display())
+                format!(
+                    "publish focus-follow prompt receipt {}",
+                    receipt_path.display()
+                )
             })?;
             prompt["status"] = serde_json::json!("shown");
             prompt["ready"] = serde_json::json!(false);
             prompt["emitted"] = serde_json::json!(true);
             prompt["notification_id"] = serde_json::json!(notification_id);
+            prompt["presentation_backend"] = serde_json::json!(presentation_backend);
         }
     }
 
@@ -10125,8 +10159,8 @@ async fn run_avatar_linux_live(
         &store,
         presence_args.clone(),
     )
-    .await
-    .context("initial Linux avatar live presence sync")?;
+            .await
+            .context("initial Linux avatar live presence sync")?;
     let mut heartbeat_count = 1_u64;
     let mut heartbeat_failures = 0_u64;
     let mut last_heartbeat_error: Option<String> = None;

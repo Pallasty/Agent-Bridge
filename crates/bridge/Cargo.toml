@@ -92,6 +92,7 @@ ureq = { version = "2", default-features = false }
 # C2 lockfile primitive (kill(pid, 0) liveness probe).
 libc = "0.2"
 png = "0.17"
+fontdue = "0.9"
 tempfile = { version = "3", optional = true }
 
 [target.'cfg(unix)'.dependencies]
