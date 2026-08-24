@@ -133,11 +133,25 @@ pixels per step and 900 pixels total. `Ctrl-C` cancels the foreground action;
 `--cancel-file PATH` also cancels before the next step whenever PATH exists.
 
 Every real execution appends a `started` record and a final outcome to
-`$XDG_STATE_HOME/agent-bridge/avatar-focus-follow-outcomes.jsonl` (falling back
-to `~/.local/state`). Completed actions are positive outcomes; cancelled and
-failed actions are durable negative-learning candidates. A started record with
-no matching final record exposes an interrupted/internal-failure attempt.
-The log is owner-only (`0600`) and rotates at 8 MiB. It stores no window title.
+`$AGENT_BRIDGE_STATE_DIR/avatar-focus-follow/outcomes.jsonl`, when that common
+state root is configured; otherwise it uses the same private subtree below
+`$XDG_STATE_HOME/agent-bridge` and finally `~/.local/state/agent-bridge`.
+Completed actions are positive outcomes; cancelled and failed actions are
+durable negative-learning candidates. Outcome v2 gives both phases the same
+random `attempt_id`; a started record with no matching final record exposes an
+interrupted/internal-failure attempt even when rotation or concurrency separates
+the two lines. Historical v1 rows remain evidence but are explicitly
+unpairable.
+
+Only the dedicated `avatar-focus-follow` directory is changed to owner-only
+`0700`; the common state root is never chmodded. The log and lock file are
+regular, single-link, non-symlink files restricted to `0600`, and rotation is
+checked only before a new started phase at 8 MiB. If the initial private started
+receipt cannot be persisted, execution fails before movement and instructs the
+caller to select a permission-capable `AGENT_BRIDGE_STATE_DIR`. A storage fault
+after movement can still prevent the terminal receipt; the durable started row
+and its `attempt_id` make that failure observable on the next audit. The journal
+stores no window title or free-form reason text.
 Only actions whose final target, Avatar identity, and arrival position are
 re-observed successfully update the acknowledged-focus receipt.
 

@@ -4,6 +4,7 @@
 //! path for the Avatar window. It never invokes Sway, moves a window, changes
 //! focus, or controls the pointer.
 
+use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -13,7 +14,8 @@ pub const FOCUS_FOLLOW_RECOMMEND_SCHEMA: &str =
     "agent_bridge.avatar_focus_follow_recommendation.v2";
 pub const FOCUS_FOLLOW_PROMPT_SCHEMA: &str = "agent_bridge.avatar_focus_follow_prompt.v2";
 pub const FOCUS_FOLLOW_ACK_SCHEMA: &str = "agent_bridge.avatar_focus_follow_ack.v1";
-pub const FOCUS_FOLLOW_OUTCOME_SCHEMA: &str = "agent_bridge.avatar_focus_follow_outcome.v1";
+pub const FOCUS_FOLLOW_OUTCOME_SCHEMA_V1: &str = "agent_bridge.avatar_focus_follow_outcome.v1";
+pub const FOCUS_FOLLOW_OUTCOME_SCHEMA: &str = "agent_bridge.avatar_focus_follow_outcome.v2";
 pub const DEFAULT_AVATAR_APP_ID: &str = "agent-bridge-avatar";
 pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
     "turn_left",
@@ -43,6 +45,15 @@ pub fn sway_command_succeeded(payload: &[u8]) -> bool {
                     .iter()
                     .all(|item| item.get("success").and_then(Value::as_bool) == Some(true))
         })
+}
+
+/// Return the stable pairing key only for current v2 outcome records. Historical
+/// v1 rows intentionally remain readable evidence but cannot prove pairing.
+pub fn pairable_focus_follow_attempt_id(record: &Value) -> Option<&str> {
+    (record.get("schema")?.as_str()? == FOCUS_FOLLOW_OUTCOME_SCHEMA)
+        .then(|| record.get("attempt_id")?.as_str())
+        .flatten()
+        .filter(|attempt_id| !attempt_id.is_empty())
 }
 
 pub fn focus_follow_arrival_failure_reason(
@@ -80,15 +91,35 @@ pub fn focus_follow_arrival_failure_reason(
     None
 }
 
-pub fn focus_follow_outcome_record(action: &Value, phase: &str, observed_at_unix_ms: u64) -> Value {
+pub fn focus_follow_outcome_record(
+    action: &Value,
+    phase: &str,
+    observed_at_unix_ms: u64,
+) -> Result<Value> {
+    ensure!(
+        matches!(phase, "started" | "final"),
+        "invalid outcome phase"
+    );
+    let attempt_id = action
+        .get("attempt_id")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            value.starts_with("af-")
+                && value.len() <= 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        .ok_or_else(|| anyhow::anyhow!("invalid or missing outcome attempt_id"))?;
     let status = action
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     let final_phase = phase == "final";
     let negative_learning_candidate = final_phase && matches!(status, "failed" | "cancelled");
-    json!({
+    Ok(json!({
         "schema": FOCUS_FOLLOW_OUTCOME_SCHEMA,
+        "attempt_id": attempt_id,
         "phase": phase,
         "observed_at_unix_ms": observed_at_unix_ms,
         "status": status,
@@ -104,8 +135,10 @@ pub fn focus_follow_outcome_record(action: &Value, phase: &str, observed_at_unix
         "expression_scope": "avatar_window_only",
         "authorization_mode": action.get("authorization_mode"),
         "target_node_id": action.pointer("/plan/target/node_id"),
+        "avatar_node_id": action.pointer("/plan/avatar/node_id"),
         "travel_px": action.get("travel_px"),
         "executed_steps": action.get("executed_steps"),
+        "execution_stage": action.get("execution_stage"),
         "stopped_reason": action.get("stopped_reason"),
         "postcondition_verified": action.get("postcondition_verified"),
         "negative_learning_candidate": negative_learning_candidate,
@@ -113,7 +146,7 @@ pub fn focus_follow_outcome_record(action: &Value, phase: &str, observed_at_unix
         "moves_pointer": false,
         "changes_focus": false,
         "emits_keyboard_input": false,
-    })
+    }))
 }
 
 pub fn focus_follow_runtime_bindings() -> Value {

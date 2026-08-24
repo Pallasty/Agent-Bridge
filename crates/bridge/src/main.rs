@@ -9288,28 +9288,358 @@ fn focus_follow_ack_receipt_path() -> PathBuf {
         .join("ab-focus-follow-ack.json")
 }
 
-fn focus_follow_outcome_log_path() -> PathBuf {
-    let state_root = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-        })
-        .unwrap_or_else(std::env::temp_dir);
-    state_root
-        .join("agent-bridge")
-        .join("avatar-focus-follow-outcomes.jsonl")
+fn focus_follow_outcome_log_path() -> Result<PathBuf> {
+    focus_follow_outcome_log_path_from_roots(
+        std::env::var_os("AGENT_BRIDGE_STATE_DIR").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
 }
 
-fn append_focus_follow_outcome(action: &serde_json::Value, phase: &str) -> Result<PathBuf> {
-    use std::io::Write;
-    #[cfg(unix)]
+fn focus_follow_outcome_log_path_from_roots(
+    agent_bridge_state_dir: Option<PathBuf>,
+    xdg_state_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf> {
+    let state_root = agent_bridge_state_dir
+        .or_else(|| xdg_state_home.map(|root| root.join("agent-bridge")))
+        .or_else(|| home.map(|root| root.join(".local/state/agent-bridge")))
+        .context(
+            "no durable Avatar state root; set AGENT_BRIDGE_STATE_DIR, XDG_STATE_HOME, or HOME",
+        )?;
+    anyhow::ensure!(
+        state_root.is_absolute() && state_root.file_name().is_some(),
+        "Avatar state root must be an absolute, non-root path; configure AGENT_BRIDGE_STATE_DIR with a private local directory"
+    );
+    Ok(state_root
+        .join("avatar-focus-follow")
+        .join("outcomes.jsonl"))
+}
+
+#[cfg(unix)]
+fn enforce_private_directory(path: &std::path::Path, label: &str) -> Result<()> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-    let path = focus_follow_outcome_log_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create Avatar outcome directory {}", parent.display()))?;
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("open {label} {}", path.display()))?;
+    directory
+        .set_permissions(std::fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("restrict {label} {}", path.display()))?;
+    let observed_mode = directory
+        .metadata()
+        .with_context(|| format!("inspect open {label} {}", path.display()))?
+        .permissions()
+        .mode()
+        & 0o777;
+    anyhow::ensure!(
+        observed_mode == 0o700,
+        "{label} filesystem cannot enforce private mode 700 on {} (observed {:o}); set AGENT_BRIDGE_STATE_DIR to a permission-capable private filesystem",
+        path.display(),
+        observed_mode
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("open {label} for sync {}", path.display()))?
+        .sync_all()
+        .with_context(|| format!("sync {label} {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn enforce_private_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    anyhow::bail!(
+        "{label} private journal is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+#[cfg(not(unix))]
+fn sync_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    anyhow::bail!(
+        "{label} durable directory sync is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+#[cfg(unix)]
+fn enforce_private_regular_file(
+    file: &std::fs::File,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let before = file
+        .metadata()
+        .with_context(|| format!("inspect open {label} {}", path.display()))?;
+    anyhow::ensure!(
+        before.is_file() && before.nlink() == 1,
+        "{label} must be a regular file with exactly one hard link: {}",
+        path.display()
+    );
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restrict {label} {}", path.display()))?;
+    let after = file
+        .metadata()
+        .with_context(|| format!("reinspect open {label} {}", path.display()))?;
+    anyhow::ensure!(
+        after.is_file()
+            && after.nlink() == 1
+            && after.dev() == before.dev()
+            && after.ino() == before.ino(),
+        "{label} identity or link count changed while securing {}",
+        path.display()
+    );
+    let observed_mode = after.permissions().mode() & 0o777;
+    anyhow::ensure!(
+        observed_mode == 0o600,
+        "{label} filesystem cannot enforce private mode 600 on {} (observed {:o}); set AGENT_BRIDGE_STATE_DIR to a permission-capable private filesystem",
+        path.display(),
+        observed_mode
+    );
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn enforce_private_regular_file(
+    _file: &std::fs::File,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<()> {
+    anyhow::bail!(
+        "{label} private journal is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+fn validate_real_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("inspect {label} {}", path.display()))?;
+    anyhow::ensure!(
+        !metadata.file_type().is_symlink() && metadata.is_dir(),
+        "{label} must be a real directory, not a symlink or special file: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn prepare_focus_follow_outcome_directory(path: &std::path::Path) -> Result<()> {
+    let state_root = path
+        .parent()
+        .context("Avatar outcome directory has no state root")?;
+    let state_root_created = !state_root.exists();
+    if !state_root_created {
+        validate_real_directory(state_root, "Agent-Bridge state root")?;
+    } else {
+        std::fs::create_dir_all(state_root)
+            .with_context(|| format!("create Agent-Bridge state root {}", state_root.display()))?;
+        validate_real_directory(state_root, "Agent-Bridge state root")?;
     }
+
+    let private_directory_created = !path.exists();
+    if !private_directory_created {
+        validate_real_directory(path, "Avatar outcome directory")?;
+    } else {
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("create Avatar outcome directory {}", path.display()))
+            }
+        }
+        validate_real_directory(path, "Avatar outcome directory")?;
+    }
+    enforce_private_directory(path, "Avatar outcome directory")?;
+    if private_directory_created {
+        sync_directory(path, "Avatar outcome directory")?;
+        sync_directory(state_root, "Agent-Bridge state root")?;
+    }
+    if state_root_created {
+        if let Some(parent) = state_root.parent() {
+            sync_directory(parent, "Agent-Bridge state-root parent")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_regular_nonsymlink(path: &std::path::Path, label: &str) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                !metadata.file_type().is_symlink() && metadata.is_file(),
+                "{label} must be a regular non-symlink file: {}",
+                path.display()
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                anyhow::ensure!(
+                    metadata.nlink() == 1,
+                    "{label} must have exactly one hard link: {}",
+                    path.display()
+                );
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("inspect {label} {}", path.display()))
+        }
+    }
+    Ok(())
+}
+
+struct AvatarOutcomeJournalLock {
+    file: std::fs::File,
+}
+
+impl AvatarOutcomeJournalLock {
+    fn acquire(directory: &std::path::Path) -> Result<Self> {
+        #[cfg(unix)]
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = directory.join(".focus-follow-outcomes.lock");
+        validate_regular_nonsymlink(&path, "Avatar outcome lock")?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).read(true).write(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+            options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        }
+        let file = options
+            .open(&path)
+            .with_context(|| format!("open Avatar outcome lock {}", path.display()))?;
+        enforce_private_regular_file(&file, &path, "Avatar outcome lock")?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            if result != 0 {
+                return Err(std::io::Error::last_os_error())
+                    .with_context(|| format!("lock Avatar outcome journal {}", path.display()));
+            }
+        }
+        Ok(Self { file })
+    }
+}
+
+impl Drop for AvatarOutcomeJournalLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+}
+
+fn next_avatar_outcome_attempt_id() -> String {
+    format!("af-{}", uuid::Uuid::new_v4())
+}
+
+const MAX_FOCUS_FOLLOW_OUTCOME_LOG_BYTES: u64 = 8 * 1024 * 1024;
+
+fn rotate_focus_follow_outcome_log_if_needed(
+    path: &std::path::Path,
+    directory: &std::path::Path,
+    attempt_id: &str,
+    enabled: bool,
+) -> Result<Option<PathBuf>> {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    if !enabled
+        || !std::fs::metadata(path)
+            .ok()
+            .is_some_and(|metadata| metadata.len() >= MAX_FOCUS_FOLLOW_OUTCOME_LOG_BYTES)
+    {
+        return Ok(None);
+    }
+    let rotated = path.with_extension(format!("jsonl.{attempt_id}"));
+    anyhow::ensure!(
+        std::fs::symlink_metadata(&rotated)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+        "refusing to overwrite existing Avatar outcome rotation {}",
+        rotated.display()
+    );
+    std::fs::rename(path, &rotated).with_context(|| {
+        format!(
+            "rotate Avatar expression outcome {} to {}",
+            path.display(),
+            rotated.display()
+        )
+    })?;
+    let mut rotated_options = std::fs::OpenOptions::new();
+    rotated_options.read(true).write(true);
+    #[cfg(unix)]
+    rotated_options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    let rotated_file = rotated_options
+        .open(&rotated)
+        .with_context(|| format!("open rotated Avatar outcome {}", rotated.display()))?;
+    enforce_private_regular_file(&rotated_file, &rotated, "rotated Avatar expression outcome")?;
+    sync_directory(directory, "Avatar outcome directory")?;
+    Ok(Some(rotated))
+}
+
+fn append_focus_follow_outcome(
+    action: &serde_json::Value,
+    phase: &str,
+    rotate_before_write: bool,
+) -> Result<PathBuf> {
+    let path = focus_follow_outcome_log_path()?;
+    append_focus_follow_outcome_at_path(action, phase, rotate_before_write, &path)
+}
+
+fn append_focus_follow_outcome_at_path(
+    action: &serde_json::Value,
+    phase: &str,
+    rotate_before_write: bool,
+    path: &std::path::Path,
+) -> Result<PathBuf> {
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    anyhow::ensure!(
+        matches!(phase, "started" | "final"),
+        "invalid Avatar outcome phase"
+    );
+    let attempt_id = action
+        .get("attempt_id")
+        .and_then(serde_json::Value::as_str)
+        .context("Avatar outcome attempt_id")?;
+    anyhow::ensure!(
+        attempt_id.starts_with("af-")
+            && attempt_id.len() <= 64
+            && attempt_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+        "invalid Avatar outcome attempt_id"
+    );
+    let directory = path
+        .parent()
+        .context("Avatar outcome log has no directory")?;
+    prepare_focus_follow_outcome_directory(directory)?;
+    let _journal_lock = AvatarOutcomeJournalLock::acquire(directory)?;
     let observed_at_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .context("read wall clock for Avatar expression outcome")?
@@ -9318,62 +9648,91 @@ fn append_focus_follow_outcome(action: &serde_json::Value, phase: &str) -> Resul
         action,
         phase,
         observed_at_unix_ms,
-    );
-    const MAX_OUTCOME_LOG_BYTES: u64 = 8 * 1024 * 1024;
-    if std::fs::metadata(&path)
-        .ok()
-        .is_some_and(|metadata| metadata.len() >= MAX_OUTCOME_LOG_BYTES)
-    {
-        let rotated = path.with_extension(format!("jsonl.{observed_at_unix_ms}"));
-        std::fs::rename(&path, &rotated).with_context(|| {
-            format!(
-                "rotate Avatar expression outcome {} to {}",
-                path.display(),
-                rotated.display()
-            )
-        })?;
+    )?;
+    validate_regular_nonsymlink(&path, "Avatar expression outcome")?;
+    if path.exists() {
+        let mut existing_options = std::fs::OpenOptions::new();
+        existing_options.read(true).write(true);
+        #[cfg(unix)]
+        existing_options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        let existing = existing_options
+            .open(&path)
+            .with_context(|| format!("open existing Avatar outcome {}", path.display()))?;
+        enforce_private_regular_file(&existing, &path, "existing Avatar expression outcome")?;
     }
+    rotate_focus_follow_outcome_log_if_needed(&path, directory, attempt_id, rotate_before_write)?;
     let mut options = std::fs::OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
-    options.mode(0o600);
+    {
+        options.mode(0o600);
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
     let mut file = options
         .open(&path)
         .with_context(|| format!("open Avatar expression outcome log {}", path.display()))?;
-    #[cfg(unix)]
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("restrict Avatar expression outcome {}", path.display()))?;
+    enforce_private_regular_file(&file, &path, "Avatar expression outcome")?;
     let mut encoded = serde_json::to_vec(&record)?;
     encoded.push(b'\n');
     file.write_all(&encoded)
         .with_context(|| format!("append Avatar expression outcome {}", path.display()))?;
-    file.sync_data()
+    file.sync_all()
         .with_context(|| format!("sync Avatar expression outcome {}", path.display()))?;
-    Ok(path)
+    sync_directory(directory, "Avatar outcome directory")?;
+    Ok(path.to_path_buf())
 }
 
 struct AvatarOutcomeAttemptGuard {
-    initial_action: serde_json::Value,
+    current_action: serde_json::Value,
     finished: bool,
+    finish_attempted: bool,
 }
 
 impl AvatarOutcomeAttemptGuard {
-    fn start(action: &serde_json::Value) -> Result<(Self, PathBuf)> {
-        let path = append_focus_follow_outcome(action, "started")?;
+    fn start(action: &mut serde_json::Value) -> Result<(Self, PathBuf)> {
+        action["attempt_id"] = serde_json::json!(next_avatar_outcome_attempt_id());
+        action["status"] = serde_json::json!("running");
+        action["execution_stage"] = serde_json::json!("preparing");
+        action["executed"] = serde_json::json!(false);
+        action["executed_steps"] = serde_json::json!(0);
+        action["postcondition_verified"] = serde_json::json!(false);
+        let path = append_focus_follow_outcome(action, "started", true)?;
         Ok((
             Self {
-                initial_action: action.clone(),
+                current_action: action.clone(),
                 finished: false,
+                finish_attempted: false,
             },
             path,
         ))
     }
 
+    fn observe(&mut self, action: &serde_json::Value) {
+        self.current_action = action.clone();
+    }
+
     fn finish(&mut self, action: &serde_json::Value) -> Result<()> {
-        append_focus_follow_outcome(action, "final")?;
+        self.observe(action);
+        self.finish_attempted = true;
+        append_focus_follow_outcome(action, "final", false)?;
         self.finished = true;
         Ok(())
     }
+}
+
+fn failed_avatar_outcome_snapshot(
+    current_action: &serde_json::Value,
+    finish_attempted: bool,
+) -> serde_json::Value {
+    let mut failure = current_action.clone();
+    failure["status"] = serde_json::json!("failed");
+    failure["ready"] = serde_json::json!(false);
+    failure["stopped_reason"] = serde_json::json!(if finish_attempted {
+        "final_receipt_persistence_failed"
+    } else {
+        "unhandled_internal_error_or_unwind"
+    });
+    failure
 }
 
 impl Drop for AvatarOutcomeAttemptGuard {
@@ -9381,12 +9740,8 @@ impl Drop for AvatarOutcomeAttemptGuard {
         if self.finished {
             return;
         }
-        let mut failure = self.initial_action.clone();
-        failure["status"] = serde_json::json!("failed");
-        failure["ready"] = serde_json::json!(false);
-        failure["executed"] = serde_json::json!(false);
-        failure["stopped_reason"] = serde_json::json!("unhandled_internal_error_or_unwind");
-        if let Err(err) = append_focus_follow_outcome(&failure, "final") {
+        let failure = failed_avatar_outcome_snapshot(&self.current_action, self.finish_attempted);
+        if let Err(err) = append_focus_follow_outcome(&failure, "final", false) {
             eprintln!("agent-bridge could not record failed Avatar expression: {err:#}");
         }
     }
@@ -9685,7 +10040,7 @@ fn run_avatar_focus_follow_action(
     );
 
     if action.get("ready").and_then(serde_json::Value::as_bool) == Some(true) {
-        let (mut outcome_guard, outcome_log_path) = AvatarOutcomeAttemptGuard::start(&action)?;
+        let (mut outcome_guard, outcome_log_path) = AvatarOutcomeAttemptGuard::start(&mut action)?;
         action["outcome_log_path"] = serde_json::json!(outcome_log_path);
         action["outcome_started_recorded"] = serde_json::json!(true);
         let target_id = plan
@@ -9729,12 +10084,16 @@ fn run_avatar_focus_follow_action(
                 .pointer("/choreography/1")
                 .and_then(serde_json::Value::as_str)
                 .context("focus-follow plan walk action")?;
+            action["execution_stage"] = serde_json::json!("turning");
+            outcome_guard.observe(&action);
             override_guard.set(turn_action)?;
             std::thread::sleep(std::time::Duration::from_millis(520));
             if cancellation.requested() {
                 final_status = "cancelled";
                 stopped_reason = Some("sigint");
             } else {
+                action["execution_stage"] = serde_json::json!("walking");
+                outcome_guard.observe(&action);
                 override_guard.set(walk_action)?;
             }
 
@@ -9785,11 +10144,16 @@ fn run_avatar_focus_follow_action(
                     break;
                 }
                 executed_steps += 1;
+                action["executed"] = serde_json::json!(true);
+                action["executed_steps"] = serde_json::json!(executed_steps);
+                outcome_guard.observe(&action);
                 std::thread::sleep(std::time::Duration::from_millis(
                     step_interval_ms.clamp(32, 250),
                 ));
             }
             if final_status == "completed" {
+                action["execution_stage"] = serde_json::json!("verifying_arrival");
+                outcome_guard.observe(&action);
                 let final_tree = read_sway_tree_for_avatar()?;
                 let final_plan =
                     ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&final_tree, &opts);
@@ -9810,11 +10174,18 @@ fn run_avatar_focus_follow_action(
                     stopped_reason = Some(reason);
                 } else {
                     postcondition_verified = true;
+                    action["postcondition_verified"] = serde_json::json!(true);
+                    action["execution_stage"] = serde_json::json!("arrival_verified");
+                    outcome_guard.observe(&action);
                 }
             }
             if final_status == "completed" {
+                action["execution_stage"] = serde_json::json!("arriving");
+                outcome_guard.observe(&action);
                 override_guard.set("arrive_settle")?;
                 std::thread::sleep(std::time::Duration::from_millis(520));
+                action["execution_stage"] = serde_json::json!("acknowledging");
+                outcome_guard.observe(&action);
                 override_guard.set("wave")?;
                 std::thread::sleep(std::time::Duration::from_millis(960));
             }
@@ -9828,6 +10199,11 @@ fn run_avatar_focus_follow_action(
         action["executed_steps"] = serde_json::json!(executed_steps);
         action["stopped_reason"] = serde_json::json!(stopped_reason);
         action["postcondition_verified"] = serde_json::json!(postcondition_verified);
+        action["execution_stage"] = serde_json::json!(if final_status == "completed" {
+            "completed"
+        } else {
+            final_status
+        });
         outcome_guard.finish(&action)?;
         action["outcome_final_recorded"] = serde_json::json!(true);
         if final_status == "completed" && postcondition_verified {
@@ -19782,6 +20158,270 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_avatar_outcome_action(attempt_id: &str, status: &str) -> serde_json::Value {
+        serde_json::json!({
+            "attempt_id": attempt_id,
+            "status": status,
+            "authorization_mode": "agent_reversible_expression",
+            "executed": false,
+            "executed_steps": 0,
+            "execution_stage": "preparing",
+            "postcondition_verified": false,
+            "plan": {
+                "target": {"node_id": 41},
+                "avatar": {"node_id": 99}
+            }
+        })
+    }
+
+    #[test]
+    fn avatar_focus_follow_outcome_path_prefers_common_ab_state_root() {
+        let path = focus_follow_outcome_log_path_from_roots(
+            Some(PathBuf::from("/secure/agent-bridge")),
+            Some(PathBuf::from("/xdg-state")),
+            Some(PathBuf::from("/home/operator")),
+        )
+        .expect("absolute common state root");
+        assert_eq!(
+            path,
+            PathBuf::from("/secure/agent-bridge/avatar-focus-follow/outcomes.jsonl")
+        );
+        assert_eq!(
+            focus_follow_outcome_log_path_from_roots(
+                None,
+                Some(PathBuf::from("/xdg-state")),
+                Some(PathBuf::from("/home/operator")),
+            )
+            .expect("XDG fallback"),
+            PathBuf::from("/xdg-state/agent-bridge/avatar-focus-follow/outcomes.jsonl")
+        );
+        assert!(focus_follow_outcome_log_path_from_roots(
+            Some(PathBuf::new()),
+            Some(PathBuf::from("/xdg-state")),
+            None,
+        )
+        .is_err());
+        assert!(focus_follow_outcome_log_path_from_roots(None, None, None).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_private_mode_repairs_existing_permissive_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("private-mode tempdir");
+        let path = root.path().join("outcomes.jsonl");
+        std::fs::write(&path, b"{}\n").expect("write permissive fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777))
+            .expect("make fixture permissive");
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open permissive fixture");
+        enforce_private_regular_file(&file, &path, "test outcome")
+            .expect("repair existing outcome mode through fd");
+        let observed = std::fs::metadata(&path)
+            .expect("stat repaired outcome")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(observed, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_private_directory_does_not_chmod_common_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("state-root tempdir");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("set common root mode");
+        let private = root.path().join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("prepare private subtree");
+        let root_mode = std::fs::metadata(root.path())
+            .expect("stat common root")
+            .permissions()
+            .mode()
+            & 0o777;
+        let private_mode = std::fs::metadata(&private)
+            .expect("stat private subtree")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(root_mode, 0o755);
+        assert_eq!(private_mode, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_journal_rejects_symlinks_and_hardlinks() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("link-safety tempdir");
+        let real_root = root.path().join("real-state");
+        std::fs::create_dir(&real_root).expect("real state root");
+        let root_link = root.path().join("linked-state");
+        std::os::unix::fs::symlink(&real_root, &root_link).expect("state root symlink");
+        assert!(
+            prepare_focus_follow_outcome_directory(&root_link.join("avatar-focus-follow")).is_err()
+        );
+
+        let private = real_root.join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("private directory");
+        let target = private.join("target.jsonl");
+        std::fs::write(&target, b"{}\n").expect("target file");
+        let symlink = private.join("symlink.jsonl");
+        std::os::unix::fs::symlink(&target, &symlink).expect("log symlink");
+        assert!(validate_regular_nonsymlink(&symlink, "test symlink").is_err());
+        let action = test_avatar_outcome_action("af-link-test", "running");
+        assert!(append_focus_follow_outcome_at_path(&action, "started", true, &symlink).is_err());
+        let hardlink = private.join("hardlink.jsonl");
+        std::fs::hard_link(&target, &hardlink).expect("log hardlink");
+        assert!(validate_regular_nonsymlink(&target, "test hardlink").is_err());
+        let target_mode_before = std::fs::metadata(&target)
+            .expect("stat hardlink target before")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert!(append_focus_follow_outcome_at_path(&action, "started", true, &target).is_err());
+        let target_mode_after = std::fs::metadata(&target)
+            .expect("stat hardlink target after")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(target_mode_after, target_mode_before);
+    }
+
+    #[test]
+    fn avatar_focus_follow_internal_failure_preserves_observed_progress() {
+        let current = serde_json::json!({
+            "attempt_id": "af-test",
+            "status": "running",
+            "ready": true,
+            "executed": true,
+            "executed_steps": 3,
+            "execution_stage": "walking",
+            "postcondition_verified": false
+        });
+        let failed = failed_avatar_outcome_snapshot(&current, false);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["executed"], true);
+        assert_eq!(failed["executed_steps"], 3);
+        assert_eq!(failed["execution_stage"], "walking");
+        assert_eq!(
+            failed["stopped_reason"],
+            "unhandled_internal_error_or_unwind"
+        );
+        assert_eq!(
+            failed_avatar_outcome_snapshot(&current, true)["stopped_reason"],
+            "final_receipt_persistence_failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_rotation_occurs_only_when_start_enables_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("rotation tempdir");
+        let private = root.path().join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("private directory");
+        let path = private.join("outcomes.jsonl");
+        let file = std::fs::File::create(&path).expect("create large outcome");
+        file.set_len(MAX_FOCUS_FOLLOW_OUTCOME_LOG_BYTES)
+            .expect("extend outcome to rotation threshold");
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .expect("private large outcome");
+
+        assert!(rotate_focus_follow_outcome_log_if_needed(
+            &path,
+            &private,
+            "af-terminal-test",
+            false,
+        )
+        .expect("terminal append must not rotate")
+        .is_none());
+        assert!(path.exists());
+
+        let rotated =
+            rotate_focus_follow_outcome_log_if_needed(&path, &private, "af-start-test", true)
+                .expect("started append may rotate")
+                .expect("threshold rotation path");
+        assert!(!path.exists());
+        assert!(rotated.exists());
+        assert_eq!(
+            std::fs::metadata(rotated)
+                .expect("stat rotated outcome")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_append_persists_pair_with_private_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("append integration tempdir");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("common root mode");
+        let private = root.path().join("avatar-focus-follow");
+        let path = private.join("outcomes.jsonl");
+        let mut action = test_avatar_outcome_action("af-append-test", "running");
+        append_focus_follow_outcome_at_path(&action, "started", true, &path)
+            .expect("append started");
+        action["status"] = serde_json::json!("completed");
+        action["execution_stage"] = serde_json::json!("completed");
+        action["postcondition_verified"] = serde_json::json!(true);
+        append_focus_follow_outcome_at_path(&action, "final", false, &path).expect("append final");
+
+        let rows = std::fs::read_to_string(&path)
+            .expect("read outcome pair")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("valid JSONL row"))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["phase"], "started");
+        assert_eq!(rows[1]["phase"], "final");
+        assert_eq!(rows[0]["attempt_id"], "af-append-test");
+        assert_eq!(rows[1]["attempt_id"], "af-append-test");
+        assert_eq!(rows[0]["schema"], rows[1]["schema"]);
+        assert!(!private
+            .read_dir()
+            .expect("read private journal directory")
+            .any(|entry| entry
+                .expect("journal entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with("outcomes.jsonl.af-")));
+        assert_eq!(
+            std::fs::metadata(root.path())
+                .expect("stat common root")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        for (entry, expected_mode) in [
+            (private.clone(), 0o700),
+            (path, 0o600),
+            (private.join(".focus-follow-outcomes.lock"), 0o600),
+        ] {
+            assert_eq!(
+                std::fs::metadata(entry)
+                    .expect("stat private journal entry")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                expected_mode
+            );
+        }
+    }
 
     #[test]
     fn avatar_aura_daemon_http_composition_reads_bounded_env_once() {

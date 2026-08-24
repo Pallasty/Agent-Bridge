@@ -2,9 +2,10 @@ use ab_bridge::avatar_focus_follow::{
     acknowledged_target_from_receipt, focus_follow_action_preflight,
     focus_follow_arrival_failure_reason, focus_follow_outcome_record,
     focus_follow_plan_from_sway_tree, focus_follow_prompt_preflight, focus_follow_recommendation,
-    focus_follow_runtime_bindings, sway_command_succeeded, FocusFollowOptions,
-    FOCUS_FOLLOW_ACK_SCHEMA, FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_OUTCOME_SCHEMA,
-    FOCUS_FOLLOW_PROMPT_SCHEMA, FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
+    focus_follow_runtime_bindings, pairable_focus_follow_attempt_id, sway_command_succeeded,
+    FocusFollowOptions, FOCUS_FOLLOW_ACK_SCHEMA, FOCUS_FOLLOW_ACTION_SCHEMA,
+    FOCUS_FOLLOW_OUTCOME_SCHEMA, FOCUS_FOLLOW_OUTCOME_SCHEMA_V1, FOCUS_FOLLOW_PROMPT_SCHEMA,
+    FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
 };
 use serde_json::json;
 
@@ -193,11 +194,15 @@ fn focus_follow_outcomes_make_cancelled_attempts_negative_learning_signals() {
     let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
     let mut action =
         focus_follow_action_preflight(&plan, true, false, Some("agent expression"), 900, None);
+    action["attempt_id"] = json!("af-test-attempt");
+    action["execution_stage"] = json!("cancelled");
     action["status"] = json!("cancelled");
     action["executed_steps"] = json!(3);
     action["stopped_reason"] = json!("focus_target_changed");
-    let outcome = focus_follow_outcome_record(&action, "final", 1234);
+    let outcome =
+        focus_follow_outcome_record(&action, "final", 1234).expect("valid v2 outcome record");
     assert_eq!(outcome["schema"], FOCUS_FOLLOW_OUTCOME_SCHEMA);
+    assert_eq!(outcome["attempt_id"], "af-test-attempt");
     assert_eq!(outcome["outcome_class"], "negative");
     assert_eq!(outcome["negative_learning_candidate"], true);
     assert_eq!(outcome["requires_lesson_on_rollback"], true);
@@ -205,6 +210,24 @@ fn focus_follow_outcomes_make_cancelled_attempts_negative_learning_signals() {
     assert_eq!(outcome["target_node_id"], 41);
     assert_eq!(outcome["moves_pointer"], false);
     assert!(!outcome.to_string().contains("Editor"));
+    assert_eq!(
+        pairable_focus_follow_attempt_id(&outcome),
+        Some("af-test-attempt")
+    );
+    assert_eq!(
+        pairable_focus_follow_attempt_id(&json!({
+            "schema": FOCUS_FOLLOW_OUTCOME_SCHEMA_V1,
+            "phase": "started"
+        })),
+        None
+    );
+    let mut missing_attempt = action.clone();
+    missing_attempt
+        .as_object_mut()
+        .expect("action object")
+        .remove("attempt_id");
+    assert!(focus_follow_outcome_record(&missing_attempt, "final", 1234).is_err());
+    assert!(focus_follow_outcome_record(&action, "unexpected", 1234).is_err());
 }
 
 #[test]

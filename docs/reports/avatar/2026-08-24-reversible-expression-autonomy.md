@@ -38,17 +38,47 @@ opening post `3392`.
 
 ## Experience feedback
 
-Each real action writes two durable JSONL phases under the user state directory:
+Each real action writes two durable JSONL v2 phases under the user state
+directory, paired by one random `attempt_id`:
 
 1. `attempt_started` before the first animation or window move;
 2. a final positive or negative outcome after normal completion, cancellation,
    or handled failure.
 
 Cancelled and failed final records carry `negative_learning_candidate=true` and
-the structured `stopped_reason`. An unmatched started phase reveals a process
-or internal-error interruption instead of silently losing the failed attempt.
-The 8 MiB rotating log is written as owner-only `0600` and excludes window
-titles and free-form reason text.
+the structured `stopped_reason`. An unmatched started phase reveals a process,
+post-movement persistence, or internal-error interruption instead of silently
+losing the failed attempt. Historical v1 rows are retained as unpairable legacy
+evidence.
+
+The 8 MiB rotating log lives in the dedicated `avatar-focus-follow` subtree
+under the common `AGENT_BRIDGE_STATE_DIR` when configured. Only this subtree is
+restricted to `0700`; its regular single-link log and lock files are `0600`, and
+window titles and free-form reason text are excluded. `O_NOFOLLOW` plus fd-based
+mode and file-type re-observation reject symlinks, hardlinks, and filesystems
+that only pretend to accept `chmod`. Failure to persist the initial started row
+blocks movement. Storage can still fail after movement; in that case the paired
+terminal is absent and the already durable started row remains the audit signal.
+
+## Local falsification evidence
+
+The candidate runtime was exercised against both local state filesystems:
+
+- the NTFS/FUSE home-state fallback reported an observed `0777` after chmod,
+  exited before movement, and left the Avatar rectangle unchanged;
+- the F2FS common state root created the dedicated directory as `0700` and the
+  lock/log as `0600`;
+- an already-present cancel file produced a v2 `started` + `final` pair with one
+  `attempt_id`, zero movement, and `cancel_file_present` as negative learning;
+- removing `XDG_RUNTIME_DIR` after the started receipt produced a paired failed
+  terminal with `unhandled_internal_error_or_unwind`, zero steps, and the
+  `preparing` execution stage.
+
+Unit falsifiers also cover state-root precedence, refusal of relative/missing
+roots, unchanged common-root permissions, end-to-end symlink/hardlink refusal,
+repair of an existing permissive regular file, start-only rotation, durable
+paired appends with private modes, and preservation of observed execution
+progress in the failure snapshot.
 
 ## Boundary
 
