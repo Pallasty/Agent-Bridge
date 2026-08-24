@@ -69,8 +69,25 @@ fn native_prompt_bubble_paints_visible_chinese_glyphs_when_noto_is_available() {
         .chunks_exact(4)
         .filter(|pixel| pixel[3] > 0 && pixel[0] < 120 && pixel[1] < 120 && pixel[2] < 120)
         .count();
+    let dark_in_band = |start_y: usize, end_y: usize| {
+        canvas
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(index, pixel)| {
+                let y = index / 90;
+                y >= start_y
+                    && y < end_y
+                    && pixel[3] > 0
+                    && pixel[0] < 120
+                    && pixel[1] < 120
+                    && pixel[2] < 120
+            })
+            .count()
+    };
     assert!(opaque > 2_000, "bubble and glyphs should be visible");
     assert!(dark_glyph_pixels > 80, "Chinese glyphs should be visible");
+    assert!(dark_in_band(3, 20) > 40, "first line should be visible");
+    assert!(dark_in_band(20, 38) > 20, "second line should be visible");
 }
 
 #[test]

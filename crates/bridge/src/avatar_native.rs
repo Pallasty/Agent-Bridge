@@ -634,7 +634,9 @@ pub fn paint_native_prompt_bubble(
             .collect();
         let line_width: usize = widths.iter().sum();
         let mut pen_x = ((width as usize).saturating_sub(line_width) / 2) as i32;
-        let baseline_y = 5 + line_index as i32 * 17;
+        // fontdue's ymin is relative to the baseline. Keep both baselines far
+        // enough below the bubble top that CJK ascenders remain on-canvas.
+        let baseline_y = 16 + line_index as i32 * 15;
         for (ch, advance) in line.iter().zip(widths) {
             let (metrics, bitmap) = font.rasterize(*ch, px);
             for gy in 0..metrics.height {
