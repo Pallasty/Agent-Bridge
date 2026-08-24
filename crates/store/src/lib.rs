@@ -294,6 +294,75 @@ pub struct SemanticEventRecord {
     pub descriptor: Option<String>,
 }
 
+/// Privacy-minimal, goal-level closure evidence for one agent task contract.
+///
+/// This is deliberately separate from `semantic_events`: action-time events
+/// are a bounded telemetry ring, while task outcomes are retry-safe closure
+/// records keyed by `outcome_id`. No objective, prompt, transcript, path,
+/// memory key, raw evidence, or arbitrary free-text field is stored here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentTaskOutcomeRecord {
+    pub schema_version: String,
+    pub outcome_id: String,
+    pub recorded_at: i64,
+    pub contract_id: String,
+    pub contract_revision: u64,
+    pub status: String,
+    pub verification_status: String,
+    pub verification_method: String,
+    pub evidence_sha256: Vec<String>,
+    pub user_acceptance: String,
+    pub acceptance_provenance: String,
+    pub manual_interventions: Option<u32>,
+    pub owner_restatements: Option<u32>,
+    pub repeated_authorization_prompts: Option<u32>,
+    pub rollback_status: String,
+    pub provenance: String,
+    pub agent_id: Option<String>,
+    pub body_id: Option<String>,
+    pub environment_id: Option<String>,
+    /// Digest of the canonical validated claim. It detects retry conflicts; it
+    /// is not evidence that the claim itself is true.
+    pub record_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentTaskOutcomeWriteStatus {
+    Inserted,
+    Duplicate,
+    Conflict,
+}
+
+/// Privacy-minimal admission record for one body-operation receipt.
+///
+/// The public MCP producer is advisory-only: `claimed_verification_status`
+/// preserves what it reported but does not upgrade the receipt to trusted
+/// action evidence. Raw observations, arguments, lease IDs, prompts, and
+/// arbitrary free text are excluded from this row.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BodyOperationReceiptRecord {
+    pub schema_version: String,
+    pub operation_id: String,
+    pub recorded_at: i64,
+    pub body_id: String,
+    pub terminal_status: String,
+    pub claimed_verification_status: String,
+    pub admission_provenance: String,
+    pub redacted_facts_json: String,
+    /// Digest of the canonical privacy-minimal facts. This is an idempotency
+    /// and conflict key, not proof that the caller's claims are true.
+    pub record_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyOperationReceiptWriteStatus {
+    Inserted,
+    Duplicate,
+    Conflict,
+}
+
 /// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
 pub const MCP_TOOL_ERROR_RING_CAP: u32 = 100;
 
@@ -3298,6 +3367,59 @@ pub trait StateStore: Send + Sync {
         window_secs: i64,
         limit: u32,
     ) -> Result<Vec<SemanticEventRecord>> {
+        let _ = (window_secs, limit);
+        Ok(Vec::new())
+    }
+
+    /// Append one idempotent task-outcome record. Implementations must treat an
+    /// identical `outcome_id` + `record_sha256` as a duplicate and a different
+    /// digest under the same id as a conflict; neither case may overwrite.
+    async fn record_agent_task_outcome(
+        &self,
+        _record: AgentTaskOutcomeRecord,
+    ) -> Result<AgentTaskOutcomeWriteStatus> {
+        Err(ab_core::Error::Backend(
+            "agent task outcome ledger is not supported by this store".into(),
+        ))
+    }
+
+    /// Read-only preview of [`Self::record_agent_task_outcome`]. `Inserted`
+    /// means the immutable ID is currently unused; no row is written.
+    async fn check_agent_task_outcome(
+        &self,
+        _record: AgentTaskOutcomeRecord,
+    ) -> Result<AgentTaskOutcomeWriteStatus> {
+        Err(ab_core::Error::Backend(
+            "agent task outcome ledger is not supported by this store".into(),
+        ))
+    }
+
+    async fn recent_agent_task_outcomes(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<AgentTaskOutcomeRecord>> {
+        let _ = (window_secs, limit);
+        Ok(Vec::new())
+    }
+
+    /// Atomically admit one immutable body-operation receipt. The operation
+    /// ID is globally unique in the node-local ledger; identical canonical
+    /// facts deduplicate and different facts conflict without overwrite.
+    async fn record_body_operation_receipt(
+        &self,
+        _record: BodyOperationReceiptRecord,
+    ) -> Result<BodyOperationReceiptWriteStatus> {
+        Err(ab_core::Error::Backend(
+            "body operation receipt ledger is not supported by this store".into(),
+        ))
+    }
+
+    async fn recent_body_operation_receipts(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<BodyOperationReceiptRecord>> {
         let _ = (window_secs, limit);
         Ok(Vec::new())
     }

@@ -88,3 +88,75 @@ printf 'AGENT_BRIDGE_CLAUDE_BIN=%s\n' "${AGENT_BRIDGE_CLAUDE_BIN:-}"
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn wrapper_derives_common_state_root_from_canonical_app_control_journal() {
+    let root = test_root("wrapper-state-root");
+    let home = root.join("home");
+    fs::create_dir_all(&home).expect("home");
+    let secure_state = root.join("private-state");
+    let machine_env = root.join("machine.env");
+    fs::write(
+        &machine_env,
+        format!(
+            "export AB_APP_CONTROL_OPERATION_DIR='{}/app_control_operations'\n",
+            secure_state.display()
+        ),
+    )
+    .expect("write machine env");
+
+    let fake_real = root.join("agent-bridge.real");
+    write_executable(
+        &fake_real,
+        r#"#!/usr/bin/env bash
+printf 'AGENT_BRIDGE_STATE_DIR=%s\n' "${AGENT_BRIDGE_STATE_DIR:-}"
+"#,
+    );
+    let wrapper =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/wrapper/agent-bridge-wrapper.sh");
+    let output = Command::new("bash")
+        .arg(wrapper)
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env("AGENT_BRIDGE_REAL_BIN", &fake_real)
+        .env("AGENT_BRIDGE_MACHINE_ENV", &machine_env)
+        .output()
+        .expect("run wrapper");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr utf8");
+    assert!(
+        output.status.success(),
+        "wrapper failed: status={:?}\nstdout={stdout}\nstderr={stderr}",
+        output.status
+    );
+    assert_eq!(
+        stdout.trim(),
+        format!("AGENT_BRIDGE_STATE_DIR={}", secure_state.display())
+    );
+
+    let explicit_state = root.join("explicit-state");
+    let explicit = Command::new("bash")
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts/wrapper/agent-bridge-wrapper.sh"),
+        )
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env("AGENT_BRIDGE_REAL_BIN", &fake_real)
+        .env("AGENT_BRIDGE_MACHINE_ENV", &machine_env)
+        .env("AGENT_BRIDGE_STATE_DIR", &explicit_state)
+        .output()
+        .expect("run wrapper with explicit state root");
+    assert!(explicit.status.success());
+    assert_eq!(
+        String::from_utf8(explicit.stdout)
+            .expect("explicit stdout utf8")
+            .trim(),
+        format!("AGENT_BRIDGE_STATE_DIR={}", explicit_state.display())
+    );
+
+    let _ = fs::remove_dir_all(root);
+}

@@ -1,13 +1,14 @@
 use ab_bridge::avatar_native::{
     alpha_bbox, animated_frame_coords, animation_frame_index, apply_native_sprite_plan,
-    argb8888_le, decode_sidecar_sprite_asset, native_prompt_plan, native_sprite_asset_for_mode,
+    argb8888_le, decode_sidecar_sprite_asset, native_prompt_observed_opacity,
+    native_prompt_opacity, native_prompt_plan, native_sprite_asset_for_mode,
     native_sprite_plan_from_state_value, native_state_http_request_parts,
     native_transparent_plan_json, paint_native_prompt_bubble, paint_rgba_sprite_centered,
     paint_transparent_probe_frame, parse_native_anchor, parse_native_layer,
-    sidecar_asset_id_from_route, sprite_cell, NativeAnchor, NativeLayer, NativeTransparentOptions,
-    RgbaSprite, DEFAULT_NATIVE_FRAME_COUNT, DEFAULT_NATIVE_FRAME_INTERVAL_MS,
-    DEFAULT_NATIVE_SPRITE_CELL_HEIGHT, DEFAULT_NATIVE_SPRITE_CELL_WIDTH,
-    DEFAULT_NATIVE_TRANSPARENT_TITLE, NATIVE_PROMPT_SCHEMA,
+    sidecar_asset_id_from_route, sprite_cell, NativeAnchor, NativeLayer, NativePromptPlan,
+    NativeTransparentOptions, RgbaSprite, DEFAULT_NATIVE_FRAME_COUNT,
+    DEFAULT_NATIVE_FRAME_INTERVAL_MS, DEFAULT_NATIVE_SPRITE_CELL_HEIGHT,
+    DEFAULT_NATIVE_SPRITE_CELL_WIDTH, DEFAULT_NATIVE_TRANSPARENT_TITLE, NATIVE_PROMPT_SCHEMA,
 };
 use serde_json::json;
 use std::fs;
@@ -52,6 +53,40 @@ fn native_prompt_state_is_bounded_and_expires() {
 }
 
 #[test]
+fn native_prompt_opacity_has_bounded_fade_in_hold_and_fade_out() {
+    let prompt = NativePromptPlan {
+        text: "需要我过去吗？".to_string(),
+        created_at_unix_ms: 1_000,
+        expires_at_unix_ms: 3_000,
+    };
+    assert_eq!(native_prompt_opacity(&prompt, 999), 0);
+    assert_eq!(native_prompt_opacity(&prompt, 1_000), 0);
+    assert!(native_prompt_opacity(&prompt, 1_160) > 120);
+    assert_eq!(native_prompt_opacity(&prompt, 1_320), 255);
+    assert_eq!(native_prompt_opacity(&prompt, 2_000), 255);
+    assert!(native_prompt_opacity(&prompt, 2_840) > 120);
+    assert_eq!(native_prompt_opacity(&prompt, 3_000), 0);
+}
+
+#[test]
+fn observed_prompt_fade_in_survives_state_poll_delay() {
+    let prompt = NativePromptPlan {
+        text: "需要我过去吗？".to_string(),
+        created_at_unix_ms: 1_000,
+        expires_at_unix_ms: 4_000,
+    };
+    // The renderer first observes this prompt 700ms after publication. Fade-in
+    // must still start at zero instead of appearing fully opaque immediately.
+    assert_eq!(native_prompt_observed_opacity(&prompt, 0, 1_700), 0);
+    assert!(native_prompt_observed_opacity(&prompt, 80, 1_780) > 50);
+    assert!(native_prompt_observed_opacity(&prompt, 160, 1_860) > 120);
+    assert_eq!(native_prompt_observed_opacity(&prompt, 320, 2_020), 255);
+    assert_eq!(native_prompt_observed_opacity(&prompt, 800, 3_680), 255);
+    assert!(native_prompt_observed_opacity(&prompt, 900, 3_840) > 120);
+    assert_eq!(native_prompt_observed_opacity(&prompt, 1_000, 4_000), 0);
+}
+
+#[test]
 fn native_prompt_bubble_paints_visible_chinese_glyphs_when_noto_is_available() {
     let path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
     if !std::path::Path::new(path).is_file() {
@@ -63,7 +98,7 @@ fn native_prompt_bubble_paints_visible_chinese_glyphs_when_noto_is_available() {
     )
     .expect("decode Noto CJK collection");
     let mut canvas = vec![0_u8; 90 * 130 * 4];
-    paint_native_prompt_bubble(&mut canvas, 90, 130, "需要我过去吗？", &font);
+    paint_native_prompt_bubble(&mut canvas, 90, 130, "需要我过去吗？", &font, 255);
     let opaque = canvas.chunks_exact(4).filter(|pixel| pixel[3] > 0).count();
     let dark_glyph_pixels = canvas
         .chunks_exact(4)
@@ -88,6 +123,44 @@ fn native_prompt_bubble_paints_visible_chinese_glyphs_when_noto_is_available() {
     assert!(dark_glyph_pixels > 80, "Chinese glyphs should be visible");
     assert!(dark_in_band(3, 20) > 40, "first line should be visible");
     assert!(dark_in_band(20, 38) > 20, "second line should be visible");
+}
+
+#[test]
+fn native_prompt_bubble_adapts_long_text_to_three_lines() {
+    let path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+    if !std::path::Path::new(path).is_file() {
+        return;
+    }
+    let font = fontdue::Font::from_bytes(
+        fs::read(path).expect("read Noto CJK"),
+        fontdue::FontSettings::default(),
+    )
+    .expect("decode Noto CJK collection");
+    let mut canvas = vec![0_u8; 90 * 130 * 4];
+    paint_native_prompt_bubble(
+        &mut canvas,
+        90,
+        130,
+        "这里是一条较长的自适应提示文本",
+        &font,
+        255,
+    );
+    let dark_third_line = canvas
+        .chunks_exact(4)
+        .enumerate()
+        .filter(|(index, pixel)| {
+            let y = index / 90;
+            (35..54).contains(&y)
+                && pixel[3] > 0
+                && pixel[0] < 120
+                && pixel[1] < 120
+                && pixel[2] < 120
+        })
+        .count();
+    assert!(
+        dark_third_line > 20,
+        "third adaptive line should be visible"
+    );
 }
 
 #[test]
