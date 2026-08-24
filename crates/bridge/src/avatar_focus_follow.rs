@@ -8,11 +8,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const FOCUS_FOLLOW_SCHEMA: &str = "agent_bridge.avatar_focus_follow_plan.v1";
-pub const FOCUS_FOLLOW_ACTION_SCHEMA: &str = "agent_bridge.avatar_focus_follow_action.v1";
+pub const FOCUS_FOLLOW_ACTION_SCHEMA: &str = "agent_bridge.avatar_focus_follow_action.v2";
 pub const FOCUS_FOLLOW_RECOMMEND_SCHEMA: &str =
-    "agent_bridge.avatar_focus_follow_recommendation.v1";
-pub const FOCUS_FOLLOW_PROMPT_SCHEMA: &str = "agent_bridge.avatar_focus_follow_prompt.v1";
+    "agent_bridge.avatar_focus_follow_recommendation.v2";
+pub const FOCUS_FOLLOW_PROMPT_SCHEMA: &str = "agent_bridge.avatar_focus_follow_prompt.v2";
 pub const FOCUS_FOLLOW_ACK_SCHEMA: &str = "agent_bridge.avatar_focus_follow_ack.v1";
+pub const FOCUS_FOLLOW_OUTCOME_SCHEMA: &str = "agent_bridge.avatar_focus_follow_outcome.v1";
 pub const DEFAULT_AVATAR_APP_ID: &str = "agent-bridge-avatar";
 pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
     "turn_left",
@@ -30,6 +31,89 @@ pub fn acknowledged_target_from_receipt(receipt: &Value) -> Option<i64> {
         && receipt.get("status")?.as_str()? == "completed")
         .then(|| receipt.get("target_node_id")?.as_i64())
         .flatten()
+}
+
+pub fn sway_command_succeeded(payload: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(payload)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .is_some_and(|items| {
+            !items.is_empty()
+                && items
+                    .iter()
+                    .all(|item| item.get("success").and_then(Value::as_bool) == Some(true))
+        })
+}
+
+pub fn focus_follow_arrival_failure_reason(
+    observed_plan: &Value,
+    expected_target_node_id: i64,
+    expected_avatar_node_id: i64,
+    destination_x: i64,
+    destination_y: i64,
+) -> Option<&'static str> {
+    if observed_plan
+        .pointer("/target/node_id")
+        .and_then(Value::as_i64)
+        != Some(expected_target_node_id)
+    {
+        return Some("focus_target_changed_at_arrival");
+    }
+    if observed_plan
+        .pointer("/avatar/node_id")
+        .and_then(Value::as_i64)
+        != Some(expected_avatar_node_id)
+    {
+        return Some("avatar_identity_changed_at_arrival");
+    }
+    let x = observed_plan
+        .pointer("/avatar/current_rect/x")
+        .and_then(Value::as_i64);
+    let y = observed_plan
+        .pointer("/avatar/current_rect/y")
+        .and_then(Value::as_i64);
+    if x.is_none_or(|value| (value - destination_x).abs() > 8)
+        || y.is_none_or(|value| (value - destination_y).abs() > 32)
+    {
+        return Some("arrival_postcondition_mismatch");
+    }
+    None
+}
+
+pub fn focus_follow_outcome_record(action: &Value, phase: &str, observed_at_unix_ms: u64) -> Value {
+    let status = action
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let final_phase = phase == "final";
+    let negative_learning_candidate = final_phase && matches!(status, "failed" | "cancelled");
+    json!({
+        "schema": FOCUS_FOLLOW_OUTCOME_SCHEMA,
+        "phase": phase,
+        "observed_at_unix_ms": observed_at_unix_ms,
+        "status": status,
+        "outcome_class": if !final_phase {
+            "attempt_started"
+        } else if status == "completed" {
+            "positive"
+        } else {
+            "negative"
+        },
+        "rollback_available": true,
+        "automatic_rollback": false,
+        "expression_scope": "avatar_window_only",
+        "authorization_mode": action.get("authorization_mode"),
+        "target_node_id": action.pointer("/plan/target/node_id"),
+        "travel_px": action.get("travel_px"),
+        "executed_steps": action.get("executed_steps"),
+        "stopped_reason": action.get("stopped_reason"),
+        "postcondition_verified": action.get("postcondition_verified"),
+        "negative_learning_candidate": negative_learning_candidate,
+        "requires_lesson_on_rollback": negative_learning_candidate,
+        "moves_pointer": false,
+        "changes_focus": false,
+        "emits_keyboard_input": false,
+    })
 }
 
 pub fn focus_follow_runtime_bindings() -> Value {
@@ -301,7 +385,8 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
     };
     let Some(target) = find_focused_target(tree, &opts.avatar_app_id, None) else {
         let mut plan = base_plan("focus_target_not_found");
-        plan["avatar"] = json!({"app_id": avatar.app_id, "rect": avatar.rect});
+        plan["avatar"] =
+            json!({"node_id": avatar.node_id, "app_id": avatar.app_id, "rect": avatar.rect});
         plan["recommended_action"] = json!("focus_a_non_avatar_window_then_replan");
         return plan;
     };
@@ -316,7 +401,8 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
     });
     let Some((edge, destination)) = selected else {
         let mut plan = base_plan("no_safe_docking_point");
-        plan["avatar"] = json!({"app_id": avatar.app_id, "rect": avatar.rect});
+        plan["avatar"] =
+            json!({"node_id": avatar.node_id, "app_id": avatar.app_id, "rect": avatar.rect});
         plan["target"] = json!({"rect": target.rect, "workspace": target.workspace});
         plan["recommended_action"] = json!("keep_current_position");
         return plan;
@@ -333,6 +419,7 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
         },
     );
     plan["avatar"] = json!({
+        "node_id": avatar.node_id,
         "app_id": opts.avatar_app_id,
         "current_rect": avatar.rect,
         "destination_rect": destination,
@@ -412,9 +499,10 @@ pub fn focus_follow_recommendation(
         "target_changed": last_target_node_id.is_some() && !same_target,
         "min_travel_px": min_travel_px,
         "travel_px": travel_px,
-        "requires_explicit_action_confirmation": decision == "recommend_move",
+        "requires_explicit_action_confirmation": false,
+        "requires_agent_expression_decision": decision == "recommend_move",
         "recommended_command": if decision == "recommend_move" {
-            Some("agent-bridge avatar focus-follow-action --execute --confirm --reason <reason>")
+            Some("agent-bridge avatar focus-follow-action --execute --reason <reason>")
         } else {
             None
         },
@@ -437,8 +525,6 @@ pub fn focus_follow_prompt_preflight(
         ("suppressed", Some("movement_not_recommended"))
     } else if cooldown_active {
         ("suppressed", Some("cooldown_active"))
-    } else if show && !confirm {
-        ("blocked", Some("explicit_confirmation_required"))
     } else if show {
         ("ready", None)
     } else {
@@ -452,12 +538,14 @@ pub fn focus_follow_prompt_preflight(
         "default_enabled": false,
         "show_requested": show,
         "explicitly_confirmed": confirm,
+        "authorization_mode": if confirm { "owner_confirmed_legacy" } else { "agent_reversible_expression" },
+        "agent_autonomy_allowed": true,
         "blocked_reason": blocked_reason,
         "presentation": {
             "kind": "avatar_anchored_bubble",
             "app_name": "Xiao Shu",
             "title": "小舒",
-            "text": "需要我过去吗？",
+            "text": "我过去看看。",
             "timeout_ms": timeout_ms.clamp(2_000, 30_000),
             "anchor": "above_avatar",
             "edge_avoidance": "inside_avatar_surface",
@@ -472,7 +560,8 @@ pub fn focus_follow_prompt_preflight(
         "moves_pointer": false,
         "changes_focus": false,
         "executes_recommendation": false,
-        "requires_separate_movement_confirmation": true,
+        "requires_separate_movement_confirmation": false,
+        "movement_remains_a_separate_agent_decision": true,
         "recommendation": recommendation,
     })
 }
@@ -502,14 +591,22 @@ pub fn focus_follow_action_preflight(
     let reason = reason.map(str::trim).filter(|value| !value.is_empty());
     let blocked_reason = if !matches!(plan_status, "planned" | "already_near_focus") {
         Some("focus_follow_plan_not_actionable")
+    } else if plan
+        .pointer("/avatar/node_id")
+        .and_then(Value::as_i64)
+        .is_none()
+        || plan
+            .pointer("/target/node_id")
+            .and_then(Value::as_i64)
+            .is_none()
+    {
+        Some("focus_follow_plan_missing_identity")
     } else if travel_px.is_none() {
         Some("focus_follow_plan_missing_rects")
     } else if travel_px.is_some_and(|distance| distance > bounded_max) {
         Some("travel_exceeds_bound")
-    } else if execute && !confirm {
-        Some("explicit_confirmation_required")
     } else if execute && reason.is_none() {
-        Some("operator_reason_required")
+        Some("expression_reason_required")
     } else {
         None
     };
@@ -527,6 +624,12 @@ pub fn focus_follow_action_preflight(
         "default_enabled": false,
         "execute_requested": execute,
         "explicitly_confirmed": confirm,
+        "authorization_mode": if confirm { "owner_confirmed_legacy" } else { "agent_reversible_expression" },
+        "agent_autonomy_allowed": true,
+        "rollback_available": true,
+        "automatic_rollback": false,
+        "optional_user_permission_layer": "future_product_policy",
+        "failure_learning_required": true,
         "reason_present": reason.is_some(),
         "blocked_reason": blocked_reason,
         "movement_scope": "avatar_window_only",

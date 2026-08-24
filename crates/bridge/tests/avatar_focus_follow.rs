@@ -1,9 +1,10 @@
 use ab_bridge::avatar_focus_follow::{
     acknowledged_target_from_receipt, focus_follow_action_preflight,
+    focus_follow_arrival_failure_reason, focus_follow_outcome_record,
     focus_follow_plan_from_sway_tree, focus_follow_prompt_preflight, focus_follow_recommendation,
-    focus_follow_runtime_bindings, FocusFollowOptions, FOCUS_FOLLOW_ACK_SCHEMA,
-    FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_PROMPT_SCHEMA, FOCUS_FOLLOW_RECOMMEND_SCHEMA,
-    FOCUS_FOLLOW_SCHEMA,
+    focus_follow_runtime_bindings, sway_command_succeeded, FocusFollowOptions,
+    FOCUS_FOLLOW_ACK_SCHEMA, FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_OUTCOME_SCHEMA,
+    FOCUS_FOLLOW_PROMPT_SCHEMA, FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
 };
 use serde_json::json;
 
@@ -66,6 +67,48 @@ fn acknowledgement_receipt_only_accepts_completed_current_schema() {
 }
 
 #[test]
+fn sway_command_receipt_requires_nonempty_all_success_array() {
+    assert!(sway_command_succeeded(br#"[{"success":true}]"#));
+    assert!(!sway_command_succeeded(
+        br#"[{"success":true},{"success":false,"error":"no match"}]"#
+    ));
+    assert!(!sway_command_succeeded(br#"[]"#));
+    assert!(!sway_command_succeeded(b"not-json"));
+}
+
+#[test]
+fn arrival_verification_binds_target_avatar_and_position() {
+    let mut observed =
+        focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
+    let destination = observed["avatar"]["destination_rect"].clone();
+    observed["avatar"]["current_rect"] = destination.clone();
+    let x = destination["x"].as_i64().unwrap();
+    let y = destination["y"].as_i64().unwrap();
+    assert_eq!(
+        focus_follow_arrival_failure_reason(&observed, 41, 99, x, y),
+        None
+    );
+
+    let mut wrong_target = observed.clone();
+    wrong_target["target"]["node_id"] = json!(42);
+    assert_eq!(
+        focus_follow_arrival_failure_reason(&wrong_target, 41, 99, x, y),
+        Some("focus_target_changed_at_arrival")
+    );
+    let mut wrong_avatar = observed.clone();
+    wrong_avatar["avatar"]["node_id"] = json!(100);
+    assert_eq!(
+        focus_follow_arrival_failure_reason(&wrong_avatar, 41, 99, x, y),
+        Some("avatar_identity_changed_at_arrival")
+    );
+    observed["avatar"]["current_rect"]["x"] = json!(x + 9);
+    assert_eq!(
+        focus_follow_arrival_failure_reason(&observed, 41, 99, x, y),
+        Some("arrival_postcondition_mismatch")
+    );
+}
+
+#[test]
 fn focus_follow_plan_is_bounded_read_only_and_pointer_safe() {
     let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
 
@@ -93,28 +136,40 @@ fn focus_follow_plan_is_bounded_read_only_and_pointer_safe() {
     );
     assert_eq!(plan["action_registry"]["runtime_bound"], true);
     assert_eq!(plan["action_registry"]["actions"][5], "wave");
+    assert_eq!(plan["avatar"]["node_id"], 99);
     assert_eq!(plan["target"]["workspace"], "2");
     assert!(plan["path"]["point_count"].as_u64().unwrap() <= 32);
     assert_eq!(plan["choreography"][2], "arrive_settle");
 }
 
 #[test]
-fn focus_follow_action_requires_execute_confirm_and_reason() {
+fn focus_follow_action_treats_confirmation_as_optional_legacy_metadata() {
     let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
     let dry_run = focus_follow_action_preflight(&plan, false, false, None, 900, None);
     assert_eq!(dry_run["schema"], FOCUS_FOLLOW_ACTION_SCHEMA);
     assert_eq!(dry_run["status"], "dry_run");
     assert_eq!(dry_run["ready"], false);
 
-    let no_confirm =
-        focus_follow_action_preflight(&plan, true, false, Some("owner requested"), 900, None);
-    assert_eq!(
-        no_confirm["blocked_reason"],
-        "explicit_confirmation_required"
+    let autonomous = focus_follow_action_preflight(
+        &plan,
+        true,
+        false,
+        Some("agent attention expression"),
+        900,
+        None,
     );
+    assert_eq!(autonomous["status"], "ready");
+    assert_eq!(autonomous["ready"], true);
+    assert_eq!(
+        autonomous["authorization_mode"],
+        "agent_reversible_expression"
+    );
+    assert_eq!(autonomous["agent_autonomy_allowed"], true);
+    assert_eq!(autonomous["rollback_available"], true);
+    assert_eq!(autonomous["automatic_rollback"], false);
 
     let no_reason = focus_follow_action_preflight(&plan, true, true, None, 900, None);
-    assert_eq!(no_reason["blocked_reason"], "operator_reason_required");
+    assert_eq!(no_reason["blocked_reason"], "expression_reason_required");
 
     let ready = focus_follow_action_preflight(
         &plan,
@@ -134,6 +189,25 @@ fn focus_follow_action_requires_execute_confirm_and_reason() {
 }
 
 #[test]
+fn focus_follow_outcomes_make_cancelled_attempts_negative_learning_signals() {
+    let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
+    let mut action =
+        focus_follow_action_preflight(&plan, true, false, Some("agent expression"), 900, None);
+    action["status"] = json!("cancelled");
+    action["executed_steps"] = json!(3);
+    action["stopped_reason"] = json!("focus_target_changed");
+    let outcome = focus_follow_outcome_record(&action, "final", 1234);
+    assert_eq!(outcome["schema"], FOCUS_FOLLOW_OUTCOME_SCHEMA);
+    assert_eq!(outcome["outcome_class"], "negative");
+    assert_eq!(outcome["negative_learning_candidate"], true);
+    assert_eq!(outcome["requires_lesson_on_rollback"], true);
+    assert_eq!(outcome["authorization_mode"], "agent_reversible_expression");
+    assert_eq!(outcome["target_node_id"], 41);
+    assert_eq!(outcome["moves_pointer"], false);
+    assert!(!outcome.to_string().contains("Editor"));
+}
+
+#[test]
 fn focus_follow_recommendation_is_read_only_and_change_sensitive() {
     let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
     let recommendation = focus_follow_recommendation(&plan, Some(7), 96);
@@ -150,7 +224,12 @@ fn focus_follow_recommendation_is_read_only_and_change_sensitive() {
     assert!(recommendation["dispatch"].is_null());
     assert_eq!(
         recommendation["requires_explicit_action_confirmation"],
-        true
+        false
+    );
+    assert_eq!(recommendation["requires_agent_expression_decision"], true);
+    assert_eq!(
+        recommendation["recommended_command"],
+        "agent-bridge avatar focus-follow-action --execute --reason <reason>"
     );
 
     let unchanged = focus_follow_recommendation(&plan, Some(41), 96);
@@ -173,7 +252,7 @@ fn focus_follow_recommendation_suppresses_non_actionable_plan() {
 }
 
 #[test]
-fn focus_follow_prompt_requires_recommendation_and_explicit_show_confirmation() {
+fn focus_follow_prompt_requires_recommendation_but_not_owner_confirmation() {
     let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
     let recommendation = focus_follow_recommendation(&plan, Some(7), 96);
 
@@ -184,17 +263,20 @@ fn focus_follow_prompt_requires_recommendation_and_explicit_show_confirmation() 
     assert_eq!(preview["moves_avatar"], false);
     assert_eq!(preview["executes_recommendation"], false);
 
-    let unconfirmed = focus_follow_prompt_preflight(&recommendation, true, false, false, 8_000);
-    assert_eq!(unconfirmed["status"], "blocked");
+    let autonomous = focus_follow_prompt_preflight(&recommendation, true, false, false, 8_000);
+    assert_eq!(autonomous["status"], "ready");
     assert_eq!(
-        unconfirmed["blocked_reason"],
-        "explicit_confirmation_required"
+        autonomous["authorization_mode"],
+        "agent_reversible_expression"
     );
+    assert_eq!(autonomous["agent_autonomy_allowed"], true);
+    assert_eq!(autonomous["requires_separate_movement_confirmation"], false);
 
     let ready = focus_follow_prompt_preflight(&recommendation, true, true, false, 8_000);
     assert_eq!(ready["status"], "ready");
     assert_eq!(ready["ready"], true);
     assert_eq!(ready["presentation"]["kind"], "avatar_anchored_bubble");
+    assert_eq!(ready["presentation"]["text"], "我过去看看。");
     assert_eq!(ready["presentation"]["anchor"], "above_avatar");
     assert_eq!(
         ready["presentation"]["fallback"],

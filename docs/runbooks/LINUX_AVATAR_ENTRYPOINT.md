@@ -94,7 +94,7 @@ processes, so an orphaned Wayland child cannot leave a visible face behind.
 
 ## Read-only focus-follow planning
 
-Preview where Xiao Shu could move when explicitly asked to attend to the
+Preview where Xiao Shu could move when AB decides to express attention near the
 currently focused Sway window:
 
 ```bash
@@ -108,11 +108,11 @@ input. The feature is default-off and fail-closed. Its action registry also
 lists `wave`, but the generated v3 action sheet is a concept asset only: it
 failed transparent-alpha validation and is not bound to the renderer.
 
-Execute one explicitly authorized focus move:
+Execute one reversible embodied-expression move:
 
 ```bash
 agent-bridge avatar focus-follow-action \
-  --execute --confirm --reason "owner requested attention move" --json
+  --execute --reason "AB chose to express attention near the focused task" --json
 ```
 
 After a completed traversal, the command atomically records the acknowledged
@@ -122,14 +122,26 @@ target in `$XDG_RUNTIME_DIR/ab-focus-follow-ack.json`. Subsequent
 again. An explicit `--last-target-node-id` overrides the receipt. Cancelled or
 failed traversals never update it.
 
-Without `--execute`, this command is a dry-run. Execution additionally requires
-`--confirm` and a non-empty `--reason`, moves only the exact
-`agent-bridge-avatar` Sway window, revalidates the focused target before every
+Without `--execute`, this command is a dry-run. `--execute` records AB's
+decision to express through its Avatar, and a non-empty auditable `--reason`
+is required. `--confirm` remains accepted only as legacy owner-confirmation
+provenance; it is not an authorization gate. The command resolves one exact
+Avatar Sway `con_id`, moves only that node, and revalidates both the Avatar
+identity and focused target before every
 step, and never moves the pointer or keyboard focus. The default bounds are 48
 pixels per step and 900 pixels total. `Ctrl-C` cancels the foreground action;
 `--cancel-file PATH` also cancels before the next step whenever PATH exists.
 
-During an authorized action the native renderer reads the user-runtime file
+Every real execution appends a `started` record and a final outcome to
+`$XDG_STATE_HOME/agent-bridge/avatar-focus-follow-outcomes.jsonl` (falling back
+to `~/.local/state`). Completed actions are positive outcomes; cancelled and
+failed actions are durable negative-learning candidates. A started record with
+no matching final record exposes an interrupted/internal-failure attempt.
+The log is owner-only (`0600`) and rotates at 8 MiB. It stores no window title.
+Only actions whose final target, Avatar identity, and arrival position are
+re-observed successfully update the acknowledged-focus receipt.
+
+During an autonomous expression the native renderer reads the user-runtime file
 `$XDG_RUNTIME_DIR/ab-face-motion-override.json`. The action publishes only
 known RGBA v3 asset identifiers and removes the override on completion,
 cancellation, or handled failure. Dedicated transparent turn, walk, and wave
@@ -139,6 +151,13 @@ The 2026-08-24 live traversal passed functional acceptance: all turn, walk,
 arrival, wave, and idle transitions were visible, and the final docking point
 was accepted. Fine-grained easing and stride tuning remain a deferred visual
 polish item; they are not a correctness blocker.
+
+The current owner-local AB is governed by reversible-expression autonomy:
+Avatar position, motion, short bubbles, and already-policy-bounded sparse voice
+do not require per-action user permission. A configurable permission layer may
+be added if this surface is productized later. This does not grant authority to
+move the pointer, inject input, operate applications, modify user data, expose
+credentials, or perform irreversible/external actions.
 
 This is intentionally a foreground-session workflow with a detached child,
 not a launchd/systemd installation. The launcher uses a user-private runtime
