@@ -6,10 +6,10 @@ Accepted on 2026-08-23.
 
 - Decision scope: governance of `crates/bridge/src/main.rs`; this unit changes no
   Rust source, runtime behavior, deployment, or client process
-- Audited source base: `d4b8707099b10d84e04e4fb0facba886b2eef474`
+- Audited source base: `eb5718b61fd9097ece725c6d1d494c367669cc00`
 - Source remote: `github/master`
 - Remote state at audit: `origin/master` remained at
-  `fd60af7d8cc125a6bc55d2dffa08581bec345164`, ten commits behind the audited
+  `fd60af7d8cc125a6bc55d2dffa08581bec345164`, twelve commits behind the audited
   source base
 - Predecessors: S0-S1 through S13, especially S7 Avatar inventory
 - Next units: S14-B continuous gates, S15 daemon supervisors, S16 Avatar
@@ -25,15 +25,15 @@ dispatch, and effect custody visible at the root.
 
 That direction worked. The accepted S0 base contained 21,700 lines. S13 reduced
 the file to 18,246 lines, a reduction of 3,454 lines (15.9%). The current file
-is still 1,793 lines smaller than the S0 base, but it has regrown to 19,907
+is still 1,642 lines smaller than the S0 base, but it has regrown to 20,058
 lines. The regression is not evidence that the earlier architecture was wrong;
 it shows that the finite extraction campaign did not install a continuous
 admission rule for new composition-root code.
 
 The current source also invalidates the earlier S14 planning snapshot at
-`fd60af7d8cc1`. Ten newer GitHub commits add three sprite asset commands and a
-focus-follow recommendation command, increasing the Avatar family from 47 to
-51 variants. This ADR therefore uses the fetched GitHub head, records the
+`fd60af7d8cc1`. Twelve newer GitHub commits add three sprite asset commands,
+focus-follow recommendation, and a gated passive focus prompt, increasing the
+Avatar family from 47 to 52 variants. This ADR therefore uses the fetched GitHub head, records the
 GitLab lag explicitly, and does not claim dual-remote agreement.
 
 ## Reproducible baseline
@@ -53,13 +53,13 @@ Observed results:
 
 | Measure | S0 | S13 | Current |
 | --- | ---: | ---: | ---: |
-| `main.rs` lines | 21,700 | 18,246 | 19,907 |
-| `main.rs` bytes | not recorded | not recorded | 792,430 |
-| Change from S0 | baseline | -3,454 | -1,793 |
-| Change from S13 | n/a | baseline | +1,661 net |
-| `AvatarOp` variants | not separately frozen | 43 at S7; later growth | 51 |
+| `main.rs` lines | 21,700 | 18,246 | 20,058 |
+| `main.rs` bytes | not recorded | not recorded | 798,305 |
+| Change from S0 | baseline | -3,454 | -1,642 |
+| Change from S13 | n/a | baseline | +1,812 net |
+| `AvatarOp` variants | not separately frozen | 43 at S7; later growth | 52 |
 
-The exact post-S13 `main.rs` diff is `+1736/-75`. The commits are:
+The exact post-S13 `main.rs` diff is `+1839/-27`. The commits are:
 
 | Commit | Net source purpose | `main.rs` delta |
 | --- | --- | ---: |
@@ -80,6 +80,7 @@ The exact post-S13 `main.rs` diff is `+1736/-75`. The commits are:
 | `20f95c6a6` | complete focus-follow motion set | +2/-1 |
 | `239d23d39` | completion nod frame correction | +1/-1 |
 | `d4b870709` | read-only focus move recommendation | +73/-0 |
+| `eb5718b61` | gated passive focus prompt | +151/-0 |
 
 All post-S13 growth is in Avatar-facing integration. This concentration, not
 the absolute line count, is the reason to reopen governance.
@@ -90,15 +91,15 @@ The current physical regions are:
 
 | Region | Current location | Physical span | Governance role |
 | --- | ---: | ---: | --- |
-| CLI schema and conversions | approximately `90-4465` | approximately 4,376 | public CLI contract |
-| process entry and startup helpers | `4499-4784` | 286 | process boundary |
-| `real_main` dispatch and mode startup | `4842-8820` | 3,979 | routing and runtime authority |
-| Avatar schema | `847-2346` | 1,500 | 51 variants |
-| Avatar early dispatch | `5051-6191` | 1,141 | 51 unique `AvatarOp` arms |
-| Avatar executors and helpers | `8899-13136` | 4,238 | mixed projection and effects |
-| BioCortex executor area | `13139-14677` | approximately 1,539 | mixed status and policy |
-| Dream executor area | `14678-19261` | approximately 4,584 | reports and store workflows |
-| Hub construction | `19263-19393` | 131 | dependency composition |
+| CLI schema and conversions | approximately `90-4490` | approximately 4,401 | public CLI contract |
+| process entry and startup helpers | `4524-4809` | 286 | process boundary |
+| `real_main` dispatch and mode startup | `4867-8971` | approximately 4,105 | routing and runtime authority |
+| Avatar schema | `847-2369` | 1,523 | 52 variants |
+| Avatar early dispatch | approximately `5076-6233` | approximately 1,158 | 52 unique `AvatarOp` arms |
+| Avatar executors and helpers | approximately `9050-13287` | approximately 4,238 | mixed projection and effects |
+| BioCortex executor area | `13290-14826` | approximately 1,537 | mixed status and policy |
+| Dream executor area | `14829-19412` | approximately 4,584 | reports and store workflows |
+| Hub construction | `19414-19544` | 131 | dependency composition |
 
 The regions are physical review surfaces, not owned-line counts. Helpers and
 families overlap at some boundaries; line count must not be used as proof that
@@ -107,7 +108,7 @@ a whole region can move safely.
 ### Avatar delta since S7
 
 S7 froze 43 schema variants, 43 dispatch arms, and their executor/effect map.
-The eight later variants are:
+The nine later variants are:
 
 | Command | Character | Root-owned effects or inputs | S16 disposition |
 | --- | --- | --- | --- |
@@ -119,6 +120,7 @@ The eight later variants are:
 | `SpriteAssetCompile` | preview plus confirmed writer | reads input and may write an output atlas | keep execute/confirm, path custody, write, and exit ordering at root |
 | `SpriteAssetContract` | read-only aggregation | reads the production asset set and renders readiness | completed contract formatting is eligible after characterization |
 | `FocusFollowRecommend` | read-only recommendation | invokes `swaymsg`, constructs a plan, and renders a recommendation | pure recommendation/result projection is eligible; Sway acquisition stays at root |
+| `FocusFollowPrompt` | preview plus confirmed notification | reads Sway state and may invoke `notify-send` after explicit flags | pure preflight is eligible; acquisition, confirmation, notification, receipt write, and output ordering stay at root |
 
 The command family therefore remains unsuitable for a wholesale
 `cli::avatar` move. The newer read-only `SpriteAssetAudit` does not make the
@@ -227,7 +229,7 @@ by S1-S13.
 
 ### Continue feature delivery without governance
 
-Rejected. The +1,661 net lines after S13 show that periodic extraction alone
+Rejected. The +1,812 net lines after S13 show that periodic extraction alone
 does not prevent pure logic from returning to the composition root.
 
 ### Enforce a hard line-count ceiling
@@ -275,7 +277,7 @@ contracts.
 
 This S14-A unit is valid when:
 
-- its source SHA, remote divergence, line/byte count, post-S13 diff, and 51
+- its source SHA, remote divergence, line/byte count, post-S13 diff, and 52
   Avatar variants are reproducible;
 - it changes documentation only;
 - `git diff --check` passes;
