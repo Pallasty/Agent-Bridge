@@ -31952,10 +31952,21 @@ impl McpTool for BodyReflexAdviceTool {
 /// Read-only current projection of explicitly recorded embodiment facts.
 pub struct EmbodimentSnapshotTool {
     hub: Hub,
+    operation_receipts_only: bool,
 }
 impl EmbodimentSnapshotTool {
     pub fn new(hub: Hub) -> Self {
-        Self { hub }
+        Self {
+            hub,
+            operation_receipts_only: false,
+        }
+    }
+
+    fn operation_receipts_only(hub: Hub) -> Self {
+        Self {
+            hub,
+            operation_receipts_only: true,
+        }
     }
 }
 #[async_trait]
@@ -31967,16 +31978,51 @@ impl McpTool for EmbodimentSnapshotTool {
         Some(ToolAnnotations::read_only())
     }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { name: self.name().into(), description: "Return a read-only embodiment fact projection. It never resumes actions or acquires write leases.".into(), input_schema: json!({"type":"object","properties":{}}) }
+        let description = if self.operation_receipts_only {
+            "Return only the privacy-minimal advisory body-operation receipt ledger projection. This Codex compact-profile view excludes Event Spine facts, body telemetry, and write-lease state; it never resumes actions or acquires leases."
+        } else {
+            "Return a read-only embodiment fact projection. It never resumes actions or acquires write leases."
+        };
+        ToolSchema {
+            name: self.name().into(),
+            description: description.into(),
+            input_schema: json!({"type":"object","properties":{}}),
+        }
     }
     async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let Some(store) = &self.hub.store else {
             return Ok(ToolResult::error("no store configured"));
         };
-        let events = store.recent_semantic_events(90 * 86_400, 500).await?;
         let operation_receipts = store
             .recent_body_operation_receipts(90 * 86_400, 500)
             .await?;
+        let operation_receipt_ledger = json!({
+            "admitted_count": operation_receipts.len(),
+            "source_truncated_possible": operation_receipts.len() == 500,
+            "trust_level": "advisory_only",
+            "authority_authenticated": false,
+            "adapter_attestation_authenticated": false,
+            "receipts": operation_receipts.iter().take(20).map(|receipt| json!({
+                "operation_id": receipt.operation_id,
+                "recorded_at": receipt.recorded_at,
+                "body_id": receipt.body_id,
+                "claimed_status": receipt.terminal_status,
+                "claimed_verification_status": receipt.claimed_verification_status,
+                "admission_provenance": receipt.admission_provenance,
+            })).collect::<Vec<_>>(),
+        });
+        if self.operation_receipts_only {
+            return Ok(ToolResult::json_text(&json!({
+                "schema_version": "agent_bridge.body_operation_receipt_snapshot.v1",
+                "read_only": true,
+                "window_secs": 90 * 86_400,
+                "operation_receipt_ledger": operation_receipt_ledger,
+                "includes_event_spine": false,
+                "includes_body_telemetry": false,
+                "includes_write_lease": false,
+            })));
+        }
+        let events = store.recent_semantic_events(90 * 86_400, 500).await?;
         let mut snapshot = crate::embodiment_projection::project_embodiment_snapshot(
             &events,
             &crate::body_telemetry::body_status_snapshot(),
@@ -31993,21 +32039,7 @@ impl McpTool for EmbodimentSnapshotTool {
             })
         });
         snapshot["write_lease_complete"] = Value::Bool(true);
-        snapshot["operation_receipt_ledger"] = json!({
-            "admitted_count": operation_receipts.len(),
-            "source_truncated_possible": operation_receipts.len() == 500,
-            "trust_level": "advisory_only",
-            "authority_authenticated": false,
-            "adapter_attestation_authenticated": false,
-            "receipts": operation_receipts.iter().take(20).map(|receipt| json!({
-                "operation_id": receipt.operation_id,
-                "recorded_at": receipt.recorded_at,
-                "body_id": receipt.body_id,
-                "claimed_status": receipt.terminal_status,
-                "claimed_verification_status": receipt.claimed_verification_status,
-                "admission_provenance": receipt.admission_provenance,
-            })).collect::<Vec<_>>(),
-        });
+        snapshot["operation_receipt_ledger"] = operation_receipt_ledger;
         Ok(ToolResult::json_text(&snapshot))
     }
 }
@@ -32170,10 +32202,21 @@ impl McpTool for EmbodimentLeaseTool {
 /// Explicitly records an embodiment fact; it does not dispatch any action.
 pub struct EmbodimentRecordTool {
     hub: Hub,
+    operation_receipts_only: bool,
 }
 impl EmbodimentRecordTool {
     pub fn new(hub: Hub) -> Self {
-        Self { hub }
+        Self {
+            hub,
+            operation_receipts_only: false,
+        }
+    }
+
+    fn operation_receipts_only(hub: Hub) -> Self {
+        Self {
+            hub,
+            operation_receipts_only: true,
+        }
     }
 }
 #[async_trait]
@@ -32182,6 +32225,22 @@ impl McpTool for EmbodimentRecordTool {
         "embodiment_record"
     }
     fn schema(&self) -> ToolSchema {
+        if self.operation_receipts_only {
+            return ToolSchema {
+                name: self.name().into(),
+                description: "Admit only a structurally validated, terminal, non-mutating BodyOperationEnvelope to the dedicated atomic advisory receipt ledger. This Codex compact-profile view rejects legacy Event Spine kinds and never executes, resumes, or authorizes an action.".into(),
+                input_schema: json!({
+                    "type":"object",
+                    "required":["kind","body_id","operation"],
+                    "additionalProperties":false,
+                    "properties":{
+                        "kind":{"type":"string","enum":["operation_receipt"]},
+                        "body_id":{"type":"string","minLength":1,"maxLength":128},
+                        "operation":{"type":"object","description":"agent_bridge.body_operation_envelope.v1. The public route accepts non-mutating, agent-reported advisory receipts only."}
+                    }
+                }),
+            };
+        }
         ToolSchema {
             name: self.name().into(),
             description: "Record an intent or legacy receipt in Event Spine, or admit a structurally validated BodyOperationEnvelope to the dedicated atomic receipt ledger. Public operation_receipt claims are advisory and non-mutating only: they cannot authenticate authority, an owner, an adapter, or a verifier. This records evidence only; it never executes, resumes, or authorizes an action.".into(),
@@ -32206,6 +32265,28 @@ impl McpTool for EmbodimentRecordTool {
         let Some(kind) = args.get("kind").and_then(Value::as_str) else {
             return Ok(ToolResult::error("missing 'kind'"));
         };
+        let has_profile_forbidden_field = args
+            .as_object()
+            .map(|object| {
+                object
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "kind" | "body_id" | "operation"))
+            })
+            .unwrap_or(true);
+        if self.operation_receipts_only
+            && (kind != "operation_receipt" || has_profile_forbidden_field)
+        {
+            let mut rejected = ToolResult::json_text(&json!({
+                "recorded": false,
+                "executed": false,
+                "resumes_action": false,
+                "projected_to_event_spine": false,
+                "status": "profile_restricted",
+                "reason": "the Codex compact profile accepts only kind, body_id, and operation for operation_receipt; legacy Event Spine kinds and fields are not exposed",
+            }));
+            rejected.is_error = true;
+            return Ok(rejected);
+        }
         if !matches!(
             kind,
             "intent_opened"
@@ -50422,6 +50503,15 @@ impl ToolPolicy {
         self.profile
     }
 
+    fn uses_receipt_only_embodiment_surface(self) -> bool {
+        matches!(
+            self.set,
+            ToolSet::CodexEssential
+                | ToolSet::CodexVoice
+                | ToolSet::CodexEssentialMobileProjection
+        )
+    }
+
     /// Tools explicitly whitelisted by this toolset *beyond* what the underlying
     /// `ToolProfile` tier covers. For `codex-essential` this is the IDE bridge
     /// pair plus forum/presence collab tools — they are Tier::Standard/Niche
@@ -50532,6 +50622,13 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
 const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Compact read-only product outcomes for practical continuity work.
     "practical_workflow_scorecard",
+    // R5/P1a beneficiary-closure evidence: expose the existing record-only
+    // receipt writer and its read projection to Codex's deployed compact
+    // profile. The public writer still rejects mutation/lease claims and
+    // never executes, authorizes, resumes, or projects an operation to Event
+    // Spine.
+    "embodiment_record",
+    "embodiment_snapshot",
     // Avatar observation and sidecar-to-presence bridge: expose the read path
     // plus an explicit sync surface so Codex can inspect Xiao Shu without
     // widening to every Standard tool.
@@ -53957,7 +54054,11 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(EmbodimentSnapshotTool::new(hub.clone())),
+        Arc::new(if policy.uses_receipt_only_embodiment_surface() {
+            EmbodimentSnapshotTool::operation_receipts_only(hub.clone())
+        } else {
+            EmbodimentSnapshotTool::new(hub.clone())
+        }),
     );
     reg_if(
         &mut reg,
@@ -53969,7 +54070,11 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(EmbodimentRecordTool::new(hub.clone())),
+        Arc::new(if policy.uses_receipt_only_embodiment_surface() {
+            EmbodimentRecordTool::operation_receipts_only(hub.clone())
+        } else {
+            EmbodimentRecordTool::new(hub.clone())
+        }),
     );
     reg_if(
         &mut reg,

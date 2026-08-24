@@ -1,8 +1,12 @@
 # Agent Beneficiary Closure V1
 
-Status: bounded source implementation. No installed runtime, deployment,
-executor enablement, service change, or production embodiment admission is
-claimed by this document.
+Status: P0 source merged and deployed on 2026-08-24 as an evidence-only
+runtime slice. P1a is limited to making the already implemented record-only
+receipt write/read surfaces reachable from the deployed Codex compact profile.
+Neither status authorizes executor enablement, service-side action, or
+production embodiment admission. Runtime truth requires the installed
+binary's version/hash, `doctor`, and matching live-process executable identity
+and hashes; this source document alone is not runtime evidence.
 
 ## Product position
 
@@ -79,6 +83,12 @@ reported, with per-field observation coverage; missing data is never converted
 to zero. The public producer therefore reports acceptance as unknown until a
 future authenticated owner channel exists.
 
+The table is an admitted-record ledger, not an attempt journal. Rejected
+invalid or conflicting calls are not durably enumerated, so a scorecard zero
+cannot prove that no rejected retry occurred. Attempt-level coverage remains
+agent-reported or unavailable until a separately designed, privacy-bounded
+attempt audit exists.
+
 ### Body-operation evidence envelope
 
 `agent_bridge.body_operation_envelope.v1` defines a portable
@@ -109,6 +119,22 @@ claim into Event Spine, because a caller-declared verifier must not become a
 text, memory contents, MCP session hints, and raw lease IDs are not persisted.
 The tool records facts only: it never executes, resumes, retries, rolls back,
 or authorizes an action.
+
+P1a exposes `embodiment_record` and `embodiment_snapshot` in
+`codex-essential` (and therefore the composed
+`codex-essential-mobile-projection` profile) so Codex can actually dogfood
+this P0 evidence path. Both names are profile-scoped there: the record schema
+and handler accept only `operation_receipt`, while the snapshot returns only
+the redacted receipt ledger and explicitly excludes legacy Event Spine facts,
+body telemetry, and write-lease state. Broader profiles retain their legacy
+surface for compatibility. This is new reachability to an existing evidence
+capability, not new execution or authorization authority: the same public
+handler continues to reject mutation or lease-bearing receipts, and no
+automatic producer or lifecycle hook is added.
+
+No production `BodyOperationEnvelope` producer exists at P1a
+preregistration. Profile reachability cannot itself create a natural receipt
+sample or establish user benefit.
 
 The store boundary admits only the fixed canonical redacted-facts shape and
 recomputes its digest, so a direct store caller cannot add arbitrary fields or
@@ -161,7 +187,8 @@ These source contracts do not provide:
   cross-process lease service;
 - lease TTL, renewal, fencing tokens, or durable action-journal recovery; or
 - evidence that this branch is built, installed, enabled, deployed, or active
-  in any live Agent-Bridge process.
+  in any particular live Agent-Bridge process without a matching installed
+  version/hash, `doctor` observation, and live executable identity/hash.
 
 An envelope proves only that its submitted fields satisfy the V1 structural
 contract and canonical content bindings. It does not prove adapter identity,

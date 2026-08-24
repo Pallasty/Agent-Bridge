@@ -8172,8 +8172,9 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 73 total extras = 10 collab-group entries + 63 direct extras:
+    // 75 total extras = 10 collab-group entries + 65 direct extras:
     //      practical_workflow_scorecard
+    //      + embodiment_record + embodiment_snapshot
     //      + 6 avatar observation/sync/renderer tools
     //      + xiao_shu_action_request + 14 read-only mobile bridge tools
     //      + memory_graph_topology + memory_retrieval_feedback
@@ -8207,8 +8208,10 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // must not re-enter Codex's eager direct extras.
     // The five prune-continuity entries remain part of the direct list by
     // name, preserving the established Codex surface contract.
-    assert_eq!(extras.len(), 73);
+    assert_eq!(extras.len(), 75);
     assert!(extras.contains(&"practical_workflow_scorecard"));
+    assert!(extras.contains(&"embodiment_record"));
+    assert!(extras.contains(&"embodiment_snapshot"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
     assert!(extras.contains(&"forum_post"));
@@ -8304,10 +8307,10 @@ fn tool_policy_codex_essential_exposes_extras_list() {
 fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
     let essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let voice = ToolPolicy::from_values(Some("codex-voice"), None, None, None);
-    let voice_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), voice)
-        .list()
-        .into_iter()
-        .map(|schema| schema.name)
+    let voice_schemas = build_registry_with_policy(Hub::builder().build(), voice).list();
+    let voice_names: Vec<String> = voice_schemas
+        .iter()
+        .map(|schema| schema.name.clone())
         .collect();
 
     assert_eq!(voice.label(), "codex-voice");
@@ -8346,6 +8349,14 @@ fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
     assert!(
         !voice.includes(Tier::Niche, "browser_navigate"),
         "codex-voice must not widen to unrelated browser mutation"
+    );
+    let record_schema = voice_schemas
+        .iter()
+        .find(|schema| schema.name == "embodiment_record")
+        .expect("codex-voice receipt-only record schema");
+    assert_eq!(
+        record_schema.input_schema["properties"]["kind"]["enum"],
+        json!(["operation_receipt"])
     );
 }
 
@@ -8599,6 +8610,8 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
         "memory_save",
         "forum_read",
         "app_control",
+        "embodiment_record",
+        "embodiment_snapshot",
         "mobile_projection_status",
         "mobile_projection_wait",
         "mobile_projection_start",
@@ -8607,6 +8620,40 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
     ] {
         assert!(names.contains(tool), "combined profile missing {tool}");
     }
+    let record_schema = schemas
+        .iter()
+        .find(|schema| schema.name == "embodiment_record")
+        .expect("receipt-only embodiment record schema");
+    assert_eq!(
+        record_schema.input_schema["properties"]["kind"]["enum"],
+        json!(["operation_receipt"])
+    );
+    assert!(record_schema.input_schema["properties"]
+        .get("facts")
+        .is_none());
+    assert!(record_schema.input_schema["properties"]
+        .get("verdict")
+        .is_none());
+    let snapshot_schema = schemas
+        .iter()
+        .find(|schema| schema.name == "embodiment_snapshot")
+        .expect("receipt-only embodiment snapshot schema");
+    assert!(snapshot_schema.description.contains("excludes Event Spine"));
+    let broad_schemas = build_registry_with_policy(
+        Hub::builder().build(),
+        ToolPolicy::from_values(None, None, None, Some("all")),
+    )
+    .list();
+    let broad_record_schema = broad_schemas
+        .iter()
+        .find(|schema| schema.name == "embodiment_record")
+        .expect("broad legacy embodiment record schema");
+    assert!(broad_record_schema.input_schema["properties"]["kind"]["enum"]
+        .as_array()
+        .is_some_and(|kinds| kinds.contains(&json!("action_receipt"))));
+    assert!(broad_record_schema.input_schema["properties"]
+        .get("facts")
+        .is_some());
     for tool in [
         "mobile_install_apk",
         "mobile_click",
@@ -17980,6 +18027,103 @@ async fn embodiment_operation_receipt_is_advisory_redacted_and_atomically_idempo
         .collect::<Vec<_>>();
     assert!(violation_codes.contains(&"stale_observation"));
     assert!(violation_codes.contains(&"verification_not_independent"));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn codex_receipt_only_embodiment_surface_rejects_legacy_event_spine_kinds() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let ctx = context_with_session("session-operation-receipt-only");
+    let tool = EmbodimentRecordTool::operation_receipts_only(hub.clone());
+
+    let legacy = tool
+        .execute(
+            json!({
+                "kind": "action_receipt",
+                "body_id": "body-operation-test",
+                "facts": {"raw": "must-not-reach-event-spine"},
+                "verdict": "verified"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("legacy kind rejection");
+    assert!(legacy.is_error);
+    let legacy = result_text_as_json(&legacy);
+    assert_eq!(legacy["status"], "profile_restricted");
+    assert_eq!(legacy["recorded"], false);
+    assert_eq!(legacy["projected_to_event_spine"], false);
+
+    let extra_field = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": {},
+                "facts": {"raw": "must-not-be-accepted"}
+            }),
+            &ctx,
+        )
+        .await
+        .expect("profile-forbidden field rejection");
+    assert!(extra_field.is_error);
+    assert_eq!(result_text_as_json(&extra_field)["status"], "profile_restricted");
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("recent events");
+    assert!(events.is_empty(), "restricted legacy call wrote Event Spine");
+
+    let recorded = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": valid_body_operation_json("operation-receipt-only-valid")
+            }),
+            &ctx,
+        )
+        .await
+        .expect("valid restricted receipt");
+    let recorded = result_text_as_json(&recorded);
+    assert_eq!(recorded["recorded"], true);
+    assert_eq!(recorded["executed"], false);
+    assert_eq!(recorded["authority_authenticated"], false);
+    assert_eq!(recorded["projected_to_event_spine"], false);
+
+    let snapshot = EmbodimentSnapshotTool::operation_receipts_only(hub.clone())
+        .execute(json!({}), &ctx)
+        .await
+        .expect("receipt-only snapshot");
+    let snapshot = result_text_as_json(&snapshot);
+    assert_eq!(
+        snapshot["schema_version"],
+        "agent_bridge.body_operation_receipt_snapshot.v1"
+    );
+    assert_eq!(snapshot["includes_event_spine"], false);
+    assert_eq!(snapshot["includes_body_telemetry"], false);
+    assert_eq!(snapshot["includes_write_lease"], false);
+    assert!(snapshot.get("write_lease").is_none());
+    assert!(snapshot.get("body_status").is_none());
+    assert_eq!(snapshot["operation_receipt_ledger"]["admitted_count"], 1);
+    assert_eq!(
+        snapshot["operation_receipt_ledger"]["receipts"][0]["operation_id"],
+        "operation-receipt-only-valid"
+    );
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("recent events after valid receipt");
+    assert!(events.is_empty(), "restricted receipt wrote Event Spine");
 
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
