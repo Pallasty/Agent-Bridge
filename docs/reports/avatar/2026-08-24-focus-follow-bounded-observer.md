@@ -165,7 +165,7 @@ a live verdict.
 
 Record later evidence here:
 
-- source commit: **PENDING**;
+- source implementation commit: `f1031046`;
 - installed binary commit/currentness: **PENDING**;
 - focused automated tests: `cargo check -p ab-bridge --bin agent-bridge`
   plus 14 policy, 16 planner/ACK, 3 CLI lifecycle, 9 action lock/journal,
