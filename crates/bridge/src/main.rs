@@ -962,7 +962,7 @@ enum AvatarOp {
     /// Recommend whether Xiao Shu should stay or offer a confirmed focus move.
     /// Read-only: never dispatches movement or writes observer state.
     FocusFollowRecommend {
-        /// Last acknowledged focused Sway node id, when known.
+        /// Last acknowledged focused Sway node id. Overrides the latest completed-action receipt.
         #[arg(long)]
         last_target_node_id: Option<i64>,
         /// Suppress movement recommendations below this distance.
@@ -981,7 +981,7 @@ enum AvatarOp {
     /// Preview or explicitly show a passive Xiao Shu focus-move prompt.
     /// Never moves the Avatar; real movement remains a separate confirmed action.
     FocusFollowPrompt {
-        /// Last acknowledged focused Sway node id, when known.
+        /// Last acknowledged focused Sway node id. Overrides the latest completed-action receipt.
         #[arg(long)]
         last_target_node_id: Option<i64>,
         /// Suppress movement recommendations below this distance.
@@ -9239,6 +9239,7 @@ fn run_avatar_focus_follow_recommend(
     max_step_px: i64,
     as_json: bool,
 ) -> Result<()> {
+    let last_target_node_id = last_target_node_id.or_else(read_focus_follow_ack_target);
     let tree = read_sway_tree_for_avatar()?;
     let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
         &tree,
@@ -9280,6 +9281,41 @@ fn focus_follow_prompt_receipt_path() -> PathBuf {
         .join("ab-focus-follow-prompt-receipt.json")
 }
 
+fn focus_follow_ack_receipt_path() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("ab-focus-follow-ack.json")
+}
+
+fn read_focus_follow_ack_target() -> Option<i64> {
+    let receipt = std::fs::read(focus_follow_ack_receipt_path())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())?;
+    ab_bridge::avatar_focus_follow::acknowledged_target_from_receipt(&receipt)
+}
+
+fn write_focus_follow_ack_target(target_node_id: i64, executed_steps: u64) -> Result<PathBuf> {
+    let path = focus_follow_ack_receipt_path();
+    let completed_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("read wall clock for focus-follow acknowledgement")?
+        .as_millis() as u64;
+    let receipt = serde_json::json!({
+        "schema": ab_bridge::avatar_focus_follow::FOCUS_FOLLOW_ACK_SCHEMA,
+        "status": "completed",
+        "target_node_id": target_node_id,
+        "executed_steps": executed_steps,
+        "completed_at_unix_ms": completed_at_unix_ms,
+    });
+    let temp_path = path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&temp_path, serde_json::to_vec_pretty(&receipt)?)
+        .with_context(|| format!("write focus-follow acknowledgement {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &path)
+        .with_context(|| format!("publish focus-follow acknowledgement {}", path.display()))?;
+    Ok(path)
+}
+
 fn run_avatar_focus_follow_prompt(
     last_target_node_id: Option<i64>,
     min_travel_px: i64,
@@ -9289,6 +9325,7 @@ fn run_avatar_focus_follow_prompt(
     confirm: bool,
     as_json: bool,
 ) -> Result<()> {
+    let last_target_node_id = last_target_node_id.or_else(read_focus_follow_ack_target);
     let tree = read_sway_tree_for_avatar()?;
     let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
         &tree,
@@ -9635,6 +9672,13 @@ fn run_avatar_focus_follow_action(
         action["executed"] = serde_json::json!(executed_steps > 0);
         action["executed_steps"] = serde_json::json!(executed_steps);
         action["stopped_reason"] = serde_json::json!(stopped_reason);
+        if final_status == "completed" {
+            if let Some(target_node_id) = target_id {
+                let receipt_path = write_focus_follow_ack_target(target_node_id, executed_steps)?;
+                action["acknowledgement_receipt_path"] = serde_json::json!(receipt_path);
+                action["acknowledged_target_node_id"] = serde_json::json!(target_node_id);
+            }
+        }
     } else {
         action["executed"] = serde_json::json!(false);
         action["executed_steps"] = serde_json::json!(0);

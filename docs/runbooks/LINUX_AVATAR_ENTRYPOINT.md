@@ -115,6 +115,13 @@ agent-bridge avatar focus-follow-action \
   --execute --confirm --reason "owner requested attention move" --json
 ```
 
+After a completed traversal, the command atomically records the acknowledged
+target in `$XDG_RUNTIME_DIR/ab-focus-follow-ack.json`. Subsequent
+`focus-follow-recommend` and `focus-follow-prompt` calls use that receipt when
+`--last-target-node-id` is omitted, so the same focused window is not offered
+again. An explicit `--last-target-node-id` overrides the receipt. Cancelled or
+failed traversals never update it.
+
 Without `--execute`, this command is a dry-run. Execution additionally requires
 `--confirm` and a non-empty `--reason`, moves only the exact
 `agent-bridge-avatar` Sway window, revalidates the focused target before every
@@ -125,9 +132,13 @@ pixels per step and 900 pixels total. `Ctrl-C` cancels the foreground action;
 During an authorized action the native renderer reads the user-runtime file
 `$XDG_RUNTIME_DIR/ab-face-motion-override.json`. The action publishes only
 known RGBA v3 asset identifiers and removes the override on completion,
-cancellation, or handled failure. The current baseline reuses alert-peek for
-turning, soft-bounce for walking rhythm, and completion-nod for arrival. A
-dedicated transparent walk atlas and wave remain intentionally unavailable.
+cancellation, or handled failure. Dedicated transparent turn, walk, and wave
+atlases are runtime-bound; completion-nod is used for arrival settle.
+
+The 2026-08-24 live traversal passed functional acceptance: all turn, walk,
+arrival, wave, and idle transitions were visible, and the final docking point
+was accepted. Fine-grained easing and stride tuning remain a deferred visual
+polish item; they are not a correctness blocker.
 
 This is intentionally a foreground-session workflow with a detached child,
 not a launchd/systemd installation. The launcher uses a user-private runtime

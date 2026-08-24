@@ -1,6 +1,7 @@
 use ab_bridge::avatar_focus_follow::{
-    focus_follow_action_preflight, focus_follow_plan_from_sway_tree, focus_follow_prompt_preflight,
-    focus_follow_recommendation, focus_follow_runtime_bindings, FocusFollowOptions,
+    acknowledged_target_from_receipt, focus_follow_action_preflight,
+    focus_follow_plan_from_sway_tree, focus_follow_prompt_preflight, focus_follow_recommendation,
+    focus_follow_runtime_bindings, FocusFollowOptions, FOCUS_FOLLOW_ACK_SCHEMA,
     FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_PROMPT_SCHEMA, FOCUS_FOLLOW_RECOMMEND_SCHEMA,
     FOCUS_FOLLOW_SCHEMA,
 };
@@ -36,6 +37,32 @@ fn sway_tree() -> serde_json::Value {
             }]
         }]
     })
+}
+
+#[test]
+fn acknowledgement_receipt_only_accepts_completed_current_schema() {
+    let completed = json!({
+        "schema": FOCUS_FOLLOW_ACK_SCHEMA,
+        "status": "completed",
+        "target_node_id": 41
+    });
+    assert_eq!(acknowledged_target_from_receipt(&completed), Some(41));
+    assert_eq!(
+        acknowledged_target_from_receipt(&json!({
+            "schema": FOCUS_FOLLOW_ACK_SCHEMA,
+            "status": "cancelled",
+            "target_node_id": 41
+        })),
+        None
+    );
+    assert_eq!(
+        acknowledged_target_from_receipt(&json!({
+            "schema": "agent_bridge.avatar_focus_follow_ack.v0",
+            "status": "completed",
+            "target_node_id": 41
+        })),
+        None
+    );
 }
 
 #[test]
