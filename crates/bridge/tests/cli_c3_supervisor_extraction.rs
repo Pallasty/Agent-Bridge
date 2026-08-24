@@ -24,7 +24,7 @@ fn daemon_root_retains_c3_wiring_while_module_owns_the_loop() {
     assert!(c3_root.contains("let c3_store = hub.store.clone()"));
     assert!(c3_root.contains("spawn_supervisor(c3_store, c3_config)"));
     assert!(c3_root.contains("c3-self-check: disabled by env"));
-    assert!(c3_root.contains("c3-self-check: spawning S1+S5 tick"));
+    assert!(c3_root.contains("c3-self-check: spawning S1-S5 tick"));
     assert!(!c3_root.contains("tokio::time::interval"));
     assert!(!c3_root.contains("s1_check_and_alert"));
     assert!(!c3_root.contains("schema_meta_version().await"));

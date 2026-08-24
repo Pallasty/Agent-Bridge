@@ -8412,8 +8412,8 @@ async fn real_main() -> Result<()> {
             // OOB alert to ~/.cache/agent-bridge/alerts/ + tracing
             // error on target agent_bridge::sync_safety.
             //
-            // S5 schema_meta.version watch shares the same tick when a
-            // store is configured. S2-S4/S6 still pending follow-ups.
+            // S2-S5 share the same tick when a store is configured. S6 is
+            // enforced directly on the forum-post write path.
             if ab_bridge::c3_self_check::c3_disabled_via_env() {
                 tracing::info!("c3-self-check: disabled by env (AB_C3_DISABLE=1)");
             } else {
@@ -8422,7 +8422,7 @@ async fn real_main() -> Result<()> {
                 tracing::info!(
                     tick_secs = c3_config.tick_secs,
                     s5_enabled = c3_store.is_some(),
-                    "c3-self-check: spawning S1+S5 tick"
+                    "c3-self-check: spawning S1-S5 tick"
                 );
                 ab_bridge::c3_self_check::spawn_supervisor(c3_store, c3_config);
             }
