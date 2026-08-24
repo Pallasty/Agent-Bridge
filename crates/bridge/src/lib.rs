@@ -15,6 +15,7 @@ pub mod avatar_asset_compile;
 pub mod avatar_cortex;
 pub mod avatar_floater;
 pub mod avatar_focus_follow;
+pub mod avatar_focus_observer;
 pub mod avatar_health;
 pub mod avatar_live_observation;
 pub mod avatar_live_voice;

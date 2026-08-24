@@ -13,7 +13,8 @@ pub const FOCUS_FOLLOW_ACTION_SCHEMA: &str = "agent_bridge.avatar_focus_follow_a
 pub const FOCUS_FOLLOW_RECOMMEND_SCHEMA: &str =
     "agent_bridge.avatar_focus_follow_recommendation.v2";
 pub const FOCUS_FOLLOW_PROMPT_SCHEMA: &str = "agent_bridge.avatar_focus_follow_prompt.v2";
-pub const FOCUS_FOLLOW_ACK_SCHEMA: &str = "agent_bridge.avatar_focus_follow_ack.v1";
+pub const FOCUS_FOLLOW_ACK_SCHEMA_V1: &str = "agent_bridge.avatar_focus_follow_ack.v1";
+pub const FOCUS_FOLLOW_ACK_SCHEMA: &str = "agent_bridge.avatar_focus_follow_ack.v2";
 pub const FOCUS_FOLLOW_OUTCOME_SCHEMA_V1: &str = "agent_bridge.avatar_focus_follow_outcome.v1";
 pub const FOCUS_FOLLOW_OUTCOME_SCHEMA: &str = "agent_bridge.avatar_focus_follow_outcome.v2";
 pub const DEFAULT_AVATAR_APP_ID: &str = "agent-bridge-avatar";
@@ -28,9 +29,16 @@ pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
 
 /// Return the target from a successfully completed focus-follow receipt.
 /// Malformed, cancelled, failed, or older-schema receipts fail closed.
-pub fn acknowledged_target_from_receipt(receipt: &Value) -> Option<i64> {
-    (receipt.get("schema")?.as_str()? == FOCUS_FOLLOW_ACK_SCHEMA
-        && receipt.get("status")?.as_str()? == "completed")
+pub fn acknowledged_target_from_receipt(
+    receipt: &Value,
+    compositor_session_id: &str,
+    avatar_node_id: i64,
+) -> Option<i64> {
+    let matches_session = receipt.get("schema")?.as_str()? == FOCUS_FOLLOW_ACK_SCHEMA
+        && receipt.get("status")?.as_str()? == "completed"
+        && receipt.get("compositor_session_id")?.as_str()? == compositor_session_id
+        && receipt.get("avatar_node_id")?.as_i64()? == avatar_node_id;
+    matches_session
         .then(|| receipt.get("target_node_id")?.as_i64())
         .flatten()
 }
@@ -226,10 +234,59 @@ impl Default for FocusFollowOptions {
 struct WindowRef {
     rect: FocusRect,
     app_id: Option<String>,
+    identity_kind: Option<&'static str>,
     title: Option<String>,
     node_id: Option<i64>,
     workspace: Option<String>,
     workspace_rect: FocusRect,
+    fullscreen: bool,
+    sensitive_mark: bool,
+}
+
+fn structured_window_identity(value: &Value) -> Option<String> {
+    value
+        .get("app_id")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .pointer("/window_properties/class")
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            value
+                .pointer("/window_properties/instance")
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string)
+}
+
+fn structured_window_identity_kind(value: &Value) -> Option<&'static str> {
+    if value.get("app_id").and_then(Value::as_str).is_some() {
+        Some("wayland_app_id")
+    } else if value
+        .pointer("/window_properties/class")
+        .and_then(Value::as_str)
+        .is_some()
+        || value
+            .pointer("/window_properties/instance")
+            .and_then(Value::as_str)
+            .is_some()
+    {
+        Some("xwayland_class")
+    } else {
+        None
+    }
+}
+
+fn has_sensitive_mark(value: &Value) -> bool {
+    value
+        .get("marks")
+        .and_then(Value::as_array)
+        .is_some_and(|marks| {
+            marks
+                .iter()
+                .any(|mark| mark.as_str() == Some("ab-sensitive"))
+        })
 }
 
 fn rect_at(value: &Value) -> Option<FocusRect> {
@@ -256,6 +313,7 @@ fn find_avatar(value: &Value, app_id: &str) -> Option<WindowRef> {
         return Some(WindowRef {
             rect,
             app_id: Some(app_id.to_string()),
+            identity_kind: Some("wayland_app_id"),
             title: value
                 .get("name")
                 .and_then(Value::as_str)
@@ -263,6 +321,8 @@ fn find_avatar(value: &Value, app_id: &str) -> Option<WindowRef> {
             node_id: value.get("id").and_then(Value::as_i64),
             workspace: None,
             workspace_rect: rect,
+            fullscreen: false,
+            sensitive_mark: false,
         });
     }
     child_values(value).find_map(|child| find_avatar(child, app_id))
@@ -272,7 +332,15 @@ fn find_focused_target(
     value: &Value,
     avatar_app_id: &str,
     workspace: Option<(&str, FocusRect)>,
+    ancestor_fullscreen: bool,
+    ancestor_sensitive_mark: bool,
 ) -> Option<WindowRef> {
+    let fullscreen = ancestor_fullscreen
+        || value
+            .get("fullscreen_mode")
+            .and_then(Value::as_i64)
+            .is_some_and(|mode| mode != 0);
+    let sensitive_mark = ancestor_sensitive_mark || has_sensitive_mark(value);
     let next_workspace = if value.get("type").and_then(Value::as_str) == Some("workspace") {
         rect_at(value).map(|rect| {
             (
@@ -288,7 +356,13 @@ fn find_focused_target(
     };
 
     for child in child_values(value) {
-        if let Some(found) = find_focused_target(child, avatar_app_id, next_workspace) {
+        if let Some(found) = find_focused_target(
+            child,
+            avatar_app_id,
+            next_workspace,
+            fullscreen,
+            sensitive_mark,
+        ) {
             return Some(found);
         }
     }
@@ -302,10 +376,8 @@ fn find_focused_target(
     let (workspace_name, workspace_rect) = next_workspace?;
     Some(WindowRef {
         rect,
-        app_id: value
-            .get("app_id")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        app_id: structured_window_identity(value),
+        identity_kind: structured_window_identity_kind(value),
         title: value
             .get("name")
             .and_then(Value::as_str)
@@ -313,6 +385,8 @@ fn find_focused_target(
         node_id: value.get("id").and_then(Value::as_i64),
         workspace: Some(workspace_name.to_string()),
         workspace_rect,
+        fullscreen,
+        sensitive_mark,
     })
 }
 
@@ -416,13 +490,36 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
         plan["recommended_action"] = json!("start_or_restore_avatar_then_replan");
         return plan;
     };
-    let Some(target) = find_focused_target(tree, &opts.avatar_app_id, None) else {
+    let Some(target) = find_focused_target(tree, &opts.avatar_app_id, None, false, false) else {
         let mut plan = base_plan("focus_target_not_found");
         plan["avatar"] =
             json!({"node_id": avatar.node_id, "app_id": avatar.app_id, "rect": avatar.rect});
         plan["recommended_action"] = json!("focus_a_non_avatar_window_then_replan");
         return plan;
     };
+
+    if target.fullscreen {
+        let mut plan = base_plan("fullscreen_target");
+        plan["avatar"] = json!({
+            "node_id": avatar.node_id,
+            "app_id": opts.avatar_app_id,
+            "rect": avatar.rect,
+        });
+        plan["target"] = json!({
+            "node_id": target.node_id,
+            "app_id": target.app_id,
+            "identity_kind": target.identity_kind,
+            "identity_present": target.app_id.is_some(),
+            "title": target.title,
+            "rect": target.rect,
+            "workspace": target.workspace,
+            "workspace_rect": target.workspace_rect,
+            "fullscreen": true,
+            "sensitive_mark": target.sensitive_mark,
+        });
+        plan["recommended_action"] = json!("keep_current_position");
+        return plan;
+    }
 
     let margin = opts.margin_px.clamp(8, 256);
     let max_step = opts.max_step_px.clamp(8, 256);
@@ -436,7 +533,11 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
         let mut plan = base_plan("no_safe_docking_point");
         plan["avatar"] =
             json!({"node_id": avatar.node_id, "app_id": avatar.app_id, "rect": avatar.rect});
-        plan["target"] = json!({"rect": target.rect, "workspace": target.workspace});
+        plan["target"] = json!({
+            "rect": target.rect,
+            "workspace": target.workspace,
+            "workspace_rect": target.workspace_rect,
+        });
         plan["recommended_action"] = json!("keep_current_position");
         return plan;
     };
@@ -460,9 +561,14 @@ pub fn focus_follow_plan_from_sway_tree(tree: &Value, opts: &FocusFollowOptions)
     plan["target"] = json!({
         "node_id": target.node_id,
         "app_id": target.app_id,
+        "identity_kind": target.identity_kind,
+        "identity_present": target.app_id.is_some(),
         "title": target.title,
         "rect": target.rect,
         "workspace": target.workspace,
+        "workspace_rect": target.workspace_rect,
+        "fullscreen": target.fullscreen,
+        "sensitive_mark": target.sensitive_mark,
     });
     plan["docking"] = json!({"edge": edge, "margin_px": margin});
     plan["path"] = json!({

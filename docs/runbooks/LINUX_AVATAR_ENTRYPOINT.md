@@ -122,6 +122,11 @@ target in `$XDG_RUNTIME_DIR/ab-focus-follow-ack.json`. Subsequent
 again. An explicit `--last-target-node-id` overrides the receipt. Cancelled or
 failed traversals never update it.
 
+Acknowledgement v2 is accepted only when it is bound to the current compositor
+session and the current exact Avatar node. A v1 receipt, a receipt from a prior
+Sway session, or a receipt for a different Avatar node is ignored rather than
+suppressing the wrong target.
+
 Without `--execute`, this command is a dry-run. `--execute` records AB's
 decision to express through its Avatar, and a non-empty auditable `--reason`
 is required. `--confirm` remains accepted only as legacy owner-confirmation
@@ -131,6 +136,107 @@ identity and focused target before every
 step, and never moves the pointer or keyboard focus. The default bounds are 48
 pixels per step and 900 pixels total. `Ctrl-C` cancels the foreground action;
 `--cancel-file PATH` also cancels before the next step whenever PATH exists.
+
+## Bounded autonomous Focus-follow observer candidate
+
+Increment 2 adds a deliberately non-persistent candidate around the same
+one-shot action. Inspect its exact plan without starting a polling loop or
+moving Xiao Shu:
+
+```bash
+agent-bridge avatar focus-follow-observe --json
+```
+
+Start one owner-local foreground observation session:
+
+```bash
+agent-bridge avatar focus-follow-observe --execute --json
+```
+
+The observer is default-off: omitting `--execute` returns the preflight
+immediately. `--execute` starts only this invocation; it does not enable a
+service, autostart, or a later session. The frozen defaults are 30 minutes
+maximum duration, 1,000 ms polling, 2,000 ms stable-focus dwell, 300 seconds
+post-action cooldown, 30 seconds initial exponential failure backoff capped at
+900 seconds, 96..900 px eligible travel, and at most three real attempts.
+Completed, cancelled, and failed actions all consume that attempt budget.
+Caller options may lower the duration or attempt budget, but normalization can
+never raise them above 30 minutes or three attempts.
+
+Startup focus is a no-move baseline. A later stable target is suppressed when
+it is acknowledged or already attempted, fullscreen, missing a structured
+exact app identity, carries the exact `ab-sensitive` Sway mark on itself or an
+ancestor, is an exact denylist match, paused, outside the travel bounds, in
+cooldown/backoff, over budget, or unable to acquire the internal observer or
+Focus-follow action lock. Below/above-bound suppressions are counted as
+`below_min_travel` and `above_max_travel`.
+
+At dispatch, the action freezes the exact target node, structured identity,
+target rectangle, workspace rectangle, and workspace. Those gates are checked
+again after taking the action lock, before every movement step, and at arrival.
+Moving or resizing the focused window, moving it to another workspace, or
+Super-dragging Xiao Shu away from the expected path cancels the old traversal;
+a later stable observation may then form a new plan.
+
+The built-in case-sensitive exact authentication/password-manager identities
+are:
+
+- Wayland app ids: `com.1password.1password`, `com.bitwarden.desktop`,
+  `org.keepassxc.KeePassXC`, and `org.gnome.seahorse.Application`;
+- XWayland classes: `1Password`, `Bitwarden`, and `KeePassXC`.
+
+The observer never classifies window titles or substrings. Add an owner-local
+exact identity to both structured identity sets without exposing it in the
+receipt by repeating `--deny-app-id ID`.
+
+The default pause signal is:
+
+```text
+$XDG_RUNTIME_DIR/ab-focus-follow-observer.pause
+```
+
+Create that file to suppress new movement. If it appears during an action, the
+same path is passed as the action cancel file. Remove it to allow later eligible
+focus changes within the still-running session. Use `--pause-file PATH` only
+when an explicit owner-private runtime path is required; the live observer
+fails closed without a usable private runtime directory.
+
+Both observer and action locks live directly in the same owner-private
+`XDG_RUNTIME_DIR`; changing `AGENT_BRIDGE_STATE_DIR`, `XDG_STATE_HOME`, or
+`HOME` cannot create a second movement authority. The absolute observer
+deadline is shared by tree reads, movement commands, and animation sleeps, so
+no new movement command is issued after the bounded session expires.
+
+There is no observer `--confirm` flag and no free-form per-move reason. The
+observer never shows a prompt or bubble, emits audio, follows or moves the
+pointer, changes keyboard focus, injects input, or operates the focused
+application. A failed or cancelled target is not retried in the same run, and
+failure backoff prevents poll-speed action loops.
+
+The bounded final receipt is printed as a privacy-minimal JSON projection. The
+runtime file is written first with `status=running` before movement is possible,
+then atomically replaced with the terminal aggregate. It lives at:
+
+```text
+$XDG_RUNTIME_DIR/ab-focus-follow-observer-receipt.json
+```
+
+It contains only terminal status, aggregate counters, structured suppression
+reasons, frozen bounds, and the zero-input effect/privacy contract. It contains
+no window title, app id, raw Sway tree, path, prompt content, or free-form
+reason. This ephemeral receipt is not an observer-run journal. Every real move
+still writes the existing durable outcome v2 `started`/`final` pair described
+below; that pair, not the observer aggregate, is action truth.
+
+The aggregate distinguishes `tree_read_failure_count` from
+`prestart_runtime_failure_count`. A proven pre-action lock/path/runtime failure
+uses the closed `prestart_runtime_failed` suppression and does not consume an
+attempt or masquerade as a sensor failure.
+
+This observer remains an implementation candidate until the pending matrix in
+`docs/reports/avatar/2026-08-24-focus-follow-bounded-observer.md` is completed
+against a merged, deployed binary. Stop it with `Ctrl-C`; stopping the process
+is the complete rollback because no background service is installed.
 
 Every real execution appends a `started` record and a final outcome to
 `$AGENT_BRIDGE_STATE_DIR/avatar-focus-follow/outcomes.jsonl`, when that common

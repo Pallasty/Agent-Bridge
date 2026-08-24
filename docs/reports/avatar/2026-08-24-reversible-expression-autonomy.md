@@ -89,6 +89,33 @@ or other irreversible/external effects.
 
 ## Next stage
 
-Build a duration-bounded, non-service focus observer with dwell/debounce,
-cooldown, acknowledged-target suppression, and a small maximum autonomous-move
-budget. Validate it in owner-local dogfood before considering persistence.
+Increment 2 has passed its automated and adversarial implementation gates but
+remains a **live candidate**, not an accepted runtime baseline. It is one
+owner-started, foreground, at-most-30-minute,
+non-service focus observer. The first focus establishes a no-move baseline;
+later focus changes must pass dwell/debounce, cooldown, acknowledged-target,
+fullscreen, structured `ab-sensitive` mark, structured-identity,
+built-in/owner exact-denylist, pause, action-lock, minimum/maximum travel,
+exponential failure-backoff, and three-attempt-budget gates. Duration and
+attempt-budget normalization cannot exceed 30 minutes or three attempts.
+Observer presentation is silent: no prompt, audio, pointer motion, focus change,
+or input injection.
+
+The exact target/workspace geometry is frozen at dispatch and rechecked under
+the lock, before every step, and at arrival. Target movement/resize, workspace
+change, or an owner drag of Xiao Shu cancels the old path. Action, observation,
+and proven-prestart runtime failures remain separate closed learning signals.
+
+The observer's runtime receipt starts as a privacy-minimal `running` aggregate
+before movement can occur and is atomically replaced by the final aggregate;
+the final aggregate is also projected to stdout. Both exclude window titles,
+app ids, the raw Sway tree, and free-form reason text. Each real move continues
+to use the existing durable Focus-follow outcome v2 started/final pair as
+action truth. This increment adds no observer-run journal, service, autostart,
+or background persistence.
+
+The candidate contract and deliberately unfilled live-verification matrix are
+in `docs/reports/avatar/2026-08-24-focus-follow-bounded-observer.md`. Owner-local
+dogfood must establish zero focus/input interference, policy suppressions,
+complete receipts, and practical use value before this candidate can be called
+accepted or considered for persistence.

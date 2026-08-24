@@ -3,9 +3,9 @@ use ab_bridge::avatar_focus_follow::{
     focus_follow_arrival_failure_reason, focus_follow_outcome_record,
     focus_follow_plan_from_sway_tree, focus_follow_prompt_preflight, focus_follow_recommendation,
     focus_follow_runtime_bindings, pairable_focus_follow_attempt_id, sway_command_succeeded,
-    FocusFollowOptions, FOCUS_FOLLOW_ACK_SCHEMA, FOCUS_FOLLOW_ACTION_SCHEMA,
-    FOCUS_FOLLOW_OUTCOME_SCHEMA, FOCUS_FOLLOW_OUTCOME_SCHEMA_V1, FOCUS_FOLLOW_PROMPT_SCHEMA,
-    FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
+    FocusFollowOptions, FOCUS_FOLLOW_ACK_SCHEMA, FOCUS_FOLLOW_ACK_SCHEMA_V1,
+    FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_OUTCOME_SCHEMA, FOCUS_FOLLOW_OUTCOME_SCHEMA_V1,
+    FOCUS_FOLLOW_PROMPT_SCHEMA, FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
 };
 use serde_json::json;
 
@@ -46,23 +46,46 @@ fn acknowledgement_receipt_only_accepts_completed_current_schema() {
     let completed = json!({
         "schema": FOCUS_FOLLOW_ACK_SCHEMA,
         "status": "completed",
+        "compositor_session_id": "session-a",
+        "avatar_node_id": 99,
         "target_node_id": 41
     });
-    assert_eq!(acknowledged_target_from_receipt(&completed), Some(41));
     assert_eq!(
-        acknowledged_target_from_receipt(&json!({
-            "schema": FOCUS_FOLLOW_ACK_SCHEMA,
-            "status": "cancelled",
-            "target_node_id": 41
-        })),
+        acknowledged_target_from_receipt(&completed, "session-a", 99),
+        Some(41)
+    );
+    assert_eq!(
+        acknowledged_target_from_receipt(
+            &json!({
+                "schema": FOCUS_FOLLOW_ACK_SCHEMA,
+                "status": "cancelled",
+                "compositor_session_id": "session-a",
+                "avatar_node_id": 99,
+                "target_node_id": 41
+            }),
+            "session-a",
+            99
+        ),
         None
     );
     assert_eq!(
-        acknowledged_target_from_receipt(&json!({
-            "schema": "agent_bridge.avatar_focus_follow_ack.v0",
-            "status": "completed",
-            "target_node_id": 41
-        })),
+        acknowledged_target_from_receipt(
+            &json!({
+                "schema": FOCUS_FOLLOW_ACK_SCHEMA_V1,
+                "status": "completed",
+                "target_node_id": 41
+            }),
+            "session-a",
+            99
+        ),
+        None
+    );
+    assert_eq!(
+        acknowledged_target_from_receipt(&completed, "session-b", 99),
+        None
+    );
+    assert_eq!(
+        acknowledged_target_from_receipt(&completed, "session-a", 100),
         None
     );
 }
@@ -139,6 +162,8 @@ fn focus_follow_plan_is_bounded_read_only_and_pointer_safe() {
     assert_eq!(plan["action_registry"]["actions"][5], "wave");
     assert_eq!(plan["avatar"]["node_id"], 99);
     assert_eq!(plan["target"]["workspace"], "2");
+    assert_eq!(plan["target"]["workspace_rect"]["width"], 1920);
+    assert_eq!(plan["target"]["workspace_rect"]["height"], 1040);
     assert!(plan["path"]["point_count"].as_u64().unwrap() <= 32);
     assert_eq!(plan["choreography"][2], "arrive_settle");
 }
@@ -426,4 +451,42 @@ fn focus_follow_plan_does_not_follow_itself() {
 
     assert_eq!(plan["status"], "focus_target_not_found");
     assert_eq!(plan["moves_pointer"], false);
+}
+
+#[test]
+fn focus_follow_plan_propagates_fullscreen_and_sensitive_ancestor_state() {
+    let mut fullscreen = sway_tree();
+    fullscreen["nodes"][0]["nodes"][0]["fullscreen_mode"] = json!(1);
+    let fullscreen_plan =
+        focus_follow_plan_from_sway_tree(&fullscreen, &FocusFollowOptions::default());
+    assert_eq!(fullscreen_plan["status"], "fullscreen_target");
+    assert_eq!(fullscreen_plan["target"]["fullscreen"], true);
+    assert_eq!(
+        fullscreen_plan["recommended_action"],
+        "keep_current_position"
+    );
+
+    let mut sensitive = sway_tree();
+    sensitive["nodes"][0]["nodes"][0]["marks"] = json!(["ab-sensitive"]);
+    let sensitive_plan =
+        focus_follow_plan_from_sway_tree(&sensitive, &FocusFollowOptions::default());
+    assert_eq!(sensitive_plan["status"], "planned");
+    assert_eq!(sensitive_plan["target"]["sensitive_mark"], true);
+}
+
+#[test]
+fn focus_follow_plan_uses_structured_xwayland_class_without_title_inference() {
+    let mut tree = sway_tree();
+    let target = &mut tree["nodes"][0]["nodes"][0]["nodes"][0];
+    target
+        .as_object_mut()
+        .expect("target object")
+        .remove("app_id");
+    target["window_properties"] = json!({"class":"KeePassXC","instance":"keepassxc"});
+    target["name"] = json!("ordinary title that must not classify sensitivity");
+
+    let plan = focus_follow_plan_from_sway_tree(&tree, &FocusFollowOptions::default());
+    assert_eq!(plan["status"], "planned");
+    assert_eq!(plan["target"]["identity_kind"], "xwayland_class");
+    assert_eq!(plan["target"]["app_id"], "KeePassXC");
 }
