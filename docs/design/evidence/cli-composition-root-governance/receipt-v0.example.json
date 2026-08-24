@@ -1,0 +1,60 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "replace-with-stable-change-id",
+  "source_base": "replace-with-resolved-40-character-base-commit",
+  "main_rs_before_sha256": "replace-with-64-character-sha256",
+  "main_rs_after_sha256": "replace-with-64-character-sha256",
+  "changes": [
+    {
+      "region": "replace-with-function-or-line-bounded-region",
+      "category": "cli_schema_or_routing",
+      "summary": "replace-with-what-changed",
+      "disposition": "root_visible",
+      "root_reason": "replace-with-why-this-must-remain-visible-at-the-composition-root",
+      "evidence": [
+        "replace-with-source-or-test-evidence"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "not_applicable",
+      "evidence": [
+        "replace-with-test-evidence-or-explicit-not-applicable-reason"
+      ]
+    },
+    "json_and_text_output": {
+      "status": "not_applicable",
+      "evidence": [
+        "replace-with-test-evidence-or-explicit-not-applicable-reason"
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "not_applicable",
+      "evidence": [
+        "replace-with-test-evidence-or-explicit-not-applicable-reason"
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "not_applicable",
+      "evidence": [
+        "replace-with-test-evidence-or-explicit-not-applicable-reason"
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "not_applicable",
+      "evidence": [
+        "replace-with-test-evidence-or-explicit-not-applicable-reason"
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "replace-with-exact-test-and-check-commands"
+      ]
+    }
+  },
+  "rollback": [
+    "replace-with-behavior-preserving-rollback-step"
+  ]
+}

@@ -45,7 +45,9 @@
 
 use ab_agent::pty_session::proc_start_ticks;
 use ab_store::{SessionFilter, StateStore, StoredSession};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 /// Live `/proc` observation of one pid: distinguishes "no such process",
 /// "dead but unwaited" (zombie — keeps its original starttime!), and alive.
@@ -465,9 +467,98 @@ pub fn reaper_stale_secs() -> i64 {
         .clamp(60, 86_400)
 }
 
+pub fn spawn_reaper_supervisor(
+    store: Arc<dyn StateStore>,
+    tick_secs: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        run_reaper_loop(Duration::from_secs(tick_secs), || {
+            run_supervisor_reaper_pass(&store)
+        })
+        .await;
+    })
+}
+
+async fn run_reaper_loop<F, Fut>(tick_period: Duration, mut run_pass: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut interval = tokio::time::interval(tick_period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        interval.tick().await;
+        run_pass().await;
+    }
+}
+
+async fn run_supervisor_reaper_pass(store: &Arc<dyn StateStore>) {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    match run_reaper_pass(store, reaper_stale_secs(), Duration::from_secs(3), now).await {
+        Ok(report)
+            if report.reaped > 0
+                || report.finalised_gone > 0
+                || report.still_alive > 0
+                || report.errors > 0 =>
+        {
+            tracing::info!(
+                scanned = report.scanned,
+                reaped = report.reaped,
+                finalised_gone = report.finalised_gone,
+                still_alive = report.still_alive,
+                owner_alive = report.owner_alive,
+                legacy = report.legacy_untracked,
+                errors = report.errors,
+                "orphan-reaper: pass ran"
+            );
+        }
+        Ok(report) => {
+            tracing::debug!(
+                scanned = report.scanned,
+                owner_alive = report.owner_alive,
+                legacy = report.legacy_untracked,
+                "orphan-reaper: nothing to reap"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "orphan-reaper: pass error");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn supervisor_runs_first_pass_immediately_then_waits() {
+        let passes = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&passes);
+        let handle = tokio::spawn(async move {
+            run_reaper_loop(Duration::from_secs(60), || {
+                let observed = Arc::clone(&observed);
+                async move {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await;
+        });
+
+        tokio::time::timeout(Duration::from_millis(100), async {
+            while passes.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("first reaper pass should run immediately");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(passes.load(Ordering::SeqCst), 1);
+        handle.abort();
+    }
 
     #[test]
     fn classify_covers_every_branch() {

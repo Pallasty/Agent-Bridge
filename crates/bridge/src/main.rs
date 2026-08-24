@@ -8477,61 +8477,21 @@ async fn real_main() -> Result<()> {
                 dim_guard_strict_preflight(&store).await;
                 ab_bridge::embedding_dim_guard::spawn(store);
             }
-            // P-α — spawn always-warm coactivation tick if a store is
-            // available and the env disable flag is not set. The task
-            // runs for the daemon's lifetime; detached on shutdown.
-            // See docs/DESIGN-P-alpha-always-warm-coactivation-tick.md
-            if std::env::var("AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false)
-            {
+            // P-α — explicitly start the daemon-owned coactivation supervisor
+            // before the remaining background services and the socket server.
+            let coactivation_tick =
+                ab_bridge::coactivation_tick::CoactivationTickConfig::from_env();
+            if !coactivation_tick.enabled {
                 tracing::info!(
                     "substrate-tick: disabled by env (AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK=1)"
                 );
             } else if let Some(store) = hub.store.clone() {
-                let tick_secs: u64 = std::env::var("AGENT_BRIDGE_TICK_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(30)
-                    .clamp(5, 300);
-                let tau_secs: i64 = std::env::var("AGENT_BRIDGE_TAU_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(7 * 86_400)
-                    .clamp(3600, 30 * 86_400);
                 tracing::info!(
-                    tick_secs,
-                    tau_secs,
+                    tick_secs = coactivation_tick.tick_secs,
+                    tau_secs = coactivation_tick.tau_secs,
                     "substrate-tick: spawning P-α always-warm coactivation tick"
                 );
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    // Skip the first immediate fire (interval ticks once at t=0).
-                    interval.tick().await;
-                    loop {
-                        interval.tick().await;
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        match store.decay_coactivation_once(tau_secs, now, 10).await {
-                            Ok(s) if s.iterations > 0 => {
-                                tracing::debug!(
-                                    swept = s.swept,
-                                    pruned = s.pruned,
-                                    iters = s.iterations,
-                                    "substrate-tick: ran"
-                                );
-                            }
-                            Ok(_) => {}
-                            Err(e) => {
-                                tracing::warn!(error = %e, "substrate-tick: decay error");
-                            }
-                        }
-                    }
-                });
+                ab_bridge::coactivation_tick::spawn(store, coactivation_tick);
             } else {
                 tracing::info!("substrate-tick: no store configured, skipping");
             }
@@ -8541,131 +8501,19 @@ async fn real_main() -> Result<()> {
             // OOB alert to ~/.cache/agent-bridge/alerts/ + tracing
             // error on target agent_bridge::sync_safety.
             //
-            // S5 schema_meta.version watch shares the same tick when a
-            // store is configured. S2-S4/S6 still pending follow-ups.
+            // S2-S5 share the same tick when a store is configured. S6 is
+            // enforced directly on the forum-post write path.
             if ab_bridge::c3_self_check::c3_disabled_via_env() {
                 tracing::info!("c3-self-check: disabled by env (AB_C3_DISABLE=1)");
             } else {
-                let c3_tick_secs: u64 = std::env::var("AB_C3_TICK_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(30)
-                    .clamp(5, 300);
+                let c3_config = ab_bridge::c3_self_check::C3SupervisorConfig::from_env();
                 let c3_store = hub.store.clone();
                 tracing::info!(
-                    tick_secs = c3_tick_secs,
+                    tick_secs = c3_config.tick_secs,
                     s5_enabled = c3_store.is_some(),
-                    "c3-self-check: spawning S1+S5 tick"
+                    "c3-self-check: spawning S1-S5 tick"
                 );
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(c3_tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    // Skip the t=0 immediate fire — startup may race
-                    // with the daemon installing its own fds.
-                    interval.tick().await;
-                    loop {
-                        interval.tick().await;
-                        let inv = ab_bridge::c3_self_check::s1_check_and_alert();
-                        if !inv.is_empty() {
-                            tracing::warn!(
-                                pids = inv.len(),
-                                "c3-self-check: S1 detected state.db (deleted) fds"
-                            );
-                        }
-                        if let Some(store) = c3_store.as_ref() {
-                            match store.schema_meta_version().await {
-                                Ok(Some(v)) => {
-                                    if ab_bridge::c3_self_check::s5_check_and_alert(&v) {
-                                        tracing::warn!(
-                                            version = %v,
-                                            "c3-self-check: S5 schema_meta.version change fired alert"
-                                        );
-                                    }
-                                }
-                                Ok(None) => {
-                                    // Backend has no schema_meta row — nothing to
-                                    // compare against. Quiet by design.
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "c3-self-check: S5 schema_meta_version error"
-                                    );
-                                }
-                            }
-
-                            // S2-S4 — 5-min anchor metric drops. Cheap (3 SELECT
-                            // COUNT) so we let the check sample every tick; the
-                            // helper internally guards against returning anything
-                            // before the 5-min window elapses.
-                            match store.s234_counts().await {
-                                Ok(counts) => {
-                                    let now = std::time::SystemTime::now();
-                                    let events =
-                                        ab_bridge::c3_self_check::s234_check_against_snapshot_guarded(
-                                            counts, now,
-                                        );
-                                    if !events.is_empty() {
-                                        let ts_unix = now
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .map(|d| d.as_secs() as i64)
-                                            .unwrap_or(0);
-                                        let node_label = ab_bridge::c3_self_check::c3_node_label();
-                                        for ev in events {
-                                            let title = format!(
-                                                "[C3 alert][{}] {}: {} -> {}",
-                                                node_label,
-                                                ev.signal.as_str(),
-                                                ev.before,
-                                                ev.after,
-                                            );
-                                            let body =
-                                                ab_bridge::c3_self_check::format_s234_alert_body_for_node(
-                                                    &ev,
-                                                    ts_unix,
-                                                    &node_label,
-                                                );
-                                            if let Err(e) = store
-                                                .forum_post(
-                                                    None,
-                                                    Some("incidents"),
-                                                    Some(&title),
-                                                    "agent-bridge:daemon:c3-s234",
-                                                    "finding",
-                                                    &body,
-                                                    None,
-                                                    None,
-                                                )
-                                                .await
-                                            {
-                                                tracing::warn!(
-                                                    error = %e,
-                                                    signal = ev.signal.as_str(),
-                                                    "c3-self-check: S2-S4 forum_post failed"
-                                                );
-                                            } else {
-                                                tracing::warn!(
-                                                    signal = ev.signal.as_str(),
-                                                    before = ev.before,
-                                                    after = ev.after,
-                                                    drop_pct = ev.drop_pct,
-                                                    "c3-self-check: S2-S4 drop posted to incidents"
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "c3-self-check: s234_counts error"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                });
+                ab_bridge::c3_self_check::spawn_supervisor(c3_store, c3_config);
             }
 
             // Retrieval-outcome apply tick — the gated consumer that closes
@@ -8685,63 +8533,7 @@ async fn real_main() -> Result<()> {
                     tick_secs,
                     "retrieval-outcome-apply: spawning reinforce/decay tick"
                 );
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    // Skip the t=0 immediate fire: a daemon that restarts
-                    // several times a day must not turn "daily" into
-                    // "per-restart" (consumption bounds the damage, but a
-                    // fresh evidence batch could still be acted on early).
-                    interval.tick().await;
-                    loop {
-                        interval.tick().await;
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        // Rule params are machine.env-steerable
-                        // (AB_RETRIEVAL_OUTCOME_APPLY_{REINFORCE_STEP,DECAY_STEP,
-                        // MIN_SURFACED,FLOOR,CEILING,PROTECT_DISABLE}) so shadow-tool
-                        // recalibration doesn't need a redeploy.
-                        let params = ab_bridge::retrieval_outcome::tick_rule_params();
-                        match ab_bridge::retrieval_outcome::run_apply_pass(
-                            &store, &params, 200, true, now,
-                        )
-                        .await
-                        {
-                            Ok(r) => {
-                                if r.applied > 0 || r.failed > 0 || r.capped_out > 0 {
-                                    tracing::info!(
-                                        applied = r.applied,
-                                        failed = r.failed,
-                                        skipped_raced = r.skipped_raced,
-                                        consumed_rows = r.consumed_rows,
-                                        orphans_consumed = r.orphans_consumed,
-                                        ambient_retired = r.ambient_retired,
-                                        protected_skipped = r.protected_skipped,
-                                        pending_below_min = r.pending_below_min,
-                                        capped_out = r.capped_out,
-                                        net_delta = r.net_importance_delta,
-                                        audit = r.audit_memory_key.as_deref().unwrap_or(""),
-                                        "retrieval-outcome-apply: pass ran"
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        rows = r.rows_considered,
-                                        pending_below_min = r.pending_below_min,
-                                        orphans_consumed = r.orphans_consumed,
-                                        ambient_retired = r.ambient_retired,
-                                        "retrieval-outcome-apply: nothing to do"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "retrieval-outcome-apply: pass error");
-                            }
-                        }
-                    }
-                });
+                ab_bridge::retrieval_outcome::spawn_apply_supervisor(store, tick_secs);
             } else {
                 tracing::info!("retrieval-outcome-apply: no store configured, skipping");
             }
@@ -8756,55 +8548,7 @@ async fn real_main() -> Result<()> {
             } else if let Some(store) = hub.store.clone() {
                 let tick_secs = ab_bridge::orphan_reaper::reaper_tick_secs();
                 tracing::info!(tick_secs, "orphan-reaper: spawning reaper tick");
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    loop {
-                        interval.tick().await; // fires immediately at t=0
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        match ab_bridge::orphan_reaper::run_reaper_pass(
-                            &store,
-                            ab_bridge::orphan_reaper::reaper_stale_secs(),
-                            std::time::Duration::from_secs(3),
-                            now,
-                        )
-                        .await
-                        {
-                            Ok(r) => {
-                                if r.reaped > 0
-                                    || r.finalised_gone > 0
-                                    || r.still_alive > 0
-                                    || r.errors > 0
-                                {
-                                    tracing::info!(
-                                        scanned = r.scanned,
-                                        reaped = r.reaped,
-                                        finalised_gone = r.finalised_gone,
-                                        still_alive = r.still_alive,
-                                        owner_alive = r.owner_alive,
-                                        legacy = r.legacy_untracked,
-                                        errors = r.errors,
-                                        "orphan-reaper: pass ran"
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        scanned = r.scanned,
-                                        owner_alive = r.owner_alive,
-                                        legacy = r.legacy_untracked,
-                                        "orphan-reaper: nothing to reap"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "orphan-reaper: pass error");
-                            }
-                        }
-                    }
-                });
+                ab_bridge::orphan_reaper::spawn_reaper_supervisor(store, tick_secs);
             } else {
                 tracing::info!("orphan-reaper: no store configured, skipping");
             }
