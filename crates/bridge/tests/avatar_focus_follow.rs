@@ -1,7 +1,8 @@
 use ab_bridge::avatar_focus_follow::{
-    focus_follow_action_preflight, focus_follow_plan_from_sway_tree, focus_follow_recommendation,
-    focus_follow_runtime_bindings, FocusFollowOptions, FOCUS_FOLLOW_ACTION_SCHEMA,
-    FOCUS_FOLLOW_RECOMMEND_SCHEMA, FOCUS_FOLLOW_SCHEMA,
+    focus_follow_action_preflight, focus_follow_plan_from_sway_tree, focus_follow_prompt_preflight,
+    focus_follow_recommendation, focus_follow_runtime_bindings, FocusFollowOptions,
+    FOCUS_FOLLOW_ACTION_SCHEMA, FOCUS_FOLLOW_PROMPT_SCHEMA, FOCUS_FOLLOW_RECOMMEND_SCHEMA,
+    FOCUS_FOLLOW_SCHEMA,
 };
 use serde_json::json;
 
@@ -136,6 +137,32 @@ fn focus_follow_recommendation_suppresses_non_actionable_plan() {
     assert_eq!(recommendation["reason"], "plan_not_actionable");
     assert_eq!(recommendation["moves_pointer"], false);
     assert_eq!(recommendation["changes_focus"], false);
+}
+
+#[test]
+fn focus_follow_prompt_requires_recommendation_and_explicit_show_confirmation() {
+    let plan = focus_follow_plan_from_sway_tree(&sway_tree(), &FocusFollowOptions::default());
+    let recommendation = focus_follow_recommendation(&plan, Some(7), 96);
+
+    let preview = focus_follow_prompt_preflight(&recommendation, false, false, false, 8_000);
+    assert_eq!(preview["schema"], FOCUS_FOLLOW_PROMPT_SCHEMA);
+    assert_eq!(preview["status"], "dry_run");
+    assert_eq!(preview["emits_audio"], false);
+    assert_eq!(preview["moves_avatar"], false);
+    assert_eq!(preview["executes_recommendation"], false);
+
+    let unconfirmed = focus_follow_prompt_preflight(&recommendation, true, false, false, 8_000);
+    assert_eq!(unconfirmed["status"], "blocked");
+    assert_eq!(unconfirmed["blocked_reason"], "explicit_confirmation_required");
+
+    let ready = focus_follow_prompt_preflight(&recommendation, true, true, false, 8_000);
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["ready"], true);
+    assert_eq!(ready["presentation"]["dismissible"], true);
+
+    let cooling = focus_follow_prompt_preflight(&recommendation, true, true, true, 8_000);
+    assert_eq!(cooling["status"], "suppressed");
+    assert_eq!(cooling["blocked_reason"], "cooldown_active");
 }
 
 #[test]

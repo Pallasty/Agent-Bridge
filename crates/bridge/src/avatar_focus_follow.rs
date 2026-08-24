@@ -11,6 +11,7 @@ pub const FOCUS_FOLLOW_SCHEMA: &str = "agent_bridge.avatar_focus_follow_plan.v1"
 pub const FOCUS_FOLLOW_ACTION_SCHEMA: &str = "agent_bridge.avatar_focus_follow_action.v1";
 pub const FOCUS_FOLLOW_RECOMMEND_SCHEMA: &str =
     "agent_bridge.avatar_focus_follow_recommendation.v1";
+pub const FOCUS_FOLLOW_PROMPT_SCHEMA: &str = "agent_bridge.avatar_focus_follow_prompt.v1";
 pub const DEFAULT_AVATAR_APP_ID: &str = "agent-bridge-avatar";
 pub const FOCUS_FOLLOW_ACTIONS: [&str; 6] = [
     "turn_left",
@@ -408,6 +409,59 @@ pub fn focus_follow_recommendation(
             None
         },
         "plan": plan,
+    })
+}
+
+pub fn focus_follow_prompt_preflight(
+    recommendation: &Value,
+    show: bool,
+    confirm: bool,
+    cooldown_active: bool,
+    timeout_ms: u64,
+) -> Value {
+    let decision = recommendation
+        .get("decision")
+        .and_then(Value::as_str)
+        .unwrap_or("suppress");
+    let (status, blocked_reason) = if decision != "recommend_move" {
+        ("suppressed", Some("movement_not_recommended"))
+    } else if cooldown_active {
+        ("suppressed", Some("cooldown_active"))
+    } else if show && !confirm {
+        ("blocked", Some("explicit_confirmation_required"))
+    } else if show {
+        ("ready", None)
+    } else {
+        ("dry_run", None)
+    };
+
+    json!({
+        "schema": FOCUS_FOLLOW_PROMPT_SCHEMA,
+        "status": status,
+        "ready": status == "ready",
+        "default_enabled": false,
+        "show_requested": show,
+        "explicitly_confirmed": confirm,
+        "blocked_reason": blocked_reason,
+        "presentation": {
+            "kind": "desktop_notification_bubble",
+            "app_name": "Xiao Shu",
+            "title": "小舒",
+            "text": "需要我过去吗？",
+            "urgency": "low",
+            "timeout_ms": timeout_ms.clamp(2_000, 30_000),
+            "dismissible": true,
+            "transient": true,
+        },
+        "rate_limited": true,
+        "cooldown_active": cooldown_active,
+        "emits_audio": false,
+        "moves_avatar": false,
+        "moves_pointer": false,
+        "changes_focus": false,
+        "executes_recommendation": false,
+        "requires_separate_movement_confirmation": true,
+        "recommendation": recommendation,
     })
 }
 

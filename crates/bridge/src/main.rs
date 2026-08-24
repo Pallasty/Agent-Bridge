@@ -978,6 +978,31 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview or explicitly show a passive Xiao Shu focus-move prompt.
+    /// Never moves the Avatar; real movement remains a separate confirmed action.
+    FocusFollowPrompt {
+        /// Last acknowledged focused Sway node id, when known.
+        #[arg(long)]
+        last_target_node_id: Option<i64>,
+        /// Suppress movement recommendations below this distance.
+        #[arg(long, default_value_t = 96)]
+        min_travel_px: i64,
+        /// Prompt cooldown after a successful display.
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: u64,
+        /// Notification lifetime in milliseconds.
+        #[arg(long, default_value_t = 8_000)]
+        timeout_ms: u64,
+        /// Display the prompt. Without this flag the command is read-only.
+        #[arg(long)]
+        show: bool,
+        /// Confirm this individual prompt display.
+        #[arg(long, requires = "show")]
+        confirm: bool,
+        /// Emit raw JSON instead of the human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Move Xiao Shu near the focused Sway window after explicit owner confirmation.
     /// Default is a dry-run; affects only the exact Avatar app_id and never the pointer.
     FocusFollowAction {
@@ -5150,6 +5175,23 @@ async fn real_main() -> Result<()> {
                 *max_step_px,
                 *as_json,
             ),
+            AvatarOp::FocusFollowPrompt {
+                last_target_node_id,
+                min_travel_px,
+                cooldown_secs,
+                timeout_ms,
+                show,
+                confirm,
+                json: as_json,
+            } => run_avatar_focus_follow_prompt(
+                *last_target_node_id,
+                *min_travel_px,
+                *cooldown_secs,
+                *timeout_ms,
+                *show,
+                *confirm,
+                *as_json,
+            ),
             AvatarOp::FocusFollowAction {
                 margin_px,
                 max_step_px,
@@ -9227,6 +9269,115 @@ fn run_avatar_focus_follow_recommend(
         );
         println!("  read_only: true");
         println!("  dispatch: none");
+    }
+    Ok(())
+}
+
+fn focus_follow_prompt_receipt_path() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("ab-focus-follow-prompt-receipt.json")
+}
+
+fn run_avatar_focus_follow_prompt(
+    last_target_node_id: Option<i64>,
+    min_travel_px: i64,
+    cooldown_secs: u64,
+    timeout_ms: u64,
+    show: bool,
+    confirm: bool,
+    as_json: bool,
+) -> Result<()> {
+    let tree = read_sway_tree_for_avatar()?;
+    let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
+        &tree,
+        &ab_bridge::avatar_focus_follow::FocusFollowOptions::default(),
+    );
+    let recommendation = ab_bridge::avatar_focus_follow::focus_follow_recommendation(
+        &plan,
+        last_target_node_id,
+        min_travel_px,
+    );
+    let receipt_path = focus_follow_prompt_receipt_path();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("read wall clock for focus-follow prompt")?
+        .as_secs();
+    let cooldown_secs = cooldown_secs.clamp(30, 3_600);
+    let previous = std::fs::read(&receipt_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let cooldown_active = previous
+        .as_ref()
+        .and_then(|value| value.get("emitted_at_unix_secs"))
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|emitted| now.saturating_sub(emitted) < cooldown_secs);
+    let mut prompt = ab_bridge::avatar_focus_follow::focus_follow_prompt_preflight(
+        &recommendation,
+        show,
+        confirm,
+        cooldown_active,
+        timeout_ms,
+    );
+    prompt["cooldown_secs"] = serde_json::json!(cooldown_secs);
+    prompt["receipt_path"] = serde_json::json!(receipt_path);
+    prompt["emitted"] = serde_json::json!(false);
+
+    if prompt.get("ready").and_then(serde_json::Value::as_bool) == Some(true) {
+        let bounded_timeout = timeout_ms.clamp(2_000, 30_000);
+        let output = std::process::Command::new("notify-send")
+            .args([
+                "--print-id",
+                "--app-name=Xiao Shu",
+                "--urgency=low",
+                "--transient",
+                &format!("--expire-time={bounded_timeout}"),
+                "小舒",
+                "需要我过去吗？",
+            ])
+            .output()
+            .context("show passive Xiao Shu focus-follow prompt")?;
+        if !output.status.success() {
+            prompt["status"] = serde_json::json!("failed");
+            prompt["blocked_reason"] = serde_json::json!("notification_backend_failed");
+            prompt["ready"] = serde_json::json!(false);
+        } else {
+            let notification_id = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>()
+                .ok();
+            let receipt = serde_json::json!({
+                "schema": "agent_bridge.avatar_focus_follow_prompt_receipt.v1",
+                "emitted_at_unix_secs": now,
+                "notification_id": notification_id,
+                "target_node_id": recommendation.get("target_node_id"),
+            });
+            let temp_path = receipt_path.with_extension(format!("tmp-{}", std::process::id()));
+            std::fs::write(&temp_path, serde_json::to_vec_pretty(&receipt)?)
+                .with_context(|| format!("write focus-follow prompt receipt {}", temp_path.display()))?;
+            std::fs::rename(&temp_path, &receipt_path).with_context(|| {
+                format!("publish focus-follow prompt receipt {}", receipt_path.display())
+            })?;
+            prompt["status"] = serde_json::json!("shown");
+            prompt["ready"] = serde_json::json!(false);
+            prompt["emitted"] = serde_json::json!(true);
+            prompt["notification_id"] = serde_json::json!(notification_id);
+        }
+    }
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&prompt)?);
+    } else {
+        println!(
+            "Xiao Shu focus-follow prompt: {}",
+            prompt
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown")
+        );
+        println!("  emits_audio: false");
+        println!("  executes_recommendation: false");
     }
     Ok(())
 }
