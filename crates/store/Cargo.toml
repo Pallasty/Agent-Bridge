@@ -55,6 +55,7 @@ ab-core.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10"
 ring = { version = "0.17", optional = true }
 libc = "0.2"
