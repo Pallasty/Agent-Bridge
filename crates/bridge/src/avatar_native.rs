@@ -51,6 +51,23 @@ pub fn native_prompt_opacity(plan: &NativePromptPlan, now_unix_ms: u64) -> u8 {
     ((fade_in.min(fade_out) * 255) / FADE_MS) as u8
 }
 
+pub fn native_prompt_observed_opacity(
+    plan: &NativePromptPlan,
+    observed_elapsed_ms: u64,
+    now_unix_ms: u64,
+) -> u8 {
+    const FADE_MS: u64 = 320;
+    if now_unix_ms >= plan.expires_at_unix_ms {
+        return 0;
+    }
+    let fade_in = observed_elapsed_ms.min(FADE_MS);
+    let fade_out = plan
+        .expires_at_unix_ms
+        .saturating_sub(now_unix_ms)
+        .min(FADE_MS);
+    ((fade_in.min(fade_out) * 255) / FADE_MS) as u8
+}
+
 pub fn default_native_prompt_path() -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -994,6 +1011,8 @@ mod wayland_probe {
             motion_override_path: default_native_motion_override_path(),
             prompt_path: default_native_prompt_path(),
             prompt: None,
+            prompt_observed_at: None,
+            last_prompt_opacity: None,
             prompt_font: load_prompt_font(),
             layer: None,
             window: None,
@@ -1107,6 +1126,8 @@ mod wayland_probe {
         motion_override_path: Option<PathBuf>,
         prompt_path: Option<PathBuf>,
         prompt: Option<NativePromptPlan>,
+        prompt_observed_at: Option<Instant>,
+        last_prompt_opacity: Option<u8>,
         prompt_font: Option<fontdue::Font>,
         layer: Option<LayerSurface>,
         window: Option<Window>,
@@ -1218,6 +1239,10 @@ mod wayland_probe {
                     });
             let prompt_changed = next_prompt != self.prompt;
             self.prompt = next_prompt;
+            if prompt_changed {
+                self.prompt_observed_at = self.prompt.as_ref().map(|_| Instant::now());
+                self.last_prompt_opacity = None;
+            }
 
             if let Some(path) = self.motion_override_path.clone() {
                 match native_motion_override_plan(&path) {
@@ -1350,6 +1375,18 @@ mod wayland_probe {
         }
 
         fn draw_if_due(&mut self) -> bool {
+            if let (Some(prompt), Some(observed_at)) = (&self.prompt, self.prompt_observed_at) {
+                let now_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let observed_elapsed_ms = observed_at.elapsed().as_millis() as u64;
+                let opacity =
+                    super::native_prompt_observed_opacity(prompt, observed_elapsed_ms, now_unix_ms);
+                if self.last_prompt_opacity != Some(opacity) {
+                    return self.draw();
+                }
+            }
             let Some(animation) = &self.sprite_animation else {
                 return false;
             };
@@ -1436,8 +1473,16 @@ mod wayland_probe {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
-                let opacity = super::native_prompt_opacity(prompt, now_unix_ms);
+                let observed_elapsed_ms = self
+                    .prompt_observed_at
+                    .map(|started| started.elapsed().as_millis() as u64)
+                    .unwrap_or_default();
+                let opacity =
+                    super::native_prompt_observed_opacity(prompt, observed_elapsed_ms, now_unix_ms);
                 paint_native_prompt_bubble(canvas, width, height, &prompt.text, font, opacity);
+                self.last_prompt_opacity = Some(opacity);
+            } else {
+                self.last_prompt_opacity = None;
             }
             let surface = self
                 .layer

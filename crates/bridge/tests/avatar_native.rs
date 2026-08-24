@@ -1,11 +1,12 @@
 use ab_bridge::avatar_native::{
     alpha_bbox, animated_frame_coords, animation_frame_index, apply_native_sprite_plan,
-    argb8888_le, decode_sidecar_sprite_asset, native_prompt_opacity, native_prompt_plan,
-    native_sprite_asset_for_mode, native_sprite_plan_from_state_value,
-    native_state_http_request_parts, native_transparent_plan_json, paint_native_prompt_bubble,
-    paint_rgba_sprite_centered, paint_transparent_probe_frame, parse_native_anchor,
-    parse_native_layer, sidecar_asset_id_from_route, sprite_cell, NativeAnchor, NativeLayer,
-    NativePromptPlan, NativeTransparentOptions, RgbaSprite, DEFAULT_NATIVE_FRAME_COUNT,
+    argb8888_le, decode_sidecar_sprite_asset, native_prompt_observed_opacity,
+    native_prompt_opacity, native_prompt_plan, native_sprite_asset_for_mode,
+    native_sprite_plan_from_state_value, native_state_http_request_parts,
+    native_transparent_plan_json, paint_native_prompt_bubble, paint_rgba_sprite_centered,
+    paint_transparent_probe_frame, parse_native_anchor, parse_native_layer,
+    sidecar_asset_id_from_route, sprite_cell, NativeAnchor, NativeLayer, NativePromptPlan,
+    NativeTransparentOptions, RgbaSprite, DEFAULT_NATIVE_FRAME_COUNT,
     DEFAULT_NATIVE_FRAME_INTERVAL_MS, DEFAULT_NATIVE_SPRITE_CELL_HEIGHT,
     DEFAULT_NATIVE_SPRITE_CELL_WIDTH, DEFAULT_NATIVE_TRANSPARENT_TITLE, NATIVE_PROMPT_SCHEMA,
 };
@@ -65,6 +66,24 @@ fn native_prompt_opacity_has_bounded_fade_in_hold_and_fade_out() {
     assert_eq!(native_prompt_opacity(&prompt, 2_000), 255);
     assert!(native_prompt_opacity(&prompt, 2_840) > 120);
     assert_eq!(native_prompt_opacity(&prompt, 3_000), 0);
+}
+
+#[test]
+fn observed_prompt_fade_in_survives_state_poll_delay() {
+    let prompt = NativePromptPlan {
+        text: "需要我过去吗？".to_string(),
+        created_at_unix_ms: 1_000,
+        expires_at_unix_ms: 4_000,
+    };
+    // The renderer first observes this prompt 700ms after publication. Fade-in
+    // must still start at zero instead of appearing fully opaque immediately.
+    assert_eq!(native_prompt_observed_opacity(&prompt, 0, 1_700), 0);
+    assert!(native_prompt_observed_opacity(&prompt, 80, 1_780) > 50);
+    assert!(native_prompt_observed_opacity(&prompt, 160, 1_860) > 120);
+    assert_eq!(native_prompt_observed_opacity(&prompt, 320, 2_020), 255);
+    assert_eq!(native_prompt_observed_opacity(&prompt, 800, 3_680), 255);
+    assert!(native_prompt_observed_opacity(&prompt, 900, 3_840) > 120);
+    assert_eq!(native_prompt_observed_opacity(&prompt, 1_000, 4_000), 0);
 }
 
 #[test]
