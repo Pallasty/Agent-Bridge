@@ -3,7 +3,7 @@
   "change_id": "s15-daemon-supervisors-integration-20260823",
   "source_base": "77600c9170703fbf9f93a5d9c91a5312c51df372",
   "main_rs_before_sha256": "c3c47f6a62d1465321a5bf66540234563e4cc95efcd15aed9d59a465b0ab6f7f",
-  "main_rs_after_sha256": "26713471a50847c7237fa8c937f2e0f27c4478262977f954d1578930dce0b3f6",
+  "main_rs_after_sha256": "fbdfbcca6d19a4aac0999427751ad41ed9213dc883dd54c916f1a945e28dc857",
   "changes": [
     {
       "region": "real_main Cmd::Daemon supervisor startup",
@@ -54,7 +54,7 @@
         "C3 supervisor tests: 4 passed, 0 failed.",
         "Retrieval and orphan timer tests: 2 passed, 0 failed.",
         "Four composition-root ownership tests: 4 passed, 0 failed.",
-        "cargo check -p ab-bridge --all-targets --quiet is required before commit."
+        "cargo check -p ab-bridge --all-targets --quiet passed after merging github/master at 209514a7c."
       ]
     }
   },
