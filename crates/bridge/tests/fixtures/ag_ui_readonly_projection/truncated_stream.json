@@ -1,0 +1,9 @@
+{
+  "schema": "agent_bridge.ag_ui_readonly_projection_request.v0",
+  "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
+  "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
+  "events": [
+    {"type": "RUN_STARTED", "threadId": "thread-truncated", "runId": "run-truncated"},
+    {"type": "TEXT_MESSAGE_CHUNK", "messageId": "message-truncated", "delta": "partial private content"}
+  ]
+}

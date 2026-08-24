@@ -1,7 +1,7 @@
 # AG-UI -> Semantic System Bus Read-Only Adapter v0
 
 - Date: 2026-08-23
-- Status: design-only; no runtime implementation
+- Status: pure implementation candidate; no MCP or runtime wiring
 - External wire pin: `@ag-ui/core@0.0.57`
 - External source pin: `ag-ui-protocol/ag-ui@54f13419055b4d0f442c71e1efab18b310982ce1`
 - Reference consumer: `CopilotKit/OpenBot@2251ad266406ec8212235adba365d2c478437a0c`
@@ -242,6 +242,20 @@ The first candidate should be a pure Rust module, for example
 `crates/bridge/src/ag_ui_readonly_projection.rs`, with no registration in `mcp_tools.rs`. A later
 independent review may admit a read-only MCP wrapper only after the pure tests and leak corpus pass.
 
+### Local implementation receipt
+
+- Candidate module: `crates/bridge/src/ag_ui_readonly_projection.rs`;
+- fixed fixtures: `crates/bridge/tests/fixtures/ag_ui_readonly_projection/`;
+- input/output paths are `serde_json::Value` in memory only;
+- output identifiers are domain-separated SHA-256 hashes;
+- canonical receipt encoding uses the repository's RFC 8785/JCS canonicalizer;
+- focused unit gate: 10 passed, 0 failed;
+- `mcp_tools.rs`, store adapters, policy, leases, transports, process control, browser, and mobile
+  code are unchanged.
+
+This receipt is local source evidence only. It is not a merge, remote publication, installed build,
+fresh MCP process, runtime exposure, or deployment receipt.
+
 Not part of P1:
 
 - outbound AG-UI client/server transport;
@@ -256,7 +270,8 @@ Not part of P1:
 
 ## Gate
 
-Current verdict: `DESIGN_READY_FOR_INDEPENDENT_REVIEW`.
+Current verdict: `P1_IMPLEMENTATION_CANDIDATE_READY_FOR_INDEPENDENT_REVIEW`.
 
-The next gate is review of mapping fidelity, content minimization, ordering rules, and the assertion
-that no AG-UI lifecycle event can be laundered into a verified real-world outcome.
+The next gate is independent review of mapping fidelity, content minimization, ordering rules, and
+the assertion that no AG-UI lifecycle event can be laundered into a verified real-world outcome.
+That review grants no MCP registration or runtime enablement by itself.

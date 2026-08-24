@@ -1,0 +1,22 @@
+{
+  "schema": "agent_bridge.ag_ui_readonly_projection_request.v0",
+  "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
+  "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
+  "events": [
+    {"type": "RUN_STARTED", "threadId": "thread-leak", "runId": "run-leak", "input": {"messages": [{"content": "SYSTEM_PROMPT_CANARY_DO_NOT_LEAK"}], "forwardedProps": {"cookie": "COOKIE=session-secret-canary"}}, "rawEvent": {"private": "raw-event-secret-canary"}},
+    {"type": "TEXT_MESSAGE_CONTENT", "messageId": "message-leak", "delta": "sk-live-AGUI-CANARY"},
+    {"type": "REASONING_MESSAGE_CONTENT", "messageId": "reasoning-leak", "delta": "reasoning-secret-canary"},
+    {"type": "REASONING_ENCRYPTED_VALUE", "subtype": "message", "entityId": "encrypted-entity", "encryptedValue": "encrypted-reasoning-canary"},
+    {"type": "MESSAGES_SNAPSHOT", "messages": [{"id": "snapshot-message", "role": "user", "content": "messages-snapshot-canary"}]},
+    {"type": "TOOL_CALL_START", "toolCallId": "call-leak", "toolCallName": "private_tool"},
+    {"type": "TOOL_CALL_ARGS", "toolCallId": "call-leak", "delta": "{\"url\":\"https://internal.example.test/private?q=canary\",\"path\":\"/Users/alice/.ssh/id_ed25519\"}"},
+    {"type": "TOOL_CALL_END", "toolCallId": "call-leak"},
+    {"type": "TOOL_CALL_RESULT", "messageId": "result-leak", "toolCallId": "call-leak", "content": "tool_result_success_canary"},
+    {"type": "STATE_SNAPSHOT", "snapshot": {"secret": "snapshot-secret-canary"}},
+    {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/secret/delta-secret-canary", "value": "delta-secret-canary"}]},
+    {"type": "ACTIVITY_SNAPSHOT", "messageId": "activity-message", "activityType": "private-activity", "content": {"secret": "activity-secret-canary"}},
+    {"type": "CUSTOM", "name": "private-custom", "value": {"secret": "custom-secret-canary"}},
+    {"type": "RAW", "source": "private-source", "event": {"secret": "raw-extension-canary"}},
+    {"type": "RUN_FINISHED", "threadId": "thread-leak", "runId": "run-leak", "result": {"cookie": "COOKIE=session-secret-canary"}, "outcome": {"type": "success"}}
+  ]
+}
