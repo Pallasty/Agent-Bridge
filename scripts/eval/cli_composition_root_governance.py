@@ -174,6 +174,7 @@ def validate_repository(base_ref: str, head_ref: str) -> None:
         path
         for path in paths
         if path.startswith(RECEIPT_PREFIX) and path.endswith(".json")
+        and not path.endswith(".example.json")
     ]
     if len(receipt_paths) != 1:
         raise GovernanceError(
