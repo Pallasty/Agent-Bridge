@@ -19,6 +19,7 @@ fn sway_tree() -> serde_json::Value {
             "nodes":[{
                 "type":"workspace",
                 "name":"2",
+                "fullscreen_mode":1,
                 "rect":{"x":0,"y":0,"width":1920,"height":1040},
                 "nodes":[{
                     "id":41,
@@ -26,6 +27,7 @@ fn sway_tree() -> serde_json::Value {
                     "app_id":"com.example.Editor",
                     "name":"Editor",
                     "focused":true,
+                    "fullscreen_mode":0,
                     "rect":{"x":120,"y":80,"width":1200,"height":820}
                 }],
                 "floating_nodes":[{
@@ -454,18 +456,71 @@ fn focus_follow_plan_does_not_follow_itself() {
 }
 
 #[test]
-fn focus_follow_plan_propagates_fullscreen_and_sensitive_ancestor_state() {
-    let mut fullscreen = sway_tree();
-    fullscreen["nodes"][0]["nodes"][0]["fullscreen_mode"] = json!(1);
-    let fullscreen_plan =
-        focus_follow_plan_from_sway_tree(&fullscreen, &FocusFollowOptions::default());
-    assert_eq!(fullscreen_plan["status"], "fullscreen_target");
-    assert_eq!(fullscreen_plan["target"]["fullscreen"], true);
-    assert_eq!(
-        fullscreen_plan["recommended_action"],
-        "keep_current_position"
-    );
+fn focus_follow_plan_ignores_workspace_fullscreen_mode_for_tiled_leaf() {
+    let mut tree = sway_tree();
+    tree["nodes"][0]["nodes"][0]["fullscreen_mode"] = json!(1);
+    tree["nodes"][0]["nodes"][0]["nodes"][0]["fullscreen_mode"] = json!(0);
 
+    let plan = focus_follow_plan_from_sway_tree(&tree, &FocusFollowOptions::default());
+
+    assert_eq!(plan["status"], "planned");
+    assert_eq!(plan["target"]["fullscreen"], false);
+}
+
+#[test]
+fn focus_follow_plan_blocks_leaf_and_non_workspace_ancestor_fullscreen() {
+    let mut leaf_fullscreen = sway_tree();
+    leaf_fullscreen["nodes"][0]["nodes"][0]["nodes"][0]["fullscreen_mode"] = json!(2);
+    let leaf_plan =
+        focus_follow_plan_from_sway_tree(&leaf_fullscreen, &FocusFollowOptions::default());
+    assert_eq!(leaf_plan["status"], "fullscreen_target");
+    assert_eq!(leaf_plan["target"]["fullscreen"], true);
+    assert_eq!(leaf_plan["recommended_action"], "keep_current_position");
+
+    let mut ancestor_fullscreen = sway_tree();
+    let target = ancestor_fullscreen["nodes"][0]["nodes"][0]["nodes"][0].clone();
+    ancestor_fullscreen["nodes"][0]["nodes"][0]["nodes"] = json!([{
+        "id": 40,
+        "type": "con",
+        "fullscreen_mode": 1,
+        "rect": {"x":120,"y":80,"width":1200,"height":820},
+        "nodes": [target]
+    }]);
+    let ancestor_plan =
+        focus_follow_plan_from_sway_tree(&ancestor_fullscreen, &FocusFollowOptions::default());
+    assert_eq!(ancestor_plan["status"], "fullscreen_target");
+    assert_eq!(ancestor_plan["target"]["fullscreen"], true);
+    assert_eq!(ancestor_plan["recommended_action"], "keep_current_position");
+}
+
+#[test]
+fn focus_follow_plan_does_not_inherit_fullscreen_from_sibling_branch() {
+    let mut tree = sway_tree();
+    tree["nodes"][0]["nodes"][0]["nodes"]
+        .as_array_mut()
+        .expect("workspace nodes")
+        .insert(
+            0,
+            json!({
+                "id": 39,
+                "type": "con",
+                "app_id": "com.example.Video",
+                "name": "Video",
+                "focused": false,
+                "fullscreen_mode": 1,
+                "rect": {"x":0,"y":0,"width":1920,"height":1040}
+            }),
+        );
+
+    let plan = focus_follow_plan_from_sway_tree(&tree, &FocusFollowOptions::default());
+
+    assert_eq!(plan["status"], "planned");
+    assert_eq!(plan["target"]["node_id"], 41);
+    assert_eq!(plan["target"]["fullscreen"], false);
+}
+
+#[test]
+fn focus_follow_plan_propagates_sensitive_ancestor_state() {
     let mut sensitive = sway_tree();
     sensitive["nodes"][0]["nodes"][0]["marks"] = json!(["ab-sensitive"]);
     let sensitive_plan =

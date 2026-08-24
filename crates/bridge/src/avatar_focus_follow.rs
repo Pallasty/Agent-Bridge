@@ -335,13 +335,15 @@ fn find_focused_target(
     ancestor_fullscreen: bool,
     ancestor_sensitive_mark: bool,
 ) -> Option<WindowRef> {
+    let node_type = value.get("type").and_then(Value::as_str);
     let fullscreen = ancestor_fullscreen
-        || value
-            .get("fullscreen_mode")
-            .and_then(Value::as_i64)
-            .is_some_and(|mode| mode != 0);
+        || (node_type != Some("workspace")
+            && value
+                .get("fullscreen_mode")
+                .and_then(Value::as_i64)
+                .is_some_and(|mode| mode != 0));
     let sensitive_mark = ancestor_sensitive_mark || has_sensitive_mark(value);
-    let next_workspace = if value.get("type").and_then(Value::as_str) == Some("workspace") {
+    let next_workspace = if node_type == Some("workspace") {
         rect_at(value).map(|rect| {
             (
                 value
