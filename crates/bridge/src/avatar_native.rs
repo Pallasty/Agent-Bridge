@@ -32,7 +32,23 @@ pub const NATIVE_PROMPT_SCHEMA: &str = "agent_bridge.avatar_native_prompt.v1";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativePromptPlan {
     pub text: String,
+    pub created_at_unix_ms: u64,
     pub expires_at_unix_ms: u64,
+}
+
+pub fn native_prompt_opacity(plan: &NativePromptPlan, now_unix_ms: u64) -> u8 {
+    const FADE_MS: u64 = 320;
+    if now_unix_ms < plan.created_at_unix_ms || now_unix_ms >= plan.expires_at_unix_ms {
+        return 0;
+    }
+    let fade_in = now_unix_ms
+        .saturating_sub(plan.created_at_unix_ms)
+        .min(FADE_MS);
+    let fade_out = plan
+        .expires_at_unix_ms
+        .saturating_sub(now_unix_ms)
+        .min(FADE_MS);
+    ((fade_in.min(fade_out) * 255) / FADE_MS) as u8
 }
 
 pub fn default_native_prompt_path() -> Option<PathBuf> {
@@ -59,6 +75,13 @@ pub fn native_prompt_plan(path: &Path) -> anyhow::Result<Option<NativePromptPlan
         .get("expires_at_unix_ms")
         .and_then(Value::as_u64)
         .context("native prompt is missing expires_at_unix_ms")?;
+    let created_at_unix_ms = value
+        .get("created_at_unix_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| expires_at_unix_ms.saturating_sub(8_000));
+    if created_at_unix_ms >= expires_at_unix_ms {
+        bail!("native prompt created_at_unix_ms must precede expiry");
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -74,6 +97,7 @@ pub fn native_prompt_plan(path: &Path) -> anyhow::Result<Option<NativePromptPlan
         .context("native prompt text must contain 1 through 32 characters")?;
     Ok(Some(NativePromptPlan {
         text: text.to_string(),
+        created_at_unix_ms,
         expires_at_unix_ms,
     }))
 }
@@ -596,38 +620,54 @@ pub fn paint_native_prompt_bubble(
     height: u32,
     text: &str,
     font: &fontdue::Font,
+    opacity: u8,
 ) {
-    if width < 48 || height < 48 {
+    if width < 48 || height < 48 || opacity == 0 {
         return;
     }
+    let mut chars: Vec<char> = text.chars().collect();
+    let max_chars_per_line = if chars.len() <= 8 { 5 } else { 6 };
+    let max_chars = max_chars_per_line * 3;
+    if chars.len() > max_chars {
+        chars.truncate(max_chars);
+        if let Some(last) = chars.last_mut() {
+            *last = '…';
+        }
+    }
+    let lines: Vec<&[char]> = chars.chunks(max_chars_per_line).collect();
+    let font_px = if lines.len() <= 2 { 12.0_f32 } else { 10.0_f32 };
     let left = 2_i32;
     let right = width as i32 - 3;
     let top = 2_i32;
-    let bottom = 43_i32.min(height as i32 - 8);
+    let bottom = (13 + lines.len() as i32 * 15).min(height as i32 - 8);
     let radius = 7_i32;
+    let bubble_alpha = ((238_u16 * opacity as u16) / 255) as u8;
     for y in top..=bottom {
         for x in left..=right {
             let cx = x.clamp(left + radius, right - radius);
             let cy = y.clamp(top + radius, bottom - radius);
             if (x - cx).pow(2) + (y - cy).pow(2) <= radius.pow(2) {
-                blend_argb8888_pixel(canvas, width, x, y, [255, 250, 238, 238]);
+                blend_argb8888_pixel(canvas, width, x, y, [255, 250, 238, bubble_alpha]);
             }
         }
     }
     let mid = width as i32 / 2;
     for dy in 0..6_i32 {
         for dx in -dy..=dy {
-            blend_argb8888_pixel(canvas, width, mid + dx, bottom + dy, [255, 250, 238, 238]);
+            blend_argb8888_pixel(
+                canvas,
+                width,
+                mid + dx,
+                bottom + dy,
+                [255, 250, 238, bubble_alpha],
+            );
         }
     }
-    let chars: Vec<char> = text.chars().collect();
-    let split = chars.len().min(5);
-    let lines = [&chars[..split], &chars[split..]];
     for (line_index, line) in lines.into_iter().enumerate() {
         if line.is_empty() {
             continue;
         }
-        let px = 12.0_f32;
+        let px = font_px;
         let widths: Vec<usize> = line
             .iter()
             .map(|c| font.metrics(*c, px).advance_width.ceil() as usize)
@@ -641,7 +681,8 @@ pub fn paint_native_prompt_bubble(
             let (metrics, bitmap) = font.rasterize(*ch, px);
             for gy in 0..metrics.height {
                 for gx in 0..metrics.width {
-                    let alpha = bitmap[gy * metrics.width + gx];
+                    let alpha =
+                        ((bitmap[gy * metrics.width + gx] as u16 * opacity as u16) / 255) as u8;
                     blend_argb8888_pixel(
                         canvas,
                         width,
@@ -1391,7 +1432,12 @@ mod wayland_probe {
                 paint_transparent_probe_frame(canvas, width, height);
             }
             if let (Some(prompt), Some(font)) = (&self.prompt, &self.prompt_font) {
-                paint_native_prompt_bubble(canvas, width, height, &prompt.text, font);
+                let now_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let opacity = super::native_prompt_opacity(prompt, now_unix_ms);
+                paint_native_prompt_bubble(canvas, width, height, &prompt.text, font, opacity);
             }
             let surface = self
                 .layer

@@ -9300,10 +9300,11 @@ fn run_avatar_focus_follow_prompt(
         min_travel_px,
     );
     let receipt_path = focus_follow_prompt_receipt_path();
-    let now = std::time::SystemTime::now()
+    let wall_clock = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .context("read wall clock for focus-follow prompt")?
-        .as_secs();
+        .context("read wall clock for focus-follow prompt")?;
+    let now = wall_clock.as_secs();
+    let now_ms = wall_clock.as_millis() as u64;
     let cooldown_secs = cooldown_secs.clamp(30, 3_600);
     let previous = std::fs::read(&receipt_path)
         .ok()
@@ -9332,10 +9333,11 @@ fn run_avatar_focus_follow_prompt(
         if avatar_visible {
             let prompt_path = ab_bridge::avatar_native::default_native_prompt_path()
                 .context("XDG_RUNTIME_DIR is required for Avatar anchored prompt")?;
-            let expires_at_unix_ms = now.saturating_mul(1_000).saturating_add(bounded_timeout);
+            let expires_at_unix_ms = now_ms.saturating_add(bounded_timeout);
             let payload = serde_json::json!({
                 "schema": ab_bridge::avatar_native::NATIVE_PROMPT_SCHEMA,
                 "text": "需要我过去吗？",
+                "created_at_unix_ms": now_ms,
                 "expires_at_unix_ms": expires_at_unix_ms,
             });
             let temp_path = prompt_path.with_extension(format!("tmp-{}", std::process::id()));
