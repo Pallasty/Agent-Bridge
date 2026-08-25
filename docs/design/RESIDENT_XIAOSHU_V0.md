@@ -321,6 +321,15 @@ fixed label, wake/subject IDs, existing hashes, cognition disposition, and a
 deterministic evaluation ID. It stores no observed event, prompt, provider
 response, arbitrary note, or owner-identifying content.
 
+The wake lock, wake journal, and evaluation receipts share one durable state
+root. Resolution prefers `AGENT_BRIDGE_STATE_DIR`, then
+`$XDG_STATE_HOME/agent-bridge`, and retains the database parent only as a
+compatibility fallback. This lets the installed wrapper select a local
+permission-capable filesystem on hosts where the database lives on a mount
+that cannot enforce 0700/0600, without relocating or forking the database.
+An unsuitable fallback continues to fail closed rather than weakening the
+privacy modes.
+
 An identical repeated label is idempotent and returns the existing receipt. A
 different label for the same wake fails closed and cannot rewrite history.
 Hash or wake-journal tampering also fails closed. The next explicit cognition
