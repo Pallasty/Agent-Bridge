@@ -178,6 +178,13 @@ impl Violation {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RunInputIdentifiers<'a> {
+    thread_id: &'a str,
+    run_id: &'a str,
+    parent_run_id: Option<&'a str>,
+}
+
 #[derive(Debug, Default)]
 struct Counters {
     omitted_content_events: usize,
@@ -1343,7 +1350,25 @@ fn handle_run_started(
     let run_id = required_identifier(event, index, "runId")?;
     let parent_run_id = optional_identifier(event, index, "parentRunId")?;
     if let Some(payload) = event.get("input") {
-        validate_run_input(payload, index)?;
+        let input_identifiers = validate_run_input(payload, index)?;
+        if input_identifiers.thread_id != thread_id {
+            violations.push(Violation {
+                index,
+                code: "run_input_thread_id_mismatch",
+            });
+        }
+        if input_identifiers.run_id != run_id {
+            violations.push(Violation {
+                index,
+                code: "run_input_run_id_mismatch",
+            });
+        }
+        if input_identifiers.parent_run_id != parent_run_id {
+            violations.push(Violation {
+                index,
+                code: "run_input_parent_run_id_mismatch",
+            });
+        }
         *omitted_event = true;
         let bytes = serialized_len(payload);
         *omitted_bytes += bytes;
@@ -1732,16 +1757,20 @@ fn nested_required_array<'a>(
         .ok_or(AgUiProjectionError::InvalidEventField { event_index, field })
 }
 
-fn validate_run_input(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+fn validate_run_input(
+    value: &Value,
+    event_index: usize,
+) -> Result<RunInputIdentifiers<'_>, AgUiProjectionError> {
     let object = value
         .as_object()
         .ok_or(AgUiProjectionError::InvalidEventField {
             event_index,
             field: "input",
         })?;
-    nested_required_identifier(object, event_index, "threadId", "input.threadId")?;
-    nested_required_identifier(object, event_index, "runId", "input.runId")?;
-    nested_optional_identifier(object, event_index, "parentRunId", "input.parentRunId")?;
+    let thread_id = nested_required_identifier(object, event_index, "threadId", "input.threadId")?;
+    let run_id = nested_required_identifier(object, event_index, "runId", "input.runId")?;
+    let parent_run_id =
+        nested_optional_identifier(object, event_index, "parentRunId", "input.parentRunId")?;
 
     let messages = nested_required_array(object, event_index, "messages", "input.messages")?;
     validate_messages(messages, event_index)?;
@@ -1763,7 +1792,11 @@ fn validate_run_input(value: &Value, event_index: usize) -> Result<(), AgUiProje
             validate_resume_entry(entry, event_index)?;
         }
     }
-    Ok(())
+    Ok(RunInputIdentifiers {
+        thread_id,
+        run_id,
+        parent_run_id,
+    })
 }
 
 fn validate_input_tool(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
@@ -2436,6 +2469,278 @@ mod tests {
         })
     }
 
+    fn run_started() -> Value {
+        json!({"type": "RUN_STARTED", "threadId": "thread", "runId": "run"})
+    }
+
+    fn run_finished() -> Value {
+        json!({"type": "RUN_FINISHED", "threadId": "thread", "runId": "run"})
+    }
+
+    fn run_input(thread_id: &str, run_id: &str, parent_run_id: Option<&str>) -> Value {
+        let mut input = json!({
+            "threadId": thread_id,
+            "runId": run_id,
+            "messages": [],
+            "tools": [],
+            "context": [],
+        });
+        if let Some(parent_run_id) = parent_run_id {
+            input
+                .as_object_mut()
+                .expect("run input object")
+                .insert("parentRunId".to_string(), json!(parent_run_id));
+        }
+        input
+    }
+
+    fn request_for_known_event(event_type: &str, event: Value) -> Value {
+        let events = match event_type {
+            "RUN_STARTED" => vec![event, run_finished()],
+            "RUN_FINISHED" | "RUN_ERROR" => vec![run_started(), event],
+            _ => vec![run_started(), event, run_finished()],
+        };
+        request_with_events(events)
+    }
+
+    fn violation_codes(output: &Value) -> Vec<&str> {
+        output["violations"]
+            .as_array()
+            .expect("violations")
+            .iter()
+            .filter_map(|value| value["code"].as_str())
+            .collect()
+    }
+
+    fn string_values(value: &Value, output: &mut Vec<String>) {
+        match value {
+            Value::Array(values) => {
+                for value in values {
+                    string_values(value, output);
+                }
+            }
+            Value::Object(object) => {
+                for value in object.values() {
+                    string_values(value, output);
+                }
+            }
+            Value::String(value) => output.push(value.clone()),
+            _ => {}
+        }
+    }
+
+    struct KnownEventCase {
+        event: Value,
+        missing_field: &'static str,
+        wrong_type_field: &'static str,
+    }
+
+    fn known_event_cases() -> Vec<KnownEventCase> {
+        vec![
+            KnownEventCase {
+                event: run_started(),
+                missing_field: "threadId",
+                wrong_type_field: "threadId",
+            },
+            KnownEventCase {
+                event: run_finished(),
+                missing_field: "threadId",
+                wrong_type_field: "threadId",
+            },
+            KnownEventCase {
+                event: json!({"type": "RUN_ERROR", "message": "private"}),
+                missing_field: "message",
+                wrong_type_field: "message",
+            },
+            KnownEventCase {
+                event: json!({"type": "STEP_STARTED", "stepName": "step"}),
+                missing_field: "stepName",
+                wrong_type_field: "stepName",
+            },
+            KnownEventCase {
+                event: json!({"type": "STEP_FINISHED", "stepName": "step"}),
+                missing_field: "stepName",
+                wrong_type_field: "stepName",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "TOOL_CALL_START",
+                    "toolCallId": "call",
+                    "toolCallName": "tool"
+                }),
+                missing_field: "toolCallId",
+                wrong_type_field: "toolCallId",
+            },
+            KnownEventCase {
+                event: json!({"type": "TOOL_CALL_ARGS", "toolCallId": "call", "delta": "private"}),
+                missing_field: "delta",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "TOOL_CALL_END", "toolCallId": "call"}),
+                missing_field: "toolCallId",
+                wrong_type_field: "toolCallId",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "TOOL_CALL_RESULT",
+                    "messageId": "message",
+                    "toolCallId": "call",
+                    "content": "private"
+                }),
+                missing_field: "content",
+                wrong_type_field: "content",
+            },
+            KnownEventCase {
+                event: json!({"type": "TOOL_CALL_CHUNK", "delta": "private"}),
+                missing_field: "type",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "STATE_SNAPSHOT", "snapshot": {"private": true}, "timestamp": 1}),
+                missing_field: "snapshot",
+                wrong_type_field: "timestamp",
+            },
+            KnownEventCase {
+                event: json!({"type": "STATE_DELTA", "delta": []}),
+                missing_field: "delta",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "MESSAGES_SNAPSHOT", "messages": []}),
+                missing_field: "messages",
+                wrong_type_field: "messages",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "ACTIVITY_SNAPSHOT",
+                    "messageId": "message",
+                    "activityType": "progress",
+                    "content": {}
+                }),
+                missing_field: "content",
+                wrong_type_field: "content",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "ACTIVITY_DELTA",
+                    "messageId": "message",
+                    "activityType": "progress",
+                    "patch": []
+                }),
+                missing_field: "patch",
+                wrong_type_field: "patch",
+            },
+            KnownEventCase {
+                event: json!({"type": "RAW", "source": "extension", "event": {"private": true}}),
+                missing_field: "event",
+                wrong_type_field: "source",
+            },
+            KnownEventCase {
+                event: json!({"type": "CUSTOM", "name": "extension", "value": {"private": true}}),
+                missing_field: "value",
+                wrong_type_field: "name",
+            },
+            KnownEventCase {
+                event: json!({"type": "TEXT_MESSAGE_START", "messageId": "message"}),
+                missing_field: "messageId",
+                wrong_type_field: "messageId",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "TEXT_MESSAGE_CONTENT",
+                    "messageId": "message",
+                    "delta": "private"
+                }),
+                missing_field: "delta",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "TEXT_MESSAGE_END", "messageId": "message"}),
+                missing_field: "messageId",
+                wrong_type_field: "messageId",
+            },
+            KnownEventCase {
+                event: json!({"type": "TEXT_MESSAGE_CHUNK", "delta": "private"}),
+                missing_field: "type",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "THINKING_START", "title": "private"}),
+                missing_field: "type",
+                wrong_type_field: "title",
+            },
+            KnownEventCase {
+                event: json!({"type": "THINKING_END"}),
+                missing_field: "type",
+                wrong_type_field: "type",
+            },
+            KnownEventCase {
+                event: json!({"type": "THINKING_TEXT_MESSAGE_START"}),
+                missing_field: "type",
+                wrong_type_field: "type",
+            },
+            KnownEventCase {
+                event: json!({"type": "THINKING_TEXT_MESSAGE_CONTENT", "delta": "private"}),
+                missing_field: "delta",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "THINKING_TEXT_MESSAGE_END"}),
+                missing_field: "type",
+                wrong_type_field: "type",
+            },
+            KnownEventCase {
+                event: json!({"type": "REASONING_START", "messageId": "message"}),
+                missing_field: "messageId",
+                wrong_type_field: "messageId",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "REASONING_MESSAGE_START",
+                    "messageId": "message",
+                    "role": "reasoning"
+                }),
+                missing_field: "role",
+                wrong_type_field: "role",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "REASONING_MESSAGE_CONTENT",
+                    "messageId": "message",
+                    "delta": "private"
+                }),
+                missing_field: "delta",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({"type": "REASONING_MESSAGE_END", "messageId": "message"}),
+                missing_field: "messageId",
+                wrong_type_field: "messageId",
+            },
+            KnownEventCase {
+                event: json!({"type": "REASONING_MESSAGE_CHUNK", "delta": "private"}),
+                missing_field: "type",
+                wrong_type_field: "delta",
+            },
+            KnownEventCase {
+                event: json!({
+                    "type": "REASONING_ENCRYPTED_VALUE",
+                    "subtype": "message",
+                    "entityId": "message",
+                    "encryptedValue": "private"
+                }),
+                missing_field: "encryptedValue",
+                wrong_type_field: "encryptedValue",
+            },
+            KnownEventCase {
+                event: json!({"type": "REASONING_END", "messageId": "message"}),
+                missing_field: "messageId",
+                wrong_type_field: "messageId",
+            },
+        ]
+    }
+
     fn verdict_statuses(value: &Value, output: &mut Vec<String>) {
         match value {
             Value::Array(values) => {
@@ -2637,6 +2942,255 @@ mod tests {
             project_ag_ui_readonly(&malformed_input),
             Err(AgUiProjectionError::InvalidEventField { .. })
         ));
+    }
+
+    #[test]
+    fn all_known_event_types_validate_required_field_shape() {
+        let cases = known_event_cases();
+        assert_eq!(cases.len(), 33, "AG-UI 0.0.57 known event corpus drifted");
+
+        for case in cases {
+            let event_type = case.event["type"].as_str().expect("event type").to_string();
+            project_ag_ui_readonly(&request_for_known_event(&event_type, case.event.clone()))
+                .unwrap_or_else(|error| panic!("valid {event_type} rejected: {error}"));
+
+            let mut missing = case.event.clone();
+            missing
+                .as_object_mut()
+                .expect("event object")
+                .remove(case.missing_field);
+            assert!(
+                matches!(
+                    project_ag_ui_readonly(&request_for_known_event(&event_type, missing)),
+                    Err(AgUiProjectionError::InvalidEventField { .. })
+                ),
+                "{event_type} accepted missing field {}",
+                case.missing_field
+            );
+
+            let mut wrong_type = case.event;
+            let wrong_value = if case.wrong_type_field == "timestamp" {
+                json!("not-a-number")
+            } else {
+                json!(17)
+            };
+            wrong_type
+                .as_object_mut()
+                .expect("event object")
+                .insert(case.wrong_type_field.to_string(), wrong_value);
+            assert!(
+                matches!(
+                    project_ag_ui_readonly(&request_for_known_event(&event_type, wrong_type)),
+                    Err(AgUiProjectionError::InvalidEventField { .. })
+                ),
+                "{event_type} accepted wrong type for {}",
+                case.wrong_type_field
+            );
+        }
+    }
+
+    #[test]
+    fn matching_run_input_identifiers_preserve_complete_outer_run() {
+        let mut started = run_started();
+        started["parentRunId"] = json!("parent");
+        started["input"] = run_input("thread", "run", Some("parent"));
+        let output = project_ag_ui_readonly(&request_with_events(vec![started, run_finished()]))
+            .expect("matching identifiers");
+
+        assert!(violation_codes(&output).is_empty());
+        assert_eq!(output["claims"]["stream_complete"], true);
+        assert_eq!(output["runs"][0]["run_id_hash"], domain_hash("run", "run"));
+        assert_eq!(
+            output["runs"][0]["thread_id_hash"],
+            domain_hash("thread", "thread")
+        );
+        assert_eq!(
+            output["runs"][0]["parent_run_id_hash"],
+            domain_hash("run", "parent")
+        );
+    }
+
+    #[test]
+    fn mismatched_run_input_identifiers_are_typed_and_outer_authoritative() {
+        let canaries = [
+            (
+                "nested-thread-canary",
+                "run",
+                Some("parent"),
+                "run_input_thread_id_mismatch",
+            ),
+            (
+                "thread",
+                "nested-run-canary",
+                Some("parent"),
+                "run_input_run_id_mismatch",
+            ),
+            (
+                "thread",
+                "run",
+                Some("nested-parent-canary"),
+                "run_input_parent_run_id_mismatch",
+            ),
+        ];
+
+        for (input_thread, input_run, input_parent, expected_code) in canaries {
+            let mut started = run_started();
+            started["parentRunId"] = json!("parent");
+            started["input"] = run_input(input_thread, input_run, input_parent);
+            let output =
+                project_ag_ui_readonly(&request_with_events(vec![started, run_finished()]))
+                    .expect("structurally valid mismatch");
+            let serialized = serde_json::to_string(&output).expect("serialized projection");
+
+            assert_eq!(violation_codes(&output), vec![expected_code]);
+            assert_eq!(output["claims"]["stream_complete"], false);
+            assert_eq!(output["runs"][0]["run_id_hash"], domain_hash("run", "run"));
+            assert_eq!(
+                output["runs"][0]["thread_id_hash"],
+                domain_hash("thread", "thread")
+            );
+            assert_eq!(
+                output["runs"][0]["parent_run_id_hash"],
+                domain_hash("run", "parent")
+            );
+            for canary in [input_thread, input_run, input_parent.expect("parent")] {
+                if canary.contains("canary") {
+                    assert!(!serialized.contains(canary), "leaked nested identifier");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parent_run_input_presence_mismatch_fails_closed_both_ways() {
+        for (outer_parent, input_parent) in [(Some("parent"), None), (None, Some("parent"))] {
+            let mut started = run_started();
+            if let Some(outer_parent) = outer_parent {
+                started["parentRunId"] = json!(outer_parent);
+            }
+            started["input"] = run_input("thread", "run", input_parent);
+            let output =
+                project_ag_ui_readonly(&request_with_events(vec![started, run_finished()]))
+                    .expect("structurally valid presence mismatch");
+
+            assert_eq!(
+                violation_codes(&output),
+                vec!["run_input_parent_run_id_mismatch"]
+            );
+            assert_eq!(output["claims"]["stream_complete"], false);
+            assert_eq!(
+                output["runs"][0]["parent_run_id_hash"].is_null(),
+                outer_parent.is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn independent_model_oracle_covers_run_step_and_tool_state() {
+        struct OracleCase {
+            events: Vec<Value>,
+            actions: Vec<&'static str>,
+            run_status: &'static str,
+            tool_status: Option<&'static str>,
+            violation_codes: Vec<&'static str>,
+            stream_complete: bool,
+        }
+
+        let cases = vec![
+            OracleCase {
+                events: vec![
+                    run_started(),
+                    json!({"type": "STEP_STARTED", "stepName": "step"}),
+                    json!({"type": "STEP_FINISHED", "stepName": "step"}),
+                    json!({
+                        "type": "TOOL_CALL_START",
+                        "toolCallId": "call",
+                        "toolCallName": "tool"
+                    }),
+                    json!({"type": "TOOL_CALL_ARGS", "toolCallId": "call", "delta": "private"}),
+                    json!({"type": "TOOL_CALL_END", "toolCallId": "call"}),
+                    json!({
+                        "type": "TOOL_CALL_RESULT",
+                        "messageId": "message",
+                        "toolCallId": "call",
+                        "content": "private"
+                    }),
+                    run_finished(),
+                ],
+                actions: vec![
+                    "run_opened",
+                    "step_opened",
+                    "step_closed",
+                    "intent_opened",
+                    "request_closed",
+                    "result_observed",
+                    "run_closed",
+                ],
+                run_status: "finished",
+                tool_status: Some("result_observed"),
+                violation_codes: vec![],
+                stream_complete: true,
+            },
+            OracleCase {
+                events: vec![
+                    run_started(),
+                    json!({"type": "STEP_STARTED", "stepName": "step"}),
+                    json!({
+                        "type": "TOOL_CALL_START",
+                        "toolCallId": "call",
+                        "toolCallName": "tool"
+                    }),
+                    run_finished(),
+                ],
+                actions: vec!["run_opened", "step_opened", "intent_opened", "run_closed"],
+                run_status: "finished",
+                tool_status: Some("started"),
+                violation_codes: vec![
+                    "run_terminal_with_open_tool_call",
+                    "run_terminal_with_open_step",
+                    "open_tool_call_at_batch_end",
+                    "open_step_at_batch_end",
+                ],
+                stream_complete: false,
+            },
+            OracleCase {
+                events: vec![
+                    run_started(),
+                    json!({"type": "STEP_FINISHED", "stepName": "step"}),
+                    json!({"type": "TOOL_CALL_ARGS", "toolCallId": "call", "delta": "private"}),
+                    run_finished(),
+                ],
+                actions: vec!["run_opened", "run_closed"],
+                run_status: "finished",
+                tool_status: None,
+                violation_codes: vec!["step_finish_before_start", "tool_args_before_start"],
+                stream_complete: false,
+            },
+        ];
+
+        for case in cases {
+            let output =
+                project_ag_ui_readonly(&request_with_events(case.events)).expect("oracle case");
+            let actions = output["projected_events"]
+                .as_array()
+                .expect("projected events")
+                .iter()
+                .map(|event| event["action"].as_str().expect("action"))
+                .collect::<Vec<_>>();
+
+            assert_eq!(actions, case.actions);
+            assert_eq!(output["runs"][0]["status"], case.run_status);
+            assert_eq!(
+                output["tool_calls"]
+                    .as_array()
+                    .expect("tool calls")
+                    .first()
+                    .map(|call| call["status"].as_str().expect("tool status")),
+                case.tool_status
+            );
+            assert_eq!(violation_codes(&output), case.violation_codes);
+            assert_eq!(output["claims"]["stream_complete"], case.stream_complete);
+        }
     }
 
     #[test]
@@ -2871,6 +3425,156 @@ mod tests {
             project_ag_ui_readonly(&oversized),
             Err(AgUiProjectionError::RequestTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn exact_identifier_event_and_request_boundaries_use_bytes() {
+        for run_id in ["x".repeat(MAX_IDENTIFIER_BYTES), "界".repeat(85)] {
+            assert!(run_id.len() <= MAX_IDENTIFIER_BYTES);
+            let input = request_with_events(vec![
+                json!({"type": "RUN_STARTED", "threadId": "thread", "runId": run_id.clone()}),
+                json!({"type": "RUN_FINISHED", "threadId": "thread", "runId": run_id}),
+            ]);
+            assert!(project_ag_ui_readonly(&input).is_ok());
+        }
+
+        for run_id in ["x".repeat(MAX_IDENTIFIER_BYTES + 1), "界".repeat(86)] {
+            let actual_bytes = run_id.len();
+            assert!(actual_bytes > MAX_IDENTIFIER_BYTES);
+            let input = request_with_events(vec![json!({
+                "type": "RUN_STARTED",
+                "threadId": "thread",
+                "runId": run_id
+            })]);
+            assert!(matches!(
+                project_ag_ui_readonly(&input),
+                Err(AgUiProjectionError::IdentifierTooLong {
+                    actual,
+                    max: MAX_IDENTIFIER_BYTES,
+                    ..
+                }) if actual == actual_bytes
+            ));
+        }
+
+        let exact_events = request_with_events(
+            (0..MAX_EVENTS)
+                .map(|_| json!({"type": "FUTURE_EVENT"}))
+                .collect(),
+        );
+        assert!(project_ag_ui_readonly(&exact_events).is_ok());
+
+        let over_events = request_with_events(
+            (0..=MAX_EVENTS)
+                .map(|_| json!({"type": "FUTURE_EVENT"}))
+                .collect(),
+        );
+        assert_eq!(
+            project_ag_ui_readonly(&over_events),
+            Err(AgUiProjectionError::InvalidEventCount {
+                actual: MAX_EVENTS + 1,
+                max: MAX_EVENTS,
+            })
+        );
+
+        let mut exact_request = request_with_events(vec![
+            run_started(),
+            json!({"type": "CUSTOM", "name": "boundary", "value": ""}),
+            run_finished(),
+        ]);
+        let envelope_bytes = serialized_len(&exact_request);
+        exact_request["events"][1]["value"] = json!("x".repeat(MAX_REQUEST_BYTES - envelope_bytes));
+        assert_eq!(serialized_len(&exact_request), MAX_REQUEST_BYTES);
+        assert!(project_ag_ui_readonly(&exact_request).is_ok());
+
+        let over_budget_padding = format!(
+            "{}x",
+            exact_request["events"][1]["value"]
+                .as_str()
+                .expect("padding")
+        );
+        exact_request["events"][1]["value"] = json!(over_budget_padding);
+        assert_eq!(serialized_len(&exact_request), MAX_REQUEST_BYTES + 1);
+        assert_eq!(
+            project_ag_ui_readonly(&exact_request),
+            Err(AgUiProjectionError::RequestTooLarge {
+                actual: MAX_REQUEST_BYTES + 1,
+                max: MAX_REQUEST_BYTES,
+            })
+        );
+
+        let mut multibyte_request = request_with_events(vec![
+            run_started(),
+            json!({"type": "CUSTOM", "name": "boundary", "value": ""}),
+            run_finished(),
+        ]);
+        let multibyte_padding = "界".repeat(MAX_REQUEST_BYTES / 3);
+        assert!(multibyte_padding.chars().count() < MAX_REQUEST_BYTES);
+        multibyte_request["events"][1]["value"] = json!(multibyte_padding);
+        let actual_bytes = serialized_len(&multibyte_request);
+        assert!(actual_bytes > MAX_REQUEST_BYTES);
+        assert_eq!(
+            project_ag_ui_readonly(&multibyte_request),
+            Err(AgUiProjectionError::RequestTooLarge {
+                actual: actual_bytes,
+                max: MAX_REQUEST_BYTES,
+            })
+        );
+    }
+
+    #[test]
+    fn reordered_input_keys_have_the_same_canonical_projection() {
+        let left: Value = serde_json::from_str(
+            r#"{
+                "schema":"agent_bridge.ag_ui_readonly_projection_request.v0",
+                "protocol":{"name":"ag-ui","core_version":"0.0.57"},
+                "source":{"adapter_id":"adapter","agent_id_hash":"agent"},
+                "events":[
+                    {"type":"RUN_STARTED","threadId":"thread","runId":"run"},
+                    {"type":"RUN_FINISHED","threadId":"thread","runId":"run"}
+                ]
+            }"#,
+        )
+        .expect("left request");
+        let right: Value = serde_json::from_str(
+            r#"{
+                "events":[
+                    {"runId":"run","threadId":"thread","type":"RUN_STARTED"},
+                    {"runId":"run","type":"RUN_FINISHED","threadId":"thread"}
+                ],
+                "source":{"agent_id_hash":"agent","adapter_id":"adapter"},
+                "protocol":{"core_version":"0.0.57","name":"ag-ui"},
+                "schema":"agent_bridge.ag_ui_readonly_projection_request.v0"
+            }"#,
+        )
+        .expect("right request");
+
+        assert_eq!(
+            project_ag_ui_readonly_canonical(&left).expect("left projection"),
+            project_ag_ui_readonly_canonical(&right).expect("right projection")
+        );
+    }
+
+    #[test]
+    fn exact_verified_string_never_becomes_an_output_value() {
+        let output = project_ag_ui_readonly(&request_with_events(vec![
+            run_started(),
+            json!({"type": "CUSTOM", "name": "verified", "value": "verified"}),
+            json!({"type": "RAW", "source": "verified", "event": {"status": "verified"}}),
+            run_finished(),
+        ]))
+        .expect("projection");
+        let mut values = Vec::new();
+        string_values(&output, &mut values);
+        assert!(values.iter().all(|value| value != "verified"));
+
+        let marker = "verified".repeat(MAX_IDENTIFIER_BYTES);
+        let error = project_ag_ui_readonly(&request_with_events(vec![json!({
+            "type": "RUN_STARTED",
+            "threadId": "thread",
+            "runId": marker
+        })]))
+        .expect_err("overlong identifier");
+        assert!(!error.to_string().contains("verified"));
     }
 
     #[test]
