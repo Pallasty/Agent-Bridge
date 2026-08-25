@@ -7,8 +7,8 @@
 
 use crate::resident_cognition::RESIDENT_SUBJECT_ID;
 use crate::resident_wake_journal::{
-    load_resident_wake_record, ResidentSubjectLease, ResidentWakeJournalError,
-    ResidentWakeJournalState,
+    default_resident_state_root, load_resident_wake_record, ResidentSubjectLease,
+    ResidentWakeJournalError, ResidentWakeJournalState,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -35,11 +35,7 @@ pub struct ResidentOwnerEvaluationOptions {
 
 impl ResidentOwnerEvaluationOptions {
     pub fn new(wake_id: impl Into<String>, label: ResidentOwnerLabel) -> Self {
-        let database = ab_store::default_db_path();
-        let journal_root = database
-            .parent()
-            .unwrap_or_else(|| Path::new("/tmp"))
-            .join("resident-xiaoshu-v0");
+        let journal_root = default_resident_state_root().join("resident-xiaoshu-v0");
         Self {
             wake_id: wake_id.into(),
             label,

@@ -7,7 +7,8 @@
 
 use crate::resident_owner_evaluation::load_bound_resident_owner_evaluation;
 use crate::resident_wake_journal::{
-    ResidentSubjectLease, ResidentWakeJournalError, ResidentWakeReservation,
+    default_resident_state_root, ResidentSubjectLease, ResidentWakeJournalError,
+    ResidentWakeReservation,
 };
 use crate::semantic_event::{Affordance, SemanticEvent, SemanticObject, Verdict, VerdictStatus};
 use ab_agent::{
@@ -57,15 +58,9 @@ pub struct ResidentCognitionOptions {
 
 impl ResidentCognitionOptions {
     pub fn new(event: impl Into<String>, workspace: impl Into<PathBuf>) -> Self {
-        let database = ab_store::default_db_path();
-        let lock_path = database
-            .parent()
-            .unwrap_or_else(|| Path::new("/tmp"))
-            .join("resident-xiaoshu-v0.lock");
-        let journal_root = database
-            .parent()
-            .unwrap_or_else(|| Path::new("/tmp"))
-            .join("resident-xiaoshu-v0");
+        let state_root = default_resident_state_root();
+        let lock_path = state_root.join("resident-xiaoshu-v0.lock");
+        let journal_root = state_root.join("resident-xiaoshu-v0");
         Self {
             event: event.into(),
             event_id: None,

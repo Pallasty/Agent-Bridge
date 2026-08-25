@@ -16,6 +16,29 @@ use uuid::Uuid;
 
 pub const RESIDENT_WAKE_JOURNAL_SCHEMA_V0: &str = "agent_bridge.resident_wake_journal.v0";
 
+/// Resolve the permission-capable durable root shared by Resident Xiao Shu
+/// sidecars. The wrapper sets `AGENT_BRIDGE_STATE_DIR` on hosts whose data
+/// directory cannot preserve private Unix modes; direct callers retain the
+/// existing database-parent fallback.
+pub fn default_resident_state_root() -> PathBuf {
+    resolve_resident_state_root(
+        std::env::var_os("AGENT_BRIDGE_STATE_DIR").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        &ab_store::default_db_path(),
+    )
+}
+
+fn resolve_resident_state_root(
+    agent_bridge_state_dir: Option<PathBuf>,
+    xdg_state_home: Option<PathBuf>,
+    database: &Path,
+) -> PathBuf {
+    agent_bridge_state_dir
+        .or_else(|| xdg_state_home.map(|root| root.join("agent-bridge")))
+        .or_else(|| database.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResidentWakeJournalState {
@@ -385,6 +408,33 @@ fn is_sha256_hex(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resident_state_root_prefers_explicit_private_root() {
+        let resolved = resolve_resident_state_root(
+            Some(PathBuf::from("/private/agent-bridge")),
+            Some(PathBuf::from("/xdg-state")),
+            Path::new("/data/agent-bridge/state.db"),
+        );
+        assert_eq!(resolved, Path::new("/private/agent-bridge"));
+    }
+
+    #[test]
+    fn resident_state_root_uses_xdg_state_before_database_parent() {
+        let resolved = resolve_resident_state_root(
+            None,
+            Some(PathBuf::from("/xdg-state")),
+            Path::new("/data/agent-bridge/state.db"),
+        );
+        assert_eq!(resolved, Path::new("/xdg-state/agent-bridge"));
+    }
+
+    #[test]
+    fn resident_state_root_retains_database_parent_fallback() {
+        let resolved =
+            resolve_resident_state_root(None, None, Path::new("/data/agent-bridge/state.db"));
+        assert_eq!(resolved, Path::new("/data/agent-bridge"));
+    }
 
     fn reserve(root: &Path) -> ResidentWakeReservation {
         ResidentWakeReservation::reserve(
