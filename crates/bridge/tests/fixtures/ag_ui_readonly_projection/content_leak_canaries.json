@@ -3,7 +3,7 @@
   "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
   "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
   "events": [
-    {"type": "RUN_STARTED", "threadId": "thread-leak", "runId": "run-leak", "input": {"messages": [{"content": "SYSTEM_PROMPT_CANARY_DO_NOT_LEAK"}], "forwardedProps": {"cookie": "COOKIE=session-secret-canary"}}, "rawEvent": {"private": "raw-event-secret-canary"}},
+    {"type": "RUN_STARTED", "threadId": "thread-leak", "runId": "run-leak", "input": {"threadId": "thread-leak", "runId": "run-leak", "state": {}, "messages": [{"id": "input-system", "role": "system", "content": "SYSTEM_PROMPT_CANARY_DO_NOT_LEAK"}], "tools": [], "context": [], "forwardedProps": {"cookie": "COOKIE=session-secret-canary"}}, "rawEvent": {"private": "raw-event-secret-canary"}},
     {"type": "TEXT_MESSAGE_CONTENT", "messageId": "message-leak", "delta": "sk-live-AGUI-CANARY"},
     {"type": "REASONING_MESSAGE_CONTENT", "messageId": "reasoning-leak", "delta": "reasoning-secret-canary"},
     {"type": "REASONING_ENCRYPTED_VALUE", "subtype": "message", "entityId": "encrypted-entity", "encryptedValue": "encrypted-reasoning-canary"},

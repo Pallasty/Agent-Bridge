@@ -4,6 +4,6 @@
   "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
   "events": [
     {"type": "RUN_STARTED", "threadId": "thread-interrupt", "runId": "run-interrupt"},
-    {"type": "RUN_FINISHED", "threadId": "thread-interrupt", "runId": "run-interrupt", "outcome": {"type": "interrupt", "interrupts": [{"value": "private interrupt payload"}]}}
+    {"type": "RUN_FINISHED", "threadId": "thread-interrupt", "runId": "run-interrupt", "outcome": {"type": "interrupt", "interrupts": [{"id": "interrupt-private", "reason": "human_input", "message": "private interrupt payload"}]}}
   ]
 }

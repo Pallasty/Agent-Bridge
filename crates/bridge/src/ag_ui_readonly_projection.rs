@@ -5,7 +5,7 @@
 //! policy, or MCP registration handle. AG-UI lifecycle events are observations;
 //! none of them can establish a verified external effect.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -202,6 +202,12 @@ struct Counters {
 }
 
 /// Project one bounded AG-UI 0.0.57 batch without performing I/O or mutation.
+///
+/// # Errors
+///
+/// Returns [`AgUiProjectionError`] when the request exceeds its budget, does
+/// not match the pinned projection envelope, or contains a malformed known
+/// AG-UI 0.0.57 event.
 pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionError> {
     validate_request_budget(input)?;
     let request = input
@@ -255,6 +261,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
     let mut counters = Counters::default();
     let mut runs = BTreeMap::<String, RunProjection>::new();
     let mut tool_calls = BTreeMap::<String, ToolCallProjection>::new();
+    let mut open_steps = BTreeSet::<(String, String)>::new();
     let mut projected_events = Vec::<Value>::new();
     let mut violations = Vec::<Violation>::new();
     let mut current_run_hash: Option<String> = None;
@@ -267,6 +274,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 field: "event",
             })?;
         let event_type = required_string(event, index, "type")?;
+        validate_base_event_fields(event, index)?;
         let mut omitted_event = event.contains_key("rawEvent");
         let mut omitted_bytes = event.get("rawEvent").map(serialized_len).unwrap_or(0);
 
@@ -288,6 +296,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 let run_id = required_identifier(event, index, "runId")?;
                 let parent_run_id = optional_identifier(event, index, "parentRunId")?;
                 if let Some(payload) = event.get("input") {
+                    validate_run_input(payload, index)?;
                     omitted_event = true;
                     omitted_bytes += serialized_len(payload);
                     counters.run_payload_bytes += serialized_len(payload);
@@ -307,6 +316,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 let run_hash = domain_hash("run", run_id);
                 let thread_hash = domain_hash("thread", thread_id);
                 let parent_hash = parent_run_id.map(|value| domain_hash("run", value));
+                let mut inserted = false;
                 if let Some(existing) = runs.get(&run_hash) {
                     violations.push(Violation {
                         index,
@@ -319,6 +329,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                         });
                     }
                 } else {
+                    inserted = true;
                     runs.insert(
                         run_hash.clone(),
                         RunProjection {
@@ -331,17 +342,19 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                     );
                 }
                 current_run_hash = Some(run_hash.clone());
-                projected_events.push(ssb_event(
-                    index,
-                    "run_opened",
-                    &run_hash,
-                    "agent_run",
-                    "lifecycle",
-                    "low",
-                    false,
-                    "unknown",
-                    "ag_ui_run_started_observation",
-                ));
+                if inserted {
+                    projected_events.push(ssb_event(
+                        index,
+                        "run_opened",
+                        &run_hash,
+                        "agent_run",
+                        "lifecycle",
+                        "low",
+                        false,
+                        "unknown",
+                        "ag_ui_run_started_observation",
+                    ));
+                }
             }
             "RUN_FINISHED" => {
                 let thread_id = required_identifier(event, index, "threadId")?;
@@ -363,12 +376,12 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                         code: "conflicting_run_id",
                     });
                 }
-                mark_terminal_open_tools(&run_hash, index, &tool_calls, &mut violations);
                 let status = if interrupted {
                     RunStatus::Interrupted
                 } else {
                     RunStatus::Finished
                 };
+                let mut transitioned = false;
                 if let Some(run) = runs.get_mut(&run_hash) {
                     if run.thread_id_hash != thread_hash {
                         violations.push(Violation {
@@ -381,8 +394,12 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                             index,
                             code: "duplicate_run_terminal",
                         });
+                    } else if run.thread_id_hash == thread_hash
+                        && current_run_hash.as_deref() == Some(run_hash.as_str())
+                    {
+                        run.status = status;
+                        transitioned = true;
                     }
-                    run.status = status;
                 } else {
                     violations.push(Violation {
                         index,
@@ -390,21 +407,25 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                     });
                 }
                 current_run_hash = Some(run_hash.clone());
-                projected_events.push(ssb_event(
-                    index,
-                    "run_closed",
-                    &run_hash,
-                    "agent_run",
-                    "lifecycle",
-                    "low",
-                    false,
-                    status.verdict_status(),
-                    if interrupted {
-                        "ag_ui_run_interrupted_observation"
-                    } else {
-                        "ag_ui_run_finished_no_external_effect_readback"
-                    },
-                ));
+                if transitioned {
+                    mark_terminal_open_tools(&run_hash, index, &tool_calls, &mut violations);
+                    mark_terminal_open_steps(&run_hash, index, &open_steps, &mut violations);
+                    projected_events.push(ssb_event(
+                        index,
+                        "run_closed",
+                        &run_hash,
+                        "agent_run",
+                        "lifecycle",
+                        "low",
+                        false,
+                        status.verdict_status(),
+                        if interrupted {
+                            "ag_ui_run_interrupted_observation"
+                        } else {
+                            "ag_ui_run_finished_no_external_effect_readback"
+                        },
+                    ));
+                }
             }
             "RUN_ERROR" => {
                 let message = required_string(event, index, "message")?;
@@ -413,28 +434,41 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 counters.error_message_bytes += message.len();
                 let code = optional_identifier(event, index, "code")?;
                 if let Some(run_hash) = current_run_hash.clone() {
-                    mark_terminal_open_tools(&run_hash, index, &tool_calls, &mut violations);
                     if let Some(run) = runs.get_mut(&run_hash) {
                         if run.status.is_terminal() {
                             violations.push(Violation {
                                 index,
                                 code: "duplicate_run_terminal",
                             });
+                        } else {
+                            run.status = RunStatus::Error;
+                            run.error_code_hash =
+                                code.map(|value| domain_hash("error-code", value));
+                            mark_terminal_open_tools(
+                                &run_hash,
+                                index,
+                                &tool_calls,
+                                &mut violations,
+                            );
+                            mark_terminal_open_steps(
+                                &run_hash,
+                                index,
+                                &open_steps,
+                                &mut violations,
+                            );
+                            projected_events.push(ssb_event(
+                                index,
+                                "run_failed",
+                                &run_hash,
+                                "agent_run",
+                                "lifecycle",
+                                "low",
+                                false,
+                                "not_verified",
+                                "ag_ui_run_error_observation",
+                            ));
                         }
-                        run.status = RunStatus::Error;
-                        run.error_code_hash = code.map(|value| domain_hash("error-code", value));
                     }
-                    projected_events.push(ssb_event(
-                        index,
-                        "run_failed",
-                        &run_hash,
-                        "agent_run",
-                        "lifecycle",
-                        "low",
-                        false,
-                        "not_verified",
-                        "ag_ui_run_error_observation",
-                    ));
                 } else {
                     violations.push(Violation {
                         index,
@@ -444,31 +478,57 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
             }
             "STEP_STARTED" | "STEP_FINISHED" => {
                 let step_name = required_identifier(event, index, "stepName")?;
-                require_active_run(index, &current_run_hash, &mut violations);
                 let step_hash = domain_hash("step", step_name);
-                projected_events.push(ssb_event(
-                    index,
-                    if event_type == "STEP_STARTED" {
-                        "step_opened"
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
+                    let key = (run_hash, step_hash.clone());
+                    let transitioned = if event_type == "STEP_STARTED" {
+                        if open_steps.insert(key) {
+                            true
+                        } else {
+                            violations.push(Violation {
+                                index,
+                                code: "duplicate_step_start",
+                            });
+                            false
+                        }
+                    } else if open_steps.remove(&key) {
+                        true
                     } else {
-                        "step_closed"
-                    },
-                    &step_hash,
-                    "agent_step",
-                    "lifecycle",
-                    "low",
-                    false,
-                    "unknown",
-                    "ag_ui_step_lifecycle_observation",
-                ));
+                        violations.push(Violation {
+                            index,
+                            code: "step_finish_before_start",
+                        });
+                        false
+                    };
+                    if transitioned {
+                        projected_events.push(ssb_event(
+                            index,
+                            if event_type == "STEP_STARTED" {
+                                "step_opened"
+                            } else {
+                                "step_closed"
+                            },
+                            &step_hash,
+                            "agent_step",
+                            "lifecycle",
+                            "low",
+                            false,
+                            "unknown",
+                            "ag_ui_step_lifecycle_observation",
+                        ));
+                    }
+                }
             }
             "TOOL_CALL_START" => {
                 let tool_call_id = required_identifier(event, index, "toolCallId")?;
                 let tool_name = required_identifier(event, index, "toolCallName")?;
                 optional_identifier(event, index, "parentMessageId")?;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &mut violations) {
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
                     let call_hash = domain_hash("tool-call", tool_call_id);
                     let tool_name_hash = domain_hash("tool-name", tool_name);
+                    let mut inserted = false;
                     if let Some(existing) = tool_calls.get(&call_hash) {
                         violations.push(Violation {
                             index,
@@ -479,6 +539,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                             },
                         });
                     } else {
+                        inserted = true;
                         tool_calls.insert(
                             call_hash.clone(),
                             ToolCallProjection {
@@ -492,17 +553,19 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                             },
                         );
                     }
-                    projected_events.push(ssb_event(
-                        index,
-                        "intent_opened",
-                        &call_hash,
-                        "agent_tool_call",
-                        "tool_call",
-                        "medium",
-                        true,
-                        "unknown",
-                        "ag_ui_tool_intent_no_execution_authority",
-                    ));
+                    if inserted {
+                        projected_events.push(ssb_event(
+                            index,
+                            "intent_opened",
+                            &call_hash,
+                            "agent_tool_call",
+                            "tool_call",
+                            "medium",
+                            true,
+                            "unknown",
+                            "ag_ui_tool_intent_no_execution_authority",
+                        ));
+                    }
                 }
             }
             "TOOL_CALL_ARGS" => {
@@ -512,7 +575,8 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 omitted_bytes += delta.len();
                 counters.tool_args_chunks += 1;
                 counters.tool_args_bytes += delta.len();
-                if let Some(run_hash) = active_run(index, &current_run_hash, &mut violations) {
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
                     let call_hash = domain_hash("tool-call", tool_call_id);
                     match tool_calls.get_mut(&call_hash) {
                         None => violations.push(Violation {
@@ -544,8 +608,10 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
             }
             "TOOL_CALL_END" => {
                 let tool_call_id = required_identifier(event, index, "toolCallId")?;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &mut violations) {
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
                     let call_hash = domain_hash("tool-call", tool_call_id);
+                    let mut transitioned = false;
                     match tool_calls.get_mut(&call_hash) {
                         None => violations.push(Violation {
                             index,
@@ -566,29 +632,37 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                                 code: "duplicate_tool_call_end",
                             })
                         }
-                        Some(call) => call.status = ToolCallStatus::RequestClosed,
+                        Some(call) => {
+                            call.status = ToolCallStatus::RequestClosed;
+                            transitioned = true;
+                        }
                     }
-                    projected_events.push(ssb_event(
-                        index,
-                        "request_closed",
-                        &call_hash,
-                        "agent_tool_call",
-                        "tool_call",
-                        "medium",
-                        true,
-                        "unknown",
-                        "ag_ui_tool_call_end_no_dispatch_or_effect_proof",
-                    ));
+                    if transitioned {
+                        projected_events.push(ssb_event(
+                            index,
+                            "request_closed",
+                            &call_hash,
+                            "agent_tool_call",
+                            "tool_call",
+                            "medium",
+                            true,
+                            "unknown",
+                            "ag_ui_tool_call_end_no_dispatch_or_effect_proof",
+                        ));
+                    }
                 }
             }
             "TOOL_CALL_RESULT" => {
                 required_identifier(event, index, "messageId")?;
                 let tool_call_id = required_identifier(event, index, "toolCallId")?;
                 let content = required_string(event, index, "content")?;
+                optional_literal(event, index, "role", "tool")?;
                 omitted_event = true;
                 omitted_bytes += content.len();
-                if let Some(run_hash) = active_run(index, &current_run_hash, &mut violations) {
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
                     let call_hash = domain_hash("tool-call", tool_call_id);
+                    let mut transitioned = false;
                     match tool_calls.get_mut(&call_hash) {
                         None => violations.push(Violation {
                             index,
@@ -603,28 +677,29 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                                 index,
                                 code: "duplicate_tool_call_result",
                             }),
-                        Some(call) => {
-                            if call.status != ToolCallStatus::RequestClosed {
-                                violations.push(Violation {
-                                    index,
-                                    code: "tool_result_before_end",
-                                });
-                            }
+                        Some(call) if call.status == ToolCallStatus::RequestClosed => {
                             call.status = ToolCallStatus::ResultObserved;
                             call.result_size_bucket = Some(size_bucket(content.len()));
+                            transitioned = true;
                         }
+                        Some(_) => violations.push(Violation {
+                            index,
+                            code: "tool_result_before_end",
+                        }),
                     }
-                    projected_events.push(ssb_event(
-                        index,
-                        "result_observed",
-                        &call_hash,
-                        "agent_tool_call",
-                        "tool_call",
-                        "medium",
-                        true,
-                        "unknown",
-                        "ag_ui_tool_result_content_has_no_normative_effect_readback",
-                    ));
+                    if transitioned {
+                        projected_events.push(ssb_event(
+                            index,
+                            "result_observed",
+                            &call_hash,
+                            "agent_tool_call",
+                            "tool_call",
+                            "medium",
+                            true,
+                            "unknown",
+                            "ag_ui_tool_result_content_has_no_normative_effect_readback",
+                        ));
+                    }
                 }
             }
             "TOOL_CALL_CHUNK" => {
@@ -637,22 +712,23 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 omitted_bytes += bytes;
                 counters.tool_chunk_events += 1;
                 counters.tool_chunk_bytes += bytes;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "STATE_SNAPSHOT" => {
-                let snapshot = event
-                    .get("snapshot")
-                    .filter(|value| value.is_object())
-                    .ok_or(AgUiProjectionError::InvalidEventField {
-                        event_index: index,
-                        field: "snapshot",
-                    })?;
+                let snapshot =
+                    event
+                        .get("snapshot")
+                        .ok_or(AgUiProjectionError::InvalidEventField {
+                            event_index: index,
+                            field: "snapshot",
+                        })?;
                 let bytes = serialized_len(snapshot);
                 omitted_event = true;
                 omitted_bytes += bytes;
                 counters.state_snapshot_keys += snapshot.as_object().map_or(0, |value| value.len());
                 counters.state_snapshot_bytes += bytes;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &mut violations) {
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
                     projected_events.push(ssb_event(
                         index,
                         "state_observed",
@@ -667,18 +743,27 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 }
             }
             "STATE_DELTA" => {
-                let delta = event.get("delta").and_then(Value::as_array).ok_or(
-                    AgUiProjectionError::InvalidEventField {
-                        event_index: index,
-                        field: "delta",
-                    },
-                )?;
-                let bytes = serialized_len(event.get("delta").expect("validated delta"));
+                let delta_value =
+                    event
+                        .get("delta")
+                        .ok_or(AgUiProjectionError::InvalidEventField {
+                            event_index: index,
+                            field: "delta",
+                        })?;
+                let delta =
+                    delta_value
+                        .as_array()
+                        .ok_or(AgUiProjectionError::InvalidEventField {
+                            event_index: index,
+                            field: "delta",
+                        })?;
+                let bytes = serialized_len(delta_value);
                 omitted_event = true;
                 omitted_bytes += bytes;
                 counters.state_delta_operations += delta.len();
                 counters.state_delta_bytes += bytes;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &mut violations) {
+                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
+                {
                     projected_events.push(ssb_event(
                         index,
                         "state_observed",
@@ -693,17 +778,26 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 }
             }
             "MESSAGES_SNAPSHOT" => {
-                let messages = event.get("messages").and_then(Value::as_array).ok_or(
-                    AgUiProjectionError::InvalidEventField {
-                        event_index: index,
-                        field: "messages",
-                    },
-                )?;
+                let messages_value =
+                    event
+                        .get("messages")
+                        .ok_or(AgUiProjectionError::InvalidEventField {
+                            event_index: index,
+                            field: "messages",
+                        })?;
+                let messages =
+                    messages_value
+                        .as_array()
+                        .ok_or(AgUiProjectionError::InvalidEventField {
+                            event_index: index,
+                            field: "messages",
+                        })?;
+                validate_messages(messages, index)?;
                 omitted_event = true;
-                omitted_bytes += serialized_len(event.get("messages").expect("validated messages"));
+                omitted_bytes += serialized_len(messages_value);
                 counters.message_snapshots += 1;
                 counters.messages_observed += messages.len();
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "ACTIVITY_SNAPSHOT" | "ACTIVITY_DELTA" => {
                 let message_id = required_identifier(event, index, "messageId")?;
@@ -728,12 +822,15 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                         field: payload_field,
                     });
                 }
+                if event_type == "ACTIVITY_SNAPSHOT" {
+                    optional_bool(event, index, "replace")?;
+                }
                 let bytes = serialized_len(payload);
                 omitted_event = true;
                 omitted_bytes += bytes;
                 counters.activity_events += 1;
                 counters.activity_payload_bytes += bytes;
-                if active_run(index, &current_run_hash, &mut violations).is_some() {
+                if active_run(index, &current_run_hash, &runs, &mut violations).is_some() {
                     let message_hash = domain_hash("message", message_id);
                     projected_events.push(ssb_event(
                         index,
@@ -761,7 +858,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 omitted_bytes += bytes;
                 counters.extension_events += 1;
                 counters.extension_payload_bytes += bytes;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "CUSTOM" => {
                 required_identifier(event, index, "name")?;
@@ -776,78 +873,94 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
                 omitted_bytes += bytes;
                 counters.extension_events += 1;
                 counters.extension_payload_bytes += bytes;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "TEXT_MESSAGE_START" => {
                 required_identifier(event, index, "messageId")?;
                 optional_identifier(event, index, "name")?;
+                optional_enum(
+                    event,
+                    index,
+                    "role",
+                    &["developer", "system", "assistant", "user"],
+                )?;
                 omitted_event = true;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "TEXT_MESSAGE_CONTENT" => {
                 required_identifier(event, index, "messageId")?;
                 let delta = required_string(event, index, "delta")?;
                 omitted_event = true;
                 omitted_bytes += delta.len();
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "TEXT_MESSAGE_END" => {
                 required_identifier(event, index, "messageId")?;
                 omitted_event = true;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "TEXT_MESSAGE_CHUNK" => {
                 optional_identifier(event, index, "messageId")?;
                 optional_identifier(event, index, "name")?;
+                optional_enum(
+                    event,
+                    index,
+                    "role",
+                    &["developer", "system", "assistant", "user"],
+                )?;
                 let delta = optional_string(event, index, "delta")?;
                 omitted_event = true;
                 omitted_bytes += delta.map(str::len).unwrap_or(0);
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "THINKING_START" => {
                 let title = optional_string(event, index, "title")?;
                 omitted_event = true;
                 omitted_bytes += title.map(str::len).unwrap_or(0);
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "THINKING_END" | "THINKING_TEXT_MESSAGE_START" | "THINKING_TEXT_MESSAGE_END" => {
                 omitted_event = true;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "THINKING_TEXT_MESSAGE_CONTENT" => {
                 let delta = required_string(event, index, "delta")?;
                 omitted_event = true;
                 omitted_bytes += delta.len();
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "REASONING_START"
             | "REASONING_MESSAGE_START"
             | "REASONING_MESSAGE_END"
             | "REASONING_END" => {
                 required_identifier(event, index, "messageId")?;
+                if event_type == "REASONING_MESSAGE_START" {
+                    required_literal(event, index, "role", "reasoning")?;
+                }
                 omitted_event = true;
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "REASONING_MESSAGE_CONTENT" => {
                 required_identifier(event, index, "messageId")?;
                 let delta = required_string(event, index, "delta")?;
                 omitted_event = true;
                 omitted_bytes += delta.len();
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "REASONING_MESSAGE_CHUNK" => {
                 optional_identifier(event, index, "messageId")?;
                 let delta = optional_string(event, index, "delta")?;
                 omitted_event = true;
                 omitted_bytes += delta.map(str::len).unwrap_or(0);
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             "REASONING_ENCRYPTED_VALUE" => {
+                required_enum(event, index, "subtype", &["tool-call", "message"])?;
                 required_identifier(event, index, "entityId")?;
                 let encrypted = required_string(event, index, "encryptedValue")?;
                 omitted_event = true;
                 omitted_bytes += encrypted.len();
-                require_active_run(index, &current_run_hash, &mut violations);
+                require_active_run(index, &current_run_hash, &runs, &mut violations);
             }
             _ => {
                 counters.unknown_event_types += 1;
@@ -870,12 +983,19 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
             });
         }
     }
+    for _ in &open_steps {
+        violations.push(Violation {
+            index: events.len(),
+            code: "open_step_at_batch_end",
+        });
+    }
 
     let stream_complete = counters.unknown_event_types == 0
         && violations.is_empty()
         && !runs.is_empty()
         && runs.values().all(|run| run.status.is_terminal())
-        && tool_calls.values().all(|call| !call.status.is_open());
+        && tool_calls.values().all(|call| !call.status.is_open())
+        && open_steps.is_empty();
 
     let run_values = runs
         .values()
@@ -939,6 +1059,11 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
 }
 
 /// Return an RFC 8785/JCS-style canonical JSON encoding for deterministic receipts.
+///
+/// # Errors
+///
+/// Returns [`AgUiProjectionError`] when projection validation or canonical JSON
+/// encoding fails.
 pub fn project_ag_ui_readonly_canonical(input: &Value) -> Result<Vec<u8>, AgUiProjectionError> {
     let projection = project_ag_ui_readonly(input)?;
     serde_json_canonicalizer::to_vec(&projection).map_err(|_| AgUiProjectionError::Canonicalization)
@@ -970,6 +1095,522 @@ fn validate_source_identifier(
             field,
             actual: value.len(),
             max: MAX_IDENTIFIER_BYTES,
+        });
+    }
+    Ok(())
+}
+
+fn validate_base_event_fields(
+    event: &serde_json::Map<String, Value>,
+    event_index: usize,
+) -> Result<(), AgUiProjectionError> {
+    if event
+        .get("timestamp")
+        .is_some_and(|value| !value.is_number())
+    {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "timestamp",
+        });
+    }
+    Ok(())
+}
+
+fn required_enum<'a>(
+    event: &'a serde_json::Map<String, Value>,
+    event_index: usize,
+    field: &'static str,
+    allowed: &[&str],
+) -> Result<&'a str, AgUiProjectionError> {
+    let value = required_string(event, event_index, field)?;
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Err(AgUiProjectionError::InvalidEventField { event_index, field })
+    }
+}
+
+fn optional_enum(
+    event: &serde_json::Map<String, Value>,
+    event_index: usize,
+    field: &'static str,
+    allowed: &[&str],
+) -> Result<(), AgUiProjectionError> {
+    if let Some(value) = optional_string(event, event_index, field)? {
+        if !allowed.contains(&value) {
+            return Err(AgUiProjectionError::InvalidEventField { event_index, field });
+        }
+    }
+    Ok(())
+}
+
+fn required_literal(
+    event: &serde_json::Map<String, Value>,
+    event_index: usize,
+    field: &'static str,
+    expected: &str,
+) -> Result<(), AgUiProjectionError> {
+    if required_string(event, event_index, field)? != expected {
+        return Err(AgUiProjectionError::InvalidEventField { event_index, field });
+    }
+    Ok(())
+}
+
+fn optional_literal(
+    event: &serde_json::Map<String, Value>,
+    event_index: usize,
+    field: &'static str,
+    expected: &str,
+) -> Result<(), AgUiProjectionError> {
+    if optional_string(event, event_index, field)?.is_some_and(|value| value != expected) {
+        return Err(AgUiProjectionError::InvalidEventField { event_index, field });
+    }
+    Ok(())
+}
+
+fn optional_bool(
+    event: &serde_json::Map<String, Value>,
+    event_index: usize,
+    field: &'static str,
+) -> Result<(), AgUiProjectionError> {
+    if event.get(field).is_some_and(|value| !value.is_boolean()) {
+        return Err(AgUiProjectionError::InvalidEventField { event_index, field });
+    }
+    Ok(())
+}
+
+fn nested_required_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    event_index: usize,
+    key: &str,
+    field: &'static str,
+) -> Result<&'a str, AgUiProjectionError> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or(AgUiProjectionError::InvalidEventField { event_index, field })
+}
+
+fn nested_optional_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    event_index: usize,
+    key: &str,
+    field: &'static str,
+) -> Result<Option<&'a str>, AgUiProjectionError> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(Some)
+            .ok_or(AgUiProjectionError::InvalidEventField { event_index, field }),
+    }
+}
+
+fn nested_required_identifier<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    event_index: usize,
+    key: &str,
+    field: &'static str,
+) -> Result<&'a str, AgUiProjectionError> {
+    let value = nested_required_string(object, event_index, key, field)?;
+    validate_identifier(value, event_index, field)?;
+    Ok(value)
+}
+
+fn nested_optional_identifier<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    event_index: usize,
+    key: &str,
+    field: &'static str,
+) -> Result<Option<&'a str>, AgUiProjectionError> {
+    let value = nested_optional_string(object, event_index, key, field)?;
+    if let Some(value) = value {
+        validate_identifier(value, event_index, field)?;
+    }
+    Ok(value)
+}
+
+fn nested_required_array<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    event_index: usize,
+    key: &str,
+    field: &'static str,
+) -> Result<&'a Vec<Value>, AgUiProjectionError> {
+    object
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or(AgUiProjectionError::InvalidEventField { event_index, field })
+}
+
+fn validate_run_input(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "input",
+        })?;
+    nested_required_identifier(object, event_index, "threadId", "input.threadId")?;
+    nested_required_identifier(object, event_index, "runId", "input.runId")?;
+    nested_optional_identifier(object, event_index, "parentRunId", "input.parentRunId")?;
+
+    let messages = nested_required_array(object, event_index, "messages", "input.messages")?;
+    validate_messages(messages, event_index)?;
+
+    for tool in nested_required_array(object, event_index, "tools", "input.tools")? {
+        validate_input_tool(tool, event_index)?;
+    }
+    for context in nested_required_array(object, event_index, "context", "input.context")? {
+        validate_input_context(context, event_index)?;
+    }
+    if let Some(resume) = object.get("resume") {
+        let entries = resume
+            .as_array()
+            .ok_or(AgUiProjectionError::InvalidEventField {
+                event_index,
+                field: "input.resume",
+            })?;
+        for entry in entries {
+            validate_resume_entry(entry, event_index)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_input_tool(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "input.tools[]",
+        })?;
+    nested_required_identifier(object, event_index, "name", "input.tools[].name")?;
+    nested_required_string(
+        object,
+        event_index,
+        "description",
+        "input.tools[].description",
+    )?;
+    if object
+        .get("metadata")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "input.tools[].metadata",
+        });
+    }
+    Ok(())
+}
+
+fn validate_input_context(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "input.context[]",
+        })?;
+    nested_required_string(
+        object,
+        event_index,
+        "description",
+        "input.context[].description",
+    )?;
+    nested_required_string(object, event_index, "value", "input.context[].value")?;
+    Ok(())
+}
+
+fn validate_resume_entry(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "input.resume[]",
+        })?;
+    nested_required_identifier(
+        object,
+        event_index,
+        "interruptId",
+        "input.resume[].interruptId",
+    )?;
+    let status = nested_required_string(object, event_index, "status", "input.resume[].status")?;
+    if !matches!(status, "resolved" | "cancelled") {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "input.resume[].status",
+        });
+    }
+    Ok(())
+}
+
+fn validate_messages(messages: &[Value], event_index: usize) -> Result<(), AgUiProjectionError> {
+    for message in messages {
+        validate_message(message, event_index)?;
+    }
+    Ok(())
+}
+
+fn validate_message(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[]",
+        })?;
+    nested_required_identifier(object, event_index, "id", "messages[].id")?;
+    let role = nested_required_string(object, event_index, "role", "messages[].role")?;
+    match role {
+        "developer" | "system" => {
+            nested_required_string(object, event_index, "content", "messages[].content")?;
+            validate_base_message_optionals(object, event_index)?;
+        }
+        "assistant" => {
+            nested_optional_string(object, event_index, "content", "messages[].content")?;
+            if let Some(tool_calls) = object.get("toolCalls") {
+                let tool_calls =
+                    tool_calls
+                        .as_array()
+                        .ok_or(AgUiProjectionError::InvalidEventField {
+                            event_index,
+                            field: "messages[].toolCalls",
+                        })?;
+                for tool_call in tool_calls {
+                    validate_message_tool_call(tool_call, event_index)?;
+                }
+            }
+            validate_base_message_optionals(object, event_index)?;
+        }
+        "user" => {
+            validate_user_message_content(object, event_index)?;
+            validate_base_message_optionals(object, event_index)?;
+        }
+        "tool" => {
+            nested_required_string(object, event_index, "content", "messages[].content")?;
+            nested_required_identifier(object, event_index, "toolCallId", "messages[].toolCallId")?;
+            nested_optional_string(object, event_index, "error", "messages[].error")?;
+            nested_optional_string(
+                object,
+                event_index,
+                "encryptedValue",
+                "messages[].encryptedValue",
+            )?;
+        }
+        "activity" => {
+            nested_required_identifier(
+                object,
+                event_index,
+                "activityType",
+                "messages[].activityType",
+            )?;
+            if object.get("content").is_none_or(|value| !value.is_object()) {
+                return Err(AgUiProjectionError::InvalidEventField {
+                    event_index,
+                    field: "messages[].content",
+                });
+            }
+        }
+        "reasoning" => {
+            nested_required_string(object, event_index, "content", "messages[].content")?;
+            nested_optional_string(
+                object,
+                event_index,
+                "encryptedValue",
+                "messages[].encryptedValue",
+            )?;
+        }
+        _ => {
+            return Err(AgUiProjectionError::InvalidEventField {
+                event_index,
+                field: "messages[].role",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_base_message_optionals(
+    object: &serde_json::Map<String, Value>,
+    event_index: usize,
+) -> Result<(), AgUiProjectionError> {
+    nested_optional_identifier(object, event_index, "name", "messages[].name")?;
+    nested_optional_string(
+        object,
+        event_index,
+        "encryptedValue",
+        "messages[].encryptedValue",
+    )?;
+    Ok(())
+}
+
+fn validate_message_tool_call(
+    value: &Value,
+    event_index: usize,
+) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].toolCalls[]",
+        })?;
+    nested_required_identifier(object, event_index, "id", "messages[].toolCalls[].id")?;
+    if nested_required_string(object, event_index, "type", "messages[].toolCalls[].type")?
+        != "function"
+    {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].toolCalls[].type",
+        });
+    }
+    let function = object.get("function").and_then(Value::as_object).ok_or(
+        AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].toolCalls[].function",
+        },
+    )?;
+    nested_required_identifier(
+        function,
+        event_index,
+        "name",
+        "messages[].toolCalls[].function.name",
+    )?;
+    nested_required_string(
+        function,
+        event_index,
+        "arguments",
+        "messages[].toolCalls[].function.arguments",
+    )?;
+    nested_optional_string(
+        object,
+        event_index,
+        "encryptedValue",
+        "messages[].toolCalls[].encryptedValue",
+    )?;
+    Ok(())
+}
+
+fn validate_user_message_content(
+    object: &serde_json::Map<String, Value>,
+    event_index: usize,
+) -> Result<(), AgUiProjectionError> {
+    let content = object
+        .get("content")
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].content",
+        })?;
+    if content.is_string() {
+        return Ok(());
+    }
+    let parts = content
+        .as_array()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].content",
+        })?;
+    for part in parts {
+        validate_input_content(part, event_index)?;
+    }
+    Ok(())
+}
+
+fn validate_input_content(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].content[]",
+        })?;
+    let content_type =
+        nested_required_string(object, event_index, "type", "messages[].content[].type")?;
+    match content_type {
+        "text" => {
+            nested_required_string(object, event_index, "text", "messages[].content[].text")?;
+        }
+        "image" | "audio" | "video" | "document" => {
+            validate_input_source(object, event_index)?;
+        }
+        "binary" => validate_legacy_binary_input(object, event_index)?,
+        _ => {
+            return Err(AgUiProjectionError::InvalidEventField {
+                event_index,
+                field: "messages[].content[].type",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_input_source(
+    object: &serde_json::Map<String, Value>,
+    event_index: usize,
+) -> Result<(), AgUiProjectionError> {
+    let source = object.get("source").and_then(Value::as_object).ok_or(
+        AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].content[].source",
+        },
+    )?;
+    let source_type = nested_required_string(
+        source,
+        event_index,
+        "type",
+        "messages[].content[].source.type",
+    )?;
+    if !matches!(source_type, "data" | "url") {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].content[].source.type",
+        });
+    }
+    nested_required_string(
+        source,
+        event_index,
+        "value",
+        "messages[].content[].source.value",
+    )?;
+    if source_type == "data" {
+        nested_required_string(
+            source,
+            event_index,
+            "mimeType",
+            "messages[].content[].source.mimeType",
+        )?;
+    } else {
+        nested_optional_string(
+            source,
+            event_index,
+            "mimeType",
+            "messages[].content[].source.mimeType",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_legacy_binary_input(
+    object: &serde_json::Map<String, Value>,
+    event_index: usize,
+) -> Result<(), AgUiProjectionError> {
+    nested_required_string(
+        object,
+        event_index,
+        "mimeType",
+        "messages[].content[].mimeType",
+    )?;
+    let id = nested_optional_identifier(object, event_index, "id", "messages[].content[].id")?;
+    let url = nested_optional_string(object, event_index, "url", "messages[].content[].url")?;
+    let data = nested_optional_string(object, event_index, "data", "messages[].content[].data")?;
+    nested_optional_string(
+        object,
+        event_index,
+        "filename",
+        "messages[].content[].filename",
+    )?;
+    if [id, url, data]
+        .into_iter()
+        .all(|value| value.is_none_or(str::is_empty))
+    {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "messages[].content[].binary_payload",
         });
     }
     Ok(())
@@ -1063,8 +1704,22 @@ fn validate_run_outcome(
         },
     )?;
     match outcome_type {
-        "success" => Ok(false),
+        "success" => {
+            if object.len() != 1 {
+                return Err(AgUiProjectionError::InvalidEventField {
+                    event_index,
+                    field: "outcome",
+                });
+            }
+            Ok(false)
+        }
         "interrupt" => {
+            if object.len() != 2 {
+                return Err(AgUiProjectionError::InvalidEventField {
+                    event_index,
+                    field: "outcome",
+                });
+            }
             let interrupts_value =
                 object
                     .get("interrupts")
@@ -1072,13 +1727,16 @@ fn validate_run_outcome(
                         event_index,
                         field: "outcome.interrupts",
                     })?;
-            interrupts_value
+            let interrupts = interrupts_value
                 .as_array()
                 .filter(|values| !values.is_empty())
                 .ok_or(AgUiProjectionError::InvalidEventField {
                     event_index,
                     field: "outcome.interrupts",
                 })?;
+            for interrupt in interrupts {
+                validate_interrupt(interrupt, event_index)?;
+            }
             *omitted_event = true;
             *omitted_bytes += serialized_len(interrupts_value);
             Ok(true)
@@ -1090,12 +1748,55 @@ fn validate_run_outcome(
     }
 }
 
+fn validate_interrupt(value: &Value, event_index: usize) -> Result<(), AgUiProjectionError> {
+    let object = value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index,
+            field: "outcome.interrupts[]",
+        })?;
+    nested_required_identifier(object, event_index, "id", "outcome.interrupts[].id")?;
+    nested_required_string(object, event_index, "reason", "outcome.interrupts[].reason")?;
+    nested_optional_string(
+        object,
+        event_index,
+        "message",
+        "outcome.interrupts[].message",
+    )?;
+    nested_optional_identifier(
+        object,
+        event_index,
+        "toolCallId",
+        "outcome.interrupts[].toolCallId",
+    )?;
+    nested_optional_string(
+        object,
+        event_index,
+        "expiresAt",
+        "outcome.interrupts[].expiresAt",
+    )?;
+    for (key, field) in [
+        ("responseSchema", "outcome.interrupts[].responseSchema"),
+        ("metadata", "outcome.interrupts[].metadata"),
+    ] {
+        if object.get(key).is_some_and(|value| !value.is_object()) {
+            return Err(AgUiProjectionError::InvalidEventField { event_index, field });
+        }
+    }
+    Ok(())
+}
+
 fn require_active_run(
     index: usize,
     current_run_hash: &Option<String>,
+    runs: &BTreeMap<String, RunProjection>,
     violations: &mut Vec<Violation>,
 ) {
-    if current_run_hash.is_none() {
+    if current_run_hash
+        .as_ref()
+        .and_then(|hash| runs.get(hash))
+        .is_none_or(|run| run.status.is_terminal())
+    {
         violations.push(Violation {
             index,
             code: "event_without_active_run",
@@ -1106,15 +1807,19 @@ fn require_active_run(
 fn active_run(
     index: usize,
     current_run_hash: &Option<String>,
+    runs: &BTreeMap<String, RunProjection>,
     violations: &mut Vec<Violation>,
 ) -> Option<String> {
-    if current_run_hash.is_none() {
-        violations.push(Violation {
-            index,
-            code: "event_without_active_run",
-        });
+    match current_run_hash.as_ref().and_then(|hash| runs.get(hash)) {
+        Some(run) if !run.status.is_terminal() => current_run_hash.clone(),
+        _ => {
+            violations.push(Violation {
+                index,
+                code: "event_without_active_run",
+            });
+            None
+        }
     }
-    current_run_hash.clone()
 }
 
 fn mark_terminal_open_tools(
@@ -1128,6 +1833,22 @@ fn mark_terminal_open_tools(
             violations.push(Violation {
                 index,
                 code: "run_terminal_with_open_tool_call",
+            });
+        }
+    }
+}
+
+fn mark_terminal_open_steps(
+    run_hash: &str,
+    index: usize,
+    open_steps: &BTreeSet<(String, String)>,
+    violations: &mut Vec<Violation>,
+) {
+    for (step_run_hash, _) in open_steps {
+        if step_run_hash == run_hash {
+            violations.push(Violation {
+                index,
+                code: "run_terminal_with_open_step",
             });
         }
     }
@@ -1348,6 +2069,110 @@ mod tests {
         assert!(!serde_json::to_string(&output)
             .expect("json")
             .contains("omit-me"));
+    }
+
+    #[test]
+    fn valid_non_object_state_snapshots_are_accepted() {
+        for snapshot in [
+            Value::Null,
+            json!(["private", "state"]),
+            json!("private-state"),
+            json!(42),
+            json!(true),
+        ] {
+            let mut input = fixture(COMPLETE_TEXT);
+            input["events"]
+                .as_array_mut()
+                .expect("events")
+                .insert(1, json!({"type": "STATE_SNAPSHOT", "snapshot": snapshot}));
+            let output = project_ag_ui_readonly(&input).expect("valid state snapshot");
+            assert_eq!(output["claims"]["stream_complete"], true);
+            assert_eq!(output["observations"]["state_snapshot_keys"], 0);
+        }
+    }
+
+    #[test]
+    fn malformed_known_event_fields_fail_closed() {
+        for malformed in [
+            json!({"type": "TEXT_MESSAGE_START", "messageId": "m", "role": "tool"}),
+            json!({"type": "REASONING_MESSAGE_START", "messageId": "r"}),
+            json!({
+                "type": "REASONING_ENCRYPTED_VALUE",
+                "subtype": "unknown",
+                "entityId": "r",
+                "encryptedValue": "private"
+            }),
+            json!({"type": "TEXT_MESSAGE_END", "messageId": "m", "timestamp": "now"}),
+        ] {
+            let mut input = fixture(COMPLETE_TEXT);
+            input["events"]
+                .as_array_mut()
+                .expect("events")
+                .insert(1, malformed);
+            assert!(matches!(
+                project_ag_ui_readonly(&input),
+                Err(AgUiProjectionError::InvalidEventField { .. })
+            ));
+        }
+
+        let mut malformed_snapshot = fixture(COMPLETE_TEXT);
+        malformed_snapshot["events"]
+            .as_array_mut()
+            .expect("events")
+            .insert(
+                1,
+                json!({"type": "MESSAGES_SNAPSHOT", "messages": [{"role": "user"}]}),
+            );
+        assert!(matches!(
+            project_ag_ui_readonly(&malformed_snapshot),
+            Err(AgUiProjectionError::InvalidEventField { .. })
+        ));
+
+        let mut malformed_input = fixture(COMPLETE_TEXT);
+        malformed_input["events"][0]["input"] = json!({
+            "messages": [],
+            "tools": [],
+            "context": []
+        });
+        assert!(matches!(
+            project_ag_ui_readonly(&malformed_input),
+            Err(AgUiProjectionError::InvalidEventField { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_tool_transitions_do_not_emit_normal_semantic_events() {
+        let output = project_ag_ui_readonly(&fixture(ADVERSARIAL)).expect("projection");
+        let actions = output["projected_events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .filter_map(|event| event["action"].as_str())
+            .collect::<Vec<_>>();
+        assert!(!actions.contains(&"request_closed"));
+        assert!(!actions.contains(&"result_observed"));
+        assert_eq!(output["claims"]["stream_complete"], false);
+    }
+
+    #[test]
+    fn step_ordering_is_fail_closed() {
+        let mut input = fixture(COMPLETE_TEXT);
+        input["events"].as_array_mut().expect("events").insert(
+            1,
+            json!({"type": "STEP_FINISHED", "stepName": "not-started"}),
+        );
+        let output = project_ag_ui_readonly(&input).expect("projection");
+        assert!(output["violations"]
+            .as_array()
+            .expect("violations")
+            .iter()
+            .any(|violation| violation["code"] == "step_finish_before_start"));
+        assert!(!output["projected_events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .any(|event| event["action"] == "step_closed"));
+        assert_eq!(output["claims"]["stream_complete"], false);
     }
 
     #[test]

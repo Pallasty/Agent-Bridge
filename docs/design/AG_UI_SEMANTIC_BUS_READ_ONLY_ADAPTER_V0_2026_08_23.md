@@ -1,7 +1,7 @@
 # AG-UI -> Semantic System Bus Read-Only Adapter v0
 
 - Date: 2026-08-23
-- Status: pure implementation candidate; no MCP or runtime wiring
+- Status: hardened pure implementation candidate; no MCP or runtime wiring
 - External wire pin: `@ag-ui/core@0.0.57`
 - External source pin: `ag-ui-protocol/ag-ui@54f13419055b4d0f442c71e1efab18b310982ce1`
 - Reference consumer: `CopilotKit/OpenBot@2251ad266406ec8212235adba365d2c478437a0c`
@@ -143,6 +143,10 @@ Violations include:
 An incomplete batch is allowed but must set `stream_complete=false`. It may not emit
 `all_actions_traceable=true`.
 
+Invalid tool-call transitions record a violation but do not emit the corresponding normal semantic
+event. In particular, an end before start does not emit `request_closed`, and a result before end
+does not emit `result_observed`. Step start/finish pairs follow the same fail-closed rule.
+
 ## SSB projection shape
 
 When a lifecycle or tool event is projected, it uses the existing Semantic System Bus vocabulary:
@@ -181,7 +185,9 @@ The v0 projector returns these shapes in memory only. It must not call
 - IDs are domain-separated SHA-256 values such as
   `sha256("ag-ui/v0/tool-call" || 0x00 || raw_id)`.
 - Hashes provide correlation inside the supplied batch; they grant no identity, lease, or policy
-  authority.
+  authority. The v0 hashes are deterministic and unkeyed, so equal low-entropy identifiers can also
+  be correlated or guessed across batches. They are pseudonymous correlation metadata, not an
+  anonymization or confidentiality boundary.
 - AG-UI `forwardedProps` is outside v0. It can contain deployment assertions and must not be treated
   as trusted without a separately designed verifier.
 - AB's A2A AgentCard remains discovery metadata. It does not authenticate an AG-UI stream.
@@ -249,7 +255,11 @@ independent review may admit a read-only MCP wrapper only after the pure tests a
 - input/output paths are `serde_json::Value` in memory only;
 - output identifiers are domain-separated SHA-256 hashes;
 - canonical receipt encoding uses the repository's RFC 8785/JCS canonicalizer;
-- focused unit gate: 10 passed, 0 failed;
+- known AG-UI event shapes are validated against the pinned 0.0.57 field contract before
+  projection; malformed known events fail the whole batch;
+- `STATE_SNAPSHOT.snapshot` accepts any JSON value, matching the pinned `StateSchema`;
+- invalid tool and step transitions produce violations without normal semantic events;
+- focused unit gate: 14 passed, 0 failed;
 - `mcp_tools.rs`, store adapters, policy, leases, transports, process control, browser, and mobile
   code are unchanged.
 
@@ -270,7 +280,7 @@ Not part of P1:
 
 ## Gate
 
-Current verdict: `P1_IMPLEMENTATION_CANDIDATE_READY_FOR_INDEPENDENT_REVIEW`.
+Current verdict: `P1_HARDENED_CANDIDATE_READY_FOR_READ_ONLY_REVIEW`.
 
 The next gate is independent review of mapping fidelity, content minimization, ordering rules, and
 the assertion that no AG-UI lifecycle event can be laundered into a verified real-world outcome.
