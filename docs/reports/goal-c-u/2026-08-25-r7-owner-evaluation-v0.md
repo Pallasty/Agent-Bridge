@@ -4,8 +4,9 @@ Date: 2026-08-25 (America/Los_Angeles)
 
 Status: contract, source, automated tests, debug CLI, isolated real-provider
 technical fixture, merge, installed-binary deployment, and one owner-visible
-unevaluated wake passed. The explicit owner product label is the only remaining
-gate; no such label is claimed by this record.
+wake passed. The owner explicitly labeled that production result `useful`; its
+private hash-bound receipt and idempotent replay passed. R7-E1 is closed with a
+positive M1 value signal. M2 remains unadmitted.
 
 ## Measured gap
 
@@ -122,7 +123,7 @@ its SHA-256 was
   Resident root and wake directory enforce 0700, and journal records/lock
   enforce 0600.
 
-## Owner-visible unevaluated wake
+## Owner-visible wake and explicit evaluation
 
 Installed wake `wake-ef3781a1c2fe8366bd31a421a8b1a6ae` completed in 24,159 ms
 as `respond`. The provider observed zero tool events, exited with code 0, and
@@ -135,12 +136,24 @@ three facts without changing the reflection itself.
 The wake journal SHA-256 is
 `804b2bda98e116004dbc874d26a3045b0e6cd8199ea02fcf99eef3eed8a339cf`.
 Full-text inspection found no raw event in the private state root or SQLite
-files. No evaluation receipt exists for this wake, and its sleep digest remains
-`owner_acceptance="unknown"`.
+files. Before owner review, no evaluation receipt existed for this wake and its
+sleep digest correctly remained `owner_acceptance="unknown"`.
 
-## Remaining owner gate
+After the four fixed labels were explained, the owner explicitly replied
+`useful`. The installed command recorded
+`evaluation-9967b2b94a90ed4368c42414a35867f9`, binding the completed wake,
+Resident subject, cognition-final SHA-256, execution-receipt SHA-256, and
+`respond` disposition. All four binding checks were true. The evaluation
+directory is 0700; the receipt is 0600 with one link, no temporary file
+remained, and receipt SHA-256 is
+`362067f7a1960490b2c4887c4d307424b27d7ad74ad200d5bfca3bd94141a601`.
+Repeating the exact label returned `already_recorded` with the same evaluation
+ID.
 
-Present the installed result and wake ID to the owner. Only the owner's
-subsequent explicit `useful`, `neutral`, `distracting`, or `harmful` answer may
-be written to the production evaluation receipt. Until then, product value and
-M2 admission remain unknown/closed.
+## Product decision
+
+`useful` records a positive M1 value signal with no stop rule. Its fixed next
+gate is `owner_review_of_separate_m2_shadow_design_only`. It does not admit M2,
+schedule a wake, execute an action, promote memory, or change runtime state.
+Any M2 design or implementation therefore remains a separate future owner
+decision.
