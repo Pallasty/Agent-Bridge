@@ -2,7 +2,10 @@
 
 Status: owner-reopened bounded design and implementation lane, 2026-08-25.
 Source, test, installed-binary, and live acceptance are separate claims. This
-document authorizes only M0 and M1 below.
+document authorizes only M0 and M1 below. On 2026-08-25 the owner also replaced
+the earlier strict-isolation proposal with the loss-tolerant risk profile
+defined below; this sentence is an authorization and source-design claim, not
+an installed-binary claim.
 
 ## Decision
 
@@ -215,9 +218,10 @@ interactive Codex session remaining alive?**
    continuity kernel, and acquires the subject's single-writer lease.
 3. AB creates the immutable `WakePacket` and invokes `codex exec` as an
    ephemeral cognitive provider.
-4. The provider runs with user configuration ignored, a read-only sandbox, no
-   interactive TUI, a time limit, a strict output schema, and the prompt on
-   standard input rather than the process argument list.
+4. The provider runs with user configuration ignored, a read-only inner
+   sandbox inside AB's read-only outer host envelope, no interactive TUI, a
+   time limit, a strict output schema, and the prompt on standard input rather
+   than the provider process argument list.
 5. AB validates the result schema and its wake/subject binding. Invalid,
    timed-out, or mismatched output becomes a failed run receipt and cannot
    advance continuity.
@@ -255,6 +259,62 @@ following:
 Source tests and synthetic fixtures support this gate but do not replace the
 live owner-local sequence.
 
+### Owner-authorized loss-tolerant risk profile (2026-08-25)
+
+The owner clarified that this current node has no confidentiality requirement
+for Resident cognition and accepts crashes, timeouts, resource exhaustion, and
+other failures that are recoverable without permanent system damage. Those
+conditions are therefore observable quality signals, not live-admission
+blockers. Raw event text is visible to the selected provider and is initially
+present in the owner-invoked AB command line; AB's dedicated durable event
+field still stores only a hash to keep state bounded, not to claim privacy.
+
+The remaining fail-closed boundary is deliberately narrower: Resident may not
+cause irreversible host/data loss, persistent system corruption, account
+mutation, public communication, or other external mutation. The source
+implementation enforces that boundary by the controls below. The one requested
+provider inference and its bounded auth/transport/token use are intentional;
+“no external mutation authority” means no external action tool or account/data
+mutation beyond that inference call.
+
+- accepting only the explicitly pinned native provider content hash, copied
+  and re-hashed into a private per-run snapshot before execution;
+- launching that snapshot through trusted `/usr/bin/bwrap` with no original
+  workspace mount and a read-only host view; the only writable host binding is
+  a private temporary output directory, while `/tmp`, `/run`, `/home`, the
+  empty workspace, and mount-point directories are isolated ephemeral
+  namespace storage; capabilities are dropped and process/IPC/UTS/cgroup
+  namespaces are isolated;
+- copying only Codex authentication into the ephemeral provider home rather
+  than loading AB's shared service credentials;
+- ignoring user configuration and rules and explicitly disabling MCP, apps,
+  browser/computer, goals, in-app update/chat/dictation, guardian approval,
+  remote-plugin, dependency-install, elicitation, shell, code-mode,
+  multi-agent/collaboration, steering, and web-search surfaces; and
+- retaining a deadline, process-group cleanup, bounded output, schema and
+  identity validation, and receipts as recovery/diagnostic controls rather
+  than pretending that recoverable failure is impossible.
+
+The earlier seven strict blockers are reclassified as follows: positive proof
+of an empty provider tool manifest is mitigated only where an external write
+could become irreversible; provider/privacy separation and credential secrecy
+are waived; minimal mount/seccomp proof is replaced by the complete read-only
+outer persistence envelope; zero-process/cgroup proof is waived in favor of
+bounded cleanup; provider-content pinning remains required; and a fully atomic
+cross-store subject CAS remains follow-up reconciliation work because M1 is
+advisory-only, retains the original evidence, detects replay, and cannot
+execute or schedule an effect. `strict_profile_admitted` therefore remains
+false; the separately named `loss_tolerant_irreversible_damage_v0` profile may
+be admitted only when its preflight verifies the pinned provider and outer
+envelope.
+
+This policy follows the supported Codex controls rather than assuming an
+implicit security boundary: `approval_policy`, `sandbox_mode`, `web_search`,
+feature flags, and MCP configuration are documented in the official
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
+with the sandbox model described in the official
+[sandboxing guide](https://learn.chatgpt.com/docs/sandboxing).
+
 ### Implemented M1 mapping (2026-08-25)
 
 The admitted owner-local surface is:
@@ -274,17 +334,19 @@ official model guide positions it for efficient, high-volume work; model and
 effort remain explicit provenance rather than resident identity. See
 <https://developers.openai.com/api/docs/guides/latest-model>.
 
-The broker launches `codex exec` with strict config, user config and rules
-ignored, hooks and model-facing tool features disabled, an ephemeral session,
-the read-only sandbox, approval policy `never`, the prompt on stdin, and a
-strict output schema. Its environment is allowlisted instead of inherited;
-AB service credentials are not forwarded. Codex transport still receives the
-local auth/home variables it needs to contact the provider, so the receipt
-does not claim that the provider process performed no host reads or network
-transport. It proves the narrower facts AB observed: requested tool features
-were disabled, no provider tool event appeared in audited JSONL, the result
-matched the schema and wake/subject binding, and the complete child process
-group exited.
+The broker launches a hash-pinned native `codex exec` snapshot with strict
+config, user config and rules ignored, hooks and model-facing action features
+disabled, an ephemeral session, inner and outer read-only bounds, approval
+policy `never`, web search disabled, the prompt on stdin, and a strict output
+schema. Its environment is allowlisted instead of inherited; AB service
+credentials are not forwarded. Codex transport receives only the ephemeral
+home/auth material needed to contact the provider, and network transport plus
+provider disclosure are explicitly accepted by this owner-local profile. The
+receipt proves the narrower facts AB can observe: expected and observed native
+content hashes matched, the compiled invocation denied external mutation,
+requested action features were disabled, provider events were audited, the
+result matched the schema and wake/subject binding, and the complete child
+process group exited or entered the recorded recoverable-failure path.
 
 The event ID deterministically derives an opaque wake ID. A private
 `create_new` journal refuses replay across process restarts, while a
@@ -441,7 +503,8 @@ Stop the lane and preserve evidence if any of these occurs:
 - a timed-out or mismatched result advances continuity;
 - concurrent wakes produce competing authoritative digests;
 - the cognitive child or expression path persists after the bounded run;
-- raw private context appears in identifiers or default durable receipts;
+- the provider gains a host persistence path, external mutation authority, or
+  runs with content different from the pinned native hash;
 - M1 adds owner ceremony without reducing repeated context restatement; or
 - the owner labels the resident behavior distracting or harmful.
 

@@ -48,6 +48,78 @@ if [ -z "${AGENT_BRIDGE_CLAUDE_BIN:-}" ] && [ -x "$HOME/.local/bin/claude" ]; th
     export AGENT_BRIDGE_CLAUDE_BIN="$HOME/.local/bin/claude"
 fi
 
+# Resident cognition is handled before the shared credential notebook. The
+# provider receives only an ephemeral copy of Codex auth inside the Rust
+# broker's outer read-only envelope, so loading unrelated service tokens into
+# this parent adds no value. Parse only the three path keys Resident needs;
+# never source or eval the owner-controlled machine file on this path.
+resident_machine_value() {
+    local key="$1"
+    local raw="$2"
+    local prefix
+    case "$raw" in
+        \"*\") raw="${raw#\"}"; raw="${raw%\"}" ;;
+        \'*\') raw="${raw#\'}"; raw="${raw%\'}" ;;
+    esac
+    prefix='${'"$key"':-'
+    case "$raw" in
+        "$prefix"*'}') raw="${raw#"$prefix"}"; raw="${raw%\}}" ;;
+    esac
+    case "$raw" in
+        /*) printf '%s' "$raw" ;;
+    esac
+}
+
+load_resident_machine_paths() {
+    local resident_machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}"
+    local line key raw value
+    [ -f "$resident_machine_env" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            'export AGENT_BRIDGE_STATE_DIR='*) key="AGENT_BRIDGE_STATE_DIR" ;;
+            'export AB_APP_CONTROL_OPERATION_DIR='*) key="AB_APP_CONTROL_OPERATION_DIR" ;;
+            'export AB_RESIDENT_CODEX_BIN='*) key="AB_RESIDENT_CODEX_BIN" ;;
+            *) continue ;;
+        esac
+        raw="${line#*=}"
+        value="$(resident_machine_value "$key" "$raw")"
+        [ -n "$value" ] || continue
+        case "$key" in
+            AGENT_BRIDGE_STATE_DIR)
+                [ -n "${AGENT_BRIDGE_STATE_DIR:-}" ] || export AGENT_BRIDGE_STATE_DIR="$value"
+                ;;
+            AB_APP_CONTROL_OPERATION_DIR)
+                [ -n "${AB_APP_CONTROL_OPERATION_DIR:-}" ] || export AB_APP_CONTROL_OPERATION_DIR="$value"
+                ;;
+            AB_RESIDENT_CODEX_BIN)
+                [ -n "${AB_RESIDENT_CODEX_BIN:-}" ] || export AB_RESIDENT_CODEX_BIN="$value"
+                ;;
+        esac
+    done < "$resident_machine_env"
+}
+
+if [ "${1:-}" = "resident" ]; then
+    load_resident_machine_paths
+    if [ -z "${AGENT_BRIDGE_STATE_DIR:-}" ] && [ -n "${AB_APP_CONTROL_OPERATION_DIR:-}" ]; then
+        resident_app_control_state="${AB_APP_CONTROL_OPERATION_DIR%/}"
+        case "$resident_app_control_state" in
+            /*/app_control_operations)
+                export AGENT_BRIDGE_STATE_DIR="${resident_app_control_state%/app_control_operations}"
+                ;;
+        esac
+    fi
+    if [ -z "${AB_RESIDENT_CODEX_BIN:-}" ]; then
+        for resident_codex_candidate in \
+            "$HOME"/.local/opt/node-*/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+        do
+            [ -f "$resident_codex_candidate" ] || continue
+            export AB_RESIDENT_CODEX_BIN="$resident_codex_candidate"
+            break
+        done
+    fi
+    exec "$real_bin" "$@"
+fi
+
 if [ -f "$creds" ]; then
     # ----- Tailscale OAuth (Section: # Tailscale API) -----
     tailscale_id=$(awk '

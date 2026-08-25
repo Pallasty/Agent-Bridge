@@ -149,8 +149,9 @@ enum Cmd {
     /// Run bounded Resident Xiao Shu cognition.
     ///
     /// V0 is explicit, one-shot, read-only, and advisory-only. Agent-Bridge
-    /// owns the durable subject receipt; Codex runs ephemerally without the
-    /// user's config or MCP surface and exits after one schema-bound response.
+    /// owns the durable subject receipt; the owner accepts disclosure and
+    /// recoverable-failure risk, while irreversible host or external mutation
+    /// remains denied by the loss-tolerant provider envelope.
     Resident {
         #[command(subcommand)]
         op: ResidentOp,
@@ -854,15 +855,28 @@ enum InstinctOp {
 
 #[derive(Subcommand, Debug)]
 enum ResidentOp {
+    /// Inspect the owner-approved loss-tolerant live admission policy without
+    /// starting a provider, reading provider auth, or writing Resident state.
+    RiskPreflight {
+        /// Candidate native Codex executable. The file must match AB's pinned
+        /// content hash; AB_RESIDENT_CODEX_BIN is used at the default value.
+        #[arg(long, default_value = "codex")]
+        codex_bin: PathBuf,
+        /// Emit the structured report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Analyze one observed event without executing or scheduling the advice.
     Cognition {
-        /// Untrusted observed event to analyze. The raw value is not persisted.
+        /// Untrusted observed event to analyze. It is visible to the provider
+        /// and host argv; AB stores only its hash as a dedicated event field.
         #[arg(long)]
         event: String,
         /// Stable caller identity for the event. Generated when omitted.
         #[arg(long)]
         event_id: Option<String>,
-        /// Read-only workspace visible to Codex.
+        /// Workspace identity recorded by AB. The permanent-damage envelope
+        /// does not mount this host directory into the provider.
         #[arg(long, default_value = ".")]
         cwd: PathBuf,
         /// Efficient model used by the ephemeral cognition provider.
@@ -874,8 +888,8 @@ enum ResidentOp {
         /// Hard wall-clock limit for the provider (10..=120 seconds).
         #[arg(long, default_value_t = ab_bridge::resident_cognition::DEFAULT_TIMEOUT_SECS)]
         timeout_secs: u64,
-        /// Codex executable override. AB_RESIDENT_CODEX_BIN is used when this
-        /// argument stays at its default.
+        /// Native Codex executable candidate. AB_RESIDENT_CODEX_BIN is used at
+        /// the default; live use accepts only AB's pinned content hash.
         #[arg(long, default_value = "codex")]
         codex_bin: PathBuf,
         /// Emit the exact bounded launch contract without starting Codex or
@@ -5174,6 +5188,26 @@ async fn real_main() -> Result<()> {
     // parent CLI supports other integrations.
     if let Cmd::Resident { op } = &cmd {
         return match op {
+            ResidentOp::RiskPreflight { codex_bin, json } => {
+                let configured_bin = if codex_bin == Path::new("codex") {
+                    std::env::var_os("AB_RESIDENT_CODEX_BIN")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| codex_bin.clone())
+                } else {
+                    codex_bin.clone()
+                };
+                let report =
+                    ab_bridge::resident_risk_policy::resident_risk_preflight(&configured_bin);
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!(
+                        "{}",
+                        ab_bridge::resident_risk_policy::render_resident_risk_preflight(&report)
+                    );
+                }
+                Ok(())
+            }
             ResidentOp::Cognition {
                 event,
                 event_id,
@@ -5197,6 +5231,16 @@ async fn real_main() -> Result<()> {
                 // clap default remains untouched.
                 if codex_bin != Path::new("codex") {
                     options.codex_bin = codex_bin.clone();
+                }
+
+                // Keep the irreversible-damage gate ahead of SQLite and the
+                // Resident journal. The cognition module repeats this check so
+                // direct library callers cannot bypass it.
+                if !*dry_run {
+                    ab_bridge::resident_risk_policy::require_owner_loss_tolerant_admission(
+                        &options.codex_bin,
+                    )
+                    .map_err(anyhow::Error::msg)?;
                 }
 
                 let store = if *dry_run {
@@ -21643,6 +21687,51 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resident_loss_tolerant_cli_is_unambiguous() {
+        // Clap materializes this binary's large command tree. Keep the parser
+        // assertion on an explicit stack instead of depending on the smaller
+        // default Rust test-worker stack.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let preflight = Cli::try_parse_from([
+                    "agent-bridge",
+                    "resident",
+                    "risk-preflight",
+                    "--codex-bin",
+                    "/opt/agent-bridge/codex",
+                    "--json",
+                ])
+                .expect("resident risk preflight should parse");
+                assert!(matches!(
+                    preflight.cmd,
+                    Some(Cmd::Resident {
+                        op: ResidentOp::RiskPreflight { json: true, .. }
+                    })
+                ));
+
+                let cognition = Cli::try_parse_from([
+                    "agent-bridge",
+                    "resident",
+                    "cognition",
+                    "--event",
+                    "bounded event",
+                    "--dry-run",
+                ])
+                .expect("resident cognition should remain compatible");
+                assert!(matches!(
+                    cognition.cmd,
+                    Some(Cmd::Resident {
+                        op: ResidentOp::Cognition { dry_run: true, .. }
+                    })
+                ));
+            })
+            .expect("spawn resident parser test")
+            .join()
+            .expect("resident parser test thread");
+    }
 
     fn test_focus_observer_tree() -> serde_json::Value {
         serde_json::json!({

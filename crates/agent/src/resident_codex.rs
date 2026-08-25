@@ -12,9 +12,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -25,6 +25,17 @@ use tokio::process::{Child, Command};
 
 pub const RESIDENT_CODEX_RECEIPT_SCHEMA_V0: &str =
     "agent_bridge.resident_codex_execution_receipt.v0";
+pub const RESIDENT_CODEX_RECEIPT_SCHEMA_V1: &str =
+    "agent_bridge.resident_codex_execution_receipt.v1";
+pub const RESIDENT_CODEX_NATIVE_SHA256_V0: &str =
+    "73dc5888888f411c1f0fa7b81d866e721dcc86b527ce8e3b2cf4708661e823ba";
+const RESIDENT_BWRAP_BINARY: &str = "/usr/bin/bwrap";
+const SANDBOX_PROVIDER_PATH: &str = "/opt/agent-bridge/codex";
+const SANDBOX_WORKSPACE_PATH: &str = "/workspace";
+const SANDBOX_OUTPUT_PATH: &str = "/output";
+const SANDBOX_HOME_PATH: &str = "/home/resident";
+const SANDBOX_CODEX_HOME_PATH: &str = "/home/resident/.codex";
+const AUTH_MAX_BYTES: u64 = 1_048_576;
 pub const DEFAULT_PROMPT_MAX_BYTES: usize = 65_536;
 pub const DEFAULT_SCHEMA_MAX_BYTES: usize = 65_536;
 pub const DEFAULT_FINAL_MAX_BYTES: usize = 32_768;
@@ -41,11 +52,36 @@ pub const RESIDENT_DISABLED_PROVIDER_FEATURES: &[&str] = &[
     "code_mode_host",
     "js_repl",
     "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "in_app_browser",
     "computer_use",
     "image_generation",
     "view_image",
     "apps",
     "plugins",
+    "remote_plugin",
+    "plugin_sharing",
+    "recommended_plugins",
+    "enable_mcp_apps",
+    "mcp_2026_07_28",
+    "auth_elicitation",
+    "tool_call_mcp_elicitation",
+    "skill_env_var_dependency_prompt",
+    "skill_mcp_dependency_install",
+    "skill_search",
+    "tool_suggest",
+    "workspace_dependencies",
+    "request_permissions_tool",
+    "external_agent_memory_import",
+    "memories",
+    "goals",
+    "guardian_approval",
+    "in_app_chat",
+    "in_app_dictation",
+    "in_app_updates",
+    "collaboration_modes",
+    "steer",
     "multi_agent",
     "multi_agent_v2",
 ];
@@ -66,6 +102,14 @@ pub enum ResidentCodexError {
     Busy,
     #[error("resident_codex_temporary_workspace_failed")]
     TemporaryWorkspaceFailed,
+    #[error("resident_codex_provider_content_pin_failed")]
+    ProviderContentPinFailed,
+    #[error("resident_codex_provider_content_hash_mismatch")]
+    ProviderContentHashMismatch,
+    #[error("resident_codex_provider_not_native")]
+    ProviderNotNative,
+    #[error("resident_codex_authentication_snapshot_failed")]
+    AuthenticationSnapshotFailed,
     #[error("resident_codex_spawn_failed")]
     SpawnFailed,
     #[error("resident_codex_stdin_failed")]
@@ -97,6 +141,7 @@ pub enum ResidentCodexError {
 #[derive(Debug, Clone)]
 pub struct ResidentCodexBrokerConfig {
     pub codex_binary: PathBuf,
+    pub expected_codex_sha256: String,
     pub lock_path: PathBuf,
     pub deadline: Duration,
     pub termination_grace: Duration,
@@ -108,9 +153,15 @@ pub struct ResidentCodexBrokerConfig {
 }
 
 impl ResidentCodexBrokerConfig {
-    pub fn new(codex_binary: PathBuf, lock_path: PathBuf, deadline: Duration) -> Self {
+    pub fn new(
+        codex_binary: PathBuf,
+        expected_codex_sha256: String,
+        lock_path: PathBuf,
+        deadline: Duration,
+    ) -> Self {
         Self {
             codex_binary,
+            expected_codex_sha256,
             lock_path,
             deadline,
             termination_grace: Duration::from_secs(2),
@@ -123,8 +174,18 @@ impl ResidentCodexBrokerConfig {
     }
 
     fn validate(&self) -> Result<(), ResidentCodexError> {
-        if self.codex_binary.as_os_str().is_empty() {
+        if !self.codex_binary.is_absolute() {
             return Err(ResidentCodexError::InvalidConfiguration("codex_binary"));
+        }
+        if self.expected_codex_sha256.len() != 64
+            || !self
+                .expected_codex_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err(ResidentCodexError::InvalidConfiguration(
+                "expected_codex_sha256",
+            ));
         }
         if !self.lock_path.is_absolute() {
             return Err(ResidentCodexError::InvalidConfiguration("lock_path"));
@@ -179,6 +240,15 @@ pub struct ResidentCodexExecutionReceipt {
     pub prompt_via_stdin: bool,
     pub output_schema_requested: bool,
     pub disabled_provider_features: Vec<String>,
+    pub expected_provider_sha256: String,
+    pub observed_provider_sha256: String,
+    pub provider_content_pinned: bool,
+    pub outer_host_filesystem: String,
+    pub private_ephemeral_output_writable: bool,
+    pub request_cwd_mounted: bool,
+    pub privacy_boundary_required: bool,
+    pub recoverable_failure_accepted: bool,
+    pub external_mutation_authority: bool,
     pub provider_event_stream_audited: bool,
     pub provider_tool_events_observed: usize,
     pub provider_fail_closed_diagnostics_observed: usize,
@@ -213,6 +283,13 @@ pub struct ResidentCodexInvocationContract {
     pub prompt_transport: &'static str,
     pub structured_output: bool,
     pub provider_tool_features_requested_disabled: bool,
+    pub provider_content_pinned: bool,
+    pub outer_host_filesystem: &'static str,
+    pub private_ephemeral_output_writable: bool,
+    pub request_cwd_mounted: bool,
+    pub privacy_boundary_required: bool,
+    pub recoverable_failure_accepted: bool,
+    pub external_mutation_authority: bool,
     pub provider_event_stream_policy: &'static str,
     pub persists_session: bool,
     pub executes_action: bool,
@@ -231,6 +308,13 @@ impl Default for ResidentCodexInvocationContract {
             prompt_transport: "stdin",
             structured_output: true,
             provider_tool_features_requested_disabled: true,
+            provider_content_pinned: true,
+            outer_host_filesystem: "read_only",
+            private_ephemeral_output_writable: true,
+            request_cwd_mounted: false,
+            privacy_boundary_required: false,
+            recoverable_failure_accepted: true,
+            external_mutation_authority: false,
             provider_event_stream_policy: "fail_closed_on_tool_or_unknown_event",
             persists_session: false,
             executes_action: false,
@@ -259,25 +343,90 @@ impl ResidentCodexBroker {
         request: ResidentCodexRequest,
     ) -> Result<ResidentCodexRun, ResidentCodexError> {
         self.validate_request(&request)?;
+        // Pin before acquiring the subject lock or creating the episode
+        // workspace. The configured path is only ever read; production never
+        // executes it, a shebang, or anything resolved through PATH.
+        let provider = pin_provider(
+            &self.config.codex_binary,
+            &self.config.expected_codex_sha256,
+            true,
+        )?;
+        self.run_pinned(request, provider, ResidentLauncher::Bubblewrap)
+            .await
+    }
+
+    /// Exercise the historical provider protocol with a deterministic fake.
+    /// This exists only in this module's tests; production has no direct-launch
+    /// branch and can execute only the native snapshot through `/usr/bin/bwrap`.
+    #[cfg(test)]
+    async fn run_unwrapped_fixture(
+        &self,
+        request: ResidentCodexRequest,
+    ) -> Result<ResidentCodexRun, ResidentCodexError> {
+        self.validate_request(&request)?;
+        let provider = pin_provider(
+            &self.config.codex_binary,
+            &self.config.expected_codex_sha256,
+            false,
+        )?;
+        self.run_pinned(request, provider, ResidentLauncher::DirectFixture)
+            .await
+    }
+
+    async fn run_pinned(
+        &self,
+        request: ResidentCodexRequest,
+        provider: PinnedProvider,
+        launcher: ResidentLauncher,
+    ) -> Result<ResidentCodexRun, ResidentCodexError> {
         let _lock = HostLock::acquire(&self.config.lock_path)?;
+        #[cfg(test)]
+        EPISODE_TEMP_ATTEMPTED.with(|attempted| attempted.set(true));
         let temporary = TempDirBuilder::new()
             .prefix("agent-bridge-resident-codex-")
             .tempdir()
             .map_err(|_| ResidentCodexError::TemporaryWorkspaceFailed)?;
-        let schema_path = temporary.path().join("intent.schema.json");
-        let final_path = temporary.path().join("final.json");
+        let output_directory = temporary.path().join("output");
+        std::fs::create_dir(&output_directory)
+            .map_err(|_| ResidentCodexError::TemporaryWorkspaceFailed)?;
+        std::fs::set_permissions(&output_directory, std::fs::Permissions::from_mode(0o700))
+            .map_err(|_| ResidentCodexError::TemporaryWorkspaceFailed)?;
+        let schema_path = output_directory.join("intent.schema.json");
+        let final_path = output_directory.join("final.json");
         write_private_new(&schema_path, &request.output_schema)?;
         write_private_new(&final_path, b"")?;
 
-        let mut command = Command::new(&self.config.codex_binary);
+        let production_envelope = matches!(launcher, ResidentLauncher::Bubblewrap);
+        let mut command = match launcher {
+            ResidentLauncher::Bubblewrap => {
+                let auth_snapshot = snapshot_auth_json(temporary.path())?;
+                let mut command = Command::new(RESIDENT_BWRAP_BINARY);
+                command
+                    .args(self.bubblewrap_args(
+                        &request,
+                        provider.path(),
+                        &auth_snapshot,
+                        &output_directory,
+                    ))
+                    .current_dir("/");
+                configure_outer_environment(&mut command);
+                command
+            }
+            #[cfg(test)]
+            ResidentLauncher::DirectFixture => {
+                let mut command = Command::new(provider.path());
+                command
+                    .args(self.provider_args(&request, &schema_path, &final_path, &request.cwd))
+                    .current_dir(&request.cwd);
+                configure_fixture_environment(&mut command);
+                command
+            }
+        };
         command
-            .args(self.command_args(&request, &schema_path, &final_path))
-            .current_dir(&request.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        configure_resident_environment(&mut command);
         configure_process_group(&mut command);
 
         let started = Instant::now();
@@ -359,7 +508,7 @@ impl ResidentCodexBroker {
         Ok(ResidentCodexRun {
             final_json,
             execution: ResidentCodexExecutionReceipt {
-                schema_version: RESIDENT_CODEX_RECEIPT_SCHEMA_V0.to_string(),
+                schema_version: RESIDENT_CODEX_RECEIPT_SCHEMA_V1.to_string(),
                 wake_id: request.wake_id,
                 cognitive_episode_id: request.cognitive_episode_id,
                 resident_id: request.resident_id,
@@ -376,6 +525,19 @@ impl ResidentCodexBroker {
                     .iter()
                     .map(|feature| (*feature).to_string())
                     .collect(),
+                expected_provider_sha256: self.config.expected_codex_sha256.clone(),
+                observed_provider_sha256: provider.observed_sha256.clone(),
+                provider_content_pinned: true,
+                outer_host_filesystem: if production_envelope {
+                    "read_only".to_string()
+                } else {
+                    "test_fixture_unwrapped".to_string()
+                },
+                private_ephemeral_output_writable: true,
+                request_cwd_mounted: !production_envelope,
+                privacy_boundary_required: false,
+                recoverable_failure_accepted: true,
+                external_mutation_authority: false,
                 provider_event_stream_audited: true,
                 provider_tool_events_observed: 0,
                 provider_fail_closed_diagnostics_observed: event_audit.fail_closed_diagnostics,
@@ -432,11 +594,12 @@ impl ResidentCodexBroker {
         Ok(())
     }
 
-    fn command_args(
+    fn provider_args(
         &self,
         request: &ResidentCodexRequest,
         schema_path: &Path,
         final_path: &Path,
+        workspace_path: &Path,
     ) -> Vec<OsString> {
         let mut args = vec![
             OsString::from("exec"),
@@ -448,10 +611,13 @@ impl ResidentCodexBroker {
             OsString::from("read-only"),
             OsString::from("-c"),
             OsString::from("approval_policy=\"never\""),
+            OsString::from("-c"),
+            OsString::from("web_search=\"disabled\""),
             OsString::from("--color"),
             OsString::from("never"),
+            OsString::from("--skip-git-repo-check"),
             OsString::from("-C"),
-            request.cwd.as_os_str().to_os_string(),
+            workspace_path.as_os_str().to_os_string(),
             OsString::from("--output-schema"),
             schema_path.as_os_str().to_os_string(),
             OsString::from("--output-last-message"),
@@ -474,6 +640,297 @@ impl ResidentCodexBroker {
         }
         args.push(OsString::from("-"));
         args
+    }
+
+    fn bubblewrap_args(
+        &self,
+        request: &ResidentCodexRequest,
+        provider_snapshot: &Path,
+        auth_snapshot: &Path,
+        output_directory: &Path,
+    ) -> Vec<OsString> {
+        let mut args = vec![
+            OsString::from("--die-with-parent"),
+            OsString::from("--new-session"),
+            OsString::from("--unshare-user"),
+            OsString::from("--unshare-pid"),
+            OsString::from("--unshare-ipc"),
+            OsString::from("--unshare-uts"),
+            OsString::from("--unshare-cgroup"),
+            OsString::from("--hostname"),
+            OsString::from("resident-cognition"),
+            OsString::from("--cap-drop"),
+            OsString::from("ALL"),
+            OsString::from("--clearenv"),
+            OsString::from("--setenv"),
+            OsString::from("HOME"),
+            OsString::from(SANDBOX_HOME_PATH),
+            OsString::from("--setenv"),
+            OsString::from("CODEX_HOME"),
+            OsString::from(SANDBOX_CODEX_HOME_PATH),
+            OsString::from("--setenv"),
+            OsString::from("TMPDIR"),
+            OsString::from("/tmp"),
+            OsString::from("--setenv"),
+            OsString::from("PATH"),
+            OsString::from("/opt/agent-bridge"),
+            OsString::from("--setenv"),
+            OsString::from("LANG"),
+            OsString::from("C.UTF-8"),
+            OsString::from("--setenv"),
+            OsString::from("NO_COLOR"),
+            OsString::from("1"),
+            OsString::from("--setenv"),
+            OsString::from("SSL_CERT_DIR"),
+            OsString::from("/etc/ssl/certs"),
+        ];
+        append_proxy_environment(&mut args);
+        args.extend([
+            OsString::from("--dev"),
+            OsString::from("/dev"),
+            OsString::from("--proc"),
+            OsString::from("/proc"),
+            OsString::from("--remount-ro"),
+            OsString::from("/proc"),
+            OsString::from("--tmpfs"),
+            OsString::from("/tmp"),
+            OsString::from("--tmpfs"),
+            OsString::from("/run"),
+            OsString::from("--tmpfs"),
+            OsString::from("/home"),
+            OsString::from("--dir"),
+            OsString::from(SANDBOX_HOME_PATH),
+            OsString::from("--dir"),
+            OsString::from(SANDBOX_CODEX_HOME_PATH),
+            OsString::from("--dir"),
+            OsString::from(SANDBOX_WORKSPACE_PATH),
+            OsString::from("--dir"),
+            OsString::from("/opt"),
+            OsString::from("--dir"),
+            OsString::from("/opt/agent-bridge"),
+            OsString::from("--dir"),
+            OsString::from("/etc"),
+            OsString::from("--dir"),
+            OsString::from("/etc/ssl"),
+            OsString::from("--ro-bind-try"),
+            OsString::from("/etc/ssl/certs"),
+            OsString::from("/etc/ssl/certs"),
+            OsString::from("--ro-bind-try"),
+            OsString::from("/etc/resolv.conf"),
+            OsString::from("/etc/resolv.conf"),
+            OsString::from("--ro-bind-try"),
+            OsString::from("/etc/hosts"),
+            OsString::from("/etc/hosts"),
+            OsString::from("--ro-bind-try"),
+            OsString::from("/etc/nsswitch.conf"),
+            OsString::from("/etc/nsswitch.conf"),
+            OsString::from("--ro-bind"),
+            provider_snapshot.as_os_str().to_os_string(),
+            OsString::from(SANDBOX_PROVIDER_PATH),
+            OsString::from("--ro-bind"),
+            auth_snapshot.as_os_str().to_os_string(),
+            OsString::from(format!("{SANDBOX_CODEX_HOME_PATH}/auth.json")),
+            OsString::from("--dir"),
+            OsString::from(SANDBOX_OUTPUT_PATH),
+            OsString::from("--bind"),
+            output_directory.as_os_str().to_os_string(),
+            OsString::from(SANDBOX_OUTPUT_PATH),
+            OsString::from("--chdir"),
+            OsString::from(SANDBOX_WORKSPACE_PATH),
+            OsString::from("--"),
+            OsString::from(SANDBOX_PROVIDER_PATH),
+        ]);
+        args.extend(self.provider_args(
+            request,
+            Path::new("/output/intent.schema.json"),
+            Path::new("/output/final.json"),
+            Path::new(SANDBOX_WORKSPACE_PATH),
+        ));
+        args
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static EPISODE_TEMP_ATTEMPTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[derive(Clone, Copy)]
+enum ResidentLauncher {
+    Bubblewrap,
+    #[cfg(test)]
+    DirectFixture,
+}
+
+struct PinnedProvider {
+    _temporary: tempfile::TempDir,
+    snapshot_path: PathBuf,
+    observed_sha256: String,
+}
+
+impl PinnedProvider {
+    fn path(&self) -> &Path {
+        &self.snapshot_path
+    }
+}
+
+fn pin_provider(
+    source_path: &Path,
+    expected_sha256: &str,
+    require_native: bool,
+) -> Result<PinnedProvider, ResidentCodexError> {
+    const PROVIDER_MAX_BYTES: u64 = 536_870_912;
+
+    let temporary = TempDirBuilder::new()
+        .prefix("agent-bridge-resident-provider-pin-")
+        .tempdir()
+        .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    let snapshot_path = temporary.path().join("codex.native");
+    let mut source = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(source_path)
+        .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    let metadata = source
+        .metadata()
+        .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > PROVIDER_MAX_BYTES {
+        return Err(ResidentCodexError::ProviderContentPinFailed);
+    }
+    let mut snapshot = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .open(&snapshot_path)
+        .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    let mut digest = Sha256::new();
+    let mut prefix = [0_u8; 4];
+    let mut prefix_length = 0_usize;
+    let mut copied = 0_u64;
+    let mut chunk = [0_u8; 64 * 1024];
+    loop {
+        let count = source
+            .read(&mut chunk)
+            .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+        if count == 0 {
+            break;
+        }
+        copied = copied.saturating_add(count as u64);
+        if copied > PROVIDER_MAX_BYTES {
+            return Err(ResidentCodexError::ProviderContentPinFailed);
+        }
+        if prefix_length < prefix.len() {
+            let prefix_count = (prefix.len() - prefix_length).min(count);
+            prefix[prefix_length..prefix_length + prefix_count]
+                .copy_from_slice(&chunk[..prefix_count]);
+            prefix_length += prefix_count;
+        }
+        digest.update(&chunk[..count]);
+        snapshot
+            .write_all(&chunk[..count])
+            .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    }
+    snapshot
+        .sync_all()
+        .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    let observed_sha256 = digest_to_hex(digest.finalize());
+    if observed_sha256 != expected_sha256 {
+        return Err(ResidentCodexError::ProviderContentHashMismatch);
+    }
+    if require_native && (prefix_length != prefix.len() || prefix != *b"\x7fELF") {
+        return Err(ResidentCodexError::ProviderNotNative);
+    }
+    std::fs::set_permissions(&snapshot_path, std::fs::Permissions::from_mode(0o500))
+        .map_err(|_| ResidentCodexError::ProviderContentPinFailed)?;
+    Ok(PinnedProvider {
+        _temporary: temporary,
+        snapshot_path,
+        observed_sha256,
+    })
+}
+
+fn snapshot_auth_json(episode_root: &Path) -> Result<PathBuf, ResidentCodexError> {
+    let source_path = resident_auth_source()?;
+    snapshot_auth_json_from(&source_path, episode_root)
+}
+
+fn snapshot_auth_json_from(
+    source_path: &Path,
+    episode_root: &Path,
+) -> Result<PathBuf, ResidentCodexError> {
+    let mut source = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(source_path)
+        .map_err(|_| ResidentCodexError::AuthenticationSnapshotFailed)?;
+    let metadata = source
+        .metadata()
+        .map_err(|_| ResidentCodexError::AuthenticationSnapshotFailed)?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > AUTH_MAX_BYTES {
+        return Err(ResidentCodexError::AuthenticationSnapshotFailed);
+    }
+    let destination_path = episode_root.join("auth.json");
+    let mut destination = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&destination_path)
+        .map_err(|_| ResidentCodexError::AuthenticationSnapshotFailed)?;
+    let mut copied = 0_u64;
+    let mut chunk = [0_u8; 8 * 1024];
+    loop {
+        let count = source
+            .read(&mut chunk)
+            .map_err(|_| ResidentCodexError::AuthenticationSnapshotFailed)?;
+        if count == 0 {
+            break;
+        }
+        copied = copied.saturating_add(count as u64);
+        if copied > AUTH_MAX_BYTES {
+            return Err(ResidentCodexError::AuthenticationSnapshotFailed);
+        }
+        destination
+            .write_all(&chunk[..count])
+            .map_err(|_| ResidentCodexError::AuthenticationSnapshotFailed)?;
+    }
+    destination
+        .sync_all()
+        .map_err(|_| ResidentCodexError::AuthenticationSnapshotFailed)?;
+    Ok(destination_path)
+}
+
+fn resident_auth_source() -> Result<PathBuf, ResidentCodexError> {
+    if let Some(codex_home) = std::env::var_os("CODEX_HOME") {
+        let codex_home = PathBuf::from(codex_home);
+        if !codex_home.is_absolute() {
+            return Err(ResidentCodexError::AuthenticationSnapshotFailed);
+        }
+        return Ok(codex_home.join("auth.json"));
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or(ResidentCodexError::AuthenticationSnapshotFailed)?;
+    Ok(home.join(".codex/auth.json"))
+}
+
+fn append_proxy_environment(args: &mut Vec<OsString>) {
+    const PROXY_ENVIRONMENT: &[&str] = &[
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ];
+    for name in PROXY_ENVIRONMENT {
+        if let Some(value) = std::env::var_os(name) {
+            args.push(OsString::from("--setenv"));
+            args.push(OsString::from(name));
+            args.push(value);
+        }
     }
 }
 
@@ -538,10 +995,16 @@ fn audit_provider_event_stream(stdout: &[u8]) -> Result<ProviderEventAudit, Resi
     })
 }
 
-/// Give the provider only the process environment needed to resolve the CLI,
-/// authenticate through CODEX_HOME, and establish TLS. Agent-Bridge service
-/// tokens and arbitrary caller environment do not cross the cognition boundary.
-fn configure_resident_environment(command: &mut Command) {
+/// Bubblewrap receives no caller environment. The small inner environment is
+/// passed as explicit `--setenv` arguments assembled by `bubblewrap_args`.
+fn configure_outer_environment(command: &mut Command) {
+    command.env_clear();
+}
+
+/// The direct launcher is test-only and preserves enough host environment for
+/// shell fixtures. It is absent from non-test builds.
+#[cfg(test)]
+fn configure_fixture_environment(command: &mut Command) {
     const ALLOWED: &[&str] = &[
         "PATH",
         "HOME",
@@ -579,8 +1042,6 @@ fn configure_resident_environment(command: &mut Command) {
 }
 
 fn write_private_new(path: &Path, bytes: &[u8]) -> Result<(), ResidentCodexError> {
-    use std::io::Write;
-
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -760,7 +1221,11 @@ fn signal_group(pid: u32, signal: libc::c_int) -> Result<(), ResidentCodexError>
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
+    digest_to_hex(Sha256::digest(bytes))
+}
+
+fn digest_to_hex(digest: impl AsRef<[u8]>) -> String {
+    let digest = digest.as_ref();
     let mut output = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write;
@@ -788,8 +1253,10 @@ mod tests {
     }
 
     fn broker_config(root: &Path, binary: PathBuf) -> ResidentCodexBrokerConfig {
+        let expected_sha256 = sha256_hex(&fs::read(&binary).unwrap());
         let mut config = ResidentCodexBrokerConfig::new(
             binary,
+            expected_sha256,
             root.join("resident.lock"),
             Duration::from_secs(2),
         );
@@ -837,7 +1304,7 @@ printf '%s\n' '{{"type":"turn.completed"}}'
         write_script(&script, &body);
         let broker = ResidentCodexBroker::new(broker_config(root.path(), script)).unwrap();
         let run = broker
-            .run(fake_request(root.path().canonicalize().unwrap()))
+            .run_unwrapped_fixture(fake_request(root.path().canonicalize().unwrap()))
             .await
             .unwrap();
 
@@ -848,6 +1315,7 @@ printf '%s\n' '{{"type":"turn.completed"}}'
         assert!(argv.contains("--ephemeral"));
         assert!(argv.contains("--sandbox\nread-only"));
         assert!(argv.contains("approval_policy=\"never\""));
+        assert!(argv.contains("web_search=\"disabled\""));
         assert!(argv.contains("--output-schema"));
         assert!(argv.contains("--output-last-message"));
         assert!(argv.contains("--json"));
@@ -858,11 +1326,20 @@ printf '%s\n' '{{"type":"turn.completed"}}'
         assert!(argv.ends_with("-\n"));
         assert!(!argv.contains("private resident packet"));
         assert!(!argv.contains("danger-full-access"));
-        assert!(!argv.contains("--skip-git-repo-check"));
+        assert!(argv.contains("--skip-git-repo-check"));
         assert_eq!(fs::read(stdin_log).unwrap(), b"private resident packet");
         assert_eq!(run.final_json["wake_id"], "wake-test");
         assert!(run.execution.user_config_ignored);
         assert!(run.execution.ephemeral);
+        assert_eq!(
+            run.execution.schema_version,
+            RESIDENT_CODEX_RECEIPT_SCHEMA_V1
+        );
+        assert!(run.execution.provider_content_pinned);
+        assert_eq!(
+            run.execution.expected_provider_sha256,
+            run.execution.observed_provider_sha256
+        );
         assert!(!run.execution.executes_action);
         assert!(!run.execution.grants_authority);
         assert!(run.execution.provider_event_stream_audited);
@@ -895,7 +1372,7 @@ printf 'not-json' > "$final"
         );
         let broker = ResidentCodexBroker::new(broker_config(root.path(), script)).unwrap();
         let error = broker
-            .run(fake_request(root.path().canonicalize().unwrap()))
+            .run_unwrapped_fixture(fake_request(root.path().canonicalize().unwrap()))
             .await
             .unwrap_err();
         assert!(matches!(error, ResidentCodexError::FinalInvalidJson));
@@ -916,7 +1393,7 @@ sleep 5
         config.deadline = Duration::from_millis(40);
         let broker = ResidentCodexBroker::new(config).unwrap();
         let error = broker
-            .run(fake_request(root.path().canonicalize().unwrap()))
+            .run_unwrapped_fixture(fake_request(root.path().canonicalize().unwrap()))
             .await
             .unwrap_err();
         assert!(matches!(error, ResidentCodexError::DeadlineExceeded));
@@ -938,7 +1415,7 @@ sleep 5
         let _held = HostLock::acquire(&config.lock_path).unwrap();
         let broker = ResidentCodexBroker::new(config).unwrap();
         let error = broker
-            .run(fake_request(root.path().canonicalize().unwrap()))
+            .run_unwrapped_fixture(fake_request(root.path().canonicalize().unwrap()))
             .await
             .unwrap_err();
         assert!(matches!(error, ResidentCodexError::Busy));
@@ -960,7 +1437,7 @@ while :; do printf '0123456789abcdef'; done
         config.stdout_max_bytes = 128;
         let broker = ResidentCodexBroker::new(config).unwrap();
         let error = broker
-            .run(fake_request(root.path().canonicalize().unwrap()))
+            .run_unwrapped_fixture(fake_request(root.path().canonicalize().unwrap()))
             .await
             .unwrap_err();
         assert!(matches!(error, ResidentCodexError::StdoutLimitExceeded));
@@ -985,7 +1462,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution"}}'
         );
         let broker = ResidentCodexBroker::new(broker_config(root.path(), script)).unwrap();
         let error = broker
-            .run(fake_request(root.path().canonicalize().unwrap()))
+            .run_unwrapped_fixture(fake_request(root.path().canonicalize().unwrap()))
             .await
             .unwrap_err();
         assert!(matches!(
@@ -994,12 +1471,190 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution"}}'
         ));
     }
 
+    #[tokio::test]
+    async fn hash_mismatch_refuses_before_lock_episode_temp_or_spawn() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("spawned");
+        let script = root.path().join("fake-codex");
+        write_script(
+            &script,
+            &format!(
+                "#!/bin/sh\nprintf spawned > '{}'\nexit 1\n",
+                marker.display()
+            ),
+        );
+        let mut config = broker_config(root.path(), script);
+        config.expected_codex_sha256 = "0".repeat(64);
+        let lock_path = config.lock_path.clone();
+        let broker = ResidentCodexBroker::new(config).unwrap();
+        EPISODE_TEMP_ATTEMPTED.with(|attempted| attempted.set(false));
+
+        let error = broker
+            .run(fake_request(root.path().canonicalize().unwrap()))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ResidentCodexError::ProviderContentHashMismatch
+        ));
+        assert_eq!(
+            error.to_string(),
+            "resident_codex_provider_content_hash_mismatch"
+        );
+        assert!(!lock_path.exists());
+        assert!(!marker.exists());
+        EPISODE_TEMP_ATTEMPTED.with(|attempted| assert!(!attempted.get()));
+    }
+
+    #[tokio::test]
+    async fn matching_script_is_never_executed_by_production() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("spawned");
+        let script = root.path().join("fake-codex");
+        write_script(
+            &script,
+            &format!(
+                "#!/bin/sh\nprintf spawned > '{}'\nexit 1\n",
+                marker.display()
+            ),
+        );
+        let config = broker_config(root.path(), script);
+        let lock_path = config.lock_path.clone();
+        let broker = ResidentCodexBroker::new(config).unwrap();
+
+        let error = broker
+            .run(fake_request(root.path().canonicalize().unwrap()))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ResidentCodexError::ProviderNotNative));
+        assert!(!lock_path.exists());
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn bubblewrap_topology_has_no_host_workspace_or_general_writable_mount() {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("fake-codex");
+        write_script(&script, "#!/bin/sh\nexit 0\n");
+        let broker = ResidentCodexBroker::new(broker_config(root.path(), script)).unwrap();
+        let request = fake_request(root.path().canonicalize().unwrap());
+        let provider_snapshot = root.path().join("private/provider.native");
+        let auth_snapshot = root.path().join("private/auth.json");
+        let output_directory = root.path().join("private/output");
+        let args: Vec<String> = broker
+            .bubblewrap_args(
+                &request,
+                &provider_snapshot,
+                &auth_snapshot,
+                &output_directory,
+            )
+            .into_iter()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(RESIDENT_BWRAP_BINARY, "/usr/bin/bwrap");
+        for required in [
+            "--die-with-parent",
+            "--unshare-user",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--unshare-cgroup",
+            "--cap-drop",
+            "--clearenv",
+            "--dev",
+            "--proc",
+            "--remount-ro",
+            "--tmpfs",
+        ] {
+            assert!(args.iter().any(|argument| argument == required));
+        }
+        assert!(!args.iter().any(|argument| argument == "--unshare-net"));
+        assert!(!args.iter().any(|argument| argument == "--dev-bind"));
+        assert!(!args
+            .iter()
+            .any(|argument| argument == &request.cwd.display().to_string()));
+        assert!(args.windows(3).any(|window| {
+            window[0] == "--ro-bind"
+                && window[1] == provider_snapshot.display().to_string()
+                && window[2] == SANDBOX_PROVIDER_PATH
+        }));
+        assert!(args.windows(3).any(|window| {
+            window[0] == "--ro-bind"
+                && window[1] == auth_snapshot.display().to_string()
+                && window[2] == format!("{SANDBOX_CODEX_HOME_PATH}/auth.json")
+        }));
+        let writable_binds: Vec<&[String]> = args
+            .windows(3)
+            .filter(|window| window[0] == "--bind")
+            .collect();
+        assert_eq!(writable_binds.len(), 1);
+        assert_eq!(writable_binds[0][1], output_directory.display().to_string());
+        assert_eq!(writable_binds[0][2], SANDBOX_OUTPUT_PATH);
+        assert!(args
+            .windows(2)
+            .any(|window| { window[0] == "-C" && window[1] == SANDBOX_WORKSPACE_PATH }));
+        assert!(args
+            .iter()
+            .any(|argument| argument == "--skip-git-repo-check"));
+        assert!(args
+            .iter()
+            .any(|argument| argument == "web_search=\"disabled\""));
+        for feature in [
+            "goals",
+            "guardian_approval",
+            "in_app_chat",
+            "in_app_dictation",
+            "in_app_updates",
+            "collaboration_modes",
+            "steer",
+        ] {
+            assert!(args
+                .windows(2)
+                .any(|window| window[0] == "--disable" && window[1] == feature));
+        }
+    }
+
+    #[test]
+    fn authentication_snapshot_copies_only_auth_json_into_episode_temp() {
+        let root = tempfile::tempdir().unwrap();
+        let source_home = root.path().join("source-home");
+        let episode = root.path().join("episode");
+        fs::create_dir(&source_home).unwrap();
+        fs::create_dir(&episode).unwrap();
+        fs::write(source_home.join("auth.json"), b"private-auth").unwrap();
+        fs::write(source_home.join("config.toml"), b"must-not-copy").unwrap();
+
+        let snapshot = snapshot_auth_json_from(&source_home.join("auth.json"), &episode).unwrap();
+
+        assert_eq!(snapshot, episode.join("auth.json"));
+        assert_eq!(fs::read(&snapshot).unwrap(), b"private-auth");
+        assert_eq!(
+            fs::metadata(&snapshot).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let entries: Vec<_> = fs::read_dir(&episode)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, vec![OsString::from("auth.json")]);
+    }
+
     #[test]
     fn invocation_contract_grants_no_action_authority() {
         let contract = ResidentCodexInvocationContract::default();
         assert_eq!(contract.sandbox, "read_only");
         assert_eq!(contract.prompt_transport, "stdin");
         assert!(contract.provider_tool_features_requested_disabled);
+        assert!(contract.provider_content_pinned);
+        assert_eq!(contract.outer_host_filesystem, "read_only");
+        assert!(contract.private_ephemeral_output_writable);
+        assert!(!contract.request_cwd_mounted);
+        assert!(!contract.privacy_boundary_required);
+        assert!(contract.recoverable_failure_accepted);
+        assert!(!contract.external_mutation_authority);
         assert_eq!(
             contract.provider_event_stream_policy,
             "fail_closed_on_tool_or_unknown_event"

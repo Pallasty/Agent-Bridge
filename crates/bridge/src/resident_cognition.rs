@@ -11,6 +11,7 @@ use crate::resident_wake_journal::{
     ResidentWakeReservation,
 };
 use crate::semantic_event::{Affordance, SemanticEvent, SemanticObject, Verdict, VerdictStatus};
+use ab_agent::resident_codex::RESIDENT_CODEX_NATIVE_SHA256_V0;
 use ab_agent::{
     ResidentCodexBroker, ResidentCodexBrokerConfig, ResidentCodexError,
     ResidentCodexInvocationContract, ResidentCodexRequest,
@@ -50,6 +51,7 @@ pub struct ResidentCognitionOptions {
     pub model: String,
     pub reasoning_effort: String,
     pub codex_bin: PathBuf,
+    pub expected_codex_sha256: String,
     pub lock_path: PathBuf,
     pub journal_root: PathBuf,
     pub timeout_secs: u64,
@@ -70,6 +72,7 @@ impl ResidentCognitionOptions {
             codex_bin: std::env::var_os("AB_RESIDENT_CODEX_BIN")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("codex")),
+            expected_codex_sha256: RESIDENT_CODEX_NATIVE_SHA256_V0.to_string(),
             lock_path,
             journal_root,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
@@ -180,6 +183,7 @@ struct ValidatedRequest {
     model: String,
     reasoning_effort: String,
     codex_bin: PathBuf,
+    expected_codex_sha256: String,
     lock_path: PathBuf,
     journal_root: PathBuf,
     timeout_secs: u64,
@@ -302,6 +306,7 @@ fn validate_options(options: ResidentCognitionOptions) -> Result<ValidatedReques
         model,
         reasoning_effort,
         codex_bin: options.codex_bin,
+        expected_codex_sha256: options.expected_codex_sha256,
         lock_path: options.lock_path,
         journal_root: options.journal_root,
         timeout_secs: options.timeout_secs,
@@ -351,19 +356,29 @@ fn result_schema() -> Value {
     })
 }
 
-fn boundary() -> Value {
+fn boundary(owner_loss_tolerant_profile_admitted: bool) -> Value {
     json!({
+        "risk_policy_id": crate::resident_risk_policy::RESIDENT_OWNER_RISK_POLICY_ID,
         "automatic_wake": false,
         "persistent_model_session": false,
         "filesystem_write_authority": false,
-        "mcp_tools_loaded": false,
-        "builtin_provider_tools_requested": false,
+        "known_provider_tool_features_requested_disabled": true,
+        "positive_empty_tool_manifest_verified": false,
+        "hosted_tool_surface_verified_absent": false,
+        "privacy_constraint_waived": true,
+        "recoverable_resource_failure_accepted": true,
+        "strict_profile_admitted": false,
+        "owner_loss_tolerant_profile_admitted": owner_loss_tolerant_profile_admitted,
         "provider_event_stream_fail_closed": true,
         "external_action_authority": false,
         "advisory_execution": false,
         "scheduling_execution": false,
         "memory_promotion": false,
-        "raw_event_persisted_by_agent_bridge": false
+        "raw_event_field_persisted_by_agent_bridge": false,
+        "provider_result_may_reproduce_event": true,
+        "cli_event_argument_visible_to_host": true,
+        "continuity_atomic_commit_verified": false,
+        "continuity_half_commit_recovery": "accepted_non_blocking_technical_debt"
     })
 }
 
@@ -372,6 +387,7 @@ fn wake_packet<'a>(
     wake_id: &'a str,
     episode_id: &'a str,
     prior: Option<&'a ResidentSleepDigest>,
+    owner_loss_tolerant_profile_admitted: bool,
 ) -> WakePacket<'a> {
     WakePacket {
         schema_version: "agent_bridge.resident_wake_packet.v0",
@@ -382,7 +398,7 @@ fn wake_packet<'a>(
         event_id: &request.event_id,
         observed_event: &request.event,
         prior_sleep_digest: prior,
-        authority: boundary(),
+        authority: boundary(owner_loss_tolerant_profile_admitted),
         budgets: json!({
             "timeout_secs": request.timeout_secs,
             "event_max_chars": MAX_EVENT_CHARS,
@@ -473,6 +489,12 @@ fn provider_failure_code(error: &ResidentCodexError) -> &'static str {
         ResidentCodexError::LockUnavailable => "provider_lock_unavailable",
         ResidentCodexError::Busy => "provider_busy",
         ResidentCodexError::TemporaryWorkspaceFailed => "provider_temp_failed",
+        ResidentCodexError::ProviderContentPinFailed => "provider_content_pin_failed",
+        ResidentCodexError::ProviderContentHashMismatch => "provider_content_hash_mismatch",
+        ResidentCodexError::ProviderNotNative => "provider_not_native",
+        ResidentCodexError::AuthenticationSnapshotFailed => {
+            "provider_authentication_snapshot_failed"
+        }
         ResidentCodexError::SpawnFailed => "provider_spawn_failed",
         ResidentCodexError::StdinFailed => "provider_stdin_failed",
         ResidentCodexError::StdoutLimitExceeded => "provider_stdout_limit",
@@ -499,6 +521,10 @@ fn provider_child_exit_observed(error: &ResidentCodexError) -> bool {
             | ResidentCodexError::LockUnavailable
             | ResidentCodexError::Busy
             | ResidentCodexError::TemporaryWorkspaceFailed
+            | ResidentCodexError::ProviderContentPinFailed
+            | ResidentCodexError::ProviderContentHashMismatch
+            | ResidentCodexError::ProviderNotNative
+            | ResidentCodexError::AuthenticationSnapshotFailed
             | ResidentCodexError::SpawnFailed
             | ResidentCodexError::CleanupFailed
     )
@@ -594,6 +620,7 @@ async fn record_failed(
     episode_id: &str,
     failure_stage: &str,
     failure_code: &str,
+    owner_loss_tolerant_profile_admitted: bool,
 ) -> bool {
     let Some(store) = store else {
         return false;
@@ -612,7 +639,7 @@ async fn record_failed(
             "event_sha256": request.event_sha256,
             "failure_stage": failure_stage,
             "failure_code": failure_code,
-            "boundary": boundary()
+            "boundary": boundary(owner_loss_tolerant_profile_admitted)
         }),
     );
     store.record_semantic_event(event.to_record()).await.is_ok()
@@ -645,21 +672,68 @@ fn dry_run_packet(
             "model": request.model,
             "reasoning_effort": request.reasoning_effort,
             "timeout_secs": request.timeout_secs,
+            "expected_provider_sha256": request.expected_codex_sha256,
             "invocation_contract": contract
         },
-        "boundary": boundary(),
+        "boundary": boundary(false),
         "executed": false,
         "receipt_recorded": false
     })
 }
 
-/// Run one explicit resident wake. The raw observed event is sent to Codex on
-/// stdin and is excluded from AB's semantic receipt.
+/// Preview or run one explicit resident wake under the owner's loss-tolerant
+/// policy. Live admission is checked before workspace validation or any
+/// store/journal access. The raw observed event is sent to Codex on stdin; AB
+/// omits that field from its semantic receipt, while the provider result may
+/// still reproduce it.
 pub async fn run_resident_cognition(
     options: ResidentCognitionOptions,
     store: Option<Arc<dyn StateStore>>,
 ) -> Result<Value> {
+    let owner_loss_tolerant_profile_admitted = if options.dry_run {
+        false
+    } else {
+        if options.expected_codex_sha256 != RESIDENT_CODEX_NATIVE_SHA256_V0 {
+            return Err(anyhow::Error::msg(
+                crate::resident_risk_policy::RESIDENT_OWNER_LOSS_TOLERANT_NOT_ADMITTED,
+            ));
+        }
+        crate::resident_risk_policy::require_owner_loss_tolerant_admission(&options.codex_bin)
+            .map_err(anyhow::Error::msg)?;
+        true
+    };
     let request = validate_options(options)?;
+    run_validated_resident_cognition(request, store, owner_loss_tolerant_profile_admitted).await
+}
+
+enum ResidentCognitionProvider {
+    Codex,
+    #[cfg(test)]
+    DeterministicFixture {
+        mismatched_wake: bool,
+    },
+}
+
+async fn run_validated_resident_cognition(
+    request: ValidatedRequest,
+    store: Option<Arc<dyn StateStore>>,
+    owner_loss_tolerant_profile_admitted: bool,
+) -> Result<Value> {
+    run_validated_resident_cognition_with_provider(
+        request,
+        store,
+        ResidentCognitionProvider::Codex,
+        owner_loss_tolerant_profile_admitted,
+    )
+    .await
+}
+
+async fn run_validated_resident_cognition_with_provider(
+    request: ValidatedRequest,
+    store: Option<Arc<dyn StateStore>>,
+    provider: ResidentCognitionProvider,
+    owner_loss_tolerant_profile_admitted: bool,
+) -> Result<Value> {
     let wake_id = deterministic_wake_id(&request.event_id);
     let episode_id = format!("episode-{}", Uuid::new_v4());
     if !request.dry_run && store.is_none() {
@@ -675,7 +749,13 @@ pub async fn run_resident_cognition(
         )
     };
     let prior = recover_prior_sleep_digest(store.as_ref(), &request.journal_root).await?;
-    let packet = wake_packet(&request, &wake_id, &episode_id, prior.as_ref());
+    let packet = wake_packet(
+        &request,
+        &wake_id,
+        &episode_id,
+        prior.as_ref(),
+        owner_loss_tolerant_profile_admitted,
+    );
     let packet_bytes = serde_json::to_vec(&packet).context("serialize resident wake packet")?;
     let wake_packet_sha256 = digest(&packet_bytes);
     let prompt = cognition_prompt(&packet)?;
@@ -692,13 +772,6 @@ pub async fn run_resident_cognition(
         ));
     }
 
-    let broker = ResidentCodexBroker::new(ResidentCodexBrokerConfig::new(
-        request.codex_bin.clone(),
-        request.lock_path.clone(),
-        Duration::from_secs(request.timeout_secs),
-    ))
-    .map_err(|error| anyhow!(error))?;
-
     let mut reservation = Some(
         ResidentWakeReservation::reserve(
             &request.journal_root,
@@ -711,23 +784,45 @@ pub async fn run_resident_cognition(
         .context("reserve exactly-once resident wake")?,
     );
 
-    let run = match broker
-        .run(ResidentCodexRequest {
-            wake_id: wake_id.clone(),
-            cognitive_episode_id: episode_id.clone(),
-            resident_id: RESIDENT_SUBJECT_ID.to_string(),
-            cwd: request.workspace.clone(),
-            prompt,
-            output_schema,
-            model: Some(request.model.clone()),
-            reasoning_effort: Some(request.reasoning_effort.clone()),
-        })
-        .await
-    {
+    let provider_request = ResidentCodexRequest {
+        wake_id: wake_id.clone(),
+        cognitive_episode_id: episode_id.clone(),
+        resident_id: RESIDENT_SUBJECT_ID.to_string(),
+        cwd: request.workspace.clone(),
+        prompt,
+        output_schema,
+        model: Some(request.model.clone()),
+        reasoning_effort: Some(request.reasoning_effort.clone()),
+    };
+    let provider_result = match provider {
+        ResidentCognitionProvider::Codex => {
+            match ResidentCodexBroker::new(ResidentCodexBrokerConfig::new(
+                request.codex_bin.clone(),
+                request.expected_codex_sha256.clone(),
+                request.lock_path.clone(),
+                Duration::from_secs(request.timeout_secs),
+            )) {
+                Ok(broker) => broker.run(provider_request).await,
+                Err(error) => Err(error),
+            }
+        }
+        #[cfg(test)]
+        ResidentCognitionProvider::DeterministicFixture { mismatched_wake } => Ok(
+            deterministic_provider_fixture(&provider_request, mismatched_wake),
+        ),
+    };
+    let run = match provider_result {
         Ok(run) => run,
         Err(error) => {
             let failure_code = provider_failure_code(&error);
             let child_exit_observed = provider_child_exit_observed(&error);
+            let provider_profile_remained_admitted = owner_loss_tolerant_profile_admitted
+                && !matches!(
+                    &error,
+                    ResidentCodexError::ProviderContentPinFailed
+                        | ResidentCodexError::ProviderContentHashMismatch
+                        | ResidentCodexError::ProviderNotNative
+                );
             if let Some(reservation) = reservation.as_mut() {
                 reservation
                     .fail(
@@ -745,6 +840,7 @@ pub async fn run_resident_cognition(
                 &episode_id,
                 "provider_execution",
                 failure_code,
+                provider_profile_remained_admitted,
             )
             .await;
             return Err(anyhow!(
@@ -773,6 +869,7 @@ pub async fn run_resident_cognition(
                 &episode_id,
                 "result_validation",
                 "invalid_result_schema",
+                owner_loss_tolerant_profile_admitted,
             )
             .await;
             return Err(anyhow!(
@@ -798,6 +895,7 @@ pub async fn run_resident_cognition(
             &episode_id,
             "result_binding",
             "identity_or_wake_mismatch",
+            owner_loss_tolerant_profile_admitted,
         )
         .await;
         return Err(anyhow!("{error}; failed_receipt_recorded={recorded}"));
@@ -835,7 +933,7 @@ pub async fn run_resident_cognition(
             "result": answer,
             "execution": run.execution,
             "sleep_digest": sleep_digest,
-            "boundary": boundary()
+            "boundary": boundary(owner_loss_tolerant_profile_admitted)
         }),
     );
     let receipt_recorded = if let Some(store) = store {
@@ -911,8 +1009,67 @@ pub async fn run_resident_cognition(
             "child_exit_observed": journal_record.child_exit_observed,
             "advances_continuity": journal_record.advances_continuity
         },
-        "boundary": boundary()
+        "boundary": boundary(owner_loss_tolerant_profile_admitted)
     }))
+}
+
+#[cfg(test)]
+fn deterministic_provider_fixture(
+    request: &ResidentCodexRequest,
+    mismatched_wake: bool,
+) -> ab_agent::ResidentCodexRun {
+    let final_json = json!({
+        "schema_version": RESIDENT_INTENT_SCHEMA_V0,
+        "wake_id": if mismatched_wake { "wake-mismatch" } else { &request.wake_id },
+        "subject_id": RESIDENT_SUBJECT_ID,
+        "intent_kind": "no_op",
+        "summary": "No current intervention.",
+        "confidence_bps": 8200,
+        "uncertainty": "",
+        "suggested_recheck_secs": null
+    });
+    let final_bytes = serde_json::to_vec(&final_json).expect("serialize deterministic fixture");
+    ab_agent::ResidentCodexRun {
+        final_json,
+        execution: ab_agent::ResidentCodexExecutionReceipt {
+            schema_version: ab_agent::resident_codex::RESIDENT_CODEX_RECEIPT_SCHEMA_V1.to_string(),
+            wake_id: request.wake_id.clone(),
+            cognitive_episode_id: request.cognitive_episode_id.clone(),
+            resident_id: request.resident_id.clone(),
+            provider: "deterministic_test_fixture".to_string(),
+            requested_model: request.model.clone(),
+            requested_reasoning_effort: request.reasoning_effort.clone(),
+            sandbox_requested: "not_executed".to_string(),
+            approval_policy_requested: "not_executed".to_string(),
+            user_config_ignored: true,
+            ephemeral: true,
+            prompt_via_stdin: false,
+            output_schema_requested: true,
+            disabled_provider_features: Vec::new(),
+            provider_event_stream_audited: false,
+            provider_tool_events_observed: 0,
+            provider_fail_closed_diagnostics_observed: 0,
+            stdout_event_count: 0,
+            executes_action: false,
+            grants_authority: false,
+            exit_code: Some(0),
+            duration_ms: 0,
+            prompt_sha256: sha256_hex(&request.prompt),
+            output_schema_sha256: sha256_hex(&request.output_schema),
+            final_sha256: sha256_hex(&final_bytes),
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            expected_provider_sha256: RESIDENT_CODEX_NATIVE_SHA256_V0.to_string(),
+            observed_provider_sha256: RESIDENT_CODEX_NATIVE_SHA256_V0.to_string(),
+            provider_content_pinned: true,
+            outer_host_filesystem: "test_fixture_not_executed".to_string(),
+            private_ephemeral_output_writable: false,
+            request_cwd_mounted: false,
+            privacy_boundary_required: false,
+            recoverable_failure_accepted: true,
+            external_mutation_authority: false,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -922,9 +1079,6 @@ mod tests {
         record_resident_owner_evaluation, ResidentOwnerEvaluationOptions, ResidentOwnerLabel,
     };
     use ab_store::SqliteStore;
-    use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     fn options(workspace: &Path, codex_bin: &Path) -> ResidentCognitionOptions {
         let mut options = ResidentCognitionOptions::new("battery state changed", workspace);
@@ -934,6 +1088,21 @@ mod tests {
         options.journal_root = workspace.join("resident-state");
         options.timeout_secs = 10;
         options
+    }
+
+    async fn run_with_test_admission(
+        options: ResidentCognitionOptions,
+        store: Option<Arc<dyn StateStore>>,
+        mismatched_wake: bool,
+    ) -> Result<Value> {
+        let request = validate_options(options)?;
+        run_validated_resident_cognition_with_provider(
+            request,
+            store,
+            ResidentCognitionProvider::DeterministicFixture { mismatched_wake },
+            true,
+        )
+        .await
     }
 
     #[test]
@@ -969,6 +1138,48 @@ mod tests {
         );
         assert_eq!(packet["boundary"]["external_action_authority"], false);
         assert_eq!(
+            packet["boundary"]["risk_policy_id"],
+            crate::resident_risk_policy::RESIDENT_OWNER_RISK_POLICY_ID
+        );
+        assert_eq!(packet["boundary"]["privacy_constraint_waived"], true);
+        assert_eq!(
+            packet["boundary"]["recoverable_resource_failure_accepted"],
+            true
+        );
+        assert_eq!(packet["boundary"]["strict_profile_admitted"], false);
+        assert_eq!(
+            packet["boundary"]["owner_loss_tolerant_profile_admitted"],
+            false
+        );
+        assert_eq!(
+            packet["boundary"]["positive_empty_tool_manifest_verified"],
+            false
+        );
+        assert_eq!(
+            packet["boundary"]["hosted_tool_surface_verified_absent"],
+            false
+        );
+        assert_eq!(
+            packet["boundary"]["raw_event_field_persisted_by_agent_bridge"],
+            false
+        );
+        assert_eq!(
+            packet["boundary"]["provider_result_may_reproduce_event"],
+            true
+        );
+        assert_eq!(
+            packet["boundary"]["continuity_atomic_commit_verified"],
+            false
+        );
+        assert_eq!(
+            packet["boundary"]["continuity_half_commit_recovery"],
+            "accepted_non_blocking_technical_debt"
+        );
+        assert_eq!(
+            packet["cognition"]["expected_provider_sha256"],
+            RESIDENT_CODEX_NATIVE_SHA256_V0
+        );
+        assert_eq!(
             packet["cognition"]["invocation_contract"]["sandbox"],
             "read_only"
         );
@@ -976,63 +1187,70 @@ mod tests {
         assert!(!temp.path().join("missing-state-parent").exists());
     }
 
-    #[cfg(unix)]
-    fn fake_codex(temp: &Path, mismatch: bool) -> PathBuf {
-        let path = temp.join(if mismatch {
-            "fake-codex-mismatch.sh"
-        } else {
-            "fake-codex.sh"
-        });
-        let wake_assignment = if mismatch {
-            "'wake-mismatch'".to_string()
-        } else {
-            "\"$wake\"".to_string()
-        };
-        fs::write(
-            &path,
-            format!(
-                r#"#!/bin/sh
-set -eu
-out=''
-prev=''
-for arg in "$@"; do
-  if [ "$prev" = '--output-last-message' ]; then out="$arg"; fi
-  prev="$arg"
-done
-test -n "$out" || exit 64
-prompt=$(cat)
-wake=$(printf '%s' "$prompt" | grep -o '"wake_id":"[^"]*"' | head -n 1 | cut -d '"' -f 4)
-test -n "$wake" || exit 65
-response_wake={wake_assignment}
-printf '{{"schema_version":"agent_bridge.xiao_shu_intent.v0","wake_id":"%s","subject_id":"agent-bridge:resident:xiaoshu","intent_kind":"no_op","summary":"No current intervention.","confidence_bps":8200,"uncertainty":"","suggested_recheck_secs":null}}' "$response_wake" > "$out"
-printf '%s\n' '{{"type":"turn.completed"}}'
-"#
-            ),
-        )
-        .expect("write fake codex");
-        let mut permissions = fs::metadata(&path).expect("metadata").permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&path, permissions).expect("chmod fake codex");
-        path
+    #[tokio::test]
+    async fn wrong_expected_hash_is_rejected_before_workspace_or_state_validation() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing_workspace = temp.path().join("missing-workspace");
+        let mut options = options(&missing_workspace, Path::new("missing-provider"));
+        options.expected_codex_sha256 = "0".repeat(64);
+        options.lock_path = temp.path().join("missing-state-parent/provider.lock");
+        options.journal_root = temp.path().join("missing-state-parent/journal");
+
+        let error = run_resident_cognition(options, None)
+            .await
+            .expect_err("wrong provider hash must fail at the policy gate");
+        assert_eq!(
+            error.to_string(),
+            crate::resident_risk_policy::RESIDENT_OWNER_LOSS_TOLERANT_NOT_ADMITTED
+        );
+        assert!(!missing_workspace.exists());
+        assert!(!temp.path().join("missing-state-parent").exists());
+    }
+
+    #[tokio::test]
+    async fn wrong_provider_path_is_rejected_before_workspace_or_state_validation() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing_workspace = temp.path().join("missing-workspace");
+        let mut options = options(&missing_workspace, &temp.path().join("missing-provider"));
+        options.lock_path = temp.path().join("missing-state-parent/provider.lock");
+        options.journal_root = temp.path().join("missing-state-parent/journal");
+
+        let error = run_resident_cognition(options, None)
+            .await
+            .expect_err("missing provider must fail at the policy gate");
+        assert_eq!(
+            error.to_string(),
+            crate::resident_risk_policy::RESIDENT_OWNER_LOSS_TOLERANT_NOT_ADMITTED
+        );
+        assert!(!missing_workspace.exists());
+        assert!(!temp.path().join("missing-state-parent").exists());
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn successful_wakes_persist_and_recover_compact_continuity() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let fake = fake_codex(temp.path(), false);
         let store = Arc::new(
             SqliteStore::open(&temp.path().join("state.db"))
                 .await
                 .expect("store"),
         );
-        let first = run_resident_cognition(options(temp.path(), &fake), Some(store.clone()))
-            .await
-            .expect("first wake");
+        let first = run_with_test_admission(
+            options(temp.path(), Path::new("fixture-provider")),
+            Some(store.clone()),
+            false,
+        )
+        .await
+        .expect("first wake");
         assert_eq!(first["status"], "completed");
         assert_eq!(first["wake"]["prior_sleep_digest_recovered"], false);
         assert_eq!(first["receipt"]["recorded"], true);
         assert_eq!(first["cognition"]["provider_child_exited"], true);
+        assert_eq!(first["boundary"]["strict_profile_admitted"], false);
+        assert_eq!(
+            first["boundary"]["owner_loss_tolerant_profile_admitted"],
+            true
+        );
 
         let first_wake_id = first["wake"]["wake_id"]
             .as_str()
@@ -1053,9 +1271,9 @@ printf '%s\n' '{{"type":"turn.completed"}}'
                 .expect("prior digest");
         assert_eq!(evaluated_prior.owner_acceptance, "useful");
 
-        let mut second_options = options(temp.path(), &fake);
+        let mut second_options = options(temp.path(), Path::new("fixture-provider"));
         second_options.event_id = Some("event:test-2".to_string());
-        let second = run_resident_cognition(second_options, Some(store.clone()))
+        let second = run_with_test_admission(second_options, Some(store.clone()), false)
             .await
             .expect("second wake");
         assert_eq!(
@@ -1081,22 +1299,31 @@ printf '%s\n' '{{"type":"turn.completed"}}'
             !event.facts.contains("battery state changed")
                 && event.facts.contains(RESIDENT_SLEEP_DIGEST_SCHEMA_V0)
         }));
+        for completion in completions {
+            let facts: Value = serde_json::from_str(&completion.facts).expect("receipt facts");
+            assert_eq!(facts["boundary"]["strict_profile_admitted"], false);
+            assert_eq!(
+                facts["boundary"]["owner_loss_tolerant_profile_admitted"],
+                true
+            );
+            assert_eq!(facts["boundary"]["privacy_constraint_waived"], true);
+        }
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn duplicate_event_is_refused_without_a_second_provider_run() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let fake = fake_codex(temp.path(), false);
         let store = Arc::new(
             SqliteStore::open(&temp.path().join("state.db"))
                 .await
                 .expect("store"),
         );
-        let first = run_resident_cognition(options(temp.path(), &fake), Some(store.clone()))
+        let fixture_options = || options(temp.path(), Path::new("fixture-provider"));
+        let first = run_with_test_admission(fixture_options(), Some(store.clone()), false)
             .await
             .expect("first wake");
-        let error = run_resident_cognition(options(temp.path(), &fake), Some(store.clone()))
+        let error = run_with_test_admission(fixture_options(), Some(store.clone()), false)
             .await
             .expect_err("duplicate event must fail closed");
         assert!(format!("{error:#}").contains("resident_wake_duplicate"));
@@ -1123,15 +1350,18 @@ printf '%s\n' '{{"type":"turn.completed"}}'
     #[tokio::test]
     async fn mismatched_wake_fails_closed_with_non_green_receipt() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let fake = fake_codex(temp.path(), true);
         let store = Arc::new(
             SqliteStore::open(&temp.path().join("state.db"))
                 .await
                 .expect("store"),
         );
-        let error = run_resident_cognition(options(temp.path(), &fake), Some(store.clone()))
-            .await
-            .expect_err("mismatch must fail");
+        let error = run_with_test_admission(
+            options(temp.path(), Path::new("fixture-provider")),
+            Some(store.clone()),
+            true,
+        )
+        .await
+        .expect_err("mismatch must fail");
         assert!(error.to_string().contains("wake binding mismatch"));
         let events = store
             .recent_semantic_events(3600, 10)
@@ -1144,6 +1374,12 @@ printf '%s\n' '{{"type":"turn.completed"}}'
         assert_eq!(failure.action, "cognition_failed");
         assert_eq!(failure.verdict_status, "not_verified");
         assert!(!failure.facts.contains("battery state changed"));
+        let facts: Value = serde_json::from_str(&failure.facts).expect("failure receipt facts");
+        assert_eq!(facts["boundary"]["strict_profile_admitted"], false);
+        assert_eq!(
+            facts["boundary"]["owner_loss_tolerant_profile_admitted"],
+            true
+        );
     }
 
     #[test]

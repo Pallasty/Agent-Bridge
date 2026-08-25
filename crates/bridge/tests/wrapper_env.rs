@@ -160,3 +160,93 @@ printf 'AGENT_BRIDGE_STATE_DIR=%s\n' "${AGENT_BRIDGE_STATE_DIR:-}"
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn wrapper_routes_resident_before_shared_credentials_and_parses_only_safe_paths() {
+    let root = test_root("wrapper-resident-isolation");
+    let home = root.join("home");
+    let local_bin = home.join(".local/bin");
+    fs::create_dir_all(&local_bin).expect("local bin");
+
+    let awk_marker = root.join("awk-was-called");
+    write_executable(
+        &local_bin.join("awk"),
+        &format!(
+            "#!/usr/bin/env bash\ntouch '{}'\nexec /usr/bin/awk \"$@\"\n",
+            awk_marker.display()
+        ),
+    );
+
+    let secure_state = root.join("private-state");
+    let native_codex = root.join("pinned-codex");
+    write_executable(&native_codex, "#!/usr/bin/env bash\nexit 0\n");
+    let machine_env = root.join("machine.env");
+    fs::write(
+        &machine_env,
+        format!(
+            concat!(
+                "export AB_APP_CONTROL_OPERATION_DIR=\"${{AB_APP_CONTROL_OPERATION_DIR:-{}/app_control_operations}}\"\n",
+                "export AB_RESIDENT_CODEX_BIN='${{AB_RESIDENT_CODEX_BIN:-{}}}'\n",
+                "export GITHUB_TOKEN='must-not-enter-resident'\n"
+            ),
+            secure_state.display(),
+            native_codex.display()
+        ),
+    )
+    .expect("write machine env");
+    let creds = root.join("credentials.txt");
+    fs::write(&creds, "# Github PAT Token\nghp_must_not_enter_resident\n")
+        .expect("write credentials");
+
+    let fake_real = root.join("agent-bridge.real");
+    write_executable(
+        &fake_real,
+        r#"#!/usr/bin/env bash
+printf 'ARGS=%s\n' "$*"
+printf 'AGENT_BRIDGE_STATE_DIR=%s\n' "${AGENT_BRIDGE_STATE_DIR:-}"
+printf 'AB_RESIDENT_CODEX_BIN=%s\n' "${AB_RESIDENT_CODEX_BIN:-}"
+printf 'GITHUB_TOKEN=%s\n' "${GITHUB_TOKEN:-}"
+"#,
+    );
+
+    let wrapper =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/wrapper/agent-bridge-wrapper.sh");
+    let output = Command::new("bash")
+        .arg(wrapper)
+        .args(["resident", "risk-preflight", "--json"])
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env("AGENT_BRIDGE_REAL_BIN", &fake_real)
+        .env("AGENT_BRIDGE_MACHINE_ENV", &machine_env)
+        .env("AGENT_BRIDGE_CREDS_FILE", &creds)
+        .output()
+        .expect("run resident wrapper");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr utf8");
+    assert!(
+        output.status.success(),
+        "wrapper failed: status={:?}\nstdout={stdout}\nstderr={stderr}",
+        output.status
+    );
+    assert_eq!(
+        stdout,
+        format!(
+            concat!(
+                "ARGS=resident risk-preflight --json\n",
+                "AGENT_BRIDGE_STATE_DIR={}\n",
+                "AB_RESIDENT_CODEX_BIN={}\n",
+                "GITHUB_TOKEN=\n"
+            ),
+            secure_state.display(),
+            native_codex.display()
+        )
+    );
+    assert!(
+        !awk_marker.exists(),
+        "Resident path must not parse the shared credentials notebook"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}

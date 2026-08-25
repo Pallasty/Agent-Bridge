@@ -132,6 +132,7 @@ pub mod remote_steer;
 pub mod resident_cognition;
 pub mod resident_m2_shadow;
 pub mod resident_owner_evaluation;
+pub mod resident_risk_policy;
 pub mod resident_wake_journal;
 pub mod rescue;
 pub mod retrieval_outcome;
