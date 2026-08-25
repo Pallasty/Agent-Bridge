@@ -1,37 +1,45 @@
 # AG-UI Read-Only MCP Wrapper v0
 
 - Date: 2026-08-25
-- Status: proposed design; no wrapper implementation or MCP registration
+- Status: D4.1 source remediation verified; registered default-off, not published or activated
 - Pure projector: `agent_bridge.ag_ui_readonly_projection.v0`
-- Proposed tool: `ag_ui_readonly_project`
+- Tool: `ag_ui_readonly_project`
 - External wire pin: `@ag-ui/core@0.0.57`
 - Related design: `AG_UI_SEMANTIC_BUS_READ_ONLY_ADAPTER_V0_2026_08_23.md`
 
 ## Decision summary
 
-Add, in a later source gate, a fieldless MCP wrapper that accepts one caller-supplied bounded AG-UI
+The source candidate contains a fieldless MCP wrapper that accepts one caller-supplied bounded AG-UI
 batch and returns the existing pure, content-minimized projection. The wrapper owns no `Hub`, store,
 transport, process, browser, mobile, policy, lease, filesystem, or environment handle. Its execution
 body calls only `project_ag_ui_readonly` and formats that result for MCP.
 
-The eventual tool is default-off. It may be exposed only by an explicit named toolset or the already
+The tool is default-off. It may be exposed only by an explicit named toolset or the already
 explicit `all-dev` surface. It must remain absent from the default profile, `essential`, `standard`,
 `codex-essential`, `codex-lean`, Claude standard, Gemini lean, ChatGPT read/collab, and hook
 lifecycle surfaces.
 
-This document does not authorize source registration, tool-profile changes, deployment, MCP
-reconnection, runtime activation, or AG-UI transport.
+`codex-ag-ui-readonly` means that the added AG-UI projector is read-only; it is otherwise the
+existing `codex-lean` toolset, whose other tools retain their normal per-tool authority. The name is
+not a claim that every tool in that toolset is read-only.
+
+This document does not authorize remote publication, merge, deployment, MCP reconnection, runtime
+activation, or AG-UI transport.
 
 ## Context
 
 The pure projector at commit `122cb374744b21f46657fc29dda21994720b789b` passed focused unit,
-sequence-corpus, canonicalization, leak, formatting, Clippy, and compile gates. An independent
-protocol/security review and a separate QA/testability review both approved it with suggestions.
+sequence-corpus, canonicalization, leak, formatting, Clippy, and compile gates. The dormant wrapper
+landed at `3e25f583578f7d737f671eea9da9339a69f5d0e2`; default-off source registration landed at
+`1574541b389318059a6628473878afce2196c6a5`.
 
-The remaining design problem is how to make the pure result callable without quietly adding an
-authority-bearing path. A read-only annotation and output booleans are useful declarations, but they
-do not prove the absence of store or execution access. The wrapper therefore needs a deliberately
-small dependency and call boundary plus static falsifiers.
+D4 independent protocol/security/content-minimization review returned `CHANGES_REQUIRED`: the MCP
+schema declared the request, `protocol`, and `source` objects closed, but the server dispatched
+arguments without performing JSON Schema validation and the pure validator ignored extra keys.
+D4.1 therefore enforces those three closed objects inside the pure validator and returns only a
+stable object coordinate on rejection. Unknown key names and their URL, path, endpoint, or
+credential-shaped values are never echoed. Event objects remain governed by the pinned AG-UI
+0.0.57 validator.
 
 ## Constraints
 
@@ -61,12 +69,12 @@ project_ag_ui_readonly(&args)          pure AG-UI 0.0.57 projector
 projection or typed redacted error     MCP text + structured content only
 ```
 
-The eventual source layout is:
+The source layout is:
 
 ```text
 crates/bridge/src/ag_ui_readonly_projection.rs   pure protocol/state machine
 crates/bridge/src/mcp_tools/ag_ui_readonly.rs    fieldless MCP transport wrapper
-crates/bridge/src/mcp_tools.rs                   later policy/registration gate only
+crates/bridge/src/mcp_tools.rs                   default-off policy and registration
 ```
 
 `mcp_tools/ag_ui_readonly.rs` must use explicit imports. It must not use `super::*`, because that
@@ -269,7 +277,8 @@ server-side request forgery concerns that are deliberately outside v0.
 - Callers must provide complete bounded batches; live streams are not supported.
 - The explicit toolset and reconnect requirement add activation ceremony.
 - Name/source omission prevents extension-type correlation beyond aggregate counts.
-- Additional pure-projector tests and identifier mismatch handling are required before exposure.
+- The named toolset needs explicit documentation because only the projector, not the full
+  `codex-lean` base surface, is read-only.
 
 ## Performance budget
 
@@ -281,19 +290,21 @@ server-side request forgery concerns that are deliberately outside v0.
 
 ## Gate sequence
 
-1. **D0 — this document:** design and review-disposition update only.
-2. **D1 — pure hardening:** implement outer/embedded ID checks and the expanded protocol/boundary
-   tests; no MCP module changes.
-3. **D2 — dormant wrapper:** add and test the fieldless wrapper plus static source gate, but do not
-   add registry or toolset entries.
-4. **D3 — source registration:** after separate authorization, add the named default-off toolset and
-   registry matrix; do not deploy.
-5. **D4 — independent review:** repeat protocol/security/content-minimization review against the
-   exact registration candidate.
-6. **D5 — runtime gate:** only after separate authorization, merge/build/install, reconnect MCP, and
-   verify the exact fresh-process tool list and projection behavior.
+1. **D0 — design:** complete.
+2. **D1 — pure hardening:** complete; outer/embedded ID checks and protocol/boundary tests remain
+   source-only.
+3. **D2 — dormant wrapper:** complete at `3e25f583578f7d737f671eea9da9339a69f5d0e2`.
+4. **D3 — source registration:** complete at `1574541b389318059a6628473878afce2196c6a5`;
+   the tool remains default-off and undeployed.
+5. **D4 — independent review:** complete with `CHANGES_REQUIRED` for runtime enforcement of the
+   closed request envelope plus toolset-authority and document clarification.
+6. **D4.1 — source remediation:** verified in this candidate; focused projection/wrapper tests,
+   registry regression, all-target compilation, formatting, and content-minimization review pass.
+7. **D5 — runtime gate:** only after separate authorization, reconcile the shared remotes,
+   merge/build/install, reconnect MCP, and verify the exact fresh-process tool list and projection
+   behavior.
 
-Current verdict: `DESIGN_READY_FOR_D1_PURE_HARDENING`.
+Current verdict: `D4_1_SOURCE_REMEDIATION_VERIFIED_D5_NOT_AUTHORIZED`.
 
-This verdict grants no wrapper implementation, MCP registration, remote publication, merge,
-deployment, or runtime enablement.
+This verdict grants no remote publication, merge, deployment, MCP reconnection, or runtime
+enablement.

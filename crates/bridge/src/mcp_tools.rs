@@ -50366,8 +50366,9 @@ enum ToolSet {
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
     CodexA2ui,
-    /// An opt-in Codex profile for projecting caller-supplied AG-UI batches.
-    /// It is deliberately the codex-lean allowlist plus one pure read-only tool.
+    /// An opt-in Codex toolset that adds the pure read-only AG-UI projector to
+    /// the existing codex-lean surface. Only the projector is read-only; the
+    /// codex-lean tools retain their normal per-tool authority.
     CodexAgUiReadonly,
     ChatGptRead,
     ChatGptCollab,

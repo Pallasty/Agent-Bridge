@@ -27,6 +27,8 @@ pub enum AgUiProjectionError {
     RequestTooLarge { actual: usize, max: usize },
     #[error("request field '{field}' is missing or has the wrong type")]
     InvalidRequestField { field: &'static str },
+    #[error("request object '{object}' contains an unexpected field")]
+    UnexpectedRequestField { object: &'static str },
     #[error("request schema is unsupported")]
     UnsupportedRequestSchema,
     #[error("AG-UI protocol name or core version is unsupported")]
@@ -345,6 +347,11 @@ fn validate_projection_request(input: &Value) -> Result<&[Value], AgUiProjection
     let request = input
         .as_object()
         .ok_or(AgUiProjectionError::InvalidRequestField { field: "request" })?;
+    validate_closed_request_object(
+        request,
+        &["schema", "protocol", "source", "events"],
+        "request",
+    )?;
     let schema = request
         .get("schema")
         .and_then(Value::as_str)
@@ -358,6 +365,7 @@ fn validate_projection_request(input: &Value) -> Result<&[Value], AgUiProjection
         .get("source")
         .and_then(Value::as_object)
         .ok_or(AgUiProjectionError::InvalidRequestField { field: "source" })?;
+    validate_closed_request_object(source, &["adapter_id", "agent_id_hash"], "source")?;
     validate_source_identifier(source, "adapter_id")?;
     validate_source_identifier(source, "agent_id_hash")?;
 
@@ -379,6 +387,7 @@ fn validate_protocol(request: &serde_json::Map<String, Value>) -> Result<(), AgU
         .get("protocol")
         .and_then(Value::as_object)
         .ok_or(AgUiProjectionError::InvalidRequestField { field: "protocol" })?;
+    validate_closed_request_object(protocol, &["name", "core_version"], "protocol")?;
     let protocol_name = protocol.get("name").and_then(Value::as_str).ok_or(
         AgUiProjectionError::InvalidRequestField {
             field: "protocol.name",
@@ -391,6 +400,22 @@ fn validate_protocol(request: &serde_json::Map<String, Value>) -> Result<(), AgU
     )?;
     if protocol_name != PROTOCOL_NAME || core_version != CORE_VERSION {
         return Err(AgUiProjectionError::UnsupportedProtocol);
+    }
+    Ok(())
+}
+
+fn validate_closed_request_object(
+    object: &serde_json::Map<String, Value>,
+    allowed_fields: &[&str],
+    object_name: &'static str,
+) -> Result<(), AgUiProjectionError> {
+    if object
+        .keys()
+        .any(|field| !allowed_fields.contains(&field.as_str()))
+    {
+        return Err(AgUiProjectionError::UnexpectedRequestField {
+            object: object_name,
+        });
     }
     Ok(())
 }
@@ -3387,6 +3412,60 @@ mod tests {
             .iter()
             .any(|event| event["action"] == "step_closed"));
         assert_eq!(output["claims"]["stream_complete"], false);
+    }
+
+    #[test]
+    fn request_protocol_and_source_objects_reject_unexpected_fields_without_echoing_them() {
+        let cases = [
+            (
+                "request",
+                "endpoint_url_canary",
+                "https://internal.example.test/ag-ui?token=request-secret",
+            ),
+            ("protocol", "authorization_canary", "Bearer protocol-secret"),
+            (
+                "source",
+                "workspace_path_canary",
+                "/Users/private/source-secret",
+            ),
+        ];
+
+        for (object_name, unexpected_field, rejected_value) in cases {
+            let mut input = request_with_events(vec![run_started(), run_finished()]);
+            let object = match object_name {
+                "request" => input.as_object_mut().expect("request object"),
+                "protocol" | "source" => input[object_name]
+                    .as_object_mut()
+                    .expect("nested request object"),
+                _ => unreachable!("fixed test case"),
+            };
+            object.insert(unexpected_field.to_string(), json!(rejected_value));
+
+            let error = project_ag_ui_readonly(&input).expect_err("closed request envelope");
+            assert_eq!(
+                error,
+                AgUiProjectionError::UnexpectedRequestField {
+                    object: object_name
+                }
+            );
+            let display = error.to_string();
+            assert!(!display.contains(unexpected_field));
+            assert!(!display.contains(rejected_value));
+        }
+    }
+
+    #[test]
+    fn event_objects_remain_governed_by_the_pinned_protocol_validator() {
+        let input = request_with_events(vec![
+            json!({
+                "type": "RUN_STARTED",
+                "threadId": "thread",
+                "runId": "run",
+                "futureProtocolField": "not-an-envelope-field"
+            }),
+            run_finished(),
+        ]);
+        assert!(project_ag_ui_readonly(&input).is_ok());
     }
 
     #[test]

@@ -43,7 +43,7 @@ impl McpTool for AgUiReadonlyProjectTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Project one caller-supplied, bounded AG-UI 0.0.57 batch into a content-minimized read-only observation. The result grants no action authority and makes no external-effect claim. Default-off: exposed only by the explicit codex-ag-ui-readonly or all-dev toolset.".into(),
+            description: "Project one caller-supplied, bounded AG-UI 0.0.57 batch into a content-minimized read-only observation. This projector grants no action authority and makes no external-effect claim. Default-off: exposed only by codex-ag-ui-readonly or all-dev; other tools in those toolsets retain their own authority.".into(),
             input_schema: projection_input_schema(),
         }
     }
@@ -275,7 +275,8 @@ fn projection_error_output_schema() -> Value {
             "code": {
                 "enum": [
                     "request_serialization_failed", "request_too_large",
-                    "invalid_request_field", "unsupported_request_schema",
+                    "invalid_request_field", "unexpected_request_field",
+                    "unsupported_request_schema",
                     "unsupported_protocol", "invalid_event_count", "invalid_event_field",
                     "identifier_too_long", "source_identifier_too_long",
                     "canonicalization_failed"
@@ -286,6 +287,7 @@ fn projection_error_output_schema() -> Value {
                 "properties": {
                     "event_index": nonnegative_integer_schema(),
                     "field": {"type": "string"},
+                    "object": {"enum": ["request", "protocol", "source"]},
                     "actual_bytes": nonnegative_integer_schema(),
                     "max_bytes": nonnegative_integer_schema(),
                     "actual_events": nonnegative_integer_schema(),
@@ -334,6 +336,9 @@ fn projection_error_parts(error: AgUiProjectionError) -> (&'static str, Value) {
         ),
         AgUiProjectionError::InvalidRequestField { field } => {
             ("invalid_request_field", json!({"field": field}))
+        }
+        AgUiProjectionError::UnexpectedRequestField { object } => {
+            ("unexpected_request_field", json!({"object": object}))
         }
         AgUiProjectionError::UnsupportedRequestSchema => ("unsupported_request_schema", json!({})),
         AgUiProjectionError::UnsupportedProtocol => ("unsupported_protocol", json!({})),
@@ -501,6 +506,45 @@ mod tests {
             ),
             (
                 json!({
+                    "schema": REQUEST_SCHEMA,
+                    "protocol": {"name": PROTOCOL_NAME, "core_version": CORE_VERSION},
+                    "source": {"adapter_id": "adapter", "agent_id_hash": "agent"},
+                    "events": [{"type": "RUN_STARTED", "threadId": "thread", "runId": "run"}],
+                    "endpoint_url_canary": "https://internal.example.test/ag-ui?token=request-secret"
+                }),
+                "unexpected_request_field",
+                Some(("object", json!("request"))),
+            ),
+            (
+                json!({
+                    "schema": REQUEST_SCHEMA,
+                    "protocol": {
+                        "name": PROTOCOL_NAME,
+                        "core_version": CORE_VERSION,
+                        "authorization_canary": "Bearer protocol-secret"
+                    },
+                    "source": {"adapter_id": "adapter", "agent_id_hash": "agent"},
+                    "events": [{"type": "RUN_STARTED", "threadId": "thread", "runId": "run"}]
+                }),
+                "unexpected_request_field",
+                Some(("object", json!("protocol"))),
+            ),
+            (
+                json!({
+                    "schema": REQUEST_SCHEMA,
+                    "protocol": {"name": PROTOCOL_NAME, "core_version": CORE_VERSION},
+                    "source": {
+                        "adapter_id": "adapter",
+                        "agent_id_hash": "agent",
+                        "workspace_path_canary": "/Users/private/source-secret"
+                    },
+                    "events": [{"type": "RUN_STARTED", "threadId": "thread", "runId": "run"}]
+                }),
+                "unexpected_request_field",
+                Some(("object", json!("source"))),
+            ),
+            (
+                json!({
                     "schema": "wrong",
                     "protocol": {"name": PROTOCOL_NAME, "core_version": CORE_VERSION},
                     "source": {"adapter_id": "adapter", "agent_id_hash": "agent"},
@@ -589,6 +633,12 @@ mod tests {
                 "identifier-canaryidentifier-canary",
                 "source-identifier-canarysource-identifier-canary",
                 "size-canary",
+                "endpoint_url_canary",
+                "https://internal.example.test/ag-ui?token=request-secret",
+                "authorization_canary",
+                "Bearer protocol-secret",
+                "workspace_path_canary",
+                "/Users/private/source-secret",
             ] {
                 if rejected_input.contains(canary) {
                     assert!(!serialized.contains(canary));
