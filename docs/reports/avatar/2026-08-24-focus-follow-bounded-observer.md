@@ -2,7 +2,7 @@
 
 Date: 2026-08-24
 
-Status: **automated verification passed; merge, deployment, and live verdict pending**
+Status: **merged and deployed; automated and bounded live dispatch passed; owner visual action accepted; persistent adoption not admitted**
 
 ## Decision boundary
 
@@ -136,52 +136,71 @@ describe the candidate interface. Observer and action locks share the same
 owner-private `XDG_RUNTIME_DIR`, so changing a durable state-root environment
 cannot bypass exclusivity. Sway reads, movement, and animation sleeps share the
 session's absolute deadline; after that deadline no new move can be issued.
-Deployment and live use remain blocked until the source and installed binary
-have been reconciled by the verification owner.
+The candidate was reconciled, deployed, and exercised on the owner desktop.
+It is admitted only as an explicitly started foreground dogfood command. This
+does not admit a service, autostart, daemon lifecycle, or broader authority.
 
-## Verification results — automated candidate PASS; live pending
+## Verification results — bounded live acceptance PASS
 
-No live or owner-observed result is asserted by this report yet. Fill this
-section only with command output or direct owner-local observation from the
-merged/deployed candidate; do not convert a source-only or unit-test PASS into
-a live verdict.
+The deployed candidate completed one real observer-dispatched move on the
+owner desktop. A later explicit one-shot replay provided a fresh owner-visible
+choreography check. The owner confirmed that the replay completed. This is a
+technical and visual acceptance result; it is not yet a claim that a persistent
+observer would provide daily-use value.
 
 | Check | Required evidence | Current result |
 | --- | --- | --- |
 | Parse/help and dry-run | command is default-off; dry-run exits without polling or movement | **PASS (automated)** |
-| Duration and foreground lifecycle | one owner-started process exits by cancellation, attempt budget, or no later than 30 minutes | **PASS (1 s paused CLI); live pending** |
-| Startup baseline | first focused target never dispatches | **PASS (policy + paused CLI)** |
-| Dwell/debounce | focus churn resets dwell; only a stable later target is eligible | **PASS (policy)** |
+| Duration and foreground lifecycle | one owner-started process exits by cancellation, attempt budget, or no later than 30 minutes | **PASS (live: attempt budget ended the run after 10,344 ms)** |
+| Startup baseline | first focused target never dispatches | **PASS (live baseline-only runs plus policy tests)** |
+| Dwell/debounce | focus churn resets dwell; only a stable later target is eligible | **PASS (live: one transition, one stable candidate, one dispatch)** |
 | ACK and repeat suppression | compositor/Avatar-bound ACK v2, baseline, and already-attempted targets do not dispatch; stale/v1 ACK cannot suppress a new session | **PASS (automated)** |
-| Fullscreen policy | structured fullscreen target is suppressed | **PASS (planner + locked gate)** |
+| Fullscreen policy | structured fullscreen target is suppressed | **PASS (planner + locked gate + Sway workspace-mode regression)** |
 | Identity and denylist policy | missing app identity, exact `ab-sensitive` mark, built-in exact identity, and owner exact identity suppress; title/substrings do not classify | **PASS (automated)** |
 | Pause and action lock | active pause or unavailable lock yields no action | **PASS (CLI + lock tests)** |
 | Bounds, geometry, and budget | travel bounds, stable target/workspace geometry, owner-drag cancellation, duration ceiling, and three-attempt ceiling are enforced | **PASS (automated)** |
 | Failure behavior | action, observation, and prestart-runtime failures remain distinct; failed/cancelled targets do not retry; backoff is bounded | **PASS (automated)** |
-| Action journal | every real attempt has the expected outcome v2 started/final evidence or an observable unmatched start | **PASS (automated); live matching pending** |
-| Receipt privacy | initial `running` file is terminally replaced; stdout/runtime aggregate excludes title, app id, raw tree, paths, and free-form text | **PASS (automated)** |
-| Authority ceiling | zero prompt/audio/pointer/focus/input/app-operation effects | **PASS (automated); live observation pending** |
-| Owner value verdict | owner labels the session helpful, neutral, or distracting | **PENDING** |
+| Action journal | every real attempt has the expected outcome v2 started/final evidence or an observable unmatched start | **PASS (live matching started/final pairs)** |
+| Receipt privacy | initial `running` file is terminally replaced; stdout/runtime aggregate excludes title, app id, raw tree, paths, and free-form text | **PASS (automated + live terminal aggregate)** |
+| Authority ceiling | zero prompt/audio/pointer/focus/input/app-operation effects | **PASS (live receipt and outcome records; harness focus change was separate and restored)** |
+| Owner value verdict | owner labels the session helpful, neutral, or distracting | **Visual action PASS; longer-term value label not yet collected** |
 
 Record later evidence here:
 
 - source implementation commit: `f1031046`;
-- installed binary commit/currentness: **PENDING**;
+- Sway workspace/fullscreen semantic regression fix: `209514a7`;
+- live-dispatch binary: `209514a7`, built and deployed from the then-current
+  `origin/master`; subsequent unrelated master/runtime updates do not alter
+  the recorded acceptance target;
 - focused automated tests: `cargo check -p ab-bridge --bin agent-bridge`
   plus 14 policy, 16 planner/ACK, 3 CLI lifecycle, 9 action lock/journal,
   2 locked observer/drag, and 1 ACK-cooldown tests — **45 passed, 0 failed**;
 - independent adversarial static review: **PASS; no remaining high/medium finding**;
-- dry-run receipt reference: **PENDING**;
-- bounded live receipt reference: **PENDING**;
-- matching outcome v2 attempt ids: **PENDING**;
-- owner observation and value verdict: **PENDING**.
+- no-transition foreground receipts: 30,000 ms / 61 polls and 45,000 ms /
+  91 polls, both zero attempts, zero failures, and zero fullscreen suppression;
+- bounded live terminal aggregate: 10,344 ms, 19 polls, one focus transition,
+  one stable candidate, one attempt, one completion, zero cancellation, and
+  zero failure;
+- matching observer-dispatch outcome v2 attempt:
+  `af-30cd6397-25a2-4f87-b836-19237fe94ead` — started/final pair,
+  `status=completed`, `outcome_class=positive`, three executed steps,
+  112 px travel, and `postcondition_verified=true`;
+- owner-confirmed replay outcome v2 attempt:
+  `af-25f1399e-7a38-48b8-86ef-f4335172aa99` — started/final pair,
+  `status=completed`, `outcome_class=positive`, three executed steps,
+  138 px travel, and `postcondition_verified=true`;
+- owner observation: “已完成动作。” This verifies visible choreography
+  completion; it does not yet classify sustained use as helpful, neutral, or
+  distracting.
 
 ## Promotion and rollback rule
 
-Promote this candidate only after a real desktop run establishes all policy
-gates, zero pointer/focus/input interference, complete privacy-minimal receipts,
-and practical owner value. Until then, the accepted baseline remains explicit
-one-shot `focus-follow-action` execution.
+The real desktop run establishes bounded dispatch, zero observer-owned
+pointer/focus/input interference, privacy-minimal receipts, and visible action
+completion. The observer is therefore accepted for explicit owner-started,
+foreground, bounded dogfood alongside the one-shot `focus-follow-action`
+baseline. It is not accepted for persistence, autostart, or a wider authority
+surface. Those require separate daily-use evidence and an owner value label.
 
 Rollback is immediate: stop the foreground observer and do not start another
 session. The ephemeral final receipt may be retained as bounded run evidence;

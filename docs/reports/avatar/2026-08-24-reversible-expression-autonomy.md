@@ -89,8 +89,9 @@ or other irreversible/external effects.
 
 ## Next stage
 
-Increment 2 has passed its automated and adversarial implementation gates but
-remains a **live candidate**, not an accepted runtime baseline. It is one
+Increment 2 has passed its automated, adversarial, deployed live-dispatch, and
+owner-visible choreography gates. It is accepted only for **explicitly started
+foreground dogfood**, not as a persistent runtime baseline. It is one
 owner-started, foreground, at-most-30-minute,
 non-service focus observer. The first focus establishes a no-move baseline;
 later focus changes must pass dwell/debounce, cooldown, acknowledged-target,
@@ -114,8 +115,9 @@ to use the existing durable Focus-follow outcome v2 started/final pair as
 action truth. This increment adds no observer-run journal, service, autostart,
 or background persistence.
 
-The candidate contract and deliberately unfilled live-verification matrix are
-in `docs/reports/avatar/2026-08-24-focus-follow-bounded-observer.md`. Owner-local
-dogfood must establish zero focus/input interference, policy suppressions,
-complete receipts, and practical use value before this candidate can be called
-accepted or considered for persistence.
+The candidate contract and completed bounded live-verification matrix are in
+`docs/reports/avatar/2026-08-24-focus-follow-bounded-observer.md`. Owner-local
+dogfood established a successful observer dispatch, matching outcome truth,
+zero observer-owned focus/input interference, and owner-visible action
+completion. Practical daily-use value remains unclassified, so no service,
+autostart, persistent observer, or broader authority is admitted.
