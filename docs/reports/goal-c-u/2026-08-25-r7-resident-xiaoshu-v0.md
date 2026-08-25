@@ -2,9 +2,9 @@
 
 Date: 2026-08-25 (America/Los_Angeles)
 
-Status: M0/M1 source, test, and owner-local live gates passed; deployment and
-installed-binary verification follow in this record. Owner usefulness label
-remains explicitly unknown until the owner labels installed use.
+Status: M0/M1 source, test, owner-local live, deployment, and installed-binary
+gates passed. Owner usefulness label remains explicitly unknown until the
+owner labels installed use.
 
 ## Product decision
 
@@ -98,6 +98,42 @@ owner-event strings in the state root. The journal contained six private wake
 records, including the failed hardening wake. No resident Codex child or
 temporary provider directory remained. The final isolated SQLite SHA-256 was
 `4f69aa9bd615d705670070e7b643bfcde79357a814b05b582f5dd8dd2f7b5a75`.
+
+## Deployment and installed-binary acceptance
+
+The implementation commit `f697006c62350c3f451209834aa0b5d22e18eb6c` was
+pushed to the stage branch and `master`, then deployed from a fresh detached
+`origin/master` worktree. The release build completed in 8 minutes 44 seconds;
+the feature-superset gate and audio, policy, runtime-script, and app-control
+parity checks passed. The installed binary reported
+`agent-bridge 0.14.0 (v0.14.0-1856-gf697006c; f697006c6235)` and SHA-256
+`69516fb021c75c2d63e484fc0f25d076b04c998c2bdb212218e4ea0792599b48`.
+
+The three long-running user services were restarted after the file install.
+`agent-bridge-daemon`, `agent-bridge-daemon-http`, and `agent-bridge-palace`
+were active and their `/proc/<pid>/exe` hashes matched the installed binary.
+One verified stale MCP child from the current Codex parent was terminated; a
+separate current MCP server was already running the new binary. The final
+installed `agent-bridge doctor --json` reported `ok=true`, `fails=0`, and
+`warns=0`, with all detected MCP servers current.
+
+Installed-binary acceptance used a second isolated XDG root:
+
+1. Dry-run succeeded while its configured state root did not exist and left
+   that path absent, with `executed=false` and `receipt_recorded=false`.
+2. One real installed wake completed in 21,485 ms. Its receipt recorded five
+   audited provider events, zero tool events, one exact fail-closed diagnostic,
+   child exit, strict wake/subject binding, and one
+   `cognition_completed/verified` semantic event.
+3. The provider returned `insufficient_evidence` because v0 intentionally
+   exposes no repository-reading tool even when `cwd` is supplied. This is a
+   valid bounded advisory outcome, not an implied repository-agent capability.
+4. Exact replay failed with `resident_wake_duplicate` in 0.02 seconds without
+   a second provider run. Full-text search again found no raw event in the
+   isolated state root. The private AB/journal directories were `0700`, wake
+   and writer-lock files were `0600`, no provider temporary directory remained,
+   and the SQLite SHA-256 was
+   `35da37f7b539297bb7f333e716a4e27ba67309613e0e4b8f96ab3668f6b19642`.
 
 ## Remaining decision
 
