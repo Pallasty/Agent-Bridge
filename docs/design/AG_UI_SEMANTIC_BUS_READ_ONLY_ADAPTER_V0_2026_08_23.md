@@ -1,7 +1,7 @@
 # AG-UI -> Semantic System Bus Read-Only Adapter v0
 
 - Date: 2026-08-23
-- Status: maintainability-hardened pure implementation candidate; no MCP or runtime wiring
+- Status: independently reviewed pure implementation candidate; wrapper design proposed; no MCP or runtime wiring
 - External wire pin: `@ag-ui/core@0.0.57`
 - External source pin: `ag-ui-protocol/ag-ui@54f13419055b4d0f442c71e1efab18b310982ce1`
 - Reference consumer: `CopilotKit/OpenBot@2251ad266406ec8212235adba365d2c478437a0c`
@@ -110,7 +110,7 @@ No raw AG-UI event is echoed.
 | `MESSAGES_SNAPSHOT` | content-bearing observation | omitted | count messages only |
 | `ACTIVITY_SNAPSHOT` / `ACTIVITY_DELTA` | activity observation | `unknown` | counts only; no activity body |
 | text/reasoning/thinking events | content-bearing observation | omitted | count chunks/bytes only |
-| `CUSTOM` / `RAW` | unknown extension | omitted | event name hash and byte count only |
+| `CUSTOM` / `RAW` | unknown extension | omitted | count event and serialized payload bytes only; omit extension name/source |
 
 `TOOL_CALL_RESULT` is not an AB `verified` receipt. In AG-UI 0.0.57 it carries string content but no
 normative success/failure field. Parsing the content to infer failure would violate the content
@@ -192,6 +192,29 @@ The v0 projector returns these shapes in memory only. It must not call
   as trusted without a separately designed verifier.
 - AB's A2A AgentCard remains discovery metadata. It does not authenticate an AG-UI stream.
 
+### `RUN_STARTED` outer and embedded identifiers
+
+AG-UI 0.0.57 can repeat `threadId`, `runId`, and optional `parentRunId` inside
+`RUN_STARTED.input`. The outer event fields are authoritative for projection-local correlation. The
+embedded values are content-bearing input metadata and never select a run, thread, lease, policy, or
+tool-call state.
+
+When `input` is present, the projector must compare its identifiers byte-for-byte with the outer
+fields after both shapes and byte budgets pass validation:
+
+- a differing `input.threadId` records `run_input_thread_id_mismatch`;
+- a differing `input.runId` records `run_input_run_id_mismatch`;
+- a differing or presence-mismatched `input.parentRunId` records
+  `run_input_parent_run_id_mismatch`.
+
+The outer identifiers continue to drive the diagnostic state machine, but any mismatch forces
+`stream_complete=false`. No embedded identifier or mismatch value is hashed into the output, and no
+mismatch can change a verdict from `unknown` or `not_verified`. A malformed or over-budget embedded
+identifier remains a whole-batch input error rather than a projection violation.
+
+This comparison is a required pure-projector hardening change before any MCP wrapper can be
+registered.
+
 ## Tool-name handling
 
 Tool names can reveal vendors, tenants, or internal operations. The default projection returns only a
@@ -267,6 +290,24 @@ independent review may admit a read-only MCP wrapper only after the pure tests a
 - `mcp_tools.rs`, store adapters, policy, leases, transports, process control, browser, and mobile
   code are unchanged.
 
+### Independent review receipt
+
+An independent protocol/security review and a separate QA/testability subreview both returned
+`APPROVED WITH SUGGESTIONS` for commit `122cb374744b21f46657fc29dda21994720b789b`.
+They found no blocking mapping, content-minimization, authority, persistence, or execution issue.
+The review confirmed all 33 pinned AG-UI 0.0.57 event types were classified and that no production
+path can generate a `verified` verdict.
+
+The non-blocking findings carried into the next gate are:
+
+- cross-check the outer and embedded `RUN_STARTED` identifiers using the rule above;
+- resolve the `CUSTOM` / `RAW` documentation drift in favor of the implementation's more private
+  count-only behavior;
+- expand table-driven event-shape, state-machine oracle, exact-boundary, UTF-8, and canonical-order
+  tests before wrapper registration;
+- add a static architecture gate proving the wrapper has no route to store, execution, policy,
+  lease, browser, mobile, process, or network capabilities.
+
 This receipt is local source evidence only. It is not a merge, remote publication, installed build,
 fresh MCP process, runtime exposure, or deployment receipt.
 
@@ -284,8 +325,8 @@ Not part of P1:
 
 ## Gate
 
-Current verdict: `P1_MAINTAINABILITY_AND_SEQUENCE_CORPUS_READY_FOR_INDEPENDENT_REVIEW`.
+Current verdict: `P1_INDEPENDENT_REVIEW_APPROVED_WITH_SUGGESTIONS`.
 
-The next gate is independent review of mapping fidelity, content minimization, ordering rules, and
-the assertion that no AG-UI lifecycle event can be laundered into a verified real-world outcome.
-That review grants no MCP registration or runtime enablement by itself.
+The admitted next gate is design and source-only hardening for a default-off, read-only MCP wrapper.
+Its contract is defined in `AG_UI_READ_ONLY_MCP_WRAPPER_V0_2026_08_25.md`. This admission grants no
+MCP registration, tool-profile change, runtime exposure, remote publication, merge, or deployment.
