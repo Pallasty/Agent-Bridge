@@ -899,6 +899,50 @@ enum ResidentOp {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Preview one typed reason-driven wake candidate without waking cognition.
+    ///
+    /// This M2 shadow is explicit and default-off. It accepts only content
+    /// hashes, requires a bound useful owner evaluation, and may record a
+    /// private policy receipt. It never invokes a provider or installs a
+    /// scheduler.
+    Shadow {
+        /// Useful completed wake whose owner evaluation admits shadow review.
+        #[arg(long)]
+        basis_wake_id: String,
+        /// Typed reason proposed for a hypothetical sparse wake.
+        #[arg(long, value_enum)]
+        trigger_kind: ResidentM2ShadowTriggerKindArg,
+        /// SHA-256 of the stable candidate signal; raw signal text is forbidden.
+        #[arg(long)]
+        signal_sha256: String,
+        /// SHA-256 of the candidate evidence; raw evidence is not persisted.
+        #[arg(long)]
+        evidence_sha256: String,
+        /// Verification status of the candidate evidence.
+        #[arg(long, value_enum, default_value = "unknown")]
+        evidence_status: ResidentM2ShadowEvidenceStatusArg,
+        /// When the candidate signal was observed.
+        #[arg(long)]
+        observed_at_unix_ms: u64,
+        /// Required only for commitment-due candidates.
+        #[arg(long)]
+        due_at_unix_ms: Option<u64>,
+        /// Failure severity; ignored by commitment and recovery candidates.
+        #[arg(long, value_enum, default_value = "info")]
+        severity: ResidentM2ShadowSeverityArg,
+        /// Whether an interactive foreground owner session is active.
+        #[arg(long, value_enum, default_value = "unknown")]
+        foreground_state: ResidentM2ShadowForegroundStateArg,
+        /// Deterministic replay time; current time is used when omitted.
+        #[arg(long)]
+        evaluated_at_unix_ms: Option<u64>,
+        /// Candidate-local UTC offset in minutes, e.g. -420 for PDT.
+        #[arg(long, allow_hyphen_values = true)]
+        utc_offset_minutes: i16,
+        /// Persist a private 0600 shadow report. Preview is the default.
+        #[arg(long)]
+        record: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -917,6 +961,100 @@ impl From<ResidentOwnerLabelArg> for ab_bridge::resident_owner_evaluation::Resid
             ResidentOwnerLabelArg::Neutral => ResidentOwnerLabel::Neutral,
             ResidentOwnerLabelArg::Distracting => ResidentOwnerLabel::Distracting,
             ResidentOwnerLabelArg::Harmful => ResidentOwnerLabel::Harmful,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ResidentM2ShadowTriggerKindArg {
+    CommitmentDue,
+    Recovery,
+    Failure,
+}
+
+impl From<ResidentM2ShadowTriggerKindArg>
+    for ab_bridge::resident_m2_shadow::ResidentM2ShadowTriggerKind
+{
+    fn from(value: ResidentM2ShadowTriggerKindArg) -> Self {
+        use ab_bridge::resident_m2_shadow::ResidentM2ShadowTriggerKind;
+        match value {
+            ResidentM2ShadowTriggerKindArg::CommitmentDue => {
+                ResidentM2ShadowTriggerKind::CommitmentDue
+            }
+            ResidentM2ShadowTriggerKindArg::Recovery => ResidentM2ShadowTriggerKind::Recovery,
+            ResidentM2ShadowTriggerKindArg::Failure => ResidentM2ShadowTriggerKind::Failure,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ResidentM2ShadowEvidenceStatusArg {
+    Verified,
+    NotVerified,
+    Unknown,
+}
+
+impl From<ResidentM2ShadowEvidenceStatusArg>
+    for ab_bridge::resident_m2_shadow::ResidentM2ShadowEvidenceStatus
+{
+    fn from(value: ResidentM2ShadowEvidenceStatusArg) -> Self {
+        use ab_bridge::resident_m2_shadow::ResidentM2ShadowEvidenceStatus;
+        match value {
+            ResidentM2ShadowEvidenceStatusArg::Verified => {
+                ResidentM2ShadowEvidenceStatus::Verified
+            }
+            ResidentM2ShadowEvidenceStatusArg::NotVerified => {
+                ResidentM2ShadowEvidenceStatus::NotVerified
+            }
+            ResidentM2ShadowEvidenceStatusArg::Unknown => {
+                ResidentM2ShadowEvidenceStatus::Unknown
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ResidentM2ShadowSeverityArg {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl From<ResidentM2ShadowSeverityArg>
+    for ab_bridge::resident_m2_shadow::ResidentM2ShadowSeverity
+{
+    fn from(value: ResidentM2ShadowSeverityArg) -> Self {
+        use ab_bridge::resident_m2_shadow::ResidentM2ShadowSeverity;
+        match value {
+            ResidentM2ShadowSeverityArg::Info => ResidentM2ShadowSeverity::Info,
+            ResidentM2ShadowSeverityArg::Warning => ResidentM2ShadowSeverity::Warning,
+            ResidentM2ShadowSeverityArg::Critical => ResidentM2ShadowSeverity::Critical,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ResidentM2ShadowForegroundStateArg {
+    Active,
+    Inactive,
+    Unknown,
+}
+
+impl From<ResidentM2ShadowForegroundStateArg>
+    for ab_bridge::resident_m2_shadow::ResidentM2ShadowForegroundState
+{
+    fn from(value: ResidentM2ShadowForegroundStateArg) -> Self {
+        use ab_bridge::resident_m2_shadow::ResidentM2ShadowForegroundState;
+        match value {
+            ResidentM2ShadowForegroundStateArg::Active => {
+                ResidentM2ShadowForegroundState::Active
+            }
+            ResidentM2ShadowForegroundStateArg::Inactive => {
+                ResidentM2ShadowForegroundState::Inactive
+            }
+            ResidentM2ShadowForegroundStateArg::Unknown => {
+                ResidentM2ShadowForegroundState::Unknown
+            }
         }
     }
 }
@@ -5075,6 +5213,42 @@ async fn real_main() -> Result<()> {
                     ab_bridge::resident_owner_evaluation::record_resident_owner_evaluation(
                         options,
                     )?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+                Ok(())
+            }
+            ResidentOp::Shadow {
+                basis_wake_id,
+                trigger_kind,
+                signal_sha256,
+                evidence_sha256,
+                evidence_status,
+                observed_at_unix_ms,
+                due_at_unix_ms,
+                severity,
+                foreground_state,
+                evaluated_at_unix_ms,
+                utc_offset_minutes,
+                record,
+            } => {
+                let mut options =
+                    ab_bridge::resident_m2_shadow::ResidentM2ShadowOptions::new(
+                        basis_wake_id.clone(),
+                        (*trigger_kind).into(),
+                        signal_sha256.clone(),
+                        evidence_sha256.clone(),
+                        *observed_at_unix_ms,
+                        *utc_offset_minutes,
+                    );
+                options.evidence_status = (*evidence_status).into();
+                options.due_at_unix_ms = *due_at_unix_ms;
+                options.severity = (*severity).into();
+                options.foreground_state = (*foreground_state).into();
+                if let Some(evaluated_at_unix_ms) = evaluated_at_unix_ms {
+                    options.evaluated_at_unix_ms = *evaluated_at_unix_ms;
+                }
+                options.record = *record;
+                let packet =
+                    ab_bridge::resident_m2_shadow::evaluate_resident_m2_shadow(options)?;
                 println!("{}", serde_json::to_string_pretty(&packet)?);
                 Ok(())
             }

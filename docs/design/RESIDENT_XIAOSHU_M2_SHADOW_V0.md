@@ -1,0 +1,131 @@
+# Resident Xiao Shu M2 shadow v0
+
+Date: 2026-08-25 (America/Los_Angeles)
+
+Status: approved bounded implementation. This is a default-off policy
+evaluator and optional private report ledger. It is not M2 runtime admission.
+
+## Decision and purpose
+
+The R7-E1 owner label `useful` supplied the positive M1 value signal required
+to review one separate M2 shadow slice. The smallest useful next increment is
+to answer one question without creating a new runtime:
+
+> Given an explicitly supplied, typed candidate, would a sparse wake have
+> passed a frozen attention and cost policy?
+
+Agent-Bridge owns this deterministic decision and its content-free receipt.
+It does not own candidate discovery in this slice. A caller must explicitly
+provide the trigger type, timestamps, evidence status, foreground state, and
+content hashes. In particular, AB does not infer commitments or due dates from
+free text, model output, memory, or project state.
+
+The command is:
+
+```text
+agent-bridge resident shadow \
+  --basis-wake-id <useful-evaluated-wake> \
+  --trigger-kind <commitment-due|recovery|failure> \
+  --signal-sha256 <sha256> \
+  --evidence-sha256 <sha256> \
+  --evidence-status <verified|not-verified|unknown> \
+  --observed-at-unix-ms <timestamp> \
+  --foreground-state <active|inactive|unknown> \
+  --utc-offset-minutes <offset>
+```
+
+`commitment-due` additionally requires `--due-at-unix-ms`. Failure candidates
+may set `--severity`; only warning or critical failures can be hypothetically
+eligible. Preview is the default. `--record` is a separate explicit choice.
+
+## Frozen policy revision 1
+
+| Control | Value | Fail-closed behavior |
+|---|---:|---|
+| Quiet hours | 22:00-08:00 candidate-local | suppress |
+| Foreground session | only explicit `inactive` is eligible | active or unknown suppresses |
+| Evidence | only explicit `verified` is eligible | not-verified or unknown suppresses |
+| Duplicate signal horizon | 24 hours | same trigger kind and signal hash suppresses |
+| Minimum projected-wake interval | 6 hours | suppress |
+| Daily budget | 2 projected wakes per candidate-local day | suppress |
+| Recovery freshness | 6 hours | stale recovery suppresses |
+| Failure freshness | 1 hour | stale failure suppresses |
+| Failure severity | warning or critical | info suppresses |
+| Hypothetical provider deadline | 120 seconds | reported only when `would_wake=true` |
+
+An eligible decision reports one *projected* provider call. Every report,
+including an eligible one, records `actual_provider_calls=0` and
+`actual_wakes_created=0`. The implementation has no provider or wake-creation
+call site.
+
+## Admission and stop binding
+
+Every evaluation must bind to an existing R7-E1 receipt whose completed wake,
+subject, final-output hash, and execution-receipt hash still validate and whose
+fixed owner label is `useful`. The candidate evaluation timestamp may not
+predate that receipt.
+
+Before evaluating, AB scans the private owner-evaluation ledger. A
+`distracting` or `harmful` label recorded at or after the useful basis stops the
+entire shadow lane. It returns an error rather than a hypothetical decision.
+`neutral` creates no new admission. Labels remain explicit local CLI
+assertions, not cryptographic owner authentication, and no recommendation
+executes automatically.
+
+## Receipt and privacy boundary
+
+The report schema is `agent_bridge.resident_m2_shadow.v0`. A report contains:
+
+- subject, basis wake, basis evaluation, and the SHA-256 of the bound
+  evaluation receipt;
+- typed trigger, timestamps, UTC offset, severity, foreground state, evidence
+  status, signal hash, and evidence hash;
+- the complete frozen policy revision, decision, suppression reasons, and
+  explicit non-authority boundary.
+
+It contains no raw signal, raw evidence, prompt, provider response, arbitrary
+note, owner identity, or action payload. The command neither reads nor accepts
+raw signal/evidence content. Caller assertions are intentionally recorded as
+not cryptographically authenticated.
+
+Recorded reports live below the shared private resident root in a 0700
+`m2-shadow-reports` directory. Each final JSON file is mode 0600 with one link.
+Complete bytes are synced under a private temporary name, then published by an
+atomic no-overwrite link. Repeating the exact candidate is idempotent; a
+different report at the same deterministic ID fails closed. Preview creates
+neither the directory nor a receipt.
+
+## Explicit non-capabilities
+
+This slice has no daemon, scheduler, timer, service, hook, autostart, event
+watcher, provider invocation, cognitive wake, tool/action execution, Avatar or
+voice projection, external message, runtime configuration change, automatic
+memory promotion, or candidate discovery. It grants no OS, network, account,
+credential, or device authority. It does not admit M2.
+
+`would_wake=true` is a counterfactual policy result, not permission to wake.
+The terms `projected_provider_calls` and `projected_provider_timeout_secs` are
+estimates under this frozen shadow policy, not observed execution.
+
+## Measurement and next gate
+
+Retain only privacy-minimal reports for real, manually identified candidates.
+Review:
+
+- eligible versus suppressed counts by typed trigger;
+- suppression reasons, especially foreground collision and quiet hours;
+- duplicate, interval, and daily-budget pressure;
+- candidate age and evidence-verification failures;
+- owner labels on any later explicit M1 wakes; and
+- false-positive, stale, distracting, or harmful candidate reports.
+
+Source tests and one current-state report prove mechanics, not unattended-wake
+value. The next gate requires natural real-task candidates, owner review of
+their counterfactual decisions, and a separate decision on candidate-source,
+frequency, quiet-hour, cost, and stop controls. Until then, adding discovery,
+a timer, a scheduler, or any real provider invocation is prohibited.
+
+Two increments without observed use-value refreeze the lane. Any stop label,
+raw-content persistence, unexpected provider/tool event, wake creation,
+permission weakening, or report corruption stops collection immediately and
+preserves evidence for disable or rollback review.

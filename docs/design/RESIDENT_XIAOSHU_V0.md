@@ -399,7 +399,9 @@ These stages express direction, not current authorization:
 1. **M2 — sparse reason-driven wake:** evaluate commitment-due, recovery, and
    failure triggers in shadow/preview first. Admit no scheduler until M1 shows
    use value and a separate owner decision sets frequency, quiet hours,
-   deduplication, cost, and stop controls.
+   deduplication, cost, and stop controls. The approved default-off policy
+   evaluator is specified in `docs/design/RESIDENT_XIAOSHU_M2_SHADOW_V0.md`;
+   its counterfactual reports do not admit M2 runtime.
 2. **M3 — reversible body selection:** let the subject choose among already
    admitted bubbles, Avatar motion, voice, and CLI response based on attention
    cost. Each body stays independently disableable and replaceable.
