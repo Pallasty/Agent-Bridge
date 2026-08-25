@@ -14262,6 +14262,10 @@ mod audio;
 pub use audio::*;
 mod a2ui;
 pub use a2ui::*;
+// D2 source gate: compiled for tests and review, but deliberately not re-exported
+// or registered. Registration and toolset policy remain a later gate.
+#[cfg_attr(not(test), allow(dead_code))]
+mod ag_ui_readonly;
 // ===========================================================================
 //                       forum (v18) — shared whiteboard
 // ===========================================================================
