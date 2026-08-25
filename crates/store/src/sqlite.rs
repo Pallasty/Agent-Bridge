@@ -58,7 +58,108 @@ pub use temporal_evidence::{
 // Local alias matches the `E` parameter that `tokio_rusqlite::Connection::call`
 // expects from the user closure.
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
-use tracing::info;
+use tracing::{info, warn};
+
+// A busy handler can return SQLITE_BUSY immediately when two deferred SQLite
+// transactions would deadlock while upgrading their locks. That is exactly the
+// shape produced when daemon and daemon-http initialize the shared state store
+// at the same time, so the connection-level five-second busy timeout below is
+// necessary but not sufficient. Retry the complete idempotent initialization a
+// few times after releasing the failed statement. The total explicit backoff is
+// deliberately short (300 ms), while the four possible busy-timeout waits stay
+// below the services' 30-second startup deadline.
+const SQLITE_INIT_RETRY_DELAYS_MS: [u64; 3] = [25, 75, 200];
+
+fn sqlite_init_retry_delay(
+    error: &tokio_rusqlite::Error,
+    retries_completed: usize,
+) -> Option<std::time::Duration> {
+    let is_lock_contention = matches!(
+        error,
+        tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(code, _))
+            if matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    );
+    is_lock_contention
+        .then(|| SQLITE_INIT_RETRY_DELAYS_MS.get(retries_completed).copied())
+        .flatten()
+        .map(std::time::Duration::from_millis)
+}
+
+async fn acquire_sqlite_init_lock(path: &Path) -> Result<std::fs::File> {
+    let mut lock_name = path.as_os_str().to_os_string();
+    lock_name.push(".init.lock");
+    let lock_path = PathBuf::from(lock_name);
+    let lock_label = lock_path.display().to_string();
+    let file =
+        tokio::task::spawn_blocking(move || acquire_sqlite_init_lock_blocking(&lock_path))
+            .await
+            .map_err(|error| Error::Backend(format!("join sqlite init lock task: {error}")))?
+            .map_err(|error| {
+                Error::Backend(format!("acquire sqlite init lock {lock_label}: {error}"))
+            })?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn acquire_sqlite_init_lock_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    for attempt in 0..800 {
+        // SAFETY: flock only observes the live descriptor; `file` remains owned
+        // by this function and is returned on success so the lock lifetime is
+        // exactly the File lifetime.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(file);
+        }
+        let error = std::io::Error::last_os_error();
+        match error.kind() {
+            std::io::ErrorKind::Interrupted if attempt < 799 => continue,
+            std::io::ErrorKind::WouldBlock if attempt < 799 => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            _ => return Err(error),
+        }
+    }
+    unreachable!("bounded Unix sqlite init lock loop must return")
+}
+
+#[cfg(windows)]
+fn acquire_sqlite_init_lock_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    // An exclusive Windows file handle provides the same crash-released
+    // advisory-lock lifetime as flock. Sharing violations are polled only up
+    // to the service startup budget; other I/O failures remain fail-fast.
+    for attempt in 0..800 {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(path)
+        {
+            Ok(file) => return Ok(file),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+                ) && attempt < 799 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("bounded Windows sqlite init lock loop must return")
+}
 
 fn resource_baseline_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!("resource baseline admission: {error}"))
@@ -1598,16 +1699,7 @@ impl SqliteStore {
 }
 
 impl SqliteStore {
-    pub async fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| Error::Backend(format!("create db dir: {e}")))?;
-        }
-        let conn = Connection::open(path)
-            .await
-            .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
-
+    async fn initialize_connection_once(conn: &Connection) -> tokio_rusqlite::Result<()> {
         conn.call(|c| -> RusqliteResult<()> {
             // Allow up to 5 s of retries when another writer holds the DB.
             c.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -2614,7 +2706,45 @@ impl SqliteStore {
             Ok(())
         })
         .await
-        .map_err(|e| Error::Backend(format!("sqlite migrate: {e}")))?;
+    }
+
+    pub async fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| Error::Backend(format!("create db dir: {e}")))?;
+        }
+        // Schema checks and migrations contain check-then-create sequences. A
+        // cross-process advisory lock keeps daemon, daemon-http, Palace, and MCP
+        // startup from racing those sequences. The file contains no state and
+        // the OS releases the lock automatically if a process exits.
+        let _init_lock = acquire_sqlite_init_lock(path).await?;
+        let conn = Connection::open(path)
+            .await
+            .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
+
+        let mut retries_completed = 0usize;
+        loop {
+            let migration_result = Self::initialize_connection_once(&conn).await;
+            match migration_result {
+                Ok(()) => break,
+                Err(error) => {
+                    let Some(delay) = sqlite_init_retry_delay(&error, retries_completed) else {
+                        return Err(Error::Backend(format!("sqlite migrate: {error}")));
+                    };
+                    retries_completed += 1;
+                    warn!(
+                        path = %path.display(),
+                        retry = retries_completed,
+                        max_retries = SQLITE_INIT_RETRY_DELAYS_MS.len(),
+                        delay_ms = delay.as_millis(),
+                        error = %error,
+                        "SQLite initialization lock contention; retrying in-process"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
 
         info!(path = %path.display(), "SqliteStore ready");
         Ok(Self {
@@ -17385,6 +17515,66 @@ mod tests {
     #[cfg(feature = "codebase-index-bounded-native-a1")]
     use crate::CodebaseIndexA1DispatchStrategy;
     use crate::{MemoryListSort, PlanStep, StateStore};
+
+    fn sqlite_call_error(code: i32) -> tokio_rusqlite::Error {
+        tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ))
+    }
+
+    #[test]
+    fn sqlite_init_retry_is_bounded_and_lock_specific() {
+        let busy = sqlite_call_error(rusqlite::ffi::SQLITE_BUSY);
+        let locked = sqlite_call_error(rusqlite::ffi::SQLITE_LOCKED);
+        let corrupt = sqlite_call_error(rusqlite::ffi::SQLITE_CORRUPT);
+
+        assert_eq!(
+            (0..SQLITE_INIT_RETRY_DELAYS_MS.len())
+                .map(|attempt| sqlite_init_retry_delay(&busy, attempt).unwrap().as_millis())
+                .collect::<Vec<_>>(),
+            vec![25, 75, 200]
+        );
+        assert_eq!(
+            sqlite_init_retry_delay(&locked, 0),
+            Some(std::time::Duration::from_millis(25))
+        );
+        assert_eq!(
+            sqlite_init_retry_delay(&busy, SQLITE_INIT_RETRY_DELAYS_MS.len()),
+            None,
+            "retry budget must be finite"
+        );
+        assert_eq!(
+            sqlite_init_retry_delay(&corrupt, 0),
+            None,
+            "non-contention failures must remain fail-fast"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_fresh_store_initialization_recovers_in_process() {
+        const OPENERS: usize = 8;
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let database = temp_dir.path().join("state.db");
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(OPENERS));
+        let mut handles = Vec::with_capacity(OPENERS);
+
+        for _ in 0..OPENERS {
+            let database = database.clone();
+            let barrier = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                SqliteStore::open(&database).await.map(drop)
+            }));
+        }
+
+        for handle in handles {
+            handle
+                .await
+                .expect("initializer task must not panic")
+                .expect("concurrent initializer must recover without process restart");
+        }
+    }
 
     #[test]
     fn cold_embedding_write_wait_defaults_to_two_seconds() {
