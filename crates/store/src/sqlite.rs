@@ -10865,18 +10865,57 @@ impl StateStore for SqliteStore {
         archive_threshold: f64,
     ) -> Result<u64> {
         let now = now_secs();
+        // Finalize can run several times within minutes (pre-compact, stop,
+        // explicit lifecycle closure). Rewriting every active row on each
+        // call is expensive on the owner-local FUSE-backed store even though
+        // the resulting decay factor is effectively 1. Keep the maximum
+        // scheduling lag below one percent of the requested half-life and cap
+        // it at six hours for the normal 30-day policy. A later due pass still
+        // uses the unchanged last_decayed_at anchor, so elapsed decay is
+        // accumulated rather than discarded.
+        const MAX_DECAY_INTERVAL_SECS: f64 = 6.0 * 60.0 * 60.0;
+        let min_decay_interval_secs =
+            (half_life_days.max(0.0) * 86_400.0 * 0.01).clamp(1.0, MAX_DECAY_INTERVAL_SECS) as i64;
+        let due_before = now.saturating_sub(min_decay_interval_secs);
         let archived = self
             .conn
             .call(move |c| -> RusqliteResult<u64> {
+                // Read due rows first. Most closely-spaced finalize calls end
+                // here without scanning the edge graph or opening a write
+                // transaction.
+                let mut stmt = c.prepare(
+                    "SELECT key, importance, COALESCE(last_decayed_at, updated_at), related_keys
+                     FROM memories
+                     WHERE status = 'active'
+                       AND (
+                           COALESCE(last_decayed_at, updated_at) <= ?1
+                           OR COALESCE(last_decayed_at, updated_at) > ?2
+                       )",
+                )?;
+                let candidates: Vec<(String, f64, i64, Option<String>)> = stmt
+                    .query_map(params![due_before, now], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                drop(stmt);
+                if candidates.is_empty() {
+                    return Ok(0);
+                }
+
                 // Durable-memory guard (2026-06-02, thread 97 #97): pre-load
                 // the set of keys that participate in at least one edge. A
                 // graph-connected or author-linked (`related_keys`) memory is
                 // NOT archived even when its decayed importance falls below
                 // the threshold — decay is a ranking signal, not a reason to
-                // retire a hub. (This decay compounds per call and does not
-                // bump updated_at, so frequent session_finalize runs can sink
-                // a well-connected durable row below the floor purely on call
-                // count — that was the thread 97 collateral root cause.)
+                // retire a hub. Before last_decayed_at became the incremental
+                // anchor, frequent finalize calls could compound decay by call
+                // count; that was the thread 97 collateral root cause.
                 let mut edge_keys: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
                 {
@@ -10897,26 +10936,6 @@ impl StateStore for SqliteStore {
                         edge_keys.insert(k);
                     }
                 }
-
-                // Fetch all active memories with their decay anchor + current
-                // importance + related_keys (for the durable guard). The anchor
-                // is last_decayed_at (COALESCE updated_at for rows not yet
-                // decayed) — see the F5 fix below.
-                let mut stmt = c.prepare(
-                    "SELECT key, importance, COALESCE(last_decayed_at, updated_at), related_keys
-                     FROM memories WHERE status = 'active'",
-                )?;
-                let candidates: Vec<(String, f64, i64, Option<String>)> = stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, f64>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                        ))
-                    })?
-                    .filter_map(|r| r.ok())
-                    .collect();
 
                 let tx = c.unchecked_transaction()?;
                 let mut archived_count = 0u64;
@@ -23577,6 +23596,150 @@ mod tests {
         assert!(
             (imp2 - imp1).abs() < 1e-6,
             "repeated decay must not compound: imp1={imp1} imp2={imp2}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_importance_defers_recent_rows_without_advancing_anchor() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-decay-min-interval-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        store
+            .memory_save(&MemoryRecord {
+                key: "recent_decay_probe".into(),
+                kind: "lesson".into(),
+                content: "probe".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.8,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+
+        let recent_anchor = now_secs() - 60;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at=?1, last_decayed_at=?1 \
+                     WHERE key='recent_decay_probe'",
+                    params![recent_anchor],
+                )
+            })
+            .await
+            .expect("set recent anchor");
+
+        let archived = store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("recent decay pass");
+        assert_eq!(archived, 0);
+        let (importance, anchor) = store
+            .conn
+            .call(|c| -> RusqliteResult<(f64, i64)> {
+                c.query_row(
+                    "SELECT importance, last_decayed_at FROM memories \
+                     WHERE key='recent_decay_probe'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .expect("read deferred row");
+        assert_eq!(importance, 0.8, "a recent row must not be rewritten");
+        assert_eq!(
+            anchor, recent_anchor,
+            "a deferred pass must preserve the anchor so elapsed decay accumulates"
+        );
+
+        let due_anchor = now_secs() - (6 * 60 * 60) - 60;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET last_decayed_at=?1 \
+                     WHERE key='recent_decay_probe'",
+                    params![due_anchor],
+                )
+            })
+            .await
+            .expect("set due anchor");
+        store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("due decay pass");
+        let (decayed_importance, advanced_anchor) = store
+            .conn
+            .call(|c| -> RusqliteResult<(f64, i64)> {
+                c.query_row(
+                    "SELECT importance, last_decayed_at FROM memories \
+                     WHERE key='recent_decay_probe'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .expect("read due row");
+        assert!(
+            decayed_importance < importance,
+            "a due row must apply its accumulated elapsed decay"
+        );
+        assert!(
+            advanced_anchor > due_anchor,
+            "a due pass must advance the decay anchor"
+        );
+
+        let future_anchor = now_secs() + 60 * 60;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET last_decayed_at=?1 \
+                     WHERE key='recent_decay_probe'",
+                    params![future_anchor],
+                )
+            })
+            .await
+            .expect("set future anchor");
+        store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("future-anchor repair pass");
+        let repaired_anchor = store
+            .conn
+            .call(|c| -> RusqliteResult<i64> {
+                c.query_row(
+                    "SELECT last_decayed_at FROM memories \
+                     WHERE key='recent_decay_probe'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .expect("read repaired anchor");
+        assert!(
+            repaired_anchor < future_anchor,
+            "future clock-skew anchors must still be repaired instead of deferred"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
