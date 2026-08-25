@@ -146,6 +146,15 @@ enum Cmd {
         #[command(subcommand)]
         op: InstinctOp,
     },
+    /// Run bounded Resident Xiao Shu cognition.
+    ///
+    /// V0 is explicit, one-shot, read-only, and advisory-only. Agent-Bridge
+    /// owns the durable subject receipt; Codex runs ephemerally without the
+    /// user's config or MCP surface and exits after one schema-bound response.
+    Resident {
+        #[command(subcommand)]
+        op: ResidentOp,
+    },
     /// Install agent-bridge for the chosen frontend.
     ///
     /// `--frontend claude-code` (default): copies the binary to
@@ -840,6 +849,39 @@ enum InstinctOp {
         /// Emit raw JSON payload instead of a command line summary.
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ResidentOp {
+    /// Analyze one observed event without executing or scheduling the advice.
+    Cognition {
+        /// Untrusted observed event to analyze. The raw value is not persisted.
+        #[arg(long)]
+        event: String,
+        /// Stable caller identity for the event. Generated when omitted.
+        #[arg(long)]
+        event_id: Option<String>,
+        /// Read-only workspace visible to Codex.
+        #[arg(long, default_value = ".")]
+        cwd: PathBuf,
+        /// Efficient model used by the ephemeral cognition provider.
+        #[arg(long, default_value = ab_bridge::resident_cognition::DEFAULT_RESIDENT_MODEL)]
+        model: String,
+        /// Bounded reasoning effort: low or medium.
+        #[arg(long, default_value = ab_bridge::resident_cognition::DEFAULT_REASONING_EFFORT)]
+        reasoning_effort: String,
+        /// Hard wall-clock limit for the provider (10..=120 seconds).
+        #[arg(long, default_value_t = ab_bridge::resident_cognition::DEFAULT_TIMEOUT_SECS)]
+        timeout_secs: u64,
+        /// Codex executable override. AB_RESIDENT_CODEX_BIN is used when this
+        /// argument stays at its default.
+        #[arg(long, default_value = "codex")]
+        codex_bin: PathBuf,
+        /// Emit the exact bounded launch contract without starting Codex or
+        /// writing a receipt.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -4939,6 +4981,52 @@ async fn real_main() -> Result<()> {
         return Ok(());
     }
 
+    // Resident Xiao Shu v0 deliberately runs before the general credential
+    // notebook is loaded. The child receives Codex auth through CODEX_HOME,
+    // but does not inherit AB's unrelated service tokens merely because the
+    // parent CLI supports other integrations.
+    if let Cmd::Resident { op } = &cmd {
+        return match op {
+            ResidentOp::Cognition {
+                event,
+                event_id,
+                cwd,
+                model,
+                reasoning_effort,
+                timeout_secs,
+                codex_bin,
+                dry_run,
+            } => {
+                let mut options = ab_bridge::resident_cognition::ResidentCognitionOptions::new(
+                    event.clone(),
+                    cwd.clone(),
+                );
+                options.event_id = event_id.clone();
+                options.model = model.clone();
+                options.reasoning_effort = reasoning_effort.clone();
+                options.timeout_secs = *timeout_secs;
+                options.dry_run = *dry_run;
+                // Keep the environment override selected by `new` when the
+                // clap default remains untouched.
+                if codex_bin != Path::new("codex") {
+                    options.codex_bin = codex_bin.clone();
+                }
+
+                let store = if *dry_run {
+                    None
+                } else {
+                    let store: Arc<dyn StateStore> =
+                        Arc::new(SqliteStore::open(&default_db_path()).await?);
+                    Some(store)
+                };
+                let packet =
+                    ab_bridge::resident_cognition::run_resident_cognition(options, store).await?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+                Ok(())
+            }
+        };
+    }
+
     // Load API tokens from the user's plaintext creds notebook before any
     // worker thread can read env. Self-heals after a `cargo install` that
     // overwrites the shell wrapper. See `creds.rs` for resolution order.
@@ -8662,6 +8750,7 @@ async fn real_main() -> Result<()> {
         | Cmd::WorktreeSession { .. }
         | Cmd::RescueSnapshot { .. }
         | Cmd::Doctor { .. }
+        | Cmd::Resident { .. }
         | Cmd::Walkthrough { .. }
         | Cmd::ContinuityReport { .. }
         | Cmd::WorkflowFeedbackReport { .. }

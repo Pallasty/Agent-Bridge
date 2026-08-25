@@ -129,6 +129,8 @@ pub mod project;
 pub mod project_identity;
 pub mod remote_embed;
 pub mod remote_steer;
+pub mod resident_cognition;
+pub mod resident_wake_journal;
 pub mod rescue;
 pub mod retrieval_outcome;
 pub mod router;

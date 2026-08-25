@@ -57,3 +57,20 @@ can only be delayed within that bound.
 Post-deployment acceptance must verify the installed binary provenance, run
 two default finalizations through a fresh MCP child, confirm the second call is
 inside the bounded fast path, and retain normal semantic-event readback.
+
+## Post-deployment acceptance
+
+Deployment completed from `master` commit
+`c80d47655efcc27907a6e0acac2e1990443d07c0`. The installed real binary reported
+that source revision and had SHA-256
+`9a90d41051a31e85ac6c716cdb0efea8721c0e972c506d58dc8fffdbc7137eae`.
+All three user services executed that same inode/hash with zero restart count
+after deployment, and Doctor reported zero failures and zero warnings.
+
+A fresh MCP child performed two ordinary `session_finalize` calls in 127 ms
+and 130 ms. Both were admitted and their semantic-event readback remained
+present. This validates the bounded fast path against the installed binary.
+Only those two acceptance calls were observed in the first post-deployment
+hour, so natural-load latency is still insufficient rather than inferred from
+synthetic volume. R6 stays in ordinary telemetry with no benchmark-only
+follow-up.
