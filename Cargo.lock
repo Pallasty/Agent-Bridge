@@ -15,6 +15,9 @@ dependencies = [
  "portable-pty",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -187,6 +190,7 @@ dependencies = [
  "security-framework",
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
@@ -233,6 +237,8 @@ version = "0.14.0"
 dependencies = [
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
  "uuid",
 ]

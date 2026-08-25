@@ -61,6 +61,38 @@ The reducer returns:
 No verdict changes runtime behavior. Even a fully passing report requires a
 separate owner adoption decision.
 
+## Relationship to the general task-outcome ledger
+
+This Python/JSONL ledger remains the locked decision instrument for the four
+V1 adoption gates above. Its event schemas, sample minima, reducer thresholds,
+stop conditions, and content-free export are not changed by the general
+`agent_task_outcomes` SQLite ledger.
+
+The general ledger receives an optional explicit result through
+`session_finalize` and lets `practical_workflow_scorecard` report task status,
+verification, rollback disposition, and per-field operator-burden claims
+without inferring them from lifecycle calls. The public producer is
+agent-reported only: it cannot assert authenticated owner/harness provenance,
+and owner acceptance remains unknown. Missing burden fields remain unavailable
+rather than becoming zero. It is an operational claim source, not an input to
+this locked four-gate reducer. It does not backfill dogfood samples, translate
+one event type into another, or make an adoption decision.
+
+The evidence authorities therefore remain separate:
+
+- this owner-local JSONL ledger decides only the locked continuity, Avatar,
+  embodied, and voice trial;
+- the SQLite outcome ledger supports general explicit workflow outcomes;
+- Tool Atlas and MCP dispatch audit own tool usage, failure, latency, and
+  payload evidence; and
+- the dedicated body-operation receipt ledger stores redacted, advisory public
+  receipts atomically without executing or authorizing an action; caller
+  claims are not promoted to verified Event Spine verdicts.
+
+Representing the same real workflow in two ledgers requires two explicit
+records satisfying the respective schemas. No automatic copy or double count
+is allowed, and neither ledger overrides the other's decision boundary.
+
 ## Local ledger
 
 The default ledger is:

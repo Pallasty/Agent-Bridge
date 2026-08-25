@@ -23,6 +23,7 @@
 set -euo pipefail
 
 MODEL=gte-multilingual-base
+EXPECTED_DIM=768
 CACHE="${AGENT_BRIDGE_ONNX_CACHE:-$HOME/.cache/agent-bridge}"
 FP32_DIR="$CACHE/onnx-models/$MODEL"
 INT8_BASE="$CACHE/onnx-models-int8"
@@ -34,6 +35,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 say() { printf '>> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+command -v curl >/dev/null 2>&1 || die "curl is required"
+command -v jq >/dev/null 2>&1 || die "jq is required"
 
 rollback() {
   say "rollback: removing int8 drop-ins, reload + restart (back to fp32 model, no delegation)"
@@ -100,11 +104,29 @@ EOF
 say "daemon-reload + restart (daemon-http first, then daemon) ..."
 systemctl --user daemon-reload
 systemctl --user restart agent-bridge-daemon-http.service
+embed_ready=false
+last_embed_meta=unavailable
 for _ in $(seq 1 40); do
-  bk=$(curl -s --max-time 30 "$EMBED_URL" -H 'content-type: application/json' -d '{"text":"setup warmup"}' 2>/dev/null | grep -o '"backend":"[^"]*"' || true)
-  [ -n "$bk" ] && { say "daemon-http /embed ready ($bk)"; break; }
+  embed_response=$(curl -sS --max-time 30 "$EMBED_URL" \
+    -H 'content-type: application/json' -d '{"text":"setup warmup"}' 2>/dev/null || true)
+  if [ -n "$embed_response" ]; then
+    last_embed_meta=$(printf '%s' "$embed_response" | jq -c \
+      '{backend, dim, vector_len:(if (.embedding | type) == "array" then (.embedding | length) else null end)}' \
+      2>/dev/null || printf 'invalid_json')
+    if printf '%s' "$embed_response" | jq -e \
+      --arg model "$MODEL" --argjson dim "$EXPECTED_DIM" \
+      '.backend == $model and .dim == $dim and
+       (.embedding | type) == "array" and (.embedding | length) == $dim' \
+      >/dev/null 2>&1; then
+      embed_ready=true
+      say "daemon-http /embed ready ($last_embed_meta)"
+      break
+    fi
+  fi
   sleep 1
 done
+[ "$embed_ready" = true ] || die \
+  "daemon-http /embed never became $MODEL/${EXPECTED_DIM}d (last=$last_embed_meta); refusing to report a fallback encoder as ready"
 systemctl --user restart agent-bridge-daemon.service
 sleep 6
 

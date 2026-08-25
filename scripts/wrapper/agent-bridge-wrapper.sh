@@ -228,6 +228,20 @@ machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}
 # shellcheck source=/dev/null
 [ -f "$machine_env" ] && . "$machine_env"
 
+# Use one host-local, permission-capable root for durable AB journals. Existing
+# installations may only declare the older app-control journal location; when
+# it has the canonical leaf name, safely derive the common parent without
+# hard-coding a host path. A caller or machine.env can always set the common
+# root explicitly and takes precedence.
+if [ -z "${AGENT_BRIDGE_STATE_DIR:-}" ] && [ -n "${AB_APP_CONTROL_OPERATION_DIR:-}" ]; then
+    app_control_state="${AB_APP_CONTROL_OPERATION_DIR%/}"
+    case "$app_control_state" in
+        /*/app_control_operations)
+            export AGENT_BRIDGE_STATE_DIR="${app_control_state%/app_control_operations}"
+            ;;
+    esac
+fi
+
 # Always-on flags
 export AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-all}"
 # Deploys install this adapter from the same repository revision as

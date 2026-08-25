@@ -5,6 +5,7 @@
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
 pub mod agent_task_contract;
+pub mod agent_task_outcome;
 pub mod agent_world_trajectory;
 /// Pure AG-UI 0.0.57 projection. This module has no MCP registration, I/O,
 /// persistence, lease, policy, or execution authority.
@@ -18,6 +19,7 @@ pub mod avatar_asset_compile;
 pub mod avatar_cortex;
 pub mod avatar_floater;
 pub mod avatar_focus_follow;
+pub mod avatar_focus_observer;
 pub mod avatar_health;
 pub mod avatar_live_observation;
 pub mod avatar_live_voice;
@@ -38,6 +40,7 @@ pub mod build_identity;
 pub mod c3_self_check;
 pub mod cloudflare_api;
 pub mod code_review_context;
+pub mod coactivation_tick;
 pub mod context_budget;
 /// Pure, shadow-only admission contract for typed context lanes.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -129,6 +132,9 @@ pub mod project;
 pub mod project_identity;
 pub mod remote_embed;
 pub mod remote_steer;
+pub mod resident_cognition;
+pub mod resident_owner_evaluation;
+pub mod resident_wake_journal;
 pub mod rescue;
 pub mod retrieval_outcome;
 pub mod router;

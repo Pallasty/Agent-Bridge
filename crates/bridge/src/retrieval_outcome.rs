@@ -56,7 +56,9 @@
 use ab_core::Result;
 use ab_store::{MemoryRecord, RetrievalOutcomeShadowRow, StateStore};
 use serde_json::{json, Value};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 /// Rows younger than this stay pending: every used_at attribution window
 /// (memory_get 1800s, retrieval feedback
@@ -628,9 +630,102 @@ fn tick_rule_params_from(
     }
 }
 
+pub fn spawn_apply_supervisor(
+    store: Arc<dyn StateStore>,
+    tick_secs: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        run_apply_loop(Duration::from_secs(tick_secs), || {
+            run_supervisor_apply_pass(&store)
+        })
+        .await;
+    })
+}
+
+async fn run_apply_loop<F, Fut>(tick_period: Duration, mut run_pass: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut interval = tokio::time::interval(tick_period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // A restart must not convert the configured cadence into per-startup work.
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        run_pass().await;
+    }
+}
+
+async fn run_supervisor_apply_pass(store: &Arc<dyn StateStore>) {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let params = tick_rule_params();
+    match run_apply_pass(store, &params, 200, true, now).await {
+        Ok(report) if report.applied > 0 || report.failed > 0 || report.capped_out > 0 => {
+            tracing::info!(
+                applied = report.applied,
+                failed = report.failed,
+                skipped_raced = report.skipped_raced,
+                consumed_rows = report.consumed_rows,
+                orphans_consumed = report.orphans_consumed,
+                ambient_retired = report.ambient_retired,
+                protected_skipped = report.protected_skipped,
+                pending_below_min = report.pending_below_min,
+                capped_out = report.capped_out,
+                net_delta = report.net_importance_delta,
+                audit = report.audit_memory_key.as_deref().unwrap_or(""),
+                "retrieval-outcome-apply: pass ran"
+            );
+        }
+        Ok(report) => {
+            tracing::debug!(
+                rows = report.rows_considered,
+                pending_below_min = report.pending_below_min,
+                orphans_consumed = report.orphans_consumed,
+                ambient_retired = report.ambient_retired,
+                "retrieval-outcome-apply: nothing to do"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "retrieval-outcome-apply: pass error");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn apply_supervisor_waits_one_full_period_before_first_pass() {
+        let passes = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&passes);
+        let handle = tokio::spawn(async move {
+            run_apply_loop(Duration::from_millis(80), || {
+                let observed = Arc::clone(&observed);
+                async move {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(passes.load(Ordering::SeqCst), 0);
+        tokio::time::timeout(Duration::from_millis(300), async {
+            while passes.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("first pass should run after one full period");
+        assert_eq!(passes.load(Ordering::SeqCst), 1);
+        handle.abort();
+    }
 
     fn row(key: &str, surfaced: u64, used: u64, importance: f64) -> RetrievalOutcomeShadowRow {
         RetrievalOutcomeShadowRow {

@@ -8,10 +8,12 @@
 //! failure was invisible — `cp` succeeded, the daemon ran, nothing errored.
 //!
 //! `doctor` turns that class of silent "I deployed but it didn't take effect"
-//! failure into an explicit report. Pure file/process inspection; no mutation.
+//! failure into an explicit report. Read-only file/process/local-HTTP
+//! inspection; no mutation.
 //! See `lesson_wrapper_clobbered_orphans_real_deploys_2026_05_23`.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -21,6 +23,9 @@ use serde_json::{json, Value};
 
 use ab_bridge::instinct;
 use ab_bridge::mcp_tools::exposed_tool_count_current;
+
+const DOCTOR_DAEMON_HTTP_BASE: &str = "http://127.0.0.1:7878";
+const DOCTOR_EMBED_PROBE_TEXT: &str = "agent-bridge doctor fixed embedding readiness probe";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -700,6 +705,150 @@ fn check_daemon_runtime() -> Check {
     }
 }
 
+fn value_display(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(value)) => value.clone(),
+        Some(Value::Bool(value)) => value.to_string(),
+        Some(Value::Number(value)) => value.to_string(),
+        Some(_) => "invalid_type".to_string(),
+        None => "missing".to_string(),
+    }
+}
+
+/// Classify the two daemon-http embedding observations without retaining or
+/// printing the probe vector. `/embed/readiness` describes configured intent;
+/// the fixed `/embed` request proves what the live process actually returned.
+fn classify_embedding_runtime(readiness: &Value, probe: &Value) -> Check {
+    let configured_backend = readiness.get("configured_backend");
+    let configured_dim = readiness.get("configured_dim");
+    let model_state = readiness.get("model_state");
+    let semantic_ready = readiness.get("semantic_ready");
+    let actual_backend = probe.get("backend");
+    let actual_dim = probe.get("dim");
+    let vector_len = probe
+        .get("embedding")
+        .and_then(Value::as_array)
+        .map(|values| values.len() as u64);
+
+    let configured_backend_str = configured_backend.and_then(Value::as_str);
+    let configured_dim_u64 = configured_dim.and_then(Value::as_u64);
+    let actual_backend_str = actual_backend.and_then(Value::as_str);
+    let actual_dim_u64 = actual_dim.and_then(Value::as_u64);
+    let ready = semantic_ready.and_then(Value::as_bool) == Some(true)
+        && model_state.and_then(Value::as_str) == Some("ready")
+        && configured_backend_str.is_some()
+        && configured_backend_str == actual_backend_str
+        && configured_dim_u64.is_some()
+        && configured_dim_u64 == actual_dim_u64
+        && configured_dim_u64 == vector_len;
+
+    let detail = format!(
+        "readiness backend={} dim={} state={} semantic_ready={}; probe backend={} dim={} vector_len={}",
+        value_display(configured_backend),
+        value_display(configured_dim),
+        value_display(model_state),
+        value_display(semantic_ready),
+        value_display(actual_backend),
+        value_display(actual_dim),
+        vector_len
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+    );
+
+    if ready {
+        Check::ok("embedding_runtime", detail)
+    } else {
+        Check::warn(
+            "embedding_runtime",
+            detail,
+            "restore the configured ONNX model assets, restart agent-bridge-daemon-http.service, and require /embed backend, dim, and vector length to match /embed/readiness",
+        )
+    }
+}
+
+/// Check the live local encoder rather than treating `/healthz` as semantic
+/// readiness. The request contains only a fixed public probe string and the
+/// returned vector is reduced to metadata before it reaches doctor output.
+async fn check_embedding_runtime() -> Check {
+    let readiness_url = format!("{DOCTOR_DAEMON_HTTP_BASE}/embed/readiness");
+    let embed_url = format!("{DOCTOR_DAEMON_HTTP_BASE}/embed");
+    let client = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(15))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return Check::warn(
+                "embedding_runtime",
+                format!("failed to create local HTTP client: {error}"),
+                "verify the local TLS/HTTP runtime and retry agent-bridge doctor",
+            );
+        }
+    };
+
+    let readiness = match client.get(&readiness_url).send().await {
+        Ok(response) if response.status().is_success() => match response.json::<Value>().await {
+            Ok(value) => value,
+            Err(error) => {
+                return Check::warn(
+                    "embedding_runtime",
+                    format!("{readiness_url} returned invalid JSON: {error}"),
+                    "restart agent-bridge-daemon-http.service and inspect /embed/readiness",
+                );
+            }
+        },
+        Ok(response) => {
+            return Check::warn(
+                "embedding_runtime",
+                format!("{readiness_url} returned HTTP {}", response.status()),
+                "restart agent-bridge-daemon-http.service and inspect /embed/readiness",
+            );
+        }
+        Err(error) => {
+            return Check::warn(
+                "embedding_runtime",
+                format!("{readiness_url} is unreachable: {error}"),
+                "start agent-bridge-daemon-http.service on the standard local 127.0.0.1:7878 listener",
+            );
+        }
+    };
+
+    let probe = match client
+        .post(&embed_url)
+        .json(&json!({"text": DOCTOR_EMBED_PROBE_TEXT}))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => match response.json::<Value>().await {
+            Ok(value) => value,
+            Err(error) => {
+                return Check::warn(
+                    "embedding_runtime",
+                    format!("{embed_url} returned invalid JSON: {error}"),
+                    "restart agent-bridge-daemon-http.service and inspect /embed",
+                );
+            }
+        },
+        Ok(response) => {
+            return Check::warn(
+                "embedding_runtime",
+                format!("{embed_url} returned HTTP {}", response.status()),
+                "restart agent-bridge-daemon-http.service and inspect /embed",
+            );
+        }
+        Err(error) => {
+            return Check::warn(
+                "embedding_runtime",
+                format!("{embed_url} probe failed: {error}"),
+                "restart agent-bridge-daemon-http.service and verify the configured model assets",
+            );
+        }
+    };
+
+    classify_embedding_runtime(&readiness, &probe)
+}
+
 /// Check 6: running MCP servers should execute the current `agent-bridge.real`.
 /// On macOS, old replaced binaries can keep running from orphaned inodes even
 /// after the path has been repaired. That serves stale tool manifests until the
@@ -1158,6 +1307,7 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
         check_real_binary(&dir),
         check_svd_artifact(),
         check_daemon_runtime(),
+        check_embedding_runtime().await,
         check_mcp_servers(&dir),
         check_mcp_tool_surface(),
         check_system_control_api(&dir),
@@ -1316,6 +1466,98 @@ mod tests {
         let check = check_svd_artifact_status("/tmp/svd_projection_v1.bin", true, "svd", true);
         assert_eq!(check.status, Status::Ok);
         assert!(check.detail.contains("SVD projection present"));
+    }
+
+    #[test]
+    fn embedding_runtime_is_ok_only_when_readiness_and_wire_vector_agree() {
+        let readiness = json!({
+            "configured_backend": "gte-multilingual-base",
+            "configured_dim": 768,
+            "model_state": "ready",
+            "semantic_ready": true
+        });
+        let probe = json!({
+            "backend": "gte-multilingual-base",
+            "dim": 768,
+            "embedding": vec![0.0_f32; 768]
+        });
+        let check = classify_embedding_runtime(&readiness, &probe);
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("backend=gte-multilingual-base"));
+        assert!(check.detail.contains("vector_len=768"));
+        assert!(!check.detail.contains(DOCTOR_EMBED_PROBE_TEXT));
+    }
+
+    #[test]
+    fn embedding_runtime_warns_on_hash_fallback() {
+        let readiness = json!({
+            "configured_backend": "gte-multilingual-base",
+            "configured_dim": 768,
+            "model_state": "fallback",
+            "semantic_ready": false
+        });
+        let probe = json!({
+            "backend": "fnv1a-hash-384",
+            "dim": 384,
+            "embedding": vec![0.0_f32; 384]
+        });
+        let check = classify_embedding_runtime(&readiness, &probe);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("state=fallback"));
+        assert!(check.detail.contains("probe backend=fnv1a-hash-384"));
+        assert!(check.fix.is_some());
+    }
+
+    #[test]
+    fn embedding_runtime_warns_on_declared_dimension_mismatch() {
+        let readiness = json!({
+            "configured_backend": "gte-multilingual-base",
+            "configured_dim": 768,
+            "model_state": "ready",
+            "semantic_ready": true
+        });
+        let probe = json!({
+            "backend": "gte-multilingual-base",
+            "dim": 384,
+            "embedding": vec![0.0_f32; 384]
+        });
+        let check = classify_embedding_runtime(&readiness, &probe);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check
+            .detail
+            .contains("readiness backend=gte-multilingual-base dim=768"));
+        assert!(check
+            .detail
+            .contains("probe backend=gte-multilingual-base dim=384"));
+    }
+
+    #[test]
+    fn embedding_runtime_warns_when_vector_length_disagrees() {
+        let readiness = json!({
+            "configured_backend": "gte-multilingual-base",
+            "configured_dim": 768,
+            "model_state": "ready",
+            "semantic_ready": true
+        });
+        let probe = json!({
+            "backend": "gte-multilingual-base",
+            "dim": 768,
+            "embedding": vec![0.0_f32; 384]
+        });
+        let check = classify_embedding_runtime(&readiness, &probe);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("vector_len=384"));
+    }
+
+    #[test]
+    fn embedding_runtime_warns_on_missing_or_wrong_typed_metadata() {
+        let check = classify_embedding_runtime(
+            &json!({"configured_backend": 7, "semantic_ready": "yes"}),
+            &json!({"backend": "gte-multilingual-base", "embedding": "not-an-array"}),
+        );
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("backend=7"));
+        assert!(check.detail.contains("vector_len=missing"));
     }
 
     #[test]

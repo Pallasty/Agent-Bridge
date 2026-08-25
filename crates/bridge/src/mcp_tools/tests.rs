@@ -8209,6 +8209,8 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // name, preserving the established Codex surface contract.
     assert_eq!(extras.len(), 73);
     assert!(extras.contains(&"practical_workflow_scorecard"));
+    assert!(!extras.contains(&"embodiment_record"));
+    assert!(!extras.contains(&"embodiment_snapshot"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
     assert!(extras.contains(&"forum_post"));
@@ -8304,10 +8306,10 @@ fn tool_policy_codex_essential_exposes_extras_list() {
 fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
     let essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let voice = ToolPolicy::from_values(Some("codex-voice"), None, None, None);
-    let voice_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), voice)
-        .list()
-        .into_iter()
-        .map(|schema| schema.name)
+    let voice_schemas = build_registry_with_policy(Hub::builder().build(), voice).list();
+    let voice_names: Vec<String> = voice_schemas
+        .iter()
+        .map(|schema| schema.name.clone())
         .collect();
 
     assert_eq!(voice.label(), "codex-voice");
@@ -8347,6 +8349,8 @@ fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
         !voice.includes(Tier::Niche, "browser_navigate"),
         "codex-voice must not widen to unrelated browser mutation"
     );
+    assert!(!voice_names.iter().any(|name| name == "embodiment_record"));
+    assert!(!voice_names.iter().any(|name| name == "embodiment_snapshot"));
 }
 
 #[test]
@@ -8607,6 +8611,23 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
     ] {
         assert!(names.contains(tool), "combined profile missing {tool}");
     }
+    assert!(!names.contains("embodiment_record"));
+    assert!(!names.contains("embodiment_snapshot"));
+    let broad_schemas = build_registry_with_policy(
+        Hub::builder().build(),
+        ToolPolicy::from_values(None, None, None, Some("all")),
+    )
+    .list();
+    let broad_record_schema = broad_schemas
+        .iter()
+        .find(|schema| schema.name == "embodiment_record")
+        .expect("broad legacy embodiment record schema");
+    assert!(broad_record_schema.input_schema["properties"]["kind"]["enum"]
+        .as_array()
+        .is_some_and(|kinds| kinds.contains(&json!("action_receipt"))));
+    assert!(broad_record_schema.input_schema["properties"]
+        .get("facts")
+        .is_some());
     for tool in [
         "mobile_install_apk",
         "mobile_click",
@@ -17771,6 +17792,314 @@ async fn body_write_lease_gate_rejects_missing_and_foreign_lease() {
         .await
         .unwrap();
     assert_eq!(valid.as_str(), lease_id);
+}
+
+fn valid_body_operation_json(operation_id: &str) -> Value {
+    let now_unix_ms = u64::try_from(dispatch_now_secs())
+        .unwrap_or_default()
+        .saturating_mul(1_000);
+    let digest = |character: char| format!("sha256:{}", character.to_string().repeat(64));
+    let observation = |revision: u64, secret: &str, source: &str, observed_at_unix_ms: u64| {
+        json!({
+            "schema": "agent_bridge.observation.v0",
+            "body_id": "body-operation-test",
+            "source": source,
+            "observed_at_unix_ms": observed_at_unix_ms,
+            "freshness_ms": 0,
+            "confidence": 1.0,
+            "world_revision": revision,
+            "payload": { "secret": secret }
+        })
+    };
+    let pre_observation = observation(
+        7,
+        "before-must-not-persist",
+        "desktop_snapshot",
+        now_unix_ms.saturating_sub(2_000),
+    );
+    let observed_after = observation(
+        8,
+        "after-must-not-persist",
+        "desktop_verify",
+        now_unix_ms,
+    );
+    let observation_digest = |value: &Value| {
+        let observation = serde_json::from_value::<ab_world_core::ObservationEnvelope>(
+            value.clone(),
+        )
+        .expect("valid observation fixture");
+        ab_world_core::body_observation_sha256(&observation)
+            .expect("canonical observation digest")
+    };
+    let pre_observation_sha256 = observation_digest(&pre_observation);
+    let post_observation_sha256 = observation_digest(&observed_after);
+    json!({
+        "schema_version": "agent_bridge.body_operation_envelope.v1",
+        "agent_id": "agent-codex",
+        "body_id": "body-operation-test",
+        "environment_id": "env-desktop-test",
+        "operation_id": operation_id,
+        "intent_id": "intent-operation-test",
+        "mutation": false,
+        "lease_id": null,
+        "action_kind": "focus_window",
+        "action_adapter_id": "desktop_action",
+        "action_adapter_build_sha256": digest('9'),
+        "action_request_sha256": digest('a'),
+        "expected_postcondition_sha256": digest('b'),
+        "action_started_at_unix_ms": now_unix_ms.saturating_sub(1_500),
+        "action_completed_at_unix_ms": now_unix_ms.saturating_sub(500),
+        "pre_observation": pre_observation,
+        "pre_observation_max_age_ms": 60_000,
+        "pre_observation_provenance": {
+            "adapter_id": "desktop_snapshot",
+            "adapter_build_sha256": digest('c'),
+            "observation_sha256": pre_observation_sha256
+        },
+        "status": "succeeded",
+        "observed_after": observed_after,
+        "post_observation_provenance": {
+            "adapter_id": "desktop_verify",
+            "adapter_build_sha256": digest('e'),
+            "observation_sha256": post_observation_sha256
+        },
+        "postcondition_verification": {
+            "status": "verified",
+            "verifier_adapter_id": "desktop_verify",
+            "verifier_build_sha256": digest('e'),
+            "evidence_sha256": [digest('f')],
+            "independent_from_action": true
+        },
+        "recovery_decision": "none",
+        "rollback_sha256": null,
+        "memory_links_sha256": []
+    })
+}
+
+#[tokio::test]
+async fn embodiment_operation_receipt_is_advisory_redacted_and_atomically_idempotent() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let ctx = context_with_session("session-operation-owner");
+    let tool = EmbodimentRecordTool::new(hub.clone());
+
+    let mut forged_mutation = valid_body_operation_json("operation-mutation-untrusted");
+    forged_mutation["mutation"] = json!(true);
+    forged_mutation["lease_id"] = json!("caller-controlled-lease");
+    let untrusted_mutation = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": forged_mutation
+            }),
+            &ctx,
+        )
+        .await
+        .expect("untrusted mutation result");
+    assert!(untrusted_mutation.is_error);
+    assert_eq!(
+        result_text_as_json(&untrusted_mutation)["status"],
+        "trusted_runtime_required"
+    );
+
+    let operation = valid_body_operation_json("operation-record-1");
+
+    let recorded = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": operation
+            }),
+            &ctx,
+        )
+        .await
+        .expect("record receipt");
+    let recorded = result_text_as_json(&recorded);
+    assert_eq!(recorded["recorded"], true);
+    assert_eq!(recorded["executed"], false);
+    assert_eq!(recorded["resumes_action"], false);
+    assert_eq!(recorded["trust_level"], "advisory_only");
+    assert_eq!(recorded["authority_authenticated"], false);
+    assert_eq!(recorded["adapter_attestation_authenticated"], false);
+    assert_eq!(recorded["projected_to_event_spine"], false);
+
+    let duplicate = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": operation
+            }),
+            &ctx,
+        )
+        .await
+        .expect("duplicate receipt");
+    assert_eq!(result_text_as_json(&duplicate)["duplicate"], true);
+
+    let receipts = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_body_operation_receipts(60, 20)
+        .await
+        .expect("recent receipts");
+    let receipt = receipts
+        .iter()
+        .find(|receipt| receipt.operation_id == "operation-record-1")
+        .expect("operation receipt");
+    let persisted = &receipt.redacted_facts_json;
+    for forbidden in ["before-must-not-persist", "after-must-not-persist"] {
+        assert!(!persisted.contains(forbidden), "persisted raw value: {forbidden}");
+    }
+    let facts: Value = serde_json::from_str(persisted).expect("receipt facts");
+    assert_eq!(facts["raw_observation_payloads_stored"], false);
+    assert_eq!(facts["lease_present"], false);
+    assert_eq!(facts["trust_level"], "advisory_only");
+    assert_eq!(facts["authority_authenticated"], false);
+    assert_eq!(receipt.admission_provenance, "public_mcp_agent_reported");
+
+    let mut conflicting = operation;
+    conflicting["action_request_sha256"] =
+        json!(format!("sha256:{}", "9".repeat(64)));
+    let conflict = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": conflicting
+            }),
+            &ctx,
+        )
+        .await
+        .expect("conflict result");
+    assert!(conflict.is_error);
+
+    let mut invalid = valid_body_operation_json("operation-invalid-1");
+    invalid["pre_observation"]["observed_at_unix_ms"] = json!(0);
+    invalid["postcondition_verification"]["independent_from_action"] = json!(false);
+    let rejected = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": invalid
+            }),
+            &ctx,
+        )
+        .await
+        .expect("contract rejection");
+    assert!(rejected.is_error);
+    let rejected = result_text_as_json(&rejected);
+    assert_eq!(rejected["recorded"], false);
+    assert_eq!(rejected["status"], "rejected_contract");
+    let violation_codes = rejected["violations"]
+        .as_array()
+        .expect("violations")
+        .iter()
+        .filter_map(|violation| violation["code"].as_str())
+        .collect::<Vec<_>>();
+    assert!(violation_codes.contains(&"stale_observation"));
+    assert!(violation_codes.contains(&"verification_not_independent"));
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn codex_receipt_only_embodiment_surface_rejects_legacy_event_spine_kinds() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let ctx = context_with_session("session-operation-receipt-only");
+    let tool = EmbodimentRecordTool::operation_receipts_only(hub.clone());
+
+    let legacy = tool
+        .execute(
+            json!({
+                "kind": "action_receipt",
+                "body_id": "body-operation-test",
+                "facts": {"raw": "must-not-reach-event-spine"},
+                "verdict": "verified"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("legacy kind rejection");
+    assert!(legacy.is_error);
+    let legacy = result_text_as_json(&legacy);
+    assert_eq!(legacy["status"], "profile_restricted");
+    assert_eq!(legacy["recorded"], false);
+    assert_eq!(legacy["projected_to_event_spine"], false);
+
+    let extra_field = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": {},
+                "facts": {"raw": "must-not-be-accepted"}
+            }),
+            &ctx,
+        )
+        .await
+        .expect("profile-forbidden field rejection");
+    assert!(extra_field.is_error);
+    assert_eq!(result_text_as_json(&extra_field)["status"], "profile_restricted");
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("recent events");
+    assert!(events.is_empty(), "restricted legacy call wrote Event Spine");
+
+    let recorded = tool
+        .execute(
+            json!({
+                "kind": "operation_receipt",
+                "body_id": "body-operation-test",
+                "operation": valid_body_operation_json("operation-receipt-only-valid")
+            }),
+            &ctx,
+        )
+        .await
+        .expect("valid restricted receipt");
+    let recorded = result_text_as_json(&recorded);
+    assert_eq!(recorded["recorded"], true);
+    assert_eq!(recorded["executed"], false);
+    assert_eq!(recorded["authority_authenticated"], false);
+    assert_eq!(recorded["projected_to_event_spine"], false);
+
+    let snapshot = EmbodimentSnapshotTool::operation_receipts_only(hub.clone())
+        .execute(json!({}), &ctx)
+        .await
+        .expect("receipt-only snapshot");
+    let snapshot = result_text_as_json(&snapshot);
+    assert_eq!(
+        snapshot["schema_version"],
+        "agent_bridge.body_operation_receipt_snapshot.v1"
+    );
+    assert_eq!(snapshot["includes_event_spine"], false);
+    assert_eq!(snapshot["includes_body_telemetry"], false);
+    assert_eq!(snapshot["includes_write_lease"], false);
+    assert!(snapshot.get("write_lease").is_none());
+    assert!(snapshot.get("body_status").is_none());
+    assert_eq!(snapshot["operation_receipt_ledger"]["admitted_count"], 1);
+    assert_eq!(
+        snapshot["operation_receipt_ledger"]["receipts"][0]["operation_id"],
+        "operation-receipt-only-valid"
+    );
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("recent events after valid receipt");
+    assert!(events.is_empty(), "restricted receipt wrote Event Spine");
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
 #[tokio::test]
@@ -32394,6 +32723,30 @@ fn outcome_gated_apply_schema_and_registered() {
 
 // --- Stage 5b: session_finalize opt-in delegation to the WRITE executor ---
 
+fn valid_task_outcome_json(outcome_id: &str) -> Value {
+    json!({
+        "schema_version": "agent_bridge.agent_task_outcome.v1",
+        "outcome_id": outcome_id,
+        "contract_id": "contract-beneficiary-closure",
+        "revision": 1,
+        "status": "achieved",
+        "verification": "verified",
+        "verification_method": "tests",
+        "user_acceptance": "unknown",
+        "acceptance_provenance": "unavailable",
+        "rollback_status": "not_needed",
+        "provenance": "agent_reported",
+        "agent_id": "agent-codex",
+        "environment_id": "env-test",
+        "evidence_sha256": [format!("sha256:{}", "a".repeat(64))],
+        "counts": {
+            "manual_interventions": 1,
+            "owner_restatements": 2,
+            "repeated_authorization_prompts": 3
+        }
+    })
+}
+
 #[test]
 fn session_finalize_schema_advertises_outcome_gated_optin() {
     let tool = SessionFinalizeTool::new(Hub::builder().build());
@@ -32430,6 +32783,215 @@ fn session_finalize_schema_advertises_outcome_gated_optin() {
         props.get("completed_work_memory_keys").is_some(),
         "session_finalize must advertise explicit scratch-lane closure"
     );
+    assert!(
+        props.get("task_outcome").is_some(),
+        "session_finalize must advertise explicit task closure evidence"
+    );
+    assert_eq!(
+        props["task_outcome"]["additionalProperties"],
+        json!(false)
+    );
+}
+
+#[tokio::test]
+async fn session_finalize_task_outcome_is_dry_run_safe_idempotent_and_conflict_closed() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let claim = valid_task_outcome_json("outcome-finalize-1");
+    let untouched = mk_mem_scoped(
+        "finalize_invalid_horizon_guard",
+        "decision",
+        "must survive invalid finalize horizons",
+        &[],
+        Some("project:/tmp/finalize-invalid-horizon"),
+    );
+    store
+        .memory_save(&untouched)
+        .await
+        .expect("seed invalid-horizon guard memory");
+
+    for invalid_days in [json!(-1), json!(i64::MAX)] {
+        let rejected = SessionFinalizeTool::new(hub.clone())
+            .execute(
+                json!({
+                    "skip_decay": true,
+                    "older_than_days": invalid_days,
+                    "task_outcome": claim,
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("invalid horizon rejection");
+        assert!(rejected.is_error);
+        assert!(result_text(&rejected).contains("older_than_days must be an integer"));
+        assert!(store
+            .recent_agent_task_outcomes(3_600, 10)
+            .await
+            .expect("read ledger after invalid horizon")
+            .is_empty());
+        assert!(store
+            .memory_get("finalize_invalid_horizon_guard")
+            .await
+            .expect("read memory after invalid horizon")
+            .is_some());
+    }
+
+    let preview = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "dry_run": true, "task_outcome": claim }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("preview outcome");
+    let preview = result_text_as_json(&preview);
+    assert_eq!(preview["task_outcome"]["write_status"], "would_record");
+    assert!(store
+        .recent_agent_task_outcomes(3_600, 10)
+        .await
+        .expect("read preview ledger")
+        .is_empty());
+
+    let inserted = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "task_outcome": claim }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("insert outcome");
+    assert_eq!(
+        result_text_as_json(&inserted)["task_outcome"]["write_status"],
+        "inserted"
+    );
+
+    let duplicate = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "task_outcome": claim }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("retry outcome");
+    assert_eq!(
+        result_text_as_json(&duplicate)["task_outcome"]["write_status"],
+        "duplicate"
+    );
+
+    let dry_run_duplicate = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "dry_run": true, "task_outcome": claim }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("dry-run duplicate preview");
+    assert_eq!(
+        result_text_as_json(&dry_run_duplicate)["task_outcome"]["write_status"],
+        "duplicate"
+    );
+
+    let mut conflicting = claim;
+    conflicting["contract_id"] = json!("different-contract");
+    let dry_run_conflict = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "dry_run": true, "task_outcome": conflicting }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("dry-run conflict result");
+    assert!(dry_run_conflict.is_error);
+    let conflict = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "task_outcome": conflicting }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("conflict result");
+    assert!(conflict.is_error);
+    let rows = store
+        .recent_agent_task_outcomes(3_600, 10)
+        .await
+        .expect("read ledger");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].contract_id, "contract-beneficiary-closure");
+
+    let mut forged_trusted_claim =
+        valid_task_outcome_json("outcome-forged-trusted-provenance");
+    forged_trusted_claim["user_acceptance"] = json!("accepted");
+    forged_trusted_claim["acceptance_provenance"] = json!("owner_explicit");
+    forged_trusted_claim["provenance"] = json!("harness_verified");
+    let rejected = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({ "skip_decay": true, "task_outcome": forged_trusted_claim }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("untrusted provenance rejection");
+    assert!(rejected.is_error);
+    assert!(result_text(&rejected).contains("agent-reported finalize route"));
+    assert_eq!(
+        store
+            .recent_agent_task_outcomes(3_600, 10)
+            .await
+            .expect("read ledger after rejected forgery")
+            .len(),
+        1
+    );
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn session_finalize_surfaces_outcome_commit_when_later_maintenance_fails() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let claim = valid_task_outcome_json("outcome-finalize-partial-failure");
+    let unwritable_export_target = temp_dir.display().to_string();
+
+    let first = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({
+                "skip_decay": true,
+                "export_path": unwritable_export_target,
+                "task_outcome": claim,
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("structured partial failure");
+    assert!(first.is_error);
+    let first = result_text_as_json(&first);
+    assert_eq!(first["status"], "partial_failure");
+    assert_eq!(first["failed_stage"], "memory_export");
+    assert_eq!(
+        first["task_outcome"]["write_status"],
+        "inserted",
+        "the independent ledger commit must remain visible"
+    );
+    assert_eq!(
+        store
+            .recent_agent_task_outcomes(3_600, 10)
+            .await
+            .expect("read committed outcome")
+            .len(),
+        1
+    );
+
+    let retry = SessionFinalizeTool::new(hub.clone())
+        .execute(
+            json!({
+                "skip_decay": true,
+                "export_path": unwritable_export_target,
+                "task_outcome": claim,
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("structured retry failure");
+    assert!(retry.is_error);
+    assert_eq!(
+        result_text_as_json(&retry)["task_outcome"]["write_status"],
+        "duplicate"
+    );
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[tokio::test]
@@ -32530,6 +33092,10 @@ async fn session_finalize_default_off_omits_gated_block_and_writes_nothing() {
     assert!(
         res.get("work_memory_closure").is_none(),
         "omitting completed keys must preserve the default response shape"
+    );
+    assert!(
+        res.get("task_outcome").is_none(),
+        "omitting task_outcome must preserve the default response shape"
     );
     // The read-only pointer field exists (Null here: small graph, not suggesting).
     assert!(res["follow_up"].get("outcome_gated_apply").is_some());
@@ -39994,6 +40560,85 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert_eq!(report.operator_burden.instrumentation_status, "unavailable");
     assert_eq!(report.operator_burden.repeated_authorization_prompts, None);
     assert_eq!(report.operator_burden.manual_interventions, None);
+    assert_eq!(report.operator_burden.owner_restatements, None);
+    assert_eq!(report.task_outcomes.admitted_outcome_count, 0);
+}
+
+#[test]
+fn practical_scorecard_reports_agent_claims_and_burden_coverage() {
+    let claim = serde_json::from_value::<crate::agent_task_outcome::AgentTaskOutcome>(
+        valid_task_outcome_json("outcome-scorecard-1"),
+    )
+    .expect("valid claim");
+    let record = claim
+        .to_store_record(900)
+        .expect("valid store row");
+    let calls = vec![mk_call(800, "session_finalize", true, 500)];
+    let report = compute_practical_workflow_scorecard_with_outcomes(
+        &calls,
+        &[record],
+        3_600,
+        600,
+        1_000,
+    );
+
+    assert_eq!(report.schema_version, 6);
+    assert_eq!(report.completion.finalize_signals, 1);
+    assert_eq!(report.task_outcomes.admitted_outcome_count, 1);
+    assert_eq!(report.task_outcomes.agent_reported_provenance, 1);
+    assert_eq!(report.task_outcomes.harness_verified_provenance_claims, 0);
+    assert_eq!(report.task_outcomes.owner_attested_provenance_claims, 0);
+    assert_eq!(report.task_outcomes.reported_achieved, 1);
+    assert_eq!(report.task_outcomes.reported_verified_achieved, 1);
+    assert_eq!(report.task_outcomes.reported_verification_coverage, Some(1.0));
+    assert_eq!(report.task_outcomes.reported_owner_accepted, 0);
+    assert_eq!(report.task_outcomes.reported_acceptance_unknown, 1);
+    assert_eq!(report.task_outcomes.reported_rollback_not_needed, 1);
+    assert_eq!(report.operator_burden.instrumentation_status, "reported_complete");
+    assert_eq!(report.operator_burden.manual_interventions, Some(1));
+    assert_eq!(report.operator_burden.owner_restatements, Some(2));
+    assert_eq!(
+        report.operator_burden.repeated_authorization_prompts,
+        Some(3)
+    );
+    assert_eq!(report.operator_burden.manual_intervention_observations, 1);
+    assert_eq!(report.operator_burden.owner_restatement_observations, 1);
+    assert_eq!(
+        report
+            .operator_burden
+            .repeated_authorization_prompt_observations,
+        1
+    );
+}
+
+#[test]
+fn practical_scorecard_keeps_partial_operator_count_coverage_explicit() {
+    let mut value = valid_task_outcome_json("outcome-scorecard-partial-burden");
+    value["counts"]["owner_restatements"] = Value::Null;
+    value["counts"]["repeated_authorization_prompts"] = Value::Null;
+    let claim = serde_json::from_value::<crate::agent_task_outcome::AgentTaskOutcome>(value)
+        .expect("valid partial burden claim");
+    let record = claim.to_store_record(900).expect("valid store row");
+    let report = compute_practical_workflow_scorecard_with_outcomes(
+        &[],
+        &[record],
+        3_600,
+        600,
+        1_000,
+    );
+
+    assert_eq!(report.operator_burden.instrumentation_status, "reported_partial");
+    assert_eq!(report.operator_burden.manual_interventions, Some(1));
+    assert_eq!(report.operator_burden.owner_restatements, None);
+    assert_eq!(report.operator_burden.repeated_authorization_prompts, None);
+    assert_eq!(report.operator_burden.manual_intervention_observations, 1);
+    assert_eq!(report.operator_burden.owner_restatement_observations, 0);
+    assert_eq!(
+        report
+            .operator_burden
+            .repeated_authorization_prompt_observations,
+        0
+    );
 }
 
 #[test]
@@ -40017,7 +40662,7 @@ fn practical_scorecard_flags_coordination_majority() {
 
     let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
 
-    assert_eq!(report.schema_version, 5);
+    assert_eq!(report.schema_version, 6);
     assert_eq!(report.coordination.calls, 18);
     assert_eq!(report.coordination.ratio, Some(0.9));
     assert_eq!(report.coordination.forum_reads, 6);
@@ -40040,6 +40685,8 @@ fn practical_scorecard_keeps_missing_signals_explicit() {
     assert!(report.recovery.repeated_failure_tools.is_empty());
     assert_eq!(report.coordination.calls, 0);
     assert_eq!(report.coordination.ratio, None);
+    assert_eq!(report.task_outcomes.admitted_outcome_count, 0);
+    assert_eq!(report.operator_burden.manual_interventions, None);
     assert!(report.recommendations[0].contains("No bootstrap signal"));
 }
 

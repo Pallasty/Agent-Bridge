@@ -25,6 +25,7 @@ use crate::resource_lineage::{
 use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
@@ -57,7 +58,108 @@ pub use temporal_evidence::{
 // Local alias matches the `E` parameter that `tokio_rusqlite::Connection::call`
 // expects from the user closure.
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
-use tracing::info;
+use tracing::{info, warn};
+
+// A busy handler can return SQLITE_BUSY immediately when two deferred SQLite
+// transactions would deadlock while upgrading their locks. That is exactly the
+// shape produced when daemon and daemon-http initialize the shared state store
+// at the same time, so the connection-level five-second busy timeout below is
+// necessary but not sufficient. Retry the complete idempotent initialization a
+// few times after releasing the failed statement. The total explicit backoff is
+// deliberately short (300 ms), while the four possible busy-timeout waits stay
+// below the services' 30-second startup deadline.
+const SQLITE_INIT_RETRY_DELAYS_MS: [u64; 3] = [25, 75, 200];
+
+fn sqlite_init_retry_delay(
+    error: &tokio_rusqlite::Error,
+    retries_completed: usize,
+) -> Option<std::time::Duration> {
+    let is_lock_contention = matches!(
+        error,
+        tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(code, _))
+            if matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    );
+    is_lock_contention
+        .then(|| SQLITE_INIT_RETRY_DELAYS_MS.get(retries_completed).copied())
+        .flatten()
+        .map(std::time::Duration::from_millis)
+}
+
+async fn acquire_sqlite_init_lock(path: &Path) -> Result<std::fs::File> {
+    let mut lock_name = path.as_os_str().to_os_string();
+    lock_name.push(".init.lock");
+    let lock_path = PathBuf::from(lock_name);
+    let lock_label = lock_path.display().to_string();
+    let file =
+        tokio::task::spawn_blocking(move || acquire_sqlite_init_lock_blocking(&lock_path))
+            .await
+            .map_err(|error| Error::Backend(format!("join sqlite init lock task: {error}")))?
+            .map_err(|error| {
+                Error::Backend(format!("acquire sqlite init lock {lock_label}: {error}"))
+            })?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn acquire_sqlite_init_lock_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    for attempt in 0..800 {
+        // SAFETY: flock only observes the live descriptor; `file` remains owned
+        // by this function and is returned on success so the lock lifetime is
+        // exactly the File lifetime.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(file);
+        }
+        let error = std::io::Error::last_os_error();
+        match error.kind() {
+            std::io::ErrorKind::Interrupted if attempt < 799 => continue,
+            std::io::ErrorKind::WouldBlock if attempt < 799 => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            _ => return Err(error),
+        }
+    }
+    unreachable!("bounded Unix sqlite init lock loop must return")
+}
+
+#[cfg(windows)]
+fn acquire_sqlite_init_lock_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    // An exclusive Windows file handle provides the same crash-released
+    // advisory-lock lifetime as flock. Sharing violations are polled only up
+    // to the service startup budget; other I/O failures remain fail-fast.
+    for attempt in 0..800 {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(path)
+        {
+            Ok(file) => return Ok(file),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+                ) && attempt < 799 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("bounded Windows sqlite init lock loop must return")
+}
 
 fn resource_baseline_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName(format!("resource baseline admission: {error}"))
@@ -1323,6 +1425,198 @@ CREATE INDEX IF NOT EXISTS idx_semantic_events_ts ON semantic_events(ts DESC, id
 CREATE INDEX IF NOT EXISTS idx_semantic_events_source ON semantic_events(source, ts DESC);
 "#;
 
+// Privacy-minimal, node-local task closure ledger. This is intentionally not
+// part of the semantic-event FIFO ring: one stable outcome_id is the retry-safe
+// source of truth for a goal-level result. Version-less additive DDL follows
+// the same compatibility shape as fusion_shadow because schema_meta v43 is
+// owned by the temporal-evidence migration family.
+const SCHEMA_AGENT_TASK_OUTCOMES: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_task_outcomes (
+    schema_version                 TEXT NOT NULL CHECK (schema_version = 'agent_bridge.agent_task_outcome.v1'),
+    outcome_id                     TEXT PRIMARY KEY,
+    recorded_at                    INTEGER NOT NULL,
+    contract_id                    TEXT NOT NULL,
+    contract_revision              INTEGER NOT NULL CHECK (contract_revision > 0),
+    status                         TEXT NOT NULL CHECK (status IN
+        ('achieved','partially_achieved','blocked','abandoned')),
+    verification_status            TEXT NOT NULL CHECK (verification_status IN
+        ('verified','not_verified','unknown')),
+    verification_method            TEXT NOT NULL CHECK (verification_method IN
+        ('tests','postcondition','owner_confirmation','mixed','none')),
+    evidence_sha256                TEXT NOT NULL,
+    user_acceptance                TEXT NOT NULL CHECK (user_acceptance IN
+        ('unknown','accepted','corrected','rejected')),
+    acceptance_provenance          TEXT NOT NULL CHECK (acceptance_provenance IN
+        ('unavailable','owner_explicit','owner_correction')),
+    manual_interventions           INTEGER CHECK (manual_interventions IS NULL OR manual_interventions BETWEEN 0 AND 1000),
+    owner_restatements             INTEGER CHECK (owner_restatements IS NULL OR owner_restatements BETWEEN 0 AND 1000),
+    repeated_authorization_prompts INTEGER CHECK (repeated_authorization_prompts IS NULL OR repeated_authorization_prompts BETWEEN 0 AND 1000),
+    rollback_status                TEXT NOT NULL CHECK (rollback_status IN
+        ('not_needed','available','completed','failed','unknown')),
+    provenance                     TEXT NOT NULL CHECK (provenance IN
+        ('agent_reported','harness_verified','owner_attested')),
+    agent_id                       TEXT,
+    body_id                        TEXT,
+    environment_id                 TEXT,
+    record_sha256                  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_recorded_at
+    ON agent_task_outcomes(recorded_at DESC, outcome_id);
+CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_contract
+    ON agent_task_outcomes(contract_id, contract_revision, recorded_at DESC);
+"#;
+
+// Immutable, node-local admission ledger for privacy-minimal body-operation
+// receipts. Unlike Event Spine this table has an operation-id uniqueness
+// boundary, so concurrent retries and old IDs cannot silently double-append.
+const SCHEMA_BODY_OPERATION_RECEIPTS: &str = r#"
+CREATE TABLE IF NOT EXISTS body_operation_receipts (
+    schema_version              TEXT NOT NULL CHECK (schema_version = 'agent_bridge.body_operation_receipt.v1'),
+    operation_id                TEXT PRIMARY KEY,
+    recorded_at                 INTEGER NOT NULL,
+    body_id                     TEXT NOT NULL,
+    terminal_status             TEXT NOT NULL CHECK (terminal_status IN
+        ('succeeded','failed','abandoned')),
+    claimed_verification_status TEXT NOT NULL CHECK (claimed_verification_status IN
+        ('verified','not_verified','unknown')),
+    admission_provenance        TEXT NOT NULL CHECK (admission_provenance IN
+        ('public_mcp_agent_reported')),
+    redacted_facts_json         TEXT NOT NULL,
+    record_sha256               TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_body_operation_receipts_recorded_at
+    ON body_operation_receipts(recorded_at DESC, operation_id);
+CREATE INDEX IF NOT EXISTS idx_body_operation_receipts_body
+    ON body_operation_receipts(body_id, recorded_at DESC);
+"#;
+
+type LedgerColumnShape = (&'static str, &'static str, bool, i64);
+type LedgerIndexShape = (&'static str, &'static [&'static str]);
+
+const AGENT_TASK_OUTCOME_COLUMN_SHAPE: &[LedgerColumnShape] = &[
+    ("schema_version", "TEXT", true, 0),
+    ("outcome_id", "TEXT", false, 1),
+    ("recorded_at", "INTEGER", true, 0),
+    ("contract_id", "TEXT", true, 0),
+    ("contract_revision", "INTEGER", true, 0),
+    ("status", "TEXT", true, 0),
+    ("verification_status", "TEXT", true, 0),
+    ("verification_method", "TEXT", true, 0),
+    ("evidence_sha256", "TEXT", true, 0),
+    ("user_acceptance", "TEXT", true, 0),
+    ("acceptance_provenance", "TEXT", true, 0),
+    ("manual_interventions", "INTEGER", false, 0),
+    ("owner_restatements", "INTEGER", false, 0),
+    ("repeated_authorization_prompts", "INTEGER", false, 0),
+    ("rollback_status", "TEXT", true, 0),
+    ("provenance", "TEXT", true, 0),
+    ("agent_id", "TEXT", false, 0),
+    ("body_id", "TEXT", false, 0),
+    ("environment_id", "TEXT", false, 0),
+    ("record_sha256", "TEXT", true, 0),
+];
+
+const AGENT_TASK_OUTCOME_INDEX_SHAPE: &[LedgerIndexShape] = &[
+    (
+        "idx_agent_task_outcomes_recorded_at",
+        &["recorded_at", "outcome_id"],
+    ),
+    (
+        "idx_agent_task_outcomes_contract",
+        &["contract_id", "contract_revision", "recorded_at"],
+    ),
+];
+
+const BODY_OPERATION_RECEIPT_COLUMN_SHAPE: &[LedgerColumnShape] = &[
+    ("schema_version", "TEXT", true, 0),
+    ("operation_id", "TEXT", false, 1),
+    ("recorded_at", "INTEGER", true, 0),
+    ("body_id", "TEXT", true, 0),
+    ("terminal_status", "TEXT", true, 0),
+    ("claimed_verification_status", "TEXT", true, 0),
+    ("admission_provenance", "TEXT", true, 0),
+    ("redacted_facts_json", "TEXT", true, 0),
+    ("record_sha256", "TEXT", true, 0),
+];
+
+const BODY_OPERATION_RECEIPT_INDEX_SHAPE: &[LedgerIndexShape] = &[
+    (
+        "idx_body_operation_receipts_recorded_at",
+        &["recorded_at", "operation_id"],
+    ),
+    (
+        "idx_body_operation_receipts_body",
+        &["body_id", "recorded_at"],
+    ),
+];
+
+fn verify_ledger_table_shape(
+    connection: &rusqlite::Connection,
+    table: &str,
+    expected_columns: &[LedgerColumnShape],
+    expected_indexes: &[LedgerIndexShape],
+) -> RusqliteResult<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info('{table}')"))?;
+    let actual = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                (
+                    row.get::<_, String>(2)?.to_ascii_uppercase(),
+                    row.get::<_, i64>(3)? != 0,
+                    row.get::<_, i64>(5)?,
+                ),
+            ))
+        })?
+        .collect::<std::result::Result<
+            std::collections::BTreeMap<String, (String, bool, i64)>,
+            _,
+        >>()?;
+    let expected = expected_columns
+        .iter()
+        .map(|(name, declared_type, not_null, primary_key_position)| {
+            (
+                (*name).to_string(),
+                (
+                    (*declared_type).to_string(),
+                    *not_null,
+                    *primary_key_position,
+                ),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if actual != expected {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "incompatible {table} schema: expected {expected:?}, found {actual:?}"
+        )));
+    }
+
+    for (index, expected_index_columns) in expected_indexes {
+        let owner = connection
+            .query_row(
+                "SELECT tbl_name FROM sqlite_schema WHERE type='index' AND name=?1",
+                [index],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if owner.as_deref() != Some(table) {
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "incompatible {table} index {index}: expected owner {table:?}, found {owner:?}"
+            )));
+        }
+        let mut index_statement = connection.prepare(&format!("PRAGMA index_info('{index}')"))?;
+        let actual_index_columns = index_statement
+            .query_map([], |row| row.get::<_, String>(2))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if actual_index_columns.as_slice() != *expected_index_columns {
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "incompatible {table} index {index}: expected {expected_index_columns:?}, found {actual_index_columns:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // v36: memory FTS indexed projection. `memories.content` remains the durable
 // authored body, while `memories.fts_content` is a derived search projection
 // that can include small, whitelisted retrieval hints such as continuity
@@ -1405,16 +1699,7 @@ impl SqliteStore {
 }
 
 impl SqliteStore {
-    pub async fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| Error::Backend(format!("create db dir: {e}")))?;
-        }
-        let conn = Connection::open(path)
-            .await
-            .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
-
+    async fn initialize_connection_once(conn: &Connection) -> tokio_rusqlite::Result<()> {
         conn.call(|c| -> RusqliteResult<()> {
             // Allow up to 5 s of retries when another writer holds the DB.
             c.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -2372,6 +2657,20 @@ impl SqliteStore {
             // comment for why it cannot bump schema_meta.version past v43).
             c.execute_batch(SCHEMA_FUSION_SHADOW)?;
             c.execute_batch(SCHEMA_AGENT_WORLD_CAPTURE)?;
+            c.execute_batch(SCHEMA_AGENT_TASK_OUTCOMES)?;
+            c.execute_batch(SCHEMA_BODY_OPERATION_RECEIPTS)?;
+            verify_ledger_table_shape(
+                c,
+                "agent_task_outcomes",
+                AGENT_TASK_OUTCOME_COLUMN_SHAPE,
+                AGENT_TASK_OUTCOME_INDEX_SHAPE,
+            )?;
+            verify_ledger_table_shape(
+                c,
+                "body_operation_receipts",
+                BODY_OPERATION_RECEIPT_COLUMN_SHAPE,
+                BODY_OPERATION_RECEIPT_INDEX_SHAPE,
+            )?;
             // SEPL P0/P1A0: additive lineage plus AGENT.md path binding.
             // StateStore remains read-only; baseline admission is an explicit
             // inherent SqliteStore method with no runtime command surface.
@@ -2407,7 +2706,45 @@ impl SqliteStore {
             Ok(())
         })
         .await
-        .map_err(|e| Error::Backend(format!("sqlite migrate: {e}")))?;
+    }
+
+    pub async fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| Error::Backend(format!("create db dir: {e}")))?;
+        }
+        // Schema checks and migrations contain check-then-create sequences. A
+        // cross-process advisory lock keeps daemon, daemon-http, Palace, and MCP
+        // startup from racing those sequences. The file contains no state and
+        // the OS releases the lock automatically if a process exits.
+        let _init_lock = acquire_sqlite_init_lock(path).await?;
+        let conn = Connection::open(path)
+            .await
+            .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
+
+        let mut retries_completed = 0usize;
+        loop {
+            let migration_result = Self::initialize_connection_once(&conn).await;
+            match migration_result {
+                Ok(()) => break,
+                Err(error) => {
+                    let Some(delay) = sqlite_init_retry_delay(&error, retries_completed) else {
+                        return Err(Error::Backend(format!("sqlite migrate: {error}")));
+                    };
+                    retries_completed += 1;
+                    warn!(
+                        path = %path.display(),
+                        retry = retries_completed,
+                        max_retries = SQLITE_INIT_RETRY_DELAYS_MS.len(),
+                        delay_ms = delay.as_millis(),
+                        error = %error,
+                        "SQLite initialization lock contention; retrying in-process"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
 
         info!(path = %path.display(), "SqliteStore ready");
         Ok(Self {
@@ -6856,6 +7193,433 @@ fn duration_ns(duration: std::time::Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
+fn ledger_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
+}
+
+fn ledger_sha256(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value.as_bytes()[7..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+}
+
+fn validate_agent_task_outcome_record(
+    record: &crate::AgentTaskOutcomeRecord,
+) -> std::result::Result<(), String> {
+    if record.schema_version != "agent_bridge.agent_task_outcome.v1" {
+        return Err("unsupported schema_version".into());
+    }
+    for (field, value) in [
+        ("outcome_id", Some(record.outcome_id.as_str())),
+        ("contract_id", Some(record.contract_id.as_str())),
+        ("agent_id", record.agent_id.as_deref()),
+        ("body_id", record.body_id.as_deref()),
+        ("environment_id", record.environment_id.as_deref()),
+    ] {
+        if value.is_some_and(|value| !ledger_identifier(value)) {
+            return Err(format!("invalid {field}"));
+        }
+    }
+    if !(0..=253_402_300_799).contains(&record.recorded_at) {
+        return Err("recorded_at is out of bounds".into());
+    }
+    if record.contract_revision == 0 || record.contract_revision > 1_000_000 {
+        return Err("contract_revision is out of bounds".into());
+    }
+    if !matches!(
+        record.status.as_str(),
+        "achieved" | "partially_achieved" | "blocked" | "abandoned"
+    ) || !matches!(
+        record.verification_status.as_str(),
+        "verified" | "not_verified" | "unknown"
+    ) || !matches!(
+        record.verification_method.as_str(),
+        "tests" | "postcondition" | "owner_confirmation" | "mixed" | "none"
+    ) || !matches!(
+        record.user_acceptance.as_str(),
+        "unknown" | "accepted" | "corrected" | "rejected"
+    ) || !matches!(
+        record.acceptance_provenance.as_str(),
+        "unavailable" | "owner_explicit" | "owner_correction"
+    ) || !matches!(
+        record.rollback_status.as_str(),
+        "not_needed" | "available" | "completed" | "failed" | "unknown"
+    ) || !matches!(
+        record.provenance.as_str(),
+        "agent_reported" | "harness_verified" | "owner_attested"
+    ) {
+        return Err("unknown closed-set value".into());
+    }
+    if record.evidence_sha256.len() > 16
+        || record.evidence_sha256.iter().any(|value| !ledger_sha256(value))
+        || record
+            .evidence_sha256
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+    {
+        return Err("evidence_sha256 must be sorted, unique, bounded lowercase digests".into());
+    }
+    if record.verification_status == "verified"
+        && (record.verification_method == "none" || record.evidence_sha256.is_empty())
+    {
+        return Err("verified outcome requires method and evidence".into());
+    }
+    if record.verification_method == "none" && !record.evidence_sha256.is_empty() {
+        return Err("evidence requires a verification method".into());
+    }
+    if matches!(record.status.as_str(), "achieved" | "partially_achieved")
+        && record.verification_status == "not_verified"
+    {
+        return Err("achievement cannot be not_verified".into());
+    }
+    let acceptance_consistent = matches!(
+        (
+            record.user_acceptance.as_str(),
+            record.acceptance_provenance.as_str()
+        ),
+        ("unknown", "unavailable")
+            | ("accepted", "owner_explicit")
+            | ("corrected", "owner_correction")
+            | ("rejected", "owner_explicit")
+    );
+    if !acceptance_consistent {
+        return Err("inconsistent acceptance provenance".into());
+    }
+    if record.provenance == "harness_verified" && record.verification_status != "verified" {
+        return Err("harness provenance requires verified status".into());
+    }
+    if record.provenance == "owner_attested"
+        && record.acceptance_provenance == "unavailable"
+    {
+        return Err("owner provenance requires an owner signal".into());
+    }
+    if [
+        record.manual_interventions,
+        record.owner_restatements,
+        record.repeated_authorization_prompts,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|count| count > 1_000)
+    {
+        return Err("operator count is out of bounds".into());
+    }
+    if !ledger_sha256(&record.record_sha256) {
+        return Err("invalid record_sha256".into());
+    }
+    let mut counts = serde_json::Map::new();
+    for (field, count) in [
+        ("manual_interventions", record.manual_interventions),
+        ("owner_restatements", record.owner_restatements),
+        (
+            "repeated_authorization_prompts",
+            record.repeated_authorization_prompts,
+        ),
+    ] {
+        if let Some(count) = count {
+            counts.insert(field.to_string(), serde_json::json!(count));
+        }
+    }
+    let mut value = serde_json::Map::from_iter([
+        (
+            "schema_version".to_string(),
+            serde_json::json!(record.schema_version),
+        ),
+        (
+            "outcome_id".to_string(),
+            serde_json::json!(record.outcome_id),
+        ),
+        (
+            "contract_id".to_string(),
+            serde_json::json!(record.contract_id),
+        ),
+        (
+            "revision".to_string(),
+            serde_json::json!(record.contract_revision),
+        ),
+        ("status".to_string(), serde_json::json!(record.status)),
+        (
+            "verification".to_string(),
+            serde_json::json!(record.verification_status),
+        ),
+        (
+            "verification_method".to_string(),
+            serde_json::json!(record.verification_method),
+        ),
+        (
+            "user_acceptance".to_string(),
+            serde_json::json!(record.user_acceptance),
+        ),
+        (
+            "acceptance_provenance".to_string(),
+            serde_json::json!(record.acceptance_provenance),
+        ),
+        (
+            "rollback_status".to_string(),
+            serde_json::json!(record.rollback_status),
+        ),
+        (
+            "provenance".to_string(),
+            serde_json::json!(record.provenance),
+        ),
+        (
+            "evidence_sha256".to_string(),
+            serde_json::json!(record.evidence_sha256),
+        ),
+        ("counts".to_string(), serde_json::Value::Object(counts)),
+    ]);
+    for (field, identifier) in [
+        ("agent_id", record.agent_id.as_ref()),
+        ("body_id", record.body_id.as_ref()),
+        ("environment_id", record.environment_id.as_ref()),
+    ] {
+        if let Some(identifier) = identifier {
+            value.insert(field.to_string(), serde_json::json!(identifier));
+        }
+    }
+    let value = serde_json::Value::Object(value);
+    let canonical = serde_json_canonicalizer::to_vec(&value)
+        .map_err(|error| format!("canonicalize outcome: {error}"))?;
+    let expected = format!("sha256:{:x}", Sha256::digest(canonical));
+    if expected != record.record_sha256 {
+        return Err("record_sha256 does not bind the canonical claim".into());
+    }
+    Ok(())
+}
+
+fn object_has_exact_keys(value: &serde_json::Value, expected: &[&str]) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.keys().map(String::as_str).collect::<BTreeSet<_>>()
+        == expected.iter().copied().collect::<BTreeSet<_>>()
+}
+
+fn validate_body_operation_receipt_record(
+    record: &crate::BodyOperationReceiptRecord,
+) -> std::result::Result<(), String> {
+    if record.schema_version != "agent_bridge.body_operation_receipt.v1" {
+        return Err("unsupported schema_version".into());
+    }
+    if !ledger_identifier(&record.operation_id) || !ledger_identifier(&record.body_id) {
+        return Err("invalid operation_id or body_id".into());
+    }
+    if !(0..=253_402_300_799).contains(&record.recorded_at) {
+        return Err("recorded_at is out of bounds".into());
+    }
+    if !matches!(
+        record.terminal_status.as_str(),
+        "succeeded" | "failed" | "abandoned"
+    ) || !matches!(
+        record.claimed_verification_status.as_str(),
+        "verified" | "not_verified" | "unknown"
+    ) || record.admission_provenance != "public_mcp_agent_reported"
+    {
+        return Err("invalid receipt closed-set value".into());
+    }
+    if (record.terminal_status == "succeeded")
+        != (record.claimed_verification_status == "verified")
+    {
+        return Err("only succeeded receipts may claim verified".into());
+    }
+    if record.redacted_facts_json.len() > 65_536 || !ledger_sha256(&record.record_sha256) {
+        return Err("receipt facts or digest are out of bounds".into());
+    }
+    let facts: serde_json::Value = serde_json::from_str(&record.redacted_facts_json)
+        .map_err(|error| format!("parse redacted receipt facts: {error}"))?;
+    if !object_has_exact_keys(
+        &facts,
+        &[
+            "schema_version",
+            "agent_id",
+            "body_id",
+            "environment_id",
+            "operation_id",
+            "intent_id",
+            "mutation",
+            "lease_present",
+            "action_kind",
+            "action_adapter_id",
+            "action_adapter_build_sha256",
+            "action_request_sha256",
+            "expected_postcondition_sha256",
+            "action_started_at_unix_ms",
+            "action_completed_at_unix_ms",
+            "pre_observation",
+            "pre_observation_max_age_ms",
+            "pre_observation_provenance",
+            "status",
+            "observed_after",
+            "post_observation_provenance",
+            "postcondition_verification_claim",
+            "recovery_decision",
+            "rollback_sha256",
+            "memory_links_sha256",
+            "raw_observation_payloads_stored",
+            "executes_action",
+            "grants_authority",
+            "authenticates_adapter",
+            "admission_provenance",
+            "trust_level",
+            "authority_authenticated",
+            "adapter_attestation_authenticated",
+        ],
+    ) {
+        return Err("receipt facts do not match the privacy-minimal schema".into());
+    }
+    for field in ["pre_observation", "observed_after"] {
+        let observation = &facts[field];
+        if observation.is_null() {
+            continue;
+        }
+        if !object_has_exact_keys(
+            observation,
+            &[
+                "schema",
+                "body_id",
+                "source",
+                "observed_at_unix_ms",
+                "freshness_ms",
+                "confidence",
+                "world_revision",
+                "payload_stored",
+            ],
+        ) || observation["payload_stored"] != false
+        {
+            return Err(format!("{field} is not a redacted observation"));
+        }
+    }
+    for field in [
+        "pre_observation_provenance",
+        "post_observation_provenance",
+    ] {
+        let provenance = &facts[field];
+        if provenance.is_null() {
+            continue;
+        }
+        if !object_has_exact_keys(
+            provenance,
+            &["adapter_id", "adapter_build_sha256", "observation_sha256"],
+        ) {
+            return Err(format!("{field} has unexpected fields"));
+        }
+    }
+    if !object_has_exact_keys(
+        &facts["postcondition_verification_claim"],
+        &[
+            "status",
+            "verifier_adapter_id",
+            "verifier_build_sha256",
+            "evidence_sha256",
+            "independent_from_action",
+        ],
+    ) {
+        return Err("verification claim has unexpected fields".into());
+    }
+    if facts["schema_version"] != "agent_bridge.body_operation_envelope.v1"
+        || facts["operation_id"] != record.operation_id
+        || facts["body_id"] != record.body_id
+        || facts["status"] != record.terminal_status
+        || facts["postcondition_verification_claim"]["status"]
+            != record.claimed_verification_status
+        || facts["mutation"] != false
+        || facts["lease_present"] != false
+        || facts["raw_observation_payloads_stored"] != false
+        || facts["executes_action"] != false
+        || facts["grants_authority"] != false
+        || facts["authenticates_adapter"] != false
+        || facts["admission_provenance"] != "public_mcp_agent_reported"
+        || facts["trust_level"] != "advisory_only"
+        || facts["authority_authenticated"] != false
+        || facts["adapter_attestation_authenticated"] != false
+    {
+        return Err("receipt facts do not match advisory admission metadata".into());
+    }
+    let canonical = serde_json_canonicalizer::to_vec(&facts)
+        .map_err(|error| format!("canonicalize receipt: {error}"))?;
+    if canonical != record.redacted_facts_json.as_bytes() {
+        return Err("redacted_facts_json is not canonical".into());
+    }
+    let expected = format!("sha256:{:x}", Sha256::digest(canonical));
+    if expected != record.record_sha256 {
+        return Err("record_sha256 does not bind the redacted facts".into());
+    }
+    Ok(())
+}
+
+fn classify_agent_task_outcome(
+    connection: &rusqlite::Connection,
+    record: &crate::AgentTaskOutcomeRecord,
+    evidence_sha256: &str,
+    contract_revision: i64,
+) -> RusqliteResult<crate::AgentTaskOutcomeWriteStatus> {
+    let existing: i64 = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_task_outcomes WHERE outcome_id=?1)",
+        params![&record.outcome_id],
+        |row| row.get(0),
+    )?;
+    if existing == 0 {
+        return Ok(crate::AgentTaskOutcomeWriteStatus::Inserted);
+    }
+    let identical: i64 = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM agent_task_outcomes
+             WHERE outcome_id=?1
+               AND schema_version=?2
+               AND contract_id=?3
+               AND contract_revision=?4
+               AND status=?5
+               AND verification_status=?6
+               AND verification_method=?7
+               AND evidence_sha256=?8
+               AND user_acceptance=?9
+               AND acceptance_provenance=?10
+               AND manual_interventions IS ?11
+               AND owner_restatements IS ?12
+               AND repeated_authorization_prompts IS ?13
+               AND rollback_status=?14
+               AND provenance=?15
+               AND agent_id IS ?16
+               AND body_id IS ?17
+               AND environment_id IS ?18
+               AND record_sha256=?19
+         )",
+        params![
+            &record.outcome_id,
+            &record.schema_version,
+            &record.contract_id,
+            contract_revision,
+            &record.status,
+            &record.verification_status,
+            &record.verification_method,
+            evidence_sha256,
+            &record.user_acceptance,
+            &record.acceptance_provenance,
+            record.manual_interventions,
+            record.owner_restatements,
+            record.repeated_authorization_prompts,
+            &record.rollback_status,
+            &record.provenance,
+            &record.agent_id,
+            &record.body_id,
+            &record.environment_id,
+            &record.record_sha256,
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(if identical == 1 {
+        crate::AgentTaskOutcomeWriteStatus::Duplicate
+    } else {
+        crate::AgentTaskOutcomeWriteStatus::Conflict
+    })
+}
+
 #[async_trait]
 impl StateStore for SqliteStore {
     async fn save_session(&self, session: &StoredSession) -> Result<()> {
@@ -7260,6 +8024,269 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("recent_semantic_events: {e}")))?;
         Ok(rows)
+    }
+
+    async fn record_agent_task_outcome(
+        &self,
+        record: crate::AgentTaskOutcomeRecord,
+    ) -> Result<crate::AgentTaskOutcomeWriteStatus> {
+        validate_agent_task_outcome_record(&record)
+            .map_err(|error| Error::Backend(format!("invalid agent task outcome: {error}")))?;
+        let evidence_sha256 = serde_json::to_string(&record.evidence_sha256)
+            .map_err(|error| Error::Backend(format!("serialize outcome evidence: {error}")))?;
+        let contract_revision = i64::try_from(record.contract_revision)
+            .map_err(|_| Error::Backend("task outcome contract revision exceeds i64".into()))?;
+        self.conn
+            .call(move |connection| -> RusqliteResult<crate::AgentTaskOutcomeWriteStatus> {
+                let transaction = connection.transaction_with_behavior(
+                    rusqlite::TransactionBehavior::Immediate,
+                )?;
+                let inserted = transaction.execute(
+                    "INSERT INTO agent_task_outcomes
+                       (outcome_id, recorded_at, contract_id,
+                        contract_revision, status, verification_status,
+                        verification_method, evidence_sha256, user_acceptance,
+                        acceptance_provenance, manual_interventions,
+                        owner_restatements, repeated_authorization_prompts,
+                        rollback_status, provenance, agent_id, body_id,
+                        environment_id, schema_version, record_sha256)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                             ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                     ON CONFLICT(outcome_id) DO NOTHING",
+                    params![
+                        record.outcome_id,
+                        record.recorded_at,
+                        record.contract_id,
+                        contract_revision,
+                        record.status,
+                        record.verification_status,
+                        record.verification_method,
+                        evidence_sha256,
+                        record.user_acceptance,
+                        record.acceptance_provenance,
+                        record.manual_interventions,
+                        record.owner_restatements,
+                        record.repeated_authorization_prompts,
+                        record.rollback_status,
+                        record.provenance,
+                        record.agent_id,
+                        record.body_id,
+                        record.environment_id,
+                        record.schema_version,
+                        record.record_sha256,
+                    ],
+                )?;
+                let status = if inserted == 1 {
+                    crate::AgentTaskOutcomeWriteStatus::Inserted
+                } else {
+                    classify_agent_task_outcome(
+                        &transaction,
+                        &record,
+                        &evidence_sha256,
+                        contract_revision,
+                    )?
+                };
+                transaction.commit()?;
+                Ok(status)
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("record_agent_task_outcome: {error}")))
+    }
+
+    async fn check_agent_task_outcome(
+        &self,
+        record: crate::AgentTaskOutcomeRecord,
+    ) -> Result<crate::AgentTaskOutcomeWriteStatus> {
+        validate_agent_task_outcome_record(&record)
+            .map_err(|error| Error::Backend(format!("invalid agent task outcome: {error}")))?;
+        let evidence_sha256 = serde_json::to_string(&record.evidence_sha256)
+            .map_err(|error| Error::Backend(format!("serialize outcome evidence: {error}")))?;
+        let contract_revision = i64::try_from(record.contract_revision)
+            .map_err(|_| Error::Backend("task outcome contract revision exceeds i64".into()))?;
+        self.conn
+            .call(move |connection| {
+                classify_agent_task_outcome(
+                    connection,
+                    &record,
+                    &evidence_sha256,
+                    contract_revision,
+                )
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("check_agent_task_outcome: {error}")))
+    }
+
+    async fn recent_agent_task_outcomes(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::AgentTaskOutcomeRecord>> {
+        let cutoff = now_secs().saturating_sub(window_secs.clamp(60, 31_536_000));
+        let limit = limit.clamp(1, 2_000) as i64;
+        self.conn
+            .call(move |connection| -> RusqliteResult<Vec<crate::AgentTaskOutcomeRecord>> {
+                let mut statement = connection.prepare(
+                    "SELECT outcome_id, recorded_at, contract_id,
+                            contract_revision, status, verification_status,
+                            verification_method, evidence_sha256, user_acceptance,
+                            acceptance_provenance, manual_interventions,
+                            owner_restatements, repeated_authorization_prompts,
+                            rollback_status, provenance, agent_id, body_id,
+                            environment_id, schema_version, record_sha256
+                       FROM agent_task_outcomes
+                      WHERE recorded_at >= ?1
+                      ORDER BY recorded_at DESC, outcome_id ASC
+                      LIMIT ?2",
+                )?;
+                let rows = statement
+                    .query_map(params![cutoff, limit], |row| {
+                        let evidence: String = row.get(7)?;
+                        // Keep a corrupt row local to itself. The bridge decoder
+                        // will classify this sentinel as invalid instead of one
+                        // malformed JSON cell aborting the entire scorecard read.
+                        let evidence_sha256 = serde_json::from_str(&evidence)
+                            .unwrap_or_else(|_| vec!["invalid_persisted_evidence".to_string()]);
+                        Ok(crate::AgentTaskOutcomeRecord {
+                            schema_version: row.get(18)?,
+                            outcome_id: row.get(0)?,
+                            recorded_at: row.get(1)?,
+                            contract_id: row.get(2)?,
+                            contract_revision: row.get(3)?,
+                            status: row.get(4)?,
+                            verification_status: row.get(5)?,
+                            verification_method: row.get(6)?,
+                            evidence_sha256,
+                            user_acceptance: row.get(8)?,
+                            acceptance_provenance: row.get(9)?,
+                            manual_interventions: row.get(10)?,
+                            owner_restatements: row.get(11)?,
+                            repeated_authorization_prompts: row.get(12)?,
+                            rollback_status: row.get(13)?,
+                            provenance: row.get(14)?,
+                            agent_id: row.get(15)?,
+                            body_id: row.get(16)?,
+                            environment_id: row.get(17)?,
+                            record_sha256: row.get(19)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("recent_agent_task_outcomes: {error}")))
+    }
+
+    async fn record_body_operation_receipt(
+        &self,
+        record: crate::BodyOperationReceiptRecord,
+    ) -> Result<crate::BodyOperationReceiptWriteStatus> {
+        validate_body_operation_receipt_record(&record)
+            .map_err(|error| Error::Backend(format!("invalid body operation receipt: {error}")))?;
+        self.conn
+            .call(
+                move |connection| -> RusqliteResult<crate::BodyOperationReceiptWriteStatus> {
+                    let transaction = connection.transaction_with_behavior(
+                        rusqlite::TransactionBehavior::Immediate,
+                    )?;
+                    let inserted = transaction.execute(
+                        "INSERT INTO body_operation_receipts
+                           (operation_id, recorded_at, body_id, terminal_status,
+                            claimed_verification_status, admission_provenance,
+                            redacted_facts_json, schema_version, record_sha256)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                         ON CONFLICT(operation_id) DO NOTHING",
+                        params![
+                            record.operation_id,
+                            record.recorded_at,
+                            record.body_id,
+                            record.terminal_status,
+                            record.claimed_verification_status,
+                            record.admission_provenance,
+                            record.redacted_facts_json,
+                            record.schema_version,
+                            record.record_sha256,
+                        ],
+                    )?;
+                    let status = if inserted == 1 {
+                        crate::BodyOperationReceiptWriteStatus::Inserted
+                    } else {
+                        let identical: i64 = transaction.query_row(
+                            "SELECT EXISTS(
+                                SELECT 1 FROM body_operation_receipts
+                                 WHERE operation_id=?1
+                                   AND schema_version=?2
+                                   AND body_id=?3
+                                   AND terminal_status=?4
+                                   AND claimed_verification_status=?5
+                                   AND admission_provenance=?6
+                                   AND redacted_facts_json=?7
+                                   AND record_sha256=?8
+                             )",
+                            params![
+                                record.operation_id,
+                                record.schema_version,
+                                record.body_id,
+                                record.terminal_status,
+                                record.claimed_verification_status,
+                                record.admission_provenance,
+                                record.redacted_facts_json,
+                                record.record_sha256,
+                            ],
+                            |row| row.get(0),
+                        )?;
+                        if identical == 1 {
+                            crate::BodyOperationReceiptWriteStatus::Duplicate
+                        } else {
+                            crate::BodyOperationReceiptWriteStatus::Conflict
+                        }
+                    };
+                    transaction.commit()?;
+                    Ok(status)
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("record_body_operation_receipt: {error}")))
+    }
+
+    async fn recent_body_operation_receipts(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::BodyOperationReceiptRecord>> {
+        let cutoff = now_secs().saturating_sub(window_secs.clamp(60, 31_536_000));
+        let limit = limit.clamp(1, 2_000) as i64;
+        self.conn
+            .call(
+                move |connection| -> RusqliteResult<Vec<crate::BodyOperationReceiptRecord>> {
+                    let mut statement = connection.prepare(
+                        "SELECT operation_id, recorded_at, body_id, terminal_status,
+                                claimed_verification_status, admission_provenance,
+                                redacted_facts_json, schema_version, record_sha256
+                           FROM body_operation_receipts
+                          WHERE recorded_at >= ?1
+                          ORDER BY recorded_at DESC, operation_id ASC
+                          LIMIT ?2",
+                    )?;
+                    let rows = statement
+                        .query_map(params![cutoff, limit], |row| {
+                            Ok(crate::BodyOperationReceiptRecord {
+                                schema_version: row.get(7)?,
+                                operation_id: row.get(0)?,
+                                recorded_at: row.get(1)?,
+                                body_id: row.get(2)?,
+                                terminal_status: row.get(3)?,
+                                claimed_verification_status: row.get(4)?,
+                                admission_provenance: row.get(5)?,
+                                redacted_facts_json: row.get(6)?,
+                                record_sha256: row.get(8)?,
+                            })
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("recent_body_operation_receipts: {error}")))
     }
 
     async fn record_mcp_tool_call(
@@ -9838,18 +10865,57 @@ impl StateStore for SqliteStore {
         archive_threshold: f64,
     ) -> Result<u64> {
         let now = now_secs();
+        // Finalize can run several times within minutes (pre-compact, stop,
+        // explicit lifecycle closure). Rewriting every active row on each
+        // call is expensive on the owner-local FUSE-backed store even though
+        // the resulting decay factor is effectively 1. Keep the maximum
+        // scheduling lag below one percent of the requested half-life and cap
+        // it at six hours for the normal 30-day policy. A later due pass still
+        // uses the unchanged last_decayed_at anchor, so elapsed decay is
+        // accumulated rather than discarded.
+        const MAX_DECAY_INTERVAL_SECS: f64 = 6.0 * 60.0 * 60.0;
+        let min_decay_interval_secs =
+            (half_life_days.max(0.0) * 86_400.0 * 0.01).clamp(1.0, MAX_DECAY_INTERVAL_SECS) as i64;
+        let due_before = now.saturating_sub(min_decay_interval_secs);
         let archived = self
             .conn
             .call(move |c| -> RusqliteResult<u64> {
+                // Read due rows first. Most closely-spaced finalize calls end
+                // here without scanning the edge graph or opening a write
+                // transaction.
+                let mut stmt = c.prepare(
+                    "SELECT key, importance, COALESCE(last_decayed_at, updated_at), related_keys
+                     FROM memories
+                     WHERE status = 'active'
+                       AND (
+                           COALESCE(last_decayed_at, updated_at) <= ?1
+                           OR COALESCE(last_decayed_at, updated_at) > ?2
+                       )",
+                )?;
+                let candidates: Vec<(String, f64, i64, Option<String>)> = stmt
+                    .query_map(params![due_before, now], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                drop(stmt);
+                if candidates.is_empty() {
+                    return Ok(0);
+                }
+
                 // Durable-memory guard (2026-06-02, thread 97 #97): pre-load
                 // the set of keys that participate in at least one edge. A
                 // graph-connected or author-linked (`related_keys`) memory is
                 // NOT archived even when its decayed importance falls below
                 // the threshold — decay is a ranking signal, not a reason to
-                // retire a hub. (This decay compounds per call and does not
-                // bump updated_at, so frequent session_finalize runs can sink
-                // a well-connected durable row below the floor purely on call
-                // count — that was the thread 97 collateral root cause.)
+                // retire a hub. Before last_decayed_at became the incremental
+                // anchor, frequent finalize calls could compound decay by call
+                // count; that was the thread 97 collateral root cause.
                 let mut edge_keys: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
                 {
@@ -9870,26 +10936,6 @@ impl StateStore for SqliteStore {
                         edge_keys.insert(k);
                     }
                 }
-
-                // Fetch all active memories with their decay anchor + current
-                // importance + related_keys (for the durable guard). The anchor
-                // is last_decayed_at (COALESCE updated_at for rows not yet
-                // decayed) — see the F5 fix below.
-                let mut stmt = c.prepare(
-                    "SELECT key, importance, COALESCE(last_decayed_at, updated_at), related_keys
-                     FROM memories WHERE status = 'active'",
-                )?;
-                let candidates: Vec<(String, f64, i64, Option<String>)> = stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, f64>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                        ))
-                    })?
-                    .filter_map(|r| r.ok())
-                    .collect();
 
                 let tx = c.unchecked_transaction()?;
                 let mut archived_count = 0u64;
@@ -16489,6 +17535,66 @@ mod tests {
     use crate::CodebaseIndexA1DispatchStrategy;
     use crate::{MemoryListSort, PlanStep, StateStore};
 
+    fn sqlite_call_error(code: i32) -> tokio_rusqlite::Error {
+        tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ))
+    }
+
+    #[test]
+    fn sqlite_init_retry_is_bounded_and_lock_specific() {
+        let busy = sqlite_call_error(rusqlite::ffi::SQLITE_BUSY);
+        let locked = sqlite_call_error(rusqlite::ffi::SQLITE_LOCKED);
+        let corrupt = sqlite_call_error(rusqlite::ffi::SQLITE_CORRUPT);
+
+        assert_eq!(
+            (0..SQLITE_INIT_RETRY_DELAYS_MS.len())
+                .map(|attempt| sqlite_init_retry_delay(&busy, attempt).unwrap().as_millis())
+                .collect::<Vec<_>>(),
+            vec![25, 75, 200]
+        );
+        assert_eq!(
+            sqlite_init_retry_delay(&locked, 0),
+            Some(std::time::Duration::from_millis(25))
+        );
+        assert_eq!(
+            sqlite_init_retry_delay(&busy, SQLITE_INIT_RETRY_DELAYS_MS.len()),
+            None,
+            "retry budget must be finite"
+        );
+        assert_eq!(
+            sqlite_init_retry_delay(&corrupt, 0),
+            None,
+            "non-contention failures must remain fail-fast"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_fresh_store_initialization_recovers_in_process() {
+        const OPENERS: usize = 8;
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let database = temp_dir.path().join("state.db");
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(OPENERS));
+        let mut handles = Vec::with_capacity(OPENERS);
+
+        for _ in 0..OPENERS {
+            let database = database.clone();
+            let barrier = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                SqliteStore::open(&database).await.map(drop)
+            }));
+        }
+
+        for handle in handles {
+            handle
+                .await
+                .expect("initializer task must not panic")
+                .expect("concurrent initializer must recover without process restart");
+        }
+    }
+
     #[test]
     fn cold_embedding_write_wait_defaults_to_two_seconds() {
         assert_eq!(embedding_cold_write_wait_ms(None), 2_000);
@@ -22490,6 +23596,150 @@ mod tests {
         assert!(
             (imp2 - imp1).abs() < 1e-6,
             "repeated decay must not compound: imp1={imp1} imp2={imp2}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_importance_defers_recent_rows_without_advancing_anchor() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-decay-min-interval-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        store
+            .memory_save(&MemoryRecord {
+                key: "recent_decay_probe".into(),
+                kind: "lesson".into(),
+                content: "probe".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.8,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+
+        let recent_anchor = now_secs() - 60;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at=?1, last_decayed_at=?1 \
+                     WHERE key='recent_decay_probe'",
+                    params![recent_anchor],
+                )
+            })
+            .await
+            .expect("set recent anchor");
+
+        let archived = store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("recent decay pass");
+        assert_eq!(archived, 0);
+        let (importance, anchor) = store
+            .conn
+            .call(|c| -> RusqliteResult<(f64, i64)> {
+                c.query_row(
+                    "SELECT importance, last_decayed_at FROM memories \
+                     WHERE key='recent_decay_probe'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .expect("read deferred row");
+        assert_eq!(importance, 0.8, "a recent row must not be rewritten");
+        assert_eq!(
+            anchor, recent_anchor,
+            "a deferred pass must preserve the anchor so elapsed decay accumulates"
+        );
+
+        let due_anchor = now_secs() - (6 * 60 * 60) - 60;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET last_decayed_at=?1 \
+                     WHERE key='recent_decay_probe'",
+                    params![due_anchor],
+                )
+            })
+            .await
+            .expect("set due anchor");
+        store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("due decay pass");
+        let (decayed_importance, advanced_anchor) = store
+            .conn
+            .call(|c| -> RusqliteResult<(f64, i64)> {
+                c.query_row(
+                    "SELECT importance, last_decayed_at FROM memories \
+                     WHERE key='recent_decay_probe'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .expect("read due row");
+        assert!(
+            decayed_importance < importance,
+            "a due row must apply its accumulated elapsed decay"
+        );
+        assert!(
+            advanced_anchor > due_anchor,
+            "a due pass must advance the decay anchor"
+        );
+
+        let future_anchor = now_secs() + 60 * 60;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET last_decayed_at=?1 \
+                     WHERE key='recent_decay_probe'",
+                    params![future_anchor],
+                )
+            })
+            .await
+            .expect("set future anchor");
+        store
+            .memory_decay_importance(30.0, 0.01)
+            .await
+            .expect("future-anchor repair pass");
+        let repaired_anchor = store
+            .conn
+            .call(|c| -> RusqliteResult<i64> {
+                c.query_row(
+                    "SELECT last_decayed_at FROM memories \
+                     WHERE key='recent_decay_probe'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .expect("read repaired anchor");
+        assert!(
+            repaired_anchor < future_anchor,
+            "future clock-skew anchors must still be repaired instead of deferred"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

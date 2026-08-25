@@ -22,12 +22,32 @@
 //! for tests / pathological loops).
 
 use std::fs;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use ab_oob_alert::{write_alert, Alert, AlertKind, ProcessFd};
-use ab_store::S234Counts;
+use ab_store::{S234Counts, StateStore};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct C3SupervisorConfig {
+    pub tick_secs: u64,
+}
+
+impl C3SupervisorConfig {
+    pub fn from_env() -> Self {
+        Self::from_lookup(|key| std::env::var(key).ok())
+    }
+
+    fn from_lookup(mut lookup: impl FnMut(&str) -> Option<String>) -> Self {
+        let tick_secs = lookup("AB_C3_TICK_SECS")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(30)
+            .clamp(5, 300);
+        Self { tick_secs }
+    }
+}
 
 /// Window between consecutive S2-S4 anchor snapshots (per §3.4.2 "5min").
 pub const S234_WINDOW_SECS: u64 = 300;
@@ -51,6 +71,118 @@ pub fn c3_disabled_via_env() -> bool {
         std::env::var("AB_C3_DISABLE").ok().as_deref(),
         Some("1") | Some("true") | Some("TRUE")
     )
+}
+
+pub fn spawn_supervisor(
+    store: Option<Arc<dyn StateStore>>,
+    config: C3SupervisorConfig,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        run_supervisor_loop(Duration::from_secs(config.tick_secs), || {
+            run_supervisor_pass(store.as_ref())
+        })
+        .await;
+    })
+}
+
+async fn run_supervisor_loop<F, Fut>(tick_period: Duration, mut run_pass: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut interval = tokio::time::interval(tick_period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Startup may race with the daemon installing its own file descriptors.
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        run_pass().await;
+    }
+}
+
+async fn run_supervisor_pass(store: Option<&Arc<dyn StateStore>>) {
+    let inv = s1_check_and_alert();
+    if !inv.is_empty() {
+        tracing::warn!(
+            pids = inv.len(),
+            "c3-self-check: S1 detected state.db (deleted) fds"
+        );
+    }
+
+    let Some(store) = store else {
+        return;
+    };
+
+    match store.schema_meta_version().await {
+        Ok(Some(version)) => {
+            if s5_check_and_alert(&version) {
+                tracing::warn!(
+                    version = %version,
+                    "c3-self-check: S5 schema_meta.version change fired alert"
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(error = %error, "c3-self-check: S5 schema_meta_version error");
+        }
+    }
+
+    match store.s234_counts().await {
+        Ok(counts) => {
+            let now = SystemTime::now();
+            let events = s234_check_against_snapshot_guarded(counts, now);
+            if events.is_empty() {
+                return;
+            }
+
+            let ts_unix = now
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(0);
+            let node_label = c3_node_label();
+            for event in events {
+                let title = format!(
+                    "[C3 alert][{}] {}: {} -> {}",
+                    node_label,
+                    event.signal.as_str(),
+                    event.before,
+                    event.after,
+                );
+                let body = format_s234_alert_body_for_node(&event, ts_unix, &node_label);
+                if let Err(error) = store
+                    .forum_post(
+                        None,
+                        Some("incidents"),
+                        Some(&title),
+                        "agent-bridge:daemon:c3-s234",
+                        "finding",
+                        &body,
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        error = %error,
+                        signal = event.signal.as_str(),
+                        "c3-self-check: S2-S4 forum_post failed"
+                    );
+                } else {
+                    tracing::warn!(
+                        signal = event.signal.as_str(),
+                        before = event.before,
+                        after = event.after,
+                        drop_pct = event.drop_pct,
+                        "c3-self-check: S2-S4 drop posted to incidents"
+                    );
+                }
+            }
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "c3-self-check: s234_counts error");
+        }
+    }
 }
 
 /// Window during which a recent bulk-hygiene run suppresses S2/S4 drop
@@ -676,6 +808,56 @@ pub(crate) fn _reset_s234_snapshot_for_tests() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn supervisor_config_uses_default() {
+        let config = C3SupervisorConfig::from_lookup(|_| None);
+        assert_eq!(config, C3SupervisorConfig { tick_secs: 30 });
+    }
+
+    #[test]
+    fn supervisor_config_clamps_bounds() {
+        let low = C3SupervisorConfig::from_lookup(|_| Some("1".into()));
+        let high = C3SupervisorConfig::from_lookup(|_| Some("999".into()));
+        assert_eq!(low.tick_secs, 5);
+        assert_eq!(high.tick_secs, 300);
+    }
+
+    #[test]
+    fn supervisor_config_invalid_value_uses_default() {
+        let config = C3SupervisorConfig::from_lookup(|_| Some("invalid".into()));
+        assert_eq!(config.tick_secs, 30);
+    }
+
+    #[tokio::test]
+    async fn supervisor_waits_one_full_period_before_first_pass() {
+        let passes = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&passes);
+        let handle = tokio::spawn(async move {
+            run_supervisor_loop(Duration::from_millis(80), || {
+                let observed = Arc::clone(&observed);
+                async move {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(passes.load(Ordering::SeqCst), 0);
+
+        tokio::time::timeout(Duration::from_millis(300), async {
+            while passes.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("first pass should run after one full period");
+        assert_eq!(passes.load(Ordering::SeqCst), 1);
+
+        handle.abort();
+    }
 
     #[test]
     fn suspect_binary_matches_both_path_layouts() {

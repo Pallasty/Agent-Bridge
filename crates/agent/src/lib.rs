@@ -26,6 +26,7 @@ pub mod opencode_family;
 pub mod oz;
 pub mod pty_interactive;
 pub mod pty_session;
+pub mod resident_codex;
 pub mod sandbox;
 pub mod worktree;
 
@@ -36,6 +37,11 @@ pub use codex::CodexRuntime;
 pub use gemini::GeminiRuntime;
 pub use opencode_family::OpenCodeFamilyRuntime;
 pub use oz::OzAgentRuntime;
+pub use resident_codex::{
+    ResidentCodexBroker, ResidentCodexBrokerConfig, ResidentCodexError,
+    ResidentCodexExecutionReceipt, ResidentCodexInvocationContract, ResidentCodexRequest,
+    ResidentCodexRun,
+};
 pub use worktree::{GitWorktreeManager, Worktree};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

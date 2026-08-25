@@ -4,6 +4,7 @@
 //! renderer, or engine crates. It holds portable semantic world types only.
 
 pub mod action_query;
+pub mod body_operation;
 pub mod embodiment;
 pub mod embodiment_attention;
 pub mod embodiment_contract;
@@ -21,6 +22,7 @@ pub mod snapshot;
 pub mod verification;
 
 pub use action_query::*;
+pub use body_operation::*;
 pub use embodiment::*;
 pub use embodiment_attention::*;
 pub use embodiment_contract::*;

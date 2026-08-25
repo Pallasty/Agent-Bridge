@@ -146,6 +146,15 @@ enum Cmd {
         #[command(subcommand)]
         op: InstinctOp,
     },
+    /// Run bounded Resident Xiao Shu cognition.
+    ///
+    /// V0 is explicit, one-shot, read-only, and advisory-only. Agent-Bridge
+    /// owns the durable subject receipt; Codex runs ephemerally without the
+    /// user's config or MCP surface and exits after one schema-bound response.
+    Resident {
+        #[command(subcommand)]
+        op: ResidentOp,
+    },
     /// Install agent-bridge for the chosen frontend.
     ///
     /// `--frontend claude-code` (default): copies the binary to
@@ -844,6 +853,75 @@ enum InstinctOp {
 }
 
 #[derive(Subcommand, Debug)]
+enum ResidentOp {
+    /// Analyze one observed event without executing or scheduling the advice.
+    Cognition {
+        /// Untrusted observed event to analyze. The raw value is not persisted.
+        #[arg(long)]
+        event: String,
+        /// Stable caller identity for the event. Generated when omitted.
+        #[arg(long)]
+        event_id: Option<String>,
+        /// Read-only workspace visible to Codex.
+        #[arg(long, default_value = ".")]
+        cwd: PathBuf,
+        /// Efficient model used by the ephemeral cognition provider.
+        #[arg(long, default_value = ab_bridge::resident_cognition::DEFAULT_RESIDENT_MODEL)]
+        model: String,
+        /// Bounded reasoning effort: low or medium.
+        #[arg(long, default_value = ab_bridge::resident_cognition::DEFAULT_REASONING_EFFORT)]
+        reasoning_effort: String,
+        /// Hard wall-clock limit for the provider (10..=120 seconds).
+        #[arg(long, default_value_t = ab_bridge::resident_cognition::DEFAULT_TIMEOUT_SECS)]
+        timeout_secs: u64,
+        /// Codex executable override. AB_RESIDENT_CODEX_BIN is used when this
+        /// argument stays at its default.
+        #[arg(long, default_value = "codex")]
+        codex_bin: PathBuf,
+        /// Emit the exact bounded launch contract without starting Codex or
+        /// writing a receipt.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Bind an explicit owner usefulness label to one completed wake.
+    ///
+    /// The label is a local CLI assertion, not a model judgment or
+    /// cryptographically authenticated identity claim. It never changes
+    /// runtime authority or admits M2 automatically.
+    Evaluate {
+        /// Completed resident wake ID returned by `resident cognition`.
+        #[arg(long)]
+        wake_id: String,
+        /// Owner-observed product value for this one wake.
+        #[arg(long, value_enum)]
+        label: ResidentOwnerLabelArg,
+        /// Preview the evaluation contract without reading or writing state.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ResidentOwnerLabelArg {
+    Useful,
+    Neutral,
+    Distracting,
+    Harmful,
+}
+
+impl From<ResidentOwnerLabelArg> for ab_bridge::resident_owner_evaluation::ResidentOwnerLabel {
+    fn from(value: ResidentOwnerLabelArg) -> Self {
+        use ab_bridge::resident_owner_evaluation::ResidentOwnerLabel;
+        match value {
+            ResidentOwnerLabelArg::Useful => ResidentOwnerLabel::Useful,
+            ResidentOwnerLabelArg::Neutral => ResidentOwnerLabel::Neutral,
+            ResidentOwnerLabelArg::Distracting => ResidentOwnerLabel::Distracting,
+            ResidentOwnerLabelArg::Harmful => ResidentOwnerLabel::Harmful,
+        }
+    }
+}
+
+#[derive(Subcommand, Debug)]
 enum AvatarOp {
     /// Compile a generated chroma-background sprite strip into a deterministic
     /// RGBA atlas. Default is a read-only preview; writing requires confirmation.
@@ -959,10 +1037,10 @@ enum AvatarOp {
         #[arg(long)]
         json: bool,
     },
-    /// Recommend whether Xiao Shu should stay or offer a confirmed focus move.
+    /// Recommend whether Xiao Shu should stay or make a reversible focus move.
     /// Read-only: never dispatches movement or writes observer state.
     FocusFollowRecommend {
-        /// Last acknowledged focused Sway node id, when known.
+        /// Last acknowledged focused Sway node id. Overrides the latest completed-action receipt.
         #[arg(long)]
         last_target_node_id: Option<i64>,
         /// Suppress movement recommendations below this distance.
@@ -979,9 +1057,9 @@ enum AvatarOp {
         json: bool,
     },
     /// Preview or explicitly show a passive Xiao Shu focus-move prompt.
-    /// Never moves the Avatar; real movement remains a separate confirmed action.
+    /// Never moves the Avatar; real movement remains a separate reversible action.
     FocusFollowPrompt {
-        /// Last acknowledged focused Sway node id, when known.
+        /// Last acknowledged focused Sway node id. Overrides the latest completed-action receipt.
         #[arg(long)]
         last_target_node_id: Option<i64>,
         /// Suppress movement recommendations below this distance.
@@ -996,14 +1074,14 @@ enum AvatarOp {
         /// Display the prompt. Without this flag the command is read-only.
         #[arg(long)]
         show: bool,
-        /// Confirm this individual prompt display.
+        /// Legacy owner-confirmation provenance. Optional for reversible Avatar expression.
         #[arg(long, requires = "show")]
         confirm: bool,
         /// Emit raw JSON instead of the human-readable summary.
         #[arg(long)]
         json: bool,
     },
-    /// Move Xiao Shu near the focused Sway window after explicit owner confirmation.
+    /// Move Xiao Shu near the focused Sway window as a reversible embodied expression.
     /// Default is a dry-run; affects only the exact Avatar app_id and never the pointer.
     FocusFollowAction {
         /// Gap between Xiao Shu and the focused window.
@@ -1024,13 +1102,62 @@ enum AvatarOp {
         /// Request execution. Without this flag the command only previews.
         #[arg(long)]
         execute: bool,
-        /// Confirm this individual movement request.
+        /// Legacy owner-confirmation provenance. Optional for reversible Avatar expression.
         #[arg(long, requires = "execute")]
         confirm: bool,
-        /// Operator reason; required with --execute.
+        /// Auditable expression reason; required with --execute.
         #[arg(long)]
         reason: Option<String>,
         /// Emit raw JSON instead of a human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Observe stable focus transitions in one bounded foreground session.
+    /// Default is preflight-only; --execute enables autonomous Avatar-only movement.
+    FocusFollowObserve {
+        /// Foreground observation lifetime in milliseconds (clamped to 1s..30m).
+        #[arg(long, default_value_t = 1_800_000)]
+        duration_ms: u64,
+        /// Sway tree polling interval in milliseconds (clamped to 250..5000ms).
+        #[arg(long, default_value_t = 1_000)]
+        poll_ms: u64,
+        /// Stable-focus dwell before a candidate can move (clamped to 500..30000ms).
+        #[arg(long, default_value_t = 2_000)]
+        dwell_ms: u64,
+        /// Cooldown after any real movement attempt (clamped to 30..3600s).
+        #[arg(long, default_value_t = 300)]
+        cooldown_secs: u64,
+        /// Base exponential backoff after a failed attempt (clamped to 5..900s).
+        #[arg(long, default_value_t = 30)]
+        failure_backoff_secs: u64,
+        /// Suppress movement below this distance.
+        #[arg(long, default_value_t = 96)]
+        min_travel_px: i64,
+        /// Maximum real attempts in one observer run (clamped to 1..3).
+        #[arg(long, default_value_t = 3)]
+        max_attempts: u64,
+        /// Maximum total movement on either axis for each attempt.
+        #[arg(long, default_value_t = 900)]
+        max_travel_px: i64,
+        /// Gap between Xiao Shu and the focused window.
+        #[arg(long, default_value_t = 24)]
+        margin_px: i64,
+        /// Maximum distance between bounded movement steps.
+        #[arg(long, default_value_t = 48)]
+        max_step_px: i64,
+        /// Delay between movement steps.
+        #[arg(long, default_value_t = 90)]
+        step_interval_ms: u64,
+        /// Marker whose presence pauses observation and cancels an active traversal.
+        #[arg(long)]
+        pause_file: Option<PathBuf>,
+        /// Additional exact structured app_id/XWayland class to suppress.
+        #[arg(long = "deny-app-id")]
+        deny_app_ids: Vec<String>,
+        /// Start the bounded observer and let AB autonomously express stable focus.
+        #[arg(long)]
+        execute: bool,
+        /// Emit raw privacy-safe JSON instead of a human-readable summary.
         #[arg(long)]
         json: bool,
     },
@@ -4890,6 +5017,70 @@ async fn real_main() -> Result<()> {
         return Ok(());
     }
 
+    // Resident Xiao Shu v0 deliberately runs before the general credential
+    // notebook is loaded. The child receives Codex auth through CODEX_HOME,
+    // but does not inherit AB's unrelated service tokens merely because the
+    // parent CLI supports other integrations.
+    if let Cmd::Resident { op } = &cmd {
+        return match op {
+            ResidentOp::Cognition {
+                event,
+                event_id,
+                cwd,
+                model,
+                reasoning_effort,
+                timeout_secs,
+                codex_bin,
+                dry_run,
+            } => {
+                let mut options = ab_bridge::resident_cognition::ResidentCognitionOptions::new(
+                    event.clone(),
+                    cwd.clone(),
+                );
+                options.event_id = event_id.clone();
+                options.model = model.clone();
+                options.reasoning_effort = reasoning_effort.clone();
+                options.timeout_secs = *timeout_secs;
+                options.dry_run = *dry_run;
+                // Keep the environment override selected by `new` when the
+                // clap default remains untouched.
+                if codex_bin != Path::new("codex") {
+                    options.codex_bin = codex_bin.clone();
+                }
+
+                let store = if *dry_run {
+                    None
+                } else {
+                    let store: Arc<dyn StateStore> =
+                        Arc::new(SqliteStore::open(&default_db_path()).await?);
+                    Some(store)
+                };
+                let packet =
+                    ab_bridge::resident_cognition::run_resident_cognition(options, store).await?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+                Ok(())
+            }
+            ResidentOp::Evaluate {
+                wake_id,
+                label,
+                dry_run,
+            } => {
+                let mut options =
+                    ab_bridge::resident_owner_evaluation::ResidentOwnerEvaluationOptions::new(
+                        wake_id.clone(),
+                        (*label).into(),
+                    );
+                options.dry_run = *dry_run;
+                let packet =
+                    ab_bridge::resident_owner_evaluation::record_resident_owner_evaluation(
+                        options,
+                    )?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+                Ok(())
+            }
+        };
+    }
+
     // Load API tokens from the user's plaintext creds notebook before any
     // worker thread can read env. Self-heals after a `cargo install` that
     // overwrites the shell wrapper. See `creds.rs` for resolution order.
@@ -5161,7 +5352,8 @@ async fn real_main() -> Result<()> {
                 *margin_px,
                 *max_step_px,
                 *as_json,
-            ),
+            )
+            .await,
             AvatarOp::FocusFollowRecommend {
                 last_target_node_id,
                 min_travel_px,
@@ -5174,7 +5366,8 @@ async fn real_main() -> Result<()> {
                 *margin_px,
                 *max_step_px,
                 *as_json,
-            ),
+            )
+            .await,
             AvatarOp::FocusFollowPrompt {
                 last_target_node_id,
                 min_travel_px,
@@ -5191,7 +5384,8 @@ async fn real_main() -> Result<()> {
                 *show,
                 *confirm,
                 *as_json,
-            ),
+            )
+            .await,
             AvatarOp::FocusFollowAction {
                 margin_px,
                 max_step_px,
@@ -5212,7 +5406,44 @@ async fn real_main() -> Result<()> {
                 *confirm,
                 reason.as_deref(),
                 *as_json,
-            ),
+            )
+            .await,
+            AvatarOp::FocusFollowObserve {
+                duration_ms,
+                poll_ms,
+                dwell_ms,
+                cooldown_secs,
+                failure_backoff_secs,
+                min_travel_px,
+                max_attempts,
+                max_travel_px,
+                margin_px,
+                max_step_px,
+                step_interval_ms,
+                pause_file,
+                deny_app_ids,
+                execute,
+                json: as_json,
+            } => {
+                run_avatar_focus_follow_observe(
+                    *duration_ms,
+                    *poll_ms,
+                    *dwell_ms,
+                    *cooldown_secs,
+                    *failure_backoff_secs,
+                    *min_travel_px,
+                    *max_attempts,
+                    *max_travel_px,
+                    *margin_px,
+                    *max_step_px,
+                    *step_interval_ms,
+                    pause_file.clone(),
+                    deny_app_ids.clone(),
+                    *execute,
+                    *as_json,
+                )
+                .await
+            }
             AvatarOp::LinuxFloater {
                 base_url,
                 project,
@@ -8388,61 +8619,21 @@ async fn real_main() -> Result<()> {
                 dim_guard_strict_preflight(&store).await;
                 ab_bridge::embedding_dim_guard::spawn(store);
             }
-            // P-α — spawn always-warm coactivation tick if a store is
-            // available and the env disable flag is not set. The task
-            // runs for the daemon's lifetime; detached on shutdown.
-            // See docs/DESIGN-P-alpha-always-warm-coactivation-tick.md
-            if std::env::var("AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false)
-            {
+            // P-α — explicitly start the daemon-owned coactivation supervisor
+            // before the remaining background services and the socket server.
+            let coactivation_tick =
+                ab_bridge::coactivation_tick::CoactivationTickConfig::from_env();
+            if !coactivation_tick.enabled {
                 tracing::info!(
                     "substrate-tick: disabled by env (AGENT_BRIDGE_DISABLE_SUBSTRATE_TICK=1)"
                 );
             } else if let Some(store) = hub.store.clone() {
-                let tick_secs: u64 = std::env::var("AGENT_BRIDGE_TICK_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(30)
-                    .clamp(5, 300);
-                let tau_secs: i64 = std::env::var("AGENT_BRIDGE_TAU_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(7 * 86_400)
-                    .clamp(3600, 30 * 86_400);
                 tracing::info!(
-                    tick_secs,
-                    tau_secs,
+                    tick_secs = coactivation_tick.tick_secs,
+                    tau_secs = coactivation_tick.tau_secs,
                     "substrate-tick: spawning P-α always-warm coactivation tick"
                 );
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    // Skip the first immediate fire (interval ticks once at t=0).
-                    interval.tick().await;
-                    loop {
-                        interval.tick().await;
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        match store.decay_coactivation_once(tau_secs, now, 10).await {
-                            Ok(s) if s.iterations > 0 => {
-                                tracing::debug!(
-                                    swept = s.swept,
-                                    pruned = s.pruned,
-                                    iters = s.iterations,
-                                    "substrate-tick: ran"
-                                );
-                            }
-                            Ok(_) => {}
-                            Err(e) => {
-                                tracing::warn!(error = %e, "substrate-tick: decay error");
-                            }
-                        }
-                    }
-                });
+                ab_bridge::coactivation_tick::spawn(store, coactivation_tick);
             } else {
                 tracing::info!("substrate-tick: no store configured, skipping");
             }
@@ -8452,131 +8643,19 @@ async fn real_main() -> Result<()> {
             // OOB alert to ~/.cache/agent-bridge/alerts/ + tracing
             // error on target agent_bridge::sync_safety.
             //
-            // S5 schema_meta.version watch shares the same tick when a
-            // store is configured. S2-S4/S6 still pending follow-ups.
+            // S2-S5 share the same tick when a store is configured. S6 is
+            // enforced directly on the forum-post write path.
             if ab_bridge::c3_self_check::c3_disabled_via_env() {
                 tracing::info!("c3-self-check: disabled by env (AB_C3_DISABLE=1)");
             } else {
-                let c3_tick_secs: u64 = std::env::var("AB_C3_TICK_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(30)
-                    .clamp(5, 300);
+                let c3_config = ab_bridge::c3_self_check::C3SupervisorConfig::from_env();
                 let c3_store = hub.store.clone();
                 tracing::info!(
-                    tick_secs = c3_tick_secs,
+                    tick_secs = c3_config.tick_secs,
                     s5_enabled = c3_store.is_some(),
-                    "c3-self-check: spawning S1+S5 tick"
+                    "c3-self-check: spawning S1-S5 tick"
                 );
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(c3_tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    // Skip the t=0 immediate fire — startup may race
-                    // with the daemon installing its own fds.
-                    interval.tick().await;
-                    loop {
-                        interval.tick().await;
-                        let inv = ab_bridge::c3_self_check::s1_check_and_alert();
-                        if !inv.is_empty() {
-                            tracing::warn!(
-                                pids = inv.len(),
-                                "c3-self-check: S1 detected state.db (deleted) fds"
-                            );
-                        }
-                        if let Some(store) = c3_store.as_ref() {
-                            match store.schema_meta_version().await {
-                                Ok(Some(v)) => {
-                                    if ab_bridge::c3_self_check::s5_check_and_alert(&v) {
-                                        tracing::warn!(
-                                            version = %v,
-                                            "c3-self-check: S5 schema_meta.version change fired alert"
-                                        );
-                                    }
-                                }
-                                Ok(None) => {
-                                    // Backend has no schema_meta row — nothing to
-                                    // compare against. Quiet by design.
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "c3-self-check: S5 schema_meta_version error"
-                                    );
-                                }
-                            }
-
-                            // S2-S4 — 5-min anchor metric drops. Cheap (3 SELECT
-                            // COUNT) so we let the check sample every tick; the
-                            // helper internally guards against returning anything
-                            // before the 5-min window elapses.
-                            match store.s234_counts().await {
-                                Ok(counts) => {
-                                    let now = std::time::SystemTime::now();
-                                    let events =
-                                        ab_bridge::c3_self_check::s234_check_against_snapshot_guarded(
-                                            counts, now,
-                                        );
-                                    if !events.is_empty() {
-                                        let ts_unix = now
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .map(|d| d.as_secs() as i64)
-                                            .unwrap_or(0);
-                                        let node_label = ab_bridge::c3_self_check::c3_node_label();
-                                        for ev in events {
-                                            let title = format!(
-                                                "[C3 alert][{}] {}: {} -> {}",
-                                                node_label,
-                                                ev.signal.as_str(),
-                                                ev.before,
-                                                ev.after,
-                                            );
-                                            let body =
-                                                ab_bridge::c3_self_check::format_s234_alert_body_for_node(
-                                                    &ev,
-                                                    ts_unix,
-                                                    &node_label,
-                                                );
-                                            if let Err(e) = store
-                                                .forum_post(
-                                                    None,
-                                                    Some("incidents"),
-                                                    Some(&title),
-                                                    "agent-bridge:daemon:c3-s234",
-                                                    "finding",
-                                                    &body,
-                                                    None,
-                                                    None,
-                                                )
-                                                .await
-                                            {
-                                                tracing::warn!(
-                                                    error = %e,
-                                                    signal = ev.signal.as_str(),
-                                                    "c3-self-check: S2-S4 forum_post failed"
-                                                );
-                                            } else {
-                                                tracing::warn!(
-                                                    signal = ev.signal.as_str(),
-                                                    before = ev.before,
-                                                    after = ev.after,
-                                                    drop_pct = ev.drop_pct,
-                                                    "c3-self-check: S2-S4 drop posted to incidents"
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "c3-self-check: s234_counts error"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                });
+                ab_bridge::c3_self_check::spawn_supervisor(c3_store, c3_config);
             }
 
             // Retrieval-outcome apply tick — the gated consumer that closes
@@ -8596,63 +8675,7 @@ async fn real_main() -> Result<()> {
                     tick_secs,
                     "retrieval-outcome-apply: spawning reinforce/decay tick"
                 );
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    // Skip the t=0 immediate fire: a daemon that restarts
-                    // several times a day must not turn "daily" into
-                    // "per-restart" (consumption bounds the damage, but a
-                    // fresh evidence batch could still be acted on early).
-                    interval.tick().await;
-                    loop {
-                        interval.tick().await;
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        // Rule params are machine.env-steerable
-                        // (AB_RETRIEVAL_OUTCOME_APPLY_{REINFORCE_STEP,DECAY_STEP,
-                        // MIN_SURFACED,FLOOR,CEILING,PROTECT_DISABLE}) so shadow-tool
-                        // recalibration doesn't need a redeploy.
-                        let params = ab_bridge::retrieval_outcome::tick_rule_params();
-                        match ab_bridge::retrieval_outcome::run_apply_pass(
-                            &store, &params, 200, true, now,
-                        )
-                        .await
-                        {
-                            Ok(r) => {
-                                if r.applied > 0 || r.failed > 0 || r.capped_out > 0 {
-                                    tracing::info!(
-                                        applied = r.applied,
-                                        failed = r.failed,
-                                        skipped_raced = r.skipped_raced,
-                                        consumed_rows = r.consumed_rows,
-                                        orphans_consumed = r.orphans_consumed,
-                                        ambient_retired = r.ambient_retired,
-                                        protected_skipped = r.protected_skipped,
-                                        pending_below_min = r.pending_below_min,
-                                        capped_out = r.capped_out,
-                                        net_delta = r.net_importance_delta,
-                                        audit = r.audit_memory_key.as_deref().unwrap_or(""),
-                                        "retrieval-outcome-apply: pass ran"
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        rows = r.rows_considered,
-                                        pending_below_min = r.pending_below_min,
-                                        orphans_consumed = r.orphans_consumed,
-                                        ambient_retired = r.ambient_retired,
-                                        "retrieval-outcome-apply: nothing to do"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "retrieval-outcome-apply: pass error");
-                            }
-                        }
-                    }
-                });
+                ab_bridge::retrieval_outcome::spawn_apply_supervisor(store, tick_secs);
             } else {
                 tracing::info!("retrieval-outcome-apply: no store configured, skipping");
             }
@@ -8667,55 +8690,7 @@ async fn real_main() -> Result<()> {
             } else if let Some(store) = hub.store.clone() {
                 let tick_secs = ab_bridge::orphan_reaper::reaper_tick_secs();
                 tracing::info!(tick_secs, "orphan-reaper: spawning reaper tick");
-                tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    loop {
-                        interval.tick().await; // fires immediately at t=0
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        match ab_bridge::orphan_reaper::run_reaper_pass(
-                            &store,
-                            ab_bridge::orphan_reaper::reaper_stale_secs(),
-                            std::time::Duration::from_secs(3),
-                            now,
-                        )
-                        .await
-                        {
-                            Ok(r) => {
-                                if r.reaped > 0
-                                    || r.finalised_gone > 0
-                                    || r.still_alive > 0
-                                    || r.errors > 0
-                                {
-                                    tracing::info!(
-                                        scanned = r.scanned,
-                                        reaped = r.reaped,
-                                        finalised_gone = r.finalised_gone,
-                                        still_alive = r.still_alive,
-                                        owner_alive = r.owner_alive,
-                                        legacy = r.legacy_untracked,
-                                        errors = r.errors,
-                                        "orphan-reaper: pass ran"
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        scanned = r.scanned,
-                                        owner_alive = r.owner_alive,
-                                        legacy = r.legacy_untracked,
-                                        "orphan-reaper: nothing to reap"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "orphan-reaper: pass error");
-                            }
-                        }
-                    }
-                });
+                ab_bridge::orphan_reaper::spawn_reaper_supervisor(store, tick_secs);
             } else {
                 tracing::info!("orphan-reaper: no store configured, skipping");
             }
@@ -8829,6 +8804,7 @@ async fn real_main() -> Result<()> {
         | Cmd::WorktreeSession { .. }
         | Cmd::RescueSnapshot { .. }
         | Cmd::Doctor { .. }
+        | Cmd::Resident { .. }
         | Cmd::Walkthrough { .. }
         | Cmd::ContinuityReport { .. }
         | Cmd::WorkflowFeedbackReport { .. }
@@ -9197,13 +9173,13 @@ fn run_avatar_sprite_asset_compile(
     Ok(())
 }
 
-fn run_avatar_focus_follow_plan(
+async fn run_avatar_focus_follow_plan(
     avatar_app_id: String,
     margin_px: i64,
     max_step_px: i64,
     as_json: bool,
 ) -> Result<()> {
-    let tree = read_sway_tree_for_avatar()?;
+    let tree = read_sway_tree_for_avatar().await?;
     let opts = ab_bridge::avatar_focus_follow::FocusFollowOptions {
         avatar_app_id,
         margin_px,
@@ -9232,14 +9208,14 @@ fn run_avatar_focus_follow_plan(
     Ok(())
 }
 
-fn run_avatar_focus_follow_recommend(
+async fn run_avatar_focus_follow_recommend(
     last_target_node_id: Option<i64>,
     min_travel_px: i64,
     margin_px: i64,
     max_step_px: i64,
     as_json: bool,
 ) -> Result<()> {
-    let tree = read_sway_tree_for_avatar()?;
+    let tree = read_sway_tree_for_avatar().await?;
     let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
         &tree,
         &ab_bridge::avatar_focus_follow::FocusFollowOptions {
@@ -9248,6 +9224,7 @@ fn run_avatar_focus_follow_recommend(
             max_step_px,
         },
     );
+    let last_target_node_id = last_target_node_id.or_else(|| read_focus_follow_ack_target(&plan));
     let recommendation = ab_bridge::avatar_focus_follow::focus_follow_recommendation(
         &plan,
         last_target_node_id,
@@ -9280,7 +9257,750 @@ fn focus_follow_prompt_receipt_path() -> PathBuf {
         .join("ab-focus-follow-prompt-receipt.json")
 }
 
-fn run_avatar_focus_follow_prompt(
+fn validate_owner_private_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    validate_real_directory(path, label)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let metadata = std::fs::metadata(path)
+            .with_context(|| format!("inspect {label} {}", path.display()))?;
+        anyhow::ensure!(
+            metadata.uid() == unsafe { libc::geteuid() }
+                && metadata.permissions().mode() & 0o077 == 0,
+            "{label} must be owned by the current user and private: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn focus_follow_runtime_dir() -> Result<PathBuf> {
+    let path = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .context("XDG_RUNTIME_DIR is required for live Avatar focus observation")?;
+    anyhow::ensure!(
+        path.is_absolute() && path.file_name().is_some(),
+        "XDG_RUNTIME_DIR must be an absolute, non-root path"
+    );
+    validate_owner_private_directory(&path, "Avatar runtime directory")?;
+    Ok(path)
+}
+
+fn focus_follow_ack_receipt_path() -> Result<PathBuf> {
+    Ok(focus_follow_runtime_dir()?.join("ab-focus-follow-ack.json"))
+}
+
+fn focus_follow_observer_receipt_path() -> Result<PathBuf> {
+    Ok(focus_follow_runtime_dir()?.join("ab-focus-follow-observer-receipt.json"))
+}
+
+fn focus_follow_compositor_session_id() -> Result<String> {
+    use sha2::{Digest, Sha256};
+    #[cfg(unix)]
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let sway_socket = std::env::var_os("SWAYSOCK")
+        .context("SWAYSOCK is required to bind the Avatar acknowledgement to this compositor")?;
+    let socket_metadata = std::fs::metadata(&sway_socket)
+        .context("inspect current Sway IPC socket for Avatar acknowledgement binding")?;
+    #[cfg(unix)]
+    anyhow::ensure!(
+        socket_metadata.file_type().is_socket()
+            && socket_metadata.uid() == unsafe { libc::geteuid() },
+        "SWAYSOCK must be a current-user Unix socket"
+    );
+    let wayland_display = std::env::var_os("WAYLAND_DISPLAY").unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(b"agent-bridge-avatar-focus-session-v2\0");
+    hasher.update(sway_socket.to_string_lossy().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(wayland_display.to_string_lossy().as_bytes());
+    #[cfg(unix)]
+    {
+        hasher.update(b"\0");
+        hasher.update(socket_metadata.dev().to_le_bytes());
+        hasher.update(socket_metadata.ino().to_le_bytes());
+    }
+    let digest = hasher.finalize();
+    Ok(digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn focus_follow_outcome_log_path() -> Result<PathBuf> {
+    focus_follow_outcome_log_path_from_roots(
+        std::env::var_os("AGENT_BRIDGE_STATE_DIR").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+fn focus_follow_outcome_log_path_from_roots(
+    agent_bridge_state_dir: Option<PathBuf>,
+    xdg_state_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf> {
+    let state_root = agent_bridge_state_dir
+        .or_else(|| xdg_state_home.map(|root| root.join("agent-bridge")))
+        .or_else(|| home.map(|root| root.join(".local/state/agent-bridge")))
+        .context(
+            "no durable Avatar state root; set AGENT_BRIDGE_STATE_DIR, XDG_STATE_HOME, or HOME",
+        )?;
+    anyhow::ensure!(
+        state_root.is_absolute() && state_root.file_name().is_some(),
+        "Avatar state root must be an absolute, non-root path; configure AGENT_BRIDGE_STATE_DIR with a private local directory"
+    );
+    Ok(state_root
+        .join("avatar-focus-follow")
+        .join("outcomes.jsonl"))
+}
+
+#[cfg(unix)]
+fn enforce_private_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("open {label} {}", path.display()))?;
+    directory
+        .set_permissions(std::fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("restrict {label} {}", path.display()))?;
+    let observed_mode = directory
+        .metadata()
+        .with_context(|| format!("inspect open {label} {}", path.display()))?
+        .permissions()
+        .mode()
+        & 0o777;
+    anyhow::ensure!(
+        observed_mode == 0o700,
+        "{label} filesystem cannot enforce private mode 700 on {} (observed {:o}); set AGENT_BRIDGE_STATE_DIR to a permission-capable private filesystem",
+        path.display(),
+        observed_mode
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("open {label} for sync {}", path.display()))?
+        .sync_all()
+        .with_context(|| format!("sync {label} {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn enforce_private_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    anyhow::bail!(
+        "{label} private journal is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+#[cfg(not(unix))]
+fn sync_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    anyhow::bail!(
+        "{label} durable directory sync is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+#[cfg(unix)]
+fn enforce_private_regular_file(
+    file: &std::fs::File,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let before = file
+        .metadata()
+        .with_context(|| format!("inspect open {label} {}", path.display()))?;
+    anyhow::ensure!(
+        before.is_file() && before.nlink() == 1,
+        "{label} must be a regular file with exactly one hard link: {}",
+        path.display()
+    );
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restrict {label} {}", path.display()))?;
+    let after = file
+        .metadata()
+        .with_context(|| format!("reinspect open {label} {}", path.display()))?;
+    anyhow::ensure!(
+        after.is_file()
+            && after.nlink() == 1
+            && after.dev() == before.dev()
+            && after.ino() == before.ino(),
+        "{label} identity or link count changed while securing {}",
+        path.display()
+    );
+    let observed_mode = after.permissions().mode() & 0o777;
+    anyhow::ensure!(
+        observed_mode == 0o600,
+        "{label} filesystem cannot enforce private mode 600 on {} (observed {:o}); set AGENT_BRIDGE_STATE_DIR to a permission-capable private filesystem",
+        path.display(),
+        observed_mode
+    );
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn enforce_private_regular_file(
+    _file: &std::fs::File,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<()> {
+    anyhow::bail!(
+        "{label} private journal is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+#[cfg(unix)]
+fn validate_private_regular_file(
+    file: &std::fs::File,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("inspect open {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.is_file()
+            && metadata.nlink() == 1
+            && metadata.uid() == unsafe { libc::geteuid() }
+            && metadata.permissions().mode() & 0o777 == 0o600,
+        "{label} must be a current-user private regular file with one hard link: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_private_regular_file(
+    _file: &std::fs::File,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<()> {
+    anyhow::bail!(
+        "{label} private validation is unsupported on this platform: {}",
+        path.display()
+    )
+}
+
+fn validate_real_directory(path: &std::path::Path, label: &str) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("inspect {label} {}", path.display()))?;
+    anyhow::ensure!(
+        !metadata.file_type().is_symlink() && metadata.is_dir(),
+        "{label} must be a real directory, not a symlink or special file: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn prepare_focus_follow_outcome_directory(path: &std::path::Path) -> Result<()> {
+    let state_root = path
+        .parent()
+        .context("Avatar outcome directory has no state root")?;
+    let state_root_created = !state_root.exists();
+    if !state_root_created {
+        validate_real_directory(state_root, "Agent-Bridge state root")?;
+    } else {
+        std::fs::create_dir_all(state_root)
+            .with_context(|| format!("create Agent-Bridge state root {}", state_root.display()))?;
+        validate_real_directory(state_root, "Agent-Bridge state root")?;
+    }
+
+    let private_directory_created = !path.exists();
+    if !private_directory_created {
+        validate_real_directory(path, "Avatar outcome directory")?;
+    } else {
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("create Avatar outcome directory {}", path.display()))
+            }
+        }
+        validate_real_directory(path, "Avatar outcome directory")?;
+    }
+    enforce_private_directory(path, "Avatar outcome directory")?;
+    if private_directory_created {
+        sync_directory(path, "Avatar outcome directory")?;
+        sync_directory(state_root, "Agent-Bridge state root")?;
+    }
+    if state_root_created {
+        if let Some(parent) = state_root.parent() {
+            sync_directory(parent, "Agent-Bridge state-root parent")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_regular_nonsymlink(path: &std::path::Path, label: &str) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                !metadata.file_type().is_symlink() && metadata.is_file(),
+                "{label} must be a regular non-symlink file: {}",
+                path.display()
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                anyhow::ensure!(
+                    metadata.nlink() == 1,
+                    "{label} must have exactly one hard link: {}",
+                    path.display()
+                );
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("inspect {label} {}", path.display()))
+        }
+    }
+    Ok(())
+}
+
+struct AvatarOutcomeJournalLock {
+    file: std::fs::File,
+}
+
+impl AvatarOutcomeJournalLock {
+    fn acquire(directory: &std::path::Path) -> Result<Self> {
+        #[cfg(unix)]
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = directory.join(".focus-follow-outcomes.lock");
+        validate_regular_nonsymlink(&path, "Avatar outcome lock")?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).read(true).write(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+            options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        }
+        let file = options
+            .open(&path)
+            .with_context(|| format!("open Avatar outcome lock {}", path.display()))?;
+        enforce_private_regular_file(&file, &path, "Avatar outcome lock")?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            if result != 0 {
+                return Err(std::io::Error::last_os_error())
+                    .with_context(|| format!("lock Avatar outcome journal {}", path.display()));
+            }
+        }
+        Ok(Self { file })
+    }
+}
+
+impl Drop for AvatarOutcomeJournalLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+}
+
+const AVATAR_FOCUS_ACTION_LOCK_FILE: &str = ".focus-follow-action.lock";
+const AVATAR_FOCUS_OBSERVER_LOCK_FILE: &str = ".focus-follow-observer.lock";
+
+struct AvatarExclusiveOperationLock {
+    file: std::fs::File,
+}
+
+impl AvatarExclusiveOperationLock {
+    fn try_acquire(
+        directory: &std::path::Path,
+        file_name: &str,
+        label: &str,
+    ) -> Result<Option<Self>> {
+        #[cfg(unix)]
+        use std::os::unix::fs::OpenOptionsExt;
+
+        anyhow::ensure!(
+            matches!(
+                file_name,
+                AVATAR_FOCUS_ACTION_LOCK_FILE | AVATAR_FOCUS_OBSERVER_LOCK_FILE
+            ),
+            "unsupported Avatar operation lock"
+        );
+        validate_real_directory(directory, "Avatar operation runtime directory")?;
+        let path = directory.join(file_name);
+        validate_regular_nonsymlink(&path, label)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).read(true).write(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+            options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        }
+        let file = options
+            .open(&path)
+            .with_context(|| format!("open {label} {}", path.display()))?;
+        enforce_private_regular_file(&file, &path, label)?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            let result = unsafe {
+                libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB)
+            };
+            if result != 0 {
+                let error = std::io::Error::last_os_error();
+                if error
+                    .raw_os_error()
+                    .is_some_and(|code| code == libc::EWOULDBLOCK || code == libc::EAGAIN)
+                {
+                    return Ok(None);
+                }
+                return Err(error).with_context(|| format!("lock {label} {}", path.display()));
+            }
+            return Ok(Some(Self { file }));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = file;
+            anyhow::bail!("{label} is unsupported on this platform")
+        }
+    }
+}
+
+impl Drop for AvatarExclusiveOperationLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+}
+
+fn next_avatar_outcome_attempt_id() -> String {
+    format!("af-{}", uuid::Uuid::new_v4())
+}
+
+const MAX_FOCUS_FOLLOW_OUTCOME_LOG_BYTES: u64 = 8 * 1024 * 1024;
+
+fn rotate_focus_follow_outcome_log_if_needed(
+    path: &std::path::Path,
+    directory: &std::path::Path,
+    attempt_id: &str,
+    enabled: bool,
+) -> Result<Option<PathBuf>> {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    if !enabled
+        || !std::fs::metadata(path)
+            .ok()
+            .is_some_and(|metadata| metadata.len() >= MAX_FOCUS_FOLLOW_OUTCOME_LOG_BYTES)
+    {
+        return Ok(None);
+    }
+    let rotated = path.with_extension(format!("jsonl.{attempt_id}"));
+    anyhow::ensure!(
+        std::fs::symlink_metadata(&rotated)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+        "refusing to overwrite existing Avatar outcome rotation {}",
+        rotated.display()
+    );
+    std::fs::rename(path, &rotated).with_context(|| {
+        format!(
+            "rotate Avatar expression outcome {} to {}",
+            path.display(),
+            rotated.display()
+        )
+    })?;
+    let mut rotated_options = std::fs::OpenOptions::new();
+    rotated_options.read(true).write(true);
+    #[cfg(unix)]
+    rotated_options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    let rotated_file = rotated_options
+        .open(&rotated)
+        .with_context(|| format!("open rotated Avatar outcome {}", rotated.display()))?;
+    enforce_private_regular_file(&rotated_file, &rotated, "rotated Avatar expression outcome")?;
+    sync_directory(directory, "Avatar outcome directory")?;
+    Ok(Some(rotated))
+}
+
+fn append_focus_follow_outcome(
+    action: &serde_json::Value,
+    phase: &str,
+    rotate_before_write: bool,
+) -> Result<PathBuf> {
+    let path = focus_follow_outcome_log_path()?;
+    append_focus_follow_outcome_at_path(action, phase, rotate_before_write, &path)
+}
+
+fn append_focus_follow_outcome_at_path(
+    action: &serde_json::Value,
+    phase: &str,
+    rotate_before_write: bool,
+    path: &std::path::Path,
+) -> Result<PathBuf> {
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    anyhow::ensure!(
+        matches!(phase, "started" | "final"),
+        "invalid Avatar outcome phase"
+    );
+    let attempt_id = action
+        .get("attempt_id")
+        .and_then(serde_json::Value::as_str)
+        .context("Avatar outcome attempt_id")?;
+    anyhow::ensure!(
+        attempt_id.starts_with("af-")
+            && attempt_id.len() <= 64
+            && attempt_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+        "invalid Avatar outcome attempt_id"
+    );
+    let directory = path
+        .parent()
+        .context("Avatar outcome log has no directory")?;
+    prepare_focus_follow_outcome_directory(directory)?;
+    let _journal_lock = AvatarOutcomeJournalLock::acquire(directory)?;
+    let observed_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("read wall clock for Avatar expression outcome")?
+        .as_millis() as u64;
+    let record = ab_bridge::avatar_focus_follow::focus_follow_outcome_record(
+        action,
+        phase,
+        observed_at_unix_ms,
+    )?;
+    validate_regular_nonsymlink(&path, "Avatar expression outcome")?;
+    if path.exists() {
+        let mut existing_options = std::fs::OpenOptions::new();
+        existing_options.read(true).write(true);
+        #[cfg(unix)]
+        existing_options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        let existing = existing_options
+            .open(&path)
+            .with_context(|| format!("open existing Avatar outcome {}", path.display()))?;
+        enforce_private_regular_file(&existing, &path, "existing Avatar expression outcome")?;
+    }
+    rotate_focus_follow_outcome_log_if_needed(&path, directory, attempt_id, rotate_before_write)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(&path)
+        .with_context(|| format!("open Avatar expression outcome log {}", path.display()))?;
+    enforce_private_regular_file(&file, &path, "Avatar expression outcome")?;
+    let mut encoded = serde_json::to_vec(&record)?;
+    encoded.push(b'\n');
+    file.write_all(&encoded)
+        .with_context(|| format!("append Avatar expression outcome {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("sync Avatar expression outcome {}", path.display()))?;
+    sync_directory(directory, "Avatar outcome directory")?;
+    Ok(path.to_path_buf())
+}
+
+struct AvatarOutcomeAttemptGuard {
+    current_action: serde_json::Value,
+    finished: bool,
+    finish_attempted: bool,
+}
+
+impl AvatarOutcomeAttemptGuard {
+    fn start(action: &mut serde_json::Value) -> Result<(Self, PathBuf)> {
+        action["attempt_id"] = serde_json::json!(next_avatar_outcome_attempt_id());
+        action["status"] = serde_json::json!("running");
+        action["execution_stage"] = serde_json::json!("preparing");
+        action["executed"] = serde_json::json!(false);
+        action["executed_steps"] = serde_json::json!(0);
+        action["postcondition_verified"] = serde_json::json!(false);
+        let path = append_focus_follow_outcome(action, "started", true)?;
+        Ok((
+            Self {
+                current_action: action.clone(),
+                finished: false,
+                finish_attempted: false,
+            },
+            path,
+        ))
+    }
+
+    fn observe(&mut self, action: &serde_json::Value) {
+        self.current_action = action.clone();
+    }
+
+    fn finish(&mut self, action: &serde_json::Value) -> Result<()> {
+        self.observe(action);
+        self.finish_attempted = true;
+        append_focus_follow_outcome(action, "final", false)?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+fn failed_avatar_outcome_snapshot(
+    current_action: &serde_json::Value,
+    finish_attempted: bool,
+) -> serde_json::Value {
+    let mut failure = current_action.clone();
+    failure["status"] = serde_json::json!("failed");
+    failure["ready"] = serde_json::json!(false);
+    failure["stopped_reason"] = serde_json::json!(if finish_attempted {
+        "final_receipt_persistence_failed"
+    } else {
+        "unhandled_internal_error_or_unwind"
+    });
+    failure
+}
+
+impl Drop for AvatarOutcomeAttemptGuard {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let failure = failed_avatar_outcome_snapshot(&self.current_action, self.finish_attempted);
+        if let Err(err) = append_focus_follow_outcome(&failure, "final", false) {
+            eprintln!("agent-bridge could not record failed Avatar expression: {err:#}");
+        }
+    }
+}
+
+fn read_focus_follow_ack_receipt(plan: &serde_json::Value) -> Option<serde_json::Value> {
+    use std::io::Read;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let avatar_node_id = plan
+        .pointer("/avatar/node_id")
+        .and_then(serde_json::Value::as_i64)?;
+    let compositor_session_id = focus_follow_compositor_session_id().ok()?;
+    let path = focus_follow_ack_receipt_path().ok()?;
+    validate_regular_nonsymlink(&path, "Avatar focus acknowledgement").ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    let mut file = options.open(&path).ok()?;
+    validate_private_regular_file(&file, &path, "Avatar focus acknowledgement").ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let receipt = serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
+    ab_bridge::avatar_focus_follow::acknowledged_target_from_receipt(
+        &receipt,
+        &compositor_session_id,
+        avatar_node_id,
+    )?;
+    Some(receipt)
+}
+
+fn read_focus_follow_ack_target(plan: &serde_json::Value) -> Option<i64> {
+    read_focus_follow_ack_receipt(plan)?
+        .get("target_node_id")?
+        .as_i64()
+}
+
+fn focus_follow_ack_cooldown_remaining_ms(
+    receipt: &serde_json::Value,
+    cooldown_ms: u64,
+    now_unix_ms: u64,
+) -> Option<u64> {
+    let completed_at = receipt
+        .get("completed_at_unix_ms")
+        .and_then(serde_json::Value::as_u64)?;
+    if completed_at > now_unix_ms {
+        return Some(cooldown_ms);
+    }
+    let elapsed = now_unix_ms.saturating_sub(completed_at);
+    (elapsed < cooldown_ms).then(|| cooldown_ms.saturating_sub(elapsed))
+}
+
+fn write_focus_follow_ack_target(
+    target_node_id: i64,
+    avatar_node_id: i64,
+    executed_steps: u64,
+) -> Result<PathBuf> {
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let path = focus_follow_ack_receipt_path()?;
+    let directory = path
+        .parent()
+        .context("Avatar focus acknowledgement has no runtime directory")?;
+    validate_real_directory(directory, "Avatar runtime directory")?;
+    validate_regular_nonsymlink(&path, "Avatar focus acknowledgement")?;
+    let compositor_session_id = focus_follow_compositor_session_id()?;
+    let completed_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("read wall clock for focus-follow acknowledgement")?
+        .as_millis() as u64;
+    let receipt = serde_json::json!({
+        "schema": ab_bridge::avatar_focus_follow::FOCUS_FOLLOW_ACK_SCHEMA,
+        "status": "completed",
+        "compositor_session_id": compositor_session_id,
+        "avatar_node_id": avatar_node_id,
+        "target_node_id": target_node_id,
+        "executed_steps": executed_steps,
+        "completed_at_unix_ms": completed_at_unix_ms,
+    });
+    let temp_path = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(&temp_path)
+        .with_context(|| format!("create focus-follow acknowledgement {}", temp_path.display()))?;
+    enforce_private_regular_file(&file, &temp_path, "temporary Avatar focus acknowledgement")?;
+    file.write_all(&serde_json::to_vec_pretty(&receipt)?)
+        .with_context(|| format!("write focus-follow acknowledgement {}", temp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("sync focus-follow acknowledgement {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &path)
+        .with_context(|| format!("publish focus-follow acknowledgement {}", path.display()))?;
+    sync_directory(directory, "Avatar runtime directory")?;
+    Ok(path)
+}
+
+async fn run_avatar_focus_follow_prompt(
     last_target_node_id: Option<i64>,
     min_travel_px: i64,
     cooldown_secs: u64,
@@ -9289,21 +10009,23 @@ fn run_avatar_focus_follow_prompt(
     confirm: bool,
     as_json: bool,
 ) -> Result<()> {
-    let tree = read_sway_tree_for_avatar()?;
+    let tree = read_sway_tree_for_avatar().await?;
     let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
         &tree,
         &ab_bridge::avatar_focus_follow::FocusFollowOptions::default(),
     );
+    let last_target_node_id = last_target_node_id.or_else(|| read_focus_follow_ack_target(&plan));
     let recommendation = ab_bridge::avatar_focus_follow::focus_follow_recommendation(
         &plan,
         last_target_node_id,
         min_travel_px,
     );
     let receipt_path = focus_follow_prompt_receipt_path();
-    let now = std::time::SystemTime::now()
+    let wall_clock = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .context("read wall clock for focus-follow prompt")?
-        .as_secs();
+        .context("read wall clock for focus-follow prompt")?;
+    let now = wall_clock.as_secs();
+    let now_ms = wall_clock.as_millis() as u64;
     let cooldown_secs = cooldown_secs.clamp(30, 3_600);
     let previous = std::fs::read(&receipt_path)
         .ok()
@@ -9332,10 +10054,11 @@ fn run_avatar_focus_follow_prompt(
         if avatar_visible {
             let prompt_path = ab_bridge::avatar_native::default_native_prompt_path()
                 .context("XDG_RUNTIME_DIR is required for Avatar anchored prompt")?;
-            let expires_at_unix_ms = now.saturating_mul(1_000).saturating_add(bounded_timeout);
+            let expires_at_unix_ms = now_ms.saturating_add(bounded_timeout);
             let payload = serde_json::json!({
                 "schema": ab_bridge::avatar_native::NATIVE_PROMPT_SCHEMA,
-                "text": "需要我过去吗？",
+                "text": "我过去看看。",
+                "created_at_unix_ms": now_ms,
                 "expires_at_unix_ms": expires_at_unix_ms,
             });
             let temp_path = prompt_path.with_extension(format!("tmp-{}", std::process::id()));
@@ -9355,7 +10078,7 @@ fn run_avatar_focus_follow_prompt(
                     "--transient",
                     &format!("--expire-time={bounded_timeout}"),
                     "小舒",
-                    "需要我过去吗？",
+                    "我过去看看。",
                 ])
                 .output()
                 .context("show fallback Xiao Shu desktop prompt")?;
@@ -9416,10 +10139,24 @@ fn run_avatar_focus_follow_prompt(
     Ok(())
 }
 
-fn read_sway_tree_for_avatar() -> Result<serde_json::Value> {
-    let output = std::process::Command::new("swaymsg")
+const AVATAR_SWAY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2_500);
+const AVATAR_SWAY_MOVE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2_000);
+
+async fn read_sway_tree_for_avatar() -> Result<serde_json::Value> {
+    read_sway_tree_for_avatar_with_timeout(AVATAR_SWAY_READ_TIMEOUT).await
+}
+
+async fn read_sway_tree_for_avatar_with_timeout(
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value> {
+    anyhow::ensure!(!timeout.is_zero(), "Avatar Sway tree read deadline elapsed");
+    let mut command = tokio::process::Command::new("swaymsg");
+    command
         .args(["-t", "get_tree", "-r"])
-        .output()
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(timeout, command.output())
+        .await
+        .context("read-only swaymsg get_tree timed out for Avatar focus-follow")?
         .context("run read-only swaymsg get_tree for Avatar focus-follow")?;
     if !output.status.success() {
         anyhow::bail!(
@@ -9428,6 +10165,28 @@ fn read_sway_tree_for_avatar() -> Result<serde_json::Value> {
         );
     }
     serde_json::from_slice(&output.stdout).context("decode Sway tree for Avatar focus-follow")
+}
+
+async fn move_avatar_exact_with_timeout(
+    avatar_node_id: i64,
+    x: i64,
+    y: i64,
+    timeout: std::time::Duration,
+) -> Result<bool> {
+    anyhow::ensure!(!timeout.is_zero(), "Avatar Sway move deadline elapsed");
+    let selector = format!("[con_id={avatar_node_id}]");
+    let movement = format!("move position {x} {y}");
+    let mut command = tokio::process::Command::new("swaymsg");
+    command
+        .arg(selector)
+        .arg(movement)
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(timeout, command.output())
+        .await
+        .context("bounded Avatar swaymsg move timed out")?
+        .context("run bounded Avatar swaymsg move")?;
+    Ok(output.status.success()
+        && ab_bridge::avatar_focus_follow::sway_command_succeeded(&output.stdout))
 }
 
 struct AvatarMotionOverrideGuard {
@@ -9503,6 +10262,10 @@ impl AvatarActionCancellation {
     fn requested(&self) -> bool {
         self.requested.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    fn token(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.requested.clone()
+    }
 }
 
 impl Drop for AvatarActionCancellation {
@@ -9511,8 +10274,120 @@ impl Drop for AvatarActionCancellation {
     }
 }
 
+fn avatar_pause_marker_present(path: Option<&std::path::Path>) -> bool {
+    path.is_some_and(|path| std::fs::symlink_metadata(path).is_ok())
+}
+
+const AVATAR_ACTION_START_NOT_REACHED: u8 = 0;
+const AVATAR_ACTION_START_AMBIGUOUS: u8 = 1;
+const AVATAR_ACTION_START_RECORDED: u8 = 2;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AvatarObserverTargetGeometry {
+    target_rect: [i64; 4],
+    workspace_rect: [i64; 4],
+    workspace: String,
+}
+
+struct AvatarObserverActionConstraints {
+    expected_target_node_id: i64,
+    expected_identity: ab_bridge::avatar_focus_observer::FocusTargetIdentity,
+    expected_geometry: AvatarObserverTargetGeometry,
+    policy: ab_bridge::avatar_focus_observer::FocusObserverPolicy,
+    cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    deadline: tokio::time::Instant,
+    start_state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+}
+
+fn avatar_action_cancel_reason(
+    local: Option<&AvatarActionCancellation>,
+    observer: Option<&AvatarObserverActionConstraints>,
+) -> Option<&'static str> {
+    if observer.is_some_and(|constraints| {
+        constraints
+            .cancellation
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }) || local.is_some_and(AvatarActionCancellation::requested)
+    {
+        Some("sigint")
+    } else if observer.is_some_and(|constraints| tokio::time::Instant::now() >= constraints.deadline)
+    {
+        Some("observer_duration_elapsed")
+    } else {
+        None
+    }
+}
+
+fn avatar_action_io_timeout(
+    default_timeout: std::time::Duration,
+    observer: Option<&AvatarObserverActionConstraints>,
+) -> Option<std::time::Duration> {
+    let Some(constraints) = observer else {
+        return Some(default_timeout);
+    };
+    let remaining = constraints
+        .deadline
+        .saturating_duration_since(tokio::time::Instant::now());
+    (!remaining.is_zero()).then(|| remaining.min(default_timeout))
+}
+
+async fn avatar_action_sleep(
+    duration: std::time::Duration,
+    local: Option<&AvatarActionCancellation>,
+    observer: Option<&AvatarObserverActionConstraints>,
+) -> bool {
+    let end = tokio::time::Instant::now() + duration;
+    loop {
+        if avatar_action_cancel_reason(local, observer).is_some() {
+            return false;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= end {
+            return true;
+        }
+        let mut chunk = end.saturating_duration_since(now).min(std::time::Duration::from_millis(50));
+        if let Some(constraints) = observer {
+            chunk = chunk.min(constraints.deadline.saturating_duration_since(now));
+        }
+        if chunk.is_zero() {
+            return false;
+        }
+        tokio::time::sleep(chunk).await;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn run_avatar_focus_follow_action(
+fn avatar_movement_step_failure(
+    current_x: i64,
+    current_y: i64,
+    expected_x: i64,
+    expected_y: i64,
+    next_x: i64,
+    next_y: i64,
+    origin_x: i64,
+    origin_y: i64,
+    max_step_px: i64,
+    max_travel_px: i64,
+) -> Option<&'static str> {
+    if (current_x - expected_x).abs() > 8 || (current_y - expected_y).abs() > 32 {
+        Some("avatar_position_changed")
+    } else if (next_x - current_x)
+        .abs()
+        .max((next_y - current_y).abs())
+        > max_step_px
+        || (next_x - origin_x)
+            .abs()
+            .max((next_y - origin_y).abs())
+            > max_travel_px
+    {
+        Some("movement_path_bound_violation")
+    } else {
+        None
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_avatar_focus_follow_action(
     margin_px: i64,
     max_step_px: i64,
     max_travel_px: i64,
@@ -9521,16 +10396,26 @@ fn run_avatar_focus_follow_action(
     execute: bool,
     confirm: bool,
     reason: Option<&str>,
-    as_json: bool,
-) -> Result<()> {
+    observer_constraints: Option<&AvatarObserverActionConstraints>,
+) -> Result<serde_json::Value> {
+    let local_cancellation = observer_constraints
+        .is_none()
+        .then(AvatarActionCancellation::install);
+    if observer_constraints.is_some()
+        && avatar_action_cancel_reason(local_cancellation.as_ref(), observer_constraints).is_some()
+    {
+        anyhow::bail!("bounded observer action cancelled before preflight");
+    }
     let avatar_app_id = ab_bridge::avatar_focus_follow::DEFAULT_AVATAR_APP_ID.to_string();
     let opts = ab_bridge::avatar_focus_follow::FocusFollowOptions {
         avatar_app_id: avatar_app_id.clone(),
         margin_px,
         max_step_px,
     };
-    let tree = read_sway_tree_for_avatar()?;
-    let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&tree, &opts);
+    let initial_timeout = avatar_action_io_timeout(AVATAR_SWAY_READ_TIMEOUT, observer_constraints)
+        .context("bounded observer deadline elapsed before action preflight")?;
+    let tree = read_sway_tree_for_avatar_with_timeout(initial_timeout).await?;
+    let mut plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&tree, &opts);
     let cancel_file_text = cancel_file.map(|path| path.to_string_lossy().into_owned());
     let mut action = ab_bridge::avatar_focus_follow::focus_follow_action_preflight(
         &plan,
@@ -9541,8 +10426,91 @@ fn run_avatar_focus_follow_action(
         cancel_file_text.as_deref(),
     );
 
+    let mut action_lock = None;
     if action.get("ready").and_then(serde_json::Value::as_bool) == Some(true) {
-        let target_id = plan.pointer("/target/node_id").and_then(serde_json::Value::as_i64);
+        let operation_directory = focus_follow_operation_directory()?;
+        action_lock = AvatarExclusiveOperationLock::try_acquire(
+            &operation_directory,
+            AVATAR_FOCUS_ACTION_LOCK_FILE,
+            "Avatar focus-follow action lock",
+        )?;
+        if action_lock.is_none() {
+            action["status"] = serde_json::json!("suppressed");
+            action["ready"] = serde_json::json!(false);
+            action["blocked_reason"] = serde_json::json!("action_in_progress");
+            action["executed"] = serde_json::json!(false);
+            action["executed_steps"] = serde_json::json!(0);
+            return Ok(action);
+        }
+
+        // A full tree read after taking the action lock closes the race between
+        // observer decision and movement. The action always binds to the exact
+        // target that was authorized by the caller's structured observation.
+        let locked_timeout =
+            avatar_action_io_timeout(AVATAR_SWAY_READ_TIMEOUT, observer_constraints)
+                .context("bounded observer deadline elapsed before locked action recheck")?;
+        let locked_tree = read_sway_tree_for_avatar_with_timeout(locked_timeout).await?;
+        plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&locked_tree, &opts);
+        action = ab_bridge::avatar_focus_follow::focus_follow_action_preflight(
+            &plan,
+            execute,
+            confirm,
+            reason,
+            max_travel_px,
+            cancel_file_text.as_deref(),
+        );
+        if let Some(blocked_reason) = observer_constraints
+            .and_then(|constraints| focus_observer_action_gate(&plan, constraints, true))
+        {
+            action["status"] = serde_json::json!("suppressed");
+            action["ready"] = serde_json::json!(false);
+            action["blocked_reason"] = serde_json::json!(blocked_reason);
+            action["executed"] = serde_json::json!(false);
+            action["executed_steps"] = serde_json::json!(0);
+            return Ok(action);
+        }
+        if action.get("ready").and_then(serde_json::Value::as_bool) != Some(true) {
+            action["executed"] = serde_json::json!(false);
+            action["executed_steps"] = serde_json::json!(0);
+            return Ok(action);
+        }
+        if let Some(constraints) = observer_constraints {
+            constraints
+                .start_state
+                .store(AVATAR_ACTION_START_AMBIGUOUS, std::sync::atomic::Ordering::SeqCst);
+        }
+        let (mut outcome_guard, outcome_log_path) = AvatarOutcomeAttemptGuard::start(&mut action)?;
+        if let Some(constraints) = observer_constraints {
+            constraints
+                .start_state
+                .store(AVATAR_ACTION_START_RECORDED, std::sync::atomic::Ordering::SeqCst);
+        }
+        action["outcome_log_path"] = serde_json::json!(outcome_log_path);
+        action["outcome_started_recorded"] = serde_json::json!(true);
+        let target_id = plan
+            .pointer("/target/node_id")
+            .and_then(serde_json::Value::as_i64)
+            .context("focus-follow target node id")?;
+        let avatar_node_id = plan
+            .pointer("/avatar/node_id")
+            .and_then(serde_json::Value::as_i64)
+            .context("focus-follow Avatar node id")?;
+        let destination_x = plan
+            .pointer("/avatar/destination_rect/x")
+            .and_then(serde_json::Value::as_i64)
+            .context("focus-follow destination x")?;
+        let destination_y = plan
+            .pointer("/avatar/destination_rect/y")
+            .and_then(serde_json::Value::as_i64)
+            .context("focus-follow destination y")?;
+        let origin_x = plan
+            .pointer("/avatar/current_rect/x")
+            .and_then(serde_json::Value::as_i64)
+            .context("focus-follow Avatar origin x")?;
+        let origin_y = plan
+            .pointer("/avatar/current_rect/y")
+            .and_then(serde_json::Value::as_i64)
+            .context("focus-follow Avatar origin y")?;
         let points = plan
             .pointer("/path/points")
             .and_then(serde_json::Value::as_array)
@@ -9551,11 +10519,20 @@ fn run_avatar_focus_follow_action(
         let mut executed_steps = 0_u64;
         let mut final_status = "completed";
         let mut stopped_reason: Option<&str> = None;
-        if cancel_file.is_some_and(std::path::Path::exists) {
+        let mut postcondition_verified = false;
+        let mut expected_avatar_x = origin_x;
+        let mut expected_avatar_y = origin_y;
+        let bounded_step_px = max_step_px.clamp(8, 256);
+        let bounded_travel_px = max_travel_px.clamp(48, 2_048);
+        if avatar_pause_marker_present(cancel_file) {
             final_status = "cancelled";
             stopped_reason = Some("cancel_file_present");
+        } else if let Some(reason) =
+            avatar_action_cancel_reason(local_cancellation.as_ref(), observer_constraints)
+        {
+            final_status = "cancelled";
+            stopped_reason = Some(reason);
         } else {
-            let cancellation = AvatarActionCancellation::install();
             let override_path = ab_bridge::avatar_native::default_native_motion_override_path()
                 .context("XDG_RUNTIME_DIR is required for bounded Avatar motion override")?;
             let override_guard = AvatarMotionOverrideGuard::new(override_path.clone());
@@ -9567,12 +10544,24 @@ fn run_avatar_focus_follow_action(
                 .pointer("/choreography/1")
                 .and_then(serde_json::Value::as_str)
                 .context("focus-follow plan walk action")?;
+            action["execution_stage"] = serde_json::json!("turning");
+            outcome_guard.observe(&action);
             override_guard.set(turn_action)?;
-            std::thread::sleep(std::time::Duration::from_millis(520));
-            if cancellation.requested() {
+            if !avatar_action_sleep(
+                std::time::Duration::from_millis(520),
+                local_cancellation.as_ref(),
+                observer_constraints,
+            )
+            .await
+            {
                 final_status = "cancelled";
-                stopped_reason = Some("sigint");
+                stopped_reason = avatar_action_cancel_reason(
+                    local_cancellation.as_ref(),
+                    observer_constraints,
+                );
             } else {
+                action["execution_stage"] = serde_json::json!("walking");
+                outcome_guard.observe(&action);
                 override_guard.set(walk_action)?;
             }
 
@@ -9580,49 +10569,227 @@ fn run_avatar_focus_follow_action(
                 if final_status != "completed" {
                     break;
                 }
-                if cancellation.requested() {
+                if let Some(reason) =
+                    avatar_action_cancel_reason(local_cancellation.as_ref(), observer_constraints)
+                {
                     final_status = "cancelled";
-                    stopped_reason = Some("sigint");
+                    stopped_reason = Some(reason);
                     break;
                 }
-                if cancel_file.is_some_and(std::path::Path::exists) {
+                if avatar_pause_marker_present(cancel_file) {
                     final_status = "cancelled";
                     stopped_reason = Some("cancel_file_present");
                     break;
                 }
-                let current_tree = read_sway_tree_for_avatar()?;
+                let Some(read_timeout) =
+                    avatar_action_io_timeout(AVATAR_SWAY_READ_TIMEOUT, observer_constraints)
+                else {
+                    final_status = "cancelled";
+                    stopped_reason = Some("observer_duration_elapsed");
+                    break;
+                };
+                let current_tree =
+                    match read_sway_tree_for_avatar_with_timeout(read_timeout).await {
+                        Ok(tree) => tree,
+                        Err(error) => {
+                            if let Some(reason) = avatar_action_cancel_reason(
+                                local_cancellation.as_ref(),
+                                observer_constraints,
+                            ) {
+                                final_status = "cancelled";
+                                stopped_reason = Some(reason);
+                                break;
+                            }
+                            return Err(error);
+                        }
+                    };
                 let current_plan =
                     ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&current_tree, &opts);
+                if let Some(reason) = observer_constraints
+                    .and_then(|constraints| focus_observer_action_gate(&current_plan, constraints, false))
+                {
+                    final_status = "cancelled";
+                    stopped_reason = Some(reason);
+                    break;
+                }
                 if current_plan.pointer("/target/node_id").and_then(serde_json::Value::as_i64)
-                    != target_id
+                    != Some(target_id)
                 {
                     final_status = "cancelled";
                     stopped_reason = Some("focus_target_changed");
                     break;
                 }
-                let x = point.get("x").and_then(serde_json::Value::as_i64).context("path point x")?;
-                let y = point.get("y").and_then(serde_json::Value::as_i64).context("path point y")?;
-                let command = format!("move position {x} {y}");
-                let output = std::process::Command::new("swaymsg")
-                    .arg(format!("[app_id=\"^{}$\"]", avatar_app_id))
-                    .arg(&command)
-                    .output()
-                    .with_context(|| format!("move Xiao Shu with swaymsg: {command}"))?;
-                if !output.status.success() {
+                if current_plan.pointer("/avatar/node_id").and_then(serde_json::Value::as_i64)
+                    != Some(avatar_node_id)
+                {
                     final_status = "failed";
-                    stopped_reason = Some("swaymsg_move_failed");
+                    stopped_reason = Some("avatar_identity_changed");
                     break;
                 }
+                let current_x = current_plan
+                    .pointer("/avatar/current_rect/x")
+                    .and_then(serde_json::Value::as_i64)
+                    .context("current Avatar x during focus-follow")?;
+                let current_y = current_plan
+                    .pointer("/avatar/current_rect/y")
+                    .and_then(serde_json::Value::as_i64)
+                    .context("current Avatar y during focus-follow")?;
+                let x = point.get("x").and_then(serde_json::Value::as_i64).context("path point x")?;
+                let y = point.get("y").and_then(serde_json::Value::as_i64).context("path point y")?;
+                if let Some(reason) = avatar_movement_step_failure(
+                    current_x,
+                    current_y,
+                    expected_avatar_x,
+                    expected_avatar_y,
+                    x,
+                    y,
+                    origin_x,
+                    origin_y,
+                    bounded_step_px,
+                    bounded_travel_px,
+                ) {
+                    final_status = if reason == "avatar_position_changed" {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    stopped_reason = Some(reason);
+                    break;
+                }
+                let Some(move_timeout) =
+                    avatar_action_io_timeout(AVATAR_SWAY_MOVE_TIMEOUT, observer_constraints)
+                else {
+                    final_status = "cancelled";
+                    stopped_reason = Some("observer_duration_elapsed");
+                    break;
+                };
+                let moved = match move_avatar_exact_with_timeout(
+                    avatar_node_id,
+                    x,
+                    y,
+                    move_timeout,
+                )
+                .await
+                {
+                    Ok(moved) => moved,
+                    Err(error) => {
+                        if let Some(reason) = avatar_action_cancel_reason(
+                            local_cancellation.as_ref(),
+                            observer_constraints,
+                        ) {
+                            final_status = "cancelled";
+                            stopped_reason = Some(reason);
+                            break;
+                        }
+                        return Err(error);
+                    }
+                };
+                if !moved {
+                    final_status = "failed";
+                    stopped_reason = Some("swaymsg_move_rejected");
+                    break;
+                }
+                expected_avatar_x = x;
+                expected_avatar_y = y;
                 executed_steps += 1;
-                std::thread::sleep(std::time::Duration::from_millis(
-                    step_interval_ms.clamp(32, 250),
-                ));
+                action["executed"] = serde_json::json!(true);
+                action["executed_steps"] = serde_json::json!(executed_steps);
+                outcome_guard.observe(&action);
+                if !avatar_action_sleep(
+                    std::time::Duration::from_millis(step_interval_ms.clamp(32, 250)),
+                    local_cancellation.as_ref(),
+                    observer_constraints,
+                )
+                .await
+                {
+                    final_status = "cancelled";
+                    stopped_reason = avatar_action_cancel_reason(
+                        local_cancellation.as_ref(),
+                        observer_constraints,
+                    );
+                    break;
+                }
             }
             if final_status == "completed" {
+                action["execution_stage"] = serde_json::json!("verifying_arrival");
+                outcome_guard.observe(&action);
+                let final_tree = match avatar_action_io_timeout(
+                    AVATAR_SWAY_READ_TIMEOUT,
+                    observer_constraints,
+                ) {
+                    Some(read_timeout) => match read_sway_tree_for_avatar_with_timeout(read_timeout).await {
+                        Ok(tree) => tree,
+                        Err(error) => {
+                            if let Some(reason) = avatar_action_cancel_reason(
+                                local_cancellation.as_ref(),
+                                observer_constraints,
+                            ) {
+                                final_status = "cancelled";
+                                stopped_reason = Some(reason);
+                                serde_json::Value::Null
+                            } else {
+                                return Err(error);
+                            }
+                        }
+                    },
+                    None => {
+                        final_status = "cancelled";
+                        stopped_reason = Some("observer_duration_elapsed");
+                        serde_json::Value::Null
+                    }
+                };
+                if final_status == "completed" {
+                    let final_plan =
+                        ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&final_tree, &opts);
+                    if let Some(reason) = observer_constraints.and_then(|constraints| {
+                        focus_observer_action_gate(&final_plan, constraints, false)
+                    }) {
+                        final_status = "cancelled";
+                        stopped_reason = Some(reason);
+                    } else if let Some(reason) =
+                    ab_bridge::avatar_focus_follow::focus_follow_arrival_failure_reason(
+                        &final_plan,
+                        target_id,
+                        avatar_node_id,
+                        destination_x,
+                        destination_y,
+                    )
+                {
+                    final_status = if reason == "focus_target_changed_at_arrival" {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    stopped_reason = Some(reason);
+                } else {
+                    postcondition_verified = true;
+                    action["postcondition_verified"] = serde_json::json!(true);
+                    action["execution_stage"] = serde_json::json!("arrival_verified");
+                    outcome_guard.observe(&action);
+                }
+                }
+            }
+            if final_status == "completed" {
+                action["execution_stage"] = serde_json::json!("arriving");
+                outcome_guard.observe(&action);
                 override_guard.set("arrive_settle")?;
-                std::thread::sleep(std::time::Duration::from_millis(520));
-                override_guard.set("wave")?;
-                std::thread::sleep(std::time::Duration::from_millis(960));
+                if avatar_action_sleep(
+                    std::time::Duration::from_millis(520),
+                    local_cancellation.as_ref(),
+                    observer_constraints,
+                )
+                .await
+                {
+                    action["execution_stage"] = serde_json::json!("acknowledging");
+                    outcome_guard.observe(&action);
+                    override_guard.set("wave")?;
+                    let _ = avatar_action_sleep(
+                        std::time::Duration::from_millis(960),
+                        local_cancellation.as_ref(),
+                        observer_constraints,
+                    )
+                    .await;
+                }
             }
             action["motion_override_path"] = serde_json::json!(override_path);
             drop(override_guard);
@@ -9633,11 +10800,63 @@ fn run_avatar_focus_follow_action(
         action["executed"] = serde_json::json!(executed_steps > 0);
         action["executed_steps"] = serde_json::json!(executed_steps);
         action["stopped_reason"] = serde_json::json!(stopped_reason);
+        action["postcondition_verified"] = serde_json::json!(postcondition_verified);
+        action["execution_stage"] = serde_json::json!(if final_status == "completed" {
+            "completed"
+        } else {
+            final_status
+        });
+        outcome_guard.finish(&action)?;
+        action["outcome_final_recorded"] = serde_json::json!(true);
+        if final_status == "completed" && postcondition_verified {
+            match write_focus_follow_ack_target(target_id, avatar_node_id, executed_steps) {
+                Ok(receipt_path) => {
+                    action["acknowledgement_recorded"] = serde_json::json!(true);
+                    action["acknowledgement_receipt_path"] = serde_json::json!(receipt_path);
+                    action["acknowledged_target_node_id"] = serde_json::json!(target_id);
+                }
+                Err(_) => {
+                    // The movement and durable outcome are already complete.
+                    // Expose only a closed persistence flag and let the
+                    // observer's per-run attempted set prevent a duplicate.
+                    action["acknowledgement_recorded"] = serde_json::json!(false);
+                    action["acknowledgement_persistence_failed"] = serde_json::json!(true);
+                }
+            }
+        }
     } else {
         action["executed"] = serde_json::json!(false);
         action["executed_steps"] = serde_json::json!(0);
     }
 
+    drop(action_lock);
+    Ok(action)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_focus_follow_action(
+    margin_px: i64,
+    max_step_px: i64,
+    max_travel_px: i64,
+    step_interval_ms: u64,
+    cancel_file: Option<&std::path::Path>,
+    execute: bool,
+    confirm: bool,
+    reason: Option<&str>,
+    as_json: bool,
+) -> Result<()> {
+    let action = execute_avatar_focus_follow_action(
+        margin_px,
+        max_step_px,
+        max_travel_px,
+        step_interval_ms,
+        cancel_file,
+        execute,
+        confirm,
+        reason,
+        None,
+    )
+    .await?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&action)?);
     } else {
@@ -9651,6 +10870,650 @@ fn run_avatar_focus_follow_action(
         println!("  changes_focus: false");
     }
     Ok(())
+}
+
+fn focus_follow_operation_directory() -> Result<PathBuf> {
+    focus_follow_runtime_dir()
+}
+
+fn resolve_focus_observer_pause_file(requested: Option<PathBuf>) -> Result<PathBuf> {
+    let path = match requested {
+        Some(path) => path,
+        None => focus_follow_runtime_dir()?.join("ab-focus-follow-observer.pause"),
+    };
+    anyhow::ensure!(
+        path.is_absolute() && path.file_name().is_some(),
+        "Avatar focus observer pause file must be an absolute, non-root path"
+    );
+    let parent = path
+        .parent()
+        .context("Avatar focus observer pause file has no parent directory")?;
+    validate_owner_private_directory(parent, "Avatar focus observer pause directory")?;
+    Ok(path)
+}
+
+fn write_focus_follow_observer_receipt(receipt: &serde_json::Value) -> Result<()> {
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let path = focus_follow_observer_receipt_path()?;
+    let directory = path
+        .parent()
+        .context("Avatar focus observer receipt has no runtime directory")?;
+    validate_real_directory(directory, "Avatar runtime directory")?;
+    validate_regular_nonsymlink(&path, "Avatar focus observer receipt")?;
+    let temp_path = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| -> Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+            options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        }
+        let mut file = options
+            .open(&temp_path)
+            .with_context(|| format!("create Avatar focus observer receipt {}", temp_path.display()))?;
+        enforce_private_regular_file(
+            &file,
+            &temp_path,
+            "temporary Avatar focus observer receipt",
+        )?;
+        file.write_all(&serde_json::to_vec_pretty(receipt)?)
+            .with_context(|| format!("write Avatar focus observer receipt {}", temp_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync Avatar focus observer receipt {}", temp_path.display()))?;
+        std::fs::rename(&temp_path, &path)
+            .with_context(|| format!("publish Avatar focus observer receipt {}", path.display()))?;
+        sync_directory(directory, "Avatar runtime directory")?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
+fn focus_observer_travel_px(plan: &serde_json::Value) -> Option<i64> {
+    let from = plan.pointer("/avatar/current_rect")?;
+    let to = plan.pointer("/avatar/destination_rect")?;
+    Some(
+        (to.get("x")?.as_i64()? - from.get("x")?.as_i64()?)
+            .abs()
+            .max((to.get("y")?.as_i64()? - from.get("y")?.as_i64()?).abs()),
+    )
+}
+
+fn focus_observer_identity_from_plan(
+    plan: &serde_json::Value,
+) -> ab_bridge::avatar_focus_observer::FocusTargetIdentity {
+    use ab_bridge::avatar_focus_observer::FocusTargetIdentity;
+
+    let value = plan
+        .pointer("/target/app_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    match (
+        plan.pointer("/target/identity_kind")
+            .and_then(serde_json::Value::as_str),
+        value,
+    ) {
+        (Some("wayland_app_id"), Some(value)) => FocusTargetIdentity::WaylandAppId(value),
+        (Some("xwayland_class"), Some(value)) => FocusTargetIdentity::XwaylandClass(value),
+        _ => FocusTargetIdentity::Missing,
+    }
+}
+
+fn focus_observer_target_geometry_from_plan(
+    plan: &serde_json::Value,
+) -> Option<AvatarObserverTargetGeometry> {
+    fn rect(value: &serde_json::Value) -> Option<[i64; 4]> {
+        Some([
+            value.get("x")?.as_i64()?,
+            value.get("y")?.as_i64()?,
+            value.get("width")?.as_i64()?,
+            value.get("height")?.as_i64()?,
+        ])
+    }
+
+    Some(AvatarObserverTargetGeometry {
+        target_rect: rect(plan.pointer("/target/rect")?)?,
+        workspace_rect: rect(plan.pointer("/target/workspace_rect")?)?,
+        workspace: plan
+            .pointer("/target/workspace")?
+            .as_str()?
+            .to_string(),
+    })
+}
+
+fn focus_observer_action_gate(
+    plan: &serde_json::Value,
+    constraints: &AvatarObserverActionConstraints,
+    include_travel_bounds: bool,
+) -> Option<&'static str> {
+    let status = plan
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    if plan
+        .pointer("/target/node_id")
+        .and_then(serde_json::Value::as_i64)
+        != Some(constraints.expected_target_node_id)
+    {
+        return Some("focus_target_changed");
+    }
+    if status == "fullscreen_target"
+        || plan
+            .pointer("/target/fullscreen")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Some("observer_fullscreen_gate_activated");
+    }
+    if plan
+        .pointer("/target/sensitive_mark")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Some("observer_sensitive_gate_activated");
+    }
+    let identity = focus_observer_identity_from_plan(plan);
+    if identity.is_missing() {
+        return Some("observer_target_identity_missing");
+    }
+    if identity != constraints.expected_identity {
+        return Some("observer_target_identity_changed");
+    }
+    if identity.is_sensitive(&constraints.policy) {
+        return Some("observer_sensitive_gate_activated");
+    }
+    if focus_observer_target_geometry_from_plan(plan).as_ref()
+        != Some(&constraints.expected_geometry)
+    {
+        return Some("observer_target_geometry_changed");
+    }
+    if !matches!(status, "planned" | "already_near_focus") {
+        return Some("focus_follow_plan_not_actionable");
+    }
+    if include_travel_bounds {
+        let Some(travel_px) = focus_observer_travel_px(plan) else {
+            return Some("focus_follow_plan_missing_rects");
+        };
+        if travel_px < constraints.policy.min_travel_px {
+            return Some("below_min_travel");
+        }
+        if travel_px > constraints.policy.max_travel_px {
+            return Some("above_max_travel");
+        }
+    }
+    None
+}
+
+fn focus_observer_context_from_plan(
+    plan: &serde_json::Value,
+    observed_at_ms: u64,
+    acknowledged_target_node_id: Option<i64>,
+    paused: bool,
+    action_busy: bool,
+) -> ab_bridge::avatar_focus_observer::FocusObserverContext {
+    use ab_bridge::avatar_focus_observer::FocusObserverContext;
+
+    let target_node_id = plan
+        .pointer("/target/node_id")
+        .and_then(serde_json::Value::as_i64);
+    let identity = focus_observer_identity_from_plan(plan);
+    let status = plan
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    FocusObserverContext {
+        observed_at_ms,
+        plan_actionable: matches!(status, "planned" | "already_near_focus"),
+        target_node_id,
+        travel_px: focus_observer_travel_px(plan),
+        fullscreen: status == "fullscreen_target"
+            || plan
+                .pointer("/target/fullscreen")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        sensitive_mark: plan
+            .pointer("/target/sensitive_mark")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        identity,
+        acknowledged_target_node_id,
+        paused,
+        action_busy,
+    }
+}
+
+fn focus_observer_action_busy(operation_directory: &std::path::Path) -> Result<bool> {
+    match AvatarExclusiveOperationLock::try_acquire(
+        operation_directory,
+        AVATAR_FOCUS_ACTION_LOCK_FILE,
+        "Avatar focus-follow action lock",
+    )? {
+        Some(lock) => {
+            drop(lock);
+            Ok(false)
+        }
+        None => Ok(true),
+    }
+}
+
+fn render_focus_observer_json(payload: &serde_json::Value, as_json: bool) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(payload)?);
+    } else {
+        println!(
+            "Xiao Shu bounded focus observer: {}",
+            payload
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown")
+        );
+        if let Some(reason) = payload
+            .get("terminal_reason")
+            .and_then(serde_json::Value::as_str)
+        {
+            println!("  terminal_reason: {reason}");
+        }
+        println!(
+            "  attempts: {}",
+            payload
+                .get("attempt_count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+        );
+        println!("  moves_pointer: false");
+        println!("  changes_focus: false");
+        println!("  emits_input: false");
+    }
+    Ok(())
+}
+
+fn focus_observer_terminal_context(
+    observed_at_ms: u64,
+) -> ab_bridge::avatar_focus_observer::FocusObserverContext {
+    ab_bridge::avatar_focus_observer::FocusObserverContext {
+        observed_at_ms,
+        plan_actionable: false,
+        target_node_id: None,
+        travel_px: None,
+        fullscreen: false,
+        sensitive_mark: false,
+        identity: ab_bridge::avatar_focus_observer::FocusTargetIdentity::Missing,
+        acknowledged_target_node_id: None,
+        paused: false,
+        action_busy: false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_avatar_focus_follow_observe(
+    duration_ms: u64,
+    poll_ms: u64,
+    dwell_ms: u64,
+    cooldown_secs: u64,
+    failure_backoff_secs: u64,
+    min_travel_px: i64,
+    max_attempts: u64,
+    max_travel_px: i64,
+    margin_px: i64,
+    max_step_px: i64,
+    step_interval_ms: u64,
+    pause_file: Option<PathBuf>,
+    deny_app_ids: Vec<String>,
+    execute: bool,
+    as_json: bool,
+) -> Result<()> {
+    use ab_bridge::avatar_focus_observer::{
+        focus_observer_plan_json, FocusAttemptOutcome, FocusObserverDecisionKind,
+        FocusObserverPolicy, FocusObserverState,
+    };
+
+    let mut policy = FocusObserverPolicy {
+        duration_ms,
+        poll_ms,
+        dwell_ms,
+        cooldown_secs,
+        failure_backoff_secs,
+        min_travel_px,
+        max_travel_px,
+        max_attempts: u32::try_from(max_attempts).unwrap_or(u32::MAX),
+        ..FocusObserverPolicy::default()
+    };
+    for identity in deny_app_ids
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        policy.sensitive_wayland_app_ids.insert(identity.clone());
+        policy.sensitive_xwayland_classes.insert(identity);
+    }
+    let policy = policy.normalized();
+
+    // Dry-run preflight performs only bounded reads. It neither starts a loop
+    // nor creates locks, receipts, journals, prompts, audio, or motion state.
+    if !execute {
+        let runtime_ready = focus_follow_runtime_dir()
+            .and_then(|runtime| {
+                validate_real_directory(&runtime, "Avatar runtime directory")?;
+                resolve_focus_observer_pause_file(pause_file.clone())?;
+                focus_follow_operation_directory()?;
+                Ok(())
+            })
+            .is_ok()
+            && read_sway_tree_for_avatar().await.is_ok();
+        let mut plan = focus_observer_plan_json(&policy, false, runtime_ready);
+        if !runtime_ready {
+            plan["blocked_reason"] = serde_json::json!("runtime_unavailable");
+        }
+        return render_focus_observer_json(&plan, as_json);
+    }
+
+    let runtime_directory = focus_follow_runtime_dir()?;
+    validate_real_directory(&runtime_directory, "Avatar runtime directory")?;
+    let pause_file = resolve_focus_observer_pause_file(pause_file)?;
+    let operation_directory = focus_follow_operation_directory()?;
+    let observer_lock = AvatarExclusiveOperationLock::try_acquire(
+        &operation_directory,
+        AVATAR_FOCUS_OBSERVER_LOCK_FILE,
+        "Avatar focus observer lock",
+    )?;
+    let Some(_observer_lock) = observer_lock else {
+        let mut plan = focus_observer_plan_json(&policy, true, false);
+        plan["blocked_reason"] = serde_json::json!("observer_in_progress");
+        return render_focus_observer_json(&plan, as_json);
+    };
+
+    let started = tokio::time::Instant::now();
+    let deadline = started + std::time::Duration::from_millis(policy.duration_ms);
+    let mut state = FocusObserverState::new(policy.clone(), 0);
+    // A writable private runtime receipt is a precondition for movement. This
+    // initial running projection ensures storage failure is fail-closed.
+    write_focus_follow_observer_receipt(&state.receipt_json(0))?;
+
+    let cancellation = AvatarActionCancellation::install();
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(policy.poll_ms));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let opts = ab_bridge::avatar_focus_follow::FocusFollowOptions {
+        avatar_app_id: ab_bridge::avatar_focus_follow::DEFAULT_AVATAR_APP_ID.to_string(),
+        margin_px,
+        max_step_px,
+    };
+    let mut consecutive_tree_failures = 0_u8;
+    let mut consecutive_prestart_failures = 0_u8;
+    let mut ack_cooldown_seeded = false;
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {}
+            _ = tokio::time::sleep_until(deadline) => {
+                state.observe(&focus_observer_terminal_context(policy.duration_ms));
+                break;
+            }
+        }
+        let observed_at_ms = started.elapsed().as_millis() as u64;
+        if cancellation.requested() {
+            state.cancel(observed_at_ms);
+            break;
+        }
+        if observed_at_ms >= policy.duration_ms {
+            state.observe(&focus_observer_terminal_context(observed_at_ms));
+            break;
+        }
+        if state.backoff_remaining_ms(observed_at_ms) > 0 {
+            continue;
+        }
+
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            state.observe(&focus_observer_terminal_context(policy.duration_ms));
+            break;
+        }
+        let tree = match read_sway_tree_for_avatar_with_timeout(
+            remaining.min(AVATAR_SWAY_READ_TIMEOUT),
+        )
+        .await
+        {
+            Ok(tree) => {
+                consecutive_tree_failures = 0;
+                state.record_observation_success();
+                tree
+            }
+            Err(_) => {
+                if tokio::time::Instant::now() >= deadline {
+                    state.observe(&focus_observer_terminal_context(policy.duration_ms));
+                    break;
+                }
+                consecutive_tree_failures = consecutive_tree_failures.saturating_add(1);
+                state.record_observation_failure(observed_at_ms);
+                if consecutive_tree_failures >= 3 {
+                    state.fail_runtime(observed_at_ms);
+                    break;
+                }
+                continue;
+            }
+        };
+        let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&tree, &opts);
+        let acknowledgement = read_focus_follow_ack_receipt(&plan);
+        if !ack_cooldown_seeded
+            && plan
+                .pointer("/avatar/node_id")
+                .and_then(serde_json::Value::as_i64)
+                .is_some()
+        {
+            if let Some(remaining_ms) = acknowledgement.as_ref().and_then(|receipt| {
+                let now_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()?
+                    .as_millis() as u64;
+                focus_follow_ack_cooldown_remaining_ms(
+                    receipt,
+                    policy.cooldown_secs.saturating_mul(1_000),
+                    now_unix_ms,
+                )
+            }) {
+                state.seed_cooldown_remaining(observed_at_ms, remaining_ms);
+            }
+            ack_cooldown_seeded = true;
+        }
+        let acknowledged_target = acknowledgement
+            .as_ref()
+            .and_then(|receipt| receipt.get("target_node_id"))
+            .and_then(serde_json::Value::as_i64);
+        let action_busy = match focus_observer_action_busy(&operation_directory) {
+            Ok(busy) => busy,
+            Err(_) => {
+                state.fail_runtime(observed_at_ms);
+                break;
+            }
+        };
+        let context = focus_observer_context_from_plan(
+            &plan,
+            observed_at_ms,
+            acknowledged_target,
+            avatar_pause_marker_present(Some(&pause_file)),
+            action_busy,
+        );
+        let decision = state.observe(&context);
+        if decision.kind == FocusObserverDecisionKind::Stop {
+            break;
+        }
+        if decision.kind != FocusObserverDecisionKind::Dispatch {
+            continue;
+        }
+        let Some(target_node_id) = decision.target_node_id else {
+            state.fail_runtime(observed_at_ms);
+            break;
+        };
+
+        // Re-observe every structured gate immediately before dispatch. A
+        // target change, pause, fullscreen transition, denylist match, or
+        // competing action therefore suppresses this cycle without movement.
+        let verification_remaining =
+            deadline.saturating_duration_since(tokio::time::Instant::now());
+        if verification_remaining.is_zero() {
+            state.observe(&focus_observer_terminal_context(policy.duration_ms));
+            break;
+        }
+        let verification_tree = match read_sway_tree_for_avatar_with_timeout(
+            verification_remaining.min(AVATAR_SWAY_READ_TIMEOUT),
+        )
+        .await
+        {
+            Ok(tree) => {
+                state.record_observation_success();
+                tree
+            }
+            Err(_) => {
+                if tokio::time::Instant::now() >= deadline {
+                    state.observe(&focus_observer_terminal_context(policy.duration_ms));
+                    break;
+                }
+                state.record_observation_failure(started.elapsed().as_millis() as u64);
+                continue;
+            }
+        };
+        let verification_plan =
+            ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&verification_tree, &opts);
+        let verification_time_ms = started.elapsed().as_millis() as u64;
+        let verification_busy = match focus_observer_action_busy(&operation_directory) {
+            Ok(busy) => busy,
+            Err(_) => {
+                state.fail_runtime(verification_time_ms);
+                break;
+            }
+        };
+        let verification_context = focus_observer_context_from_plan(
+            &verification_plan,
+            verification_time_ms,
+            read_focus_follow_ack_target(&verification_plan),
+            avatar_pause_marker_present(Some(&pause_file)),
+            verification_busy,
+        );
+        let expected_identity = verification_context.identity.clone();
+        let Some(expected_geometry) =
+            focus_observer_target_geometry_from_plan(&verification_plan)
+        else {
+            state.record_observation_failure(verification_time_ms);
+            continue;
+        };
+        let verification_decision = state.observe(&verification_context);
+        if verification_decision.kind != FocusObserverDecisionKind::Dispatch
+            || verification_decision.target_node_id != Some(target_node_id)
+        {
+            continue;
+        }
+
+        if state.start_attempt(target_node_id).is_err() {
+            state.fail_runtime(verification_time_ms);
+            break;
+        }
+        let start_state = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+            AVATAR_ACTION_START_NOT_REACHED,
+        ));
+        let constraints = AvatarObserverActionConstraints {
+            expected_target_node_id: target_node_id,
+            expected_identity,
+            expected_geometry,
+            policy: policy.clone(),
+            cancellation: cancellation.token(),
+            deadline,
+            start_state: start_state.clone(),
+        };
+        let action = execute_avatar_focus_follow_action(
+            margin_px,
+            max_step_px,
+            max_travel_px,
+            step_interval_ms,
+            Some(&pause_file),
+            true,
+            false,
+            Some("stable_focus_transition"),
+            Some(&constraints),
+        )
+        .await;
+        let action_start_state = start_state.load(std::sync::atomic::Ordering::SeqCst);
+        let proven_unstarted = action.as_ref().is_ok_and(|action| {
+            action
+                .get("outcome_started_recorded")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+        }) || (action.is_err() && action_start_state == AVATAR_ACTION_START_NOT_REACHED);
+        if proven_unstarted {
+            if state.discard_unstarted_attempt(target_node_id).is_err() {
+                state.fail_runtime(started.elapsed().as_millis() as u64);
+                break;
+            }
+            if cancellation.requested() {
+                state.cancel(started.elapsed().as_millis() as u64);
+                break;
+            }
+            let after_action_ms = started.elapsed().as_millis() as u64;
+            if after_action_ms >= policy.duration_ms {
+                state.observe(&focus_observer_terminal_context(after_action_ms));
+                break;
+            }
+            if action.is_err() {
+                consecutive_prestart_failures = consecutive_prestart_failures.saturating_add(1);
+                state.record_prestart_runtime_failure(after_action_ms);
+                if consecutive_prestart_failures >= 3 {
+                    state.fail_runtime(after_action_ms);
+                    break;
+                }
+            } else {
+                consecutive_prestart_failures = 0;
+                state.record_prestart_runtime_success();
+            }
+            continue;
+        }
+        consecutive_prestart_failures = 0;
+        state.record_prestart_runtime_success();
+        let outcome = match action {
+            Ok(action)
+                if action.get("status").and_then(serde_json::Value::as_str)
+                    == Some("completed")
+                    && action
+                        .get("postcondition_verified")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true) => FocusAttemptOutcome::CompletedVerified,
+            Ok(action)
+                if action.get("status").and_then(serde_json::Value::as_str)
+                    == Some("cancelled") => FocusAttemptOutcome::Cancelled,
+            Ok(_) | Err(_) => FocusAttemptOutcome::Failed,
+        };
+        let finished_at_ms = started.elapsed().as_millis() as u64;
+        if state
+            .finish_attempt(target_node_id, outcome, finished_at_ms)
+            .is_err()
+        {
+            state.fail_runtime(finished_at_ms);
+            break;
+        }
+        if cancellation.requested() {
+            state.cancel(finished_at_ms);
+            break;
+        }
+        if finished_at_ms >= policy.duration_ms {
+            state.observe(&focus_observer_terminal_context(finished_at_ms));
+            break;
+        }
+        if state.attempt_count() >= policy.max_attempts {
+            state.observe(&focus_observer_terminal_context(finished_at_ms));
+            break;
+        }
+    }
+
+    let receipt = state.receipt_json(started.elapsed().as_millis() as u64);
+    write_focus_follow_observer_receipt(&receipt)?;
+    render_focus_observer_json(&receipt, as_json)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -19580,6 +21443,480 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_focus_observer_tree() -> serde_json::Value {
+        serde_json::json!({
+            "type":"root",
+            "nodes":[{
+                "type":"output",
+                "rect":{"x":0,"y":0,"width":1920,"height":1080},
+                "nodes":[{
+                    "type":"workspace",
+                    "name":"1",
+                    "rect":{"x":0,"y":0,"width":1920,"height":1040},
+                    "nodes":[{
+                        "id":41,
+                        "type":"con",
+                        "app_id":"com.example.Editor",
+                        "name":"title-not-used-by-policy",
+                        "focused":true,
+                        "rect":{"x":100,"y":80,"width":1200,"height":800}
+                    }],
+                    "floating_nodes":[{
+                        "id":99,
+                        "type":"floating_con",
+                        "app_id":"agent-bridge-avatar",
+                        "name":"Xiao Shu",
+                        "focused":false,
+                        "rect":{"x":1700,"y":850,"width":90,"height":130}
+                    }]
+                }]
+            }]
+        })
+    }
+
+    fn test_avatar_outcome_action(attempt_id: &str, status: &str) -> serde_json::Value {
+        serde_json::json!({
+            "attempt_id": attempt_id,
+            "status": status,
+            "authorization_mode": "agent_reversible_expression",
+            "executed": false,
+            "executed_steps": 0,
+            "execution_stage": "preparing",
+            "postcondition_verified": false,
+            "plan": {
+                "target": {"node_id": 41},
+                "avatar": {"node_id": 99}
+            }
+        })
+    }
+
+    #[test]
+    fn avatar_focus_follow_outcome_path_prefers_common_ab_state_root() {
+        let path = focus_follow_outcome_log_path_from_roots(
+            Some(PathBuf::from("/secure/agent-bridge")),
+            Some(PathBuf::from("/xdg-state")),
+            Some(PathBuf::from("/home/operator")),
+        )
+        .expect("absolute common state root");
+        assert_eq!(
+            path,
+            PathBuf::from("/secure/agent-bridge/avatar-focus-follow/outcomes.jsonl")
+        );
+        assert_eq!(
+            focus_follow_outcome_log_path_from_roots(
+                None,
+                Some(PathBuf::from("/xdg-state")),
+                Some(PathBuf::from("/home/operator")),
+            )
+            .expect("XDG fallback"),
+            PathBuf::from("/xdg-state/agent-bridge/avatar-focus-follow/outcomes.jsonl")
+        );
+        assert!(focus_follow_outcome_log_path_from_roots(
+            Some(PathBuf::new()),
+            Some(PathBuf::from("/xdg-state")),
+            None,
+        )
+        .is_err());
+        assert!(focus_follow_outcome_log_path_from_roots(None, None, None).is_err());
+    }
+
+    #[test]
+    fn avatar_observer_locked_gate_rechecks_structured_sensitive_state() {
+        let options = ab_bridge::avatar_focus_follow::FocusFollowOptions::default();
+        let original = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(
+            &test_focus_observer_tree(),
+            &options,
+        );
+        let constraints = AvatarObserverActionConstraints {
+            expected_target_node_id: 41,
+            expected_identity: focus_observer_identity_from_plan(&original),
+            expected_geometry: focus_observer_target_geometry_from_plan(&original)
+                .expect("structured target geometry"),
+            policy: ab_bridge::avatar_focus_observer::FocusObserverPolicy::default(),
+            cancellation: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+            start_state: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+        };
+        assert_eq!(focus_observer_action_gate(&original, &constraints, true), None);
+
+        let mut fullscreen = original.clone();
+        fullscreen["target"]["fullscreen"] = serde_json::json!(true);
+        assert_eq!(
+            focus_observer_action_gate(&fullscreen, &constraints, false),
+            Some("observer_fullscreen_gate_activated")
+        );
+        let fullscreen_context = focus_observer_context_from_plan(
+            &fullscreen,
+            0,
+            None,
+            false,
+            false,
+        );
+        let mut state = ab_bridge::avatar_focus_observer::FocusObserverState::new(
+            ab_bridge::avatar_focus_observer::FocusObserverPolicy::default(),
+            0,
+        );
+        assert_eq!(
+            state.observe(&fullscreen_context).reason,
+            ab_bridge::avatar_focus_observer::FocusObserverReason::FullscreenTarget
+        );
+
+        let mut marked = original.clone();
+        marked["target"]["sensitive_mark"] = serde_json::json!(true);
+        assert_eq!(
+            focus_observer_action_gate(&marked, &constraints, false),
+            Some("observer_sensitive_gate_activated")
+        );
+        let mut changed_identity = original.clone();
+        changed_identity["target"]["app_id"] = serde_json::json!("com.bitwarden.desktop");
+        assert_eq!(
+            focus_observer_action_gate(&changed_identity, &constraints, false),
+            Some("observer_target_identity_changed")
+        );
+
+        let mut moved_target = original.clone();
+        moved_target["target"]["rect"]["x"] = serde_json::json!(101);
+        assert_eq!(
+            focus_observer_action_gate(&moved_target, &constraints, false),
+            Some("observer_target_geometry_changed")
+        );
+        let mut resized_workspace = original;
+        resized_workspace["target"]["workspace_rect"]["width"] = serde_json::json!(1_600);
+        assert_eq!(
+            focus_observer_action_gate(&resized_workspace, &constraints, false),
+            Some("observer_target_geometry_changed")
+        );
+    }
+
+    #[test]
+    fn avatar_observer_step_guard_cancels_drag_and_rejects_bound_escape() {
+        assert_eq!(
+            avatar_movement_step_failure(100, 100, 100, 100, 148, 100, 100, 100, 48, 900),
+            None
+        );
+        assert_eq!(
+            avatar_movement_step_failure(500, 500, 100, 100, 148, 100, 100, 100, 48, 900),
+            Some("avatar_position_changed")
+        );
+        assert_eq!(
+            avatar_movement_step_failure(100, 100, 100, 100, 149, 100, 100, 100, 48, 900),
+            Some("movement_path_bound_violation")
+        );
+        assert_eq!(
+            avatar_movement_step_failure(100, 100, 100, 100, 1_001, 100, 100, 100, 2_048, 900),
+            Some("movement_path_bound_violation")
+        );
+    }
+
+    #[test]
+    fn avatar_ack_cooldown_seed_is_bounded_and_future_clock_fails_closed() {
+        let receipt = serde_json::json!({"completed_at_unix_ms": 9_000});
+        assert_eq!(
+            focus_follow_ack_cooldown_remaining_ms(&receipt, 300_000, 10_000),
+            Some(299_000)
+        );
+        assert_eq!(
+            focus_follow_ack_cooldown_remaining_ms(&receipt, 300_000, 400_000),
+            None
+        );
+        assert_eq!(
+            focus_follow_ack_cooldown_remaining_ms(&receipt, 300_000, 1_000),
+            Some(300_000)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_private_mode_repairs_existing_permissive_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("private-mode tempdir");
+        let path = root.path().join("outcomes.jsonl");
+        std::fs::write(&path, b"{}\n").expect("write permissive fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777))
+            .expect("make fixture permissive");
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open permissive fixture");
+        enforce_private_regular_file(&file, &path, "test outcome")
+            .expect("repair existing outcome mode through fd");
+        let observed = std::fs::metadata(&path)
+            .expect("stat repaired outcome")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(observed, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_private_directory_does_not_chmod_common_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("state-root tempdir");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("set common root mode");
+        let private = root.path().join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("prepare private subtree");
+        let root_mode = std::fs::metadata(root.path())
+            .expect("stat common root")
+            .permissions()
+            .mode()
+            & 0o777;
+        let private_mode = std::fs::metadata(&private)
+            .expect("stat private subtree")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(root_mode, 0o755);
+        assert_eq!(private_mode, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_operation_lock_is_private_and_exclusive() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("operation-lock tempdir");
+        let private = root.path().join("avatar-focus-follow");
+        std::fs::create_dir(&private).expect("create operation runtime directory");
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700))
+            .expect("private operation runtime mode");
+        let first = AvatarExclusiveOperationLock::try_acquire(
+            &private,
+            AVATAR_FOCUS_OBSERVER_LOCK_FILE,
+            "test observer lock",
+        )
+        .expect("acquire first observer lock")
+        .expect("first observer lock is available");
+        assert!(
+            AvatarExclusiveOperationLock::try_acquire(
+                &private,
+                AVATAR_FOCUS_OBSERVER_LOCK_FILE,
+                "test observer lock",
+            )
+            .expect("probe second observer lock")
+            .is_none(),
+            "a second observer must fail closed while the first lock is held"
+        );
+        assert_eq!(
+            std::fs::metadata(private.join(AVATAR_FOCUS_OBSERVER_LOCK_FILE))
+                .expect("stat observer lock")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        drop(first);
+        assert!(
+            AvatarExclusiveOperationLock::try_acquire(
+                &private,
+                AVATAR_FOCUS_OBSERVER_LOCK_FILE,
+                "test observer lock",
+            )
+            .expect("reacquire released observer lock")
+            .is_some()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_operation_lock_rejects_links() {
+        let root = tempfile::tempdir().expect("operation-lock link tempdir");
+        let private = root.path().join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("prepare private directory");
+        let target = private.join("target.lock");
+        std::fs::write(&target, b"").expect("write lock target");
+        let lock_path = private.join(AVATAR_FOCUS_ACTION_LOCK_FILE);
+        std::os::unix::fs::symlink(&target, &lock_path).expect("create lock symlink");
+        assert!(AvatarExclusiveOperationLock::try_acquire(
+            &private,
+            AVATAR_FOCUS_ACTION_LOCK_FILE,
+            "test action lock",
+        )
+        .is_err());
+
+        std::fs::remove_file(&lock_path).expect("remove explicit test symlink");
+        std::fs::hard_link(&target, &lock_path).expect("create lock hardlink");
+        assert!(AvatarExclusiveOperationLock::try_acquire(
+            &private,
+            AVATAR_FOCUS_ACTION_LOCK_FILE,
+            "test action lock",
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_journal_rejects_symlinks_and_hardlinks() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("link-safety tempdir");
+        let real_root = root.path().join("real-state");
+        std::fs::create_dir(&real_root).expect("real state root");
+        let root_link = root.path().join("linked-state");
+        std::os::unix::fs::symlink(&real_root, &root_link).expect("state root symlink");
+        assert!(
+            prepare_focus_follow_outcome_directory(&root_link.join("avatar-focus-follow")).is_err()
+        );
+
+        let private = real_root.join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("private directory");
+        let target = private.join("target.jsonl");
+        std::fs::write(&target, b"{}\n").expect("target file");
+        let symlink = private.join("symlink.jsonl");
+        std::os::unix::fs::symlink(&target, &symlink).expect("log symlink");
+        assert!(validate_regular_nonsymlink(&symlink, "test symlink").is_err());
+        let action = test_avatar_outcome_action("af-link-test", "running");
+        assert!(append_focus_follow_outcome_at_path(&action, "started", true, &symlink).is_err());
+        let hardlink = private.join("hardlink.jsonl");
+        std::fs::hard_link(&target, &hardlink).expect("log hardlink");
+        assert!(validate_regular_nonsymlink(&target, "test hardlink").is_err());
+        let target_mode_before = std::fs::metadata(&target)
+            .expect("stat hardlink target before")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert!(append_focus_follow_outcome_at_path(&action, "started", true, &target).is_err());
+        let target_mode_after = std::fs::metadata(&target)
+            .expect("stat hardlink target after")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(target_mode_after, target_mode_before);
+    }
+
+    #[test]
+    fn avatar_focus_follow_internal_failure_preserves_observed_progress() {
+        let current = serde_json::json!({
+            "attempt_id": "af-test",
+            "status": "running",
+            "ready": true,
+            "executed": true,
+            "executed_steps": 3,
+            "execution_stage": "walking",
+            "postcondition_verified": false
+        });
+        let failed = failed_avatar_outcome_snapshot(&current, false);
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["executed"], true);
+        assert_eq!(failed["executed_steps"], 3);
+        assert_eq!(failed["execution_stage"], "walking");
+        assert_eq!(
+            failed["stopped_reason"],
+            "unhandled_internal_error_or_unwind"
+        );
+        assert_eq!(
+            failed_avatar_outcome_snapshot(&current, true)["stopped_reason"],
+            "final_receipt_persistence_failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_rotation_occurs_only_when_start_enables_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("rotation tempdir");
+        let private = root.path().join("avatar-focus-follow");
+        prepare_focus_follow_outcome_directory(&private).expect("private directory");
+        let path = private.join("outcomes.jsonl");
+        let file = std::fs::File::create(&path).expect("create large outcome");
+        file.set_len(MAX_FOCUS_FOLLOW_OUTCOME_LOG_BYTES)
+            .expect("extend outcome to rotation threshold");
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .expect("private large outcome");
+
+        assert!(rotate_focus_follow_outcome_log_if_needed(
+            &path,
+            &private,
+            "af-terminal-test",
+            false,
+        )
+        .expect("terminal append must not rotate")
+        .is_none());
+        assert!(path.exists());
+
+        let rotated =
+            rotate_focus_follow_outcome_log_if_needed(&path, &private, "af-start-test", true)
+                .expect("started append may rotate")
+                .expect("threshold rotation path");
+        assert!(!path.exists());
+        assert!(rotated.exists());
+        assert_eq!(
+            std::fs::metadata(rotated)
+                .expect("stat rotated outcome")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn avatar_focus_follow_append_persists_pair_with_private_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("append integration tempdir");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("common root mode");
+        let private = root.path().join("avatar-focus-follow");
+        let path = private.join("outcomes.jsonl");
+        let mut action = test_avatar_outcome_action("af-append-test", "running");
+        append_focus_follow_outcome_at_path(&action, "started", true, &path)
+            .expect("append started");
+        action["status"] = serde_json::json!("completed");
+        action["execution_stage"] = serde_json::json!("completed");
+        action["postcondition_verified"] = serde_json::json!(true);
+        append_focus_follow_outcome_at_path(&action, "final", false, &path).expect("append final");
+
+        let rows = std::fs::read_to_string(&path)
+            .expect("read outcome pair")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("valid JSONL row"))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["phase"], "started");
+        assert_eq!(rows[1]["phase"], "final");
+        assert_eq!(rows[0]["attempt_id"], "af-append-test");
+        assert_eq!(rows[1]["attempt_id"], "af-append-test");
+        assert_eq!(rows[0]["schema"], rows[1]["schema"]);
+        assert!(!private
+            .read_dir()
+            .expect("read private journal directory")
+            .any(|entry| entry
+                .expect("journal entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with("outcomes.jsonl.af-")));
+        assert_eq!(
+            std::fs::metadata(root.path())
+                .expect("stat common root")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        for (entry, expected_mode) in [
+            (private.clone(), 0o700),
+            (path, 0o600),
+            (private.join(".focus-follow-outcomes.lock"), 0o600),
+        ] {
+            assert_eq!(
+                std::fs::metadata(entry)
+                    .expect("stat private journal entry")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                expected_mode
+            );
+        }
+    }
 
     #[test]
     fn avatar_aura_daemon_http_composition_reads_bounded_env_once() {

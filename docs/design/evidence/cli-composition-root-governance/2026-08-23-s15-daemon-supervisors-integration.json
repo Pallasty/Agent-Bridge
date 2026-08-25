@@ -1,0 +1,64 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "s15-daemon-supervisors-integration-20260823",
+  "source_base": "77600c9170703fbf9f93a5d9c91a5312c51df372",
+  "main_rs_before_sha256": "c3c47f6a62d1465321a5bf66540234563e4cc95efcd15aed9d59a465b0ab6f7f",
+  "main_rs_after_sha256": "fbdfbcca6d19a4aac0999427751ad41ed9213dc883dd54c916f1a945e28dc857",
+  "changes": [
+    {
+      "region": "real_main Cmd::Daemon supervisor startup",
+      "category": "startup_or_dependency_injection",
+      "summary": "Retain the enablement gates, resource selection, cadence resolution, operational logging, explicit startup order, and final serve call for all four daemon supervisors in the composition root.",
+      "disposition": "root_visible",
+      "root_reason": "Daemon mode authority and dependency injection remain reviewable at the process boundary.",
+      "evidence": [
+        "The four cli_*_supervisor_extraction integration tests lock admission, injection, ordering, and absence of inline interval loops."
+      ]
+    },
+    {
+      "region": "coactivation, C3, retrieval-outcome, and orphan-reaper loops",
+      "category": "authority_or_effect_adapter",
+      "summary": "Move interval ownership and per-pass behavior into their existing domain modules behind narrow spawn functions.",
+      "disposition": "extracted",
+      "evidence": [
+        "Module tests preserve delayed first ticks for coactivation, C3, and retrieval-outcome, and the immediate first pass for orphan recovery.",
+        "Environment names, defaults, clamps, missed-tick policy, pass limits, safety checks, and operational logs remain unchanged."
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "not_applicable",
+      "evidence": ["No clap schema, command spelling, option, or help text changes."]
+    },
+    "json_and_text_output": {
+      "status": "not_applicable",
+      "evidence": ["The supervisors emit tracing only; no command response format changes."]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "not_applicable",
+      "evidence": ["No interactive preview or confirmation surface changed."]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": ["Existing enablement, store admission, parameter validation, and per-pass error handling remain in their original order."]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": ["Composition-root tests preserve startup order and each module timer test preserves its first-pass contract."]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "Coactivation supervisor tests: 5 passed, 0 failed.",
+        "C3 supervisor tests: 4 passed, 0 failed.",
+        "Retrieval and orphan timer tests: 2 passed, 0 failed.",
+        "Four composition-root ownership tests: 4 passed, 0 failed.",
+        "cargo check -p ab-bridge --all-targets --quiet passed after merging github/master at 209514a7c."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert the cumulative S15 daemon-supervisor integration commit to restore the four inline daemon loops without changing runtime environment configuration."
+  ]
+}
