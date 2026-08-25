@@ -8172,9 +8172,8 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 75 total extras = 10 collab-group entries + 65 direct extras:
+    // 73 total extras = 10 collab-group entries + 63 direct extras:
     //      practical_workflow_scorecard
-    //      + embodiment_record + embodiment_snapshot
     //      + 6 avatar observation/sync/renderer tools
     //      + xiao_shu_action_request + 14 read-only mobile bridge tools
     //      + memory_graph_topology + memory_retrieval_feedback
@@ -8208,10 +8207,10 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // must not re-enter Codex's eager direct extras.
     // The five prune-continuity entries remain part of the direct list by
     // name, preserving the established Codex surface contract.
-    assert_eq!(extras.len(), 75);
+    assert_eq!(extras.len(), 73);
     assert!(extras.contains(&"practical_workflow_scorecard"));
-    assert!(extras.contains(&"embodiment_record"));
-    assert!(extras.contains(&"embodiment_snapshot"));
+    assert!(!extras.contains(&"embodiment_record"));
+    assert!(!extras.contains(&"embodiment_snapshot"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
     assert!(extras.contains(&"forum_post"));
@@ -8350,14 +8349,8 @@ fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
         !voice.includes(Tier::Niche, "browser_navigate"),
         "codex-voice must not widen to unrelated browser mutation"
     );
-    let record_schema = voice_schemas
-        .iter()
-        .find(|schema| schema.name == "embodiment_record")
-        .expect("codex-voice receipt-only record schema");
-    assert_eq!(
-        record_schema.input_schema["properties"]["kind"]["enum"],
-        json!(["operation_receipt"])
-    );
+    assert!(!voice_names.iter().any(|name| name == "embodiment_record"));
+    assert!(!voice_names.iter().any(|name| name == "embodiment_snapshot"));
 }
 
 #[test]
@@ -8610,8 +8603,6 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
         "memory_save",
         "forum_read",
         "app_control",
-        "embodiment_record",
-        "embodiment_snapshot",
         "mobile_projection_status",
         "mobile_projection_wait",
         "mobile_projection_start",
@@ -8620,25 +8611,8 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
     ] {
         assert!(names.contains(tool), "combined profile missing {tool}");
     }
-    let record_schema = schemas
-        .iter()
-        .find(|schema| schema.name == "embodiment_record")
-        .expect("receipt-only embodiment record schema");
-    assert_eq!(
-        record_schema.input_schema["properties"]["kind"]["enum"],
-        json!(["operation_receipt"])
-    );
-    assert!(record_schema.input_schema["properties"]
-        .get("facts")
-        .is_none());
-    assert!(record_schema.input_schema["properties"]
-        .get("verdict")
-        .is_none());
-    let snapshot_schema = schemas
-        .iter()
-        .find(|schema| schema.name == "embodiment_snapshot")
-        .expect("receipt-only embodiment snapshot schema");
-    assert!(snapshot_schema.description.contains("excludes Event Spine"));
+    assert!(!names.contains("embodiment_record"));
+    assert!(!names.contains("embodiment_snapshot"));
     let broad_schemas = build_registry_with_policy(
         Hub::builder().build(),
         ToolPolicy::from_values(None, None, None, Some("all")),

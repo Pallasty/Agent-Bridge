@@ -50622,13 +50622,6 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
 const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Compact read-only product outcomes for practical continuity work.
     "practical_workflow_scorecard",
-    // R5/P1a beneficiary-closure evidence: expose the existing record-only
-    // receipt writer and its read projection to Codex's deployed compact
-    // profile. The public writer still rejects mutation/lease claims and
-    // never executes, authorizes, resumes, or projects an operation to Event
-    // Spine.
-    "embodiment_record",
-    "embodiment_snapshot",
     // Avatar observation and sidecar-to-presence bridge: expose the read path
     // plus an explicit sync surface so Codex can inspect Xiao Shu without
     // widening to every Standard tool.
