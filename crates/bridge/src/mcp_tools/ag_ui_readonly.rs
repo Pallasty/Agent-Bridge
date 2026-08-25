@@ -1,4 +1,4 @@
-//! Dormant MCP transport for the pure AG-UI 0.0.57 projection.
+//! Default-off MCP transport for the pure AG-UI 0.0.57 projection.
 
 use crate::ag_ui_readonly_projection::{
     project_ag_ui_readonly, AgUiProjectionError, CORE_VERSION, MAX_EVENTS, MAX_IDENTIFIER_BYTES,
@@ -9,7 +9,7 @@ use ab_mcp::{ContentBlock, McpTool, ToolAnnotations, ToolContext, ToolResult, To
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-const TOOL_NAME: &str = "ag_ui_readonly_project";
+pub(super) const TOOL_NAME: &str = "ag_ui_readonly_project";
 const PROJECTION_ERROR_SCHEMA: &str = "agent_bridge.ag_ui_readonly_projection_error.v0";
 
 pub struct AgUiReadonlyProjectTool;
@@ -43,7 +43,7 @@ impl McpTool for AgUiReadonlyProjectTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Project one caller-supplied, bounded AG-UI 0.0.57 batch into a content-minimized read-only observation. The result grants no action authority and makes no external-effect claim. Niche and source-only until a later registration gate.".into(),
+            description: "Project one caller-supplied, bounded AG-UI 0.0.57 batch into a content-minimized read-only observation. The result grants no action authority and makes no external-effect claim. Default-off: exposed only by the explicit codex-ag-ui-readonly or all-dev toolset.".into(),
             input_schema: projection_input_schema(),
         }
     }
@@ -675,32 +675,66 @@ mod tests {
     }
 
     #[test]
-    fn dormant_module_has_no_registry_or_toolset_path() {
-        let registry_source = include_str!("../mcp_tools.rs");
-        assert!(registry_source.contains("mod ag_ui_readonly;"));
-        assert!(!registry_source.contains(TOOL_NAME));
-        assert!(!registry_source.contains("AgUiReadonlyProjectTool"));
+    fn source_registration_matrix_is_explicit_and_default_off() {
+        let exposed = |toolset: Option<&str>, profile: Option<&str>| {
+            super::super::exposed_tool_names_for(toolset, None, profile)
+                .into_iter()
+                .any(|name| name == TOOL_NAME)
+        };
 
-        for toolset in [
-            None,
-            Some("essential"),
-            Some("compact"),
-            Some("standard"),
-            Some("codex-essential"),
-            Some("codex-lean"),
-            Some("claude-standard"),
-            Some("gemini-lean"),
-            Some("chatgpt-read"),
-            Some("chatgpt-collab"),
-            Some("hook-lifecycle"),
-            Some("codex-ag-ui-readonly"),
-            Some("all-dev"),
-        ] {
-            let exposed = super::super::exposed_tool_names_for(toolset, None, None);
+        assert!(!exposed(None, None), "unset/default must stay closed");
+        for profile in ["essential", "compact", "standard", "all"] {
             assert!(
-                !exposed.iter().any(|name| name == TOOL_NAME),
-                "dormant tool leaked through toolset {toolset:?}"
+                !exposed(None, Some(profile)),
+                "generic profile {profile} must stay closed"
             );
         }
+        for toolset in [
+            "codex-essential",
+            "codex-lean",
+            "claude-standard",
+            "gemini-lean",
+            "chatgpt-read",
+            "chatgpt-collab",
+            "hook-lifecycle",
+        ] {
+            assert!(
+                !exposed(Some(toolset), None),
+                "existing toolset {toolset} must stay closed"
+            );
+        }
+
+        assert!(
+            exposed(Some("codex-ag-ui-readonly"), None),
+            "dedicated opt-in toolset must expose the projector"
+        );
+        assert!(
+            exposed(Some("all-dev"), None),
+            "explicit broad development toolset must expose the projector"
+        );
+    }
+
+    #[test]
+    fn dedicated_toolset_is_exactly_codex_lean_plus_the_projector() {
+        let names = |toolset| {
+            super::super::exposed_tool_names_for(Some(toolset), None, None)
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let lean = names("codex-lean");
+        let opted_in = names("codex-ag-ui-readonly");
+        let mut expected = lean;
+        expected.insert(TOOL_NAME.to_string());
+        assert_eq!(opted_in, expected);
+
+        let policy = super::super::ToolPolicy::from_values(
+            Some("codex-ag-ui-readonly"),
+            None,
+            None,
+            Some("all"),
+        );
+        assert_eq!(policy.label(), "codex-ag-ui-readonly");
+        assert_eq!(policy.profile().label(), "essential");
+        assert_eq!(policy.extras(), vec![TOOL_NAME]);
     }
 }
