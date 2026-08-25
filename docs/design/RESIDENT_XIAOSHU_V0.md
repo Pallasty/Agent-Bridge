@@ -271,7 +271,7 @@ field still stores only a hash to keep state bounded, not to claim privacy.
 
 The remaining fail-closed boundary is deliberately narrower: Resident may not
 cause irreversible host/data loss, persistent system corruption, account
-mutation, public communication, or other external mutation. The source
+mutation, public communication, or other external mutation. The deployed
 implementation enforces that boundary by the controls below. The one requested
 provider inference and its bounded auth/transport/token use are intentional;
 “no external mutation authority” means no external action tool or account/data

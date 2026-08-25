@@ -1,7 +1,7 @@
 # R7 loss-tolerant Resident policy
 
-Status: source and owner-local live canary PASS on 2026-08-25; installed-binary
-deployment is a separate claim.
+Status: source, owner-local live canary, and installed-binary deployment PASS
+on 2026-08-25.
 
 ## Owner decision
 
@@ -61,7 +61,7 @@ and [sandboxing guide](https://learn.chatgpt.com/docs/sandboxing).
 ## Verification
 
 - `ab-agent` Resident provider tests: 11 passed.
-- `ab-bridge` Resident tests: 33 passed.
+- `ab-bridge` Resident tests: 38 passed after the final master rebase.
 - wrapper environment tests: 3 passed.
 - Resident CLI parser test: 1 passed.
 - Bubblewrap 0.11.1 started the pinned native Codex 0.149.1 under the production
@@ -90,11 +90,33 @@ or rewrite existing history. `PRAGMA quick_check` returned `ok`. Future
 isolated canaries must set `XDG_DATA_HOME` as well as
 `AGENT_BRIDGE_STATE_DIR`.
 
-## Remaining deployment procedure
+## Deployment closure
 
-The feature must be rebased onto the latest master, merged, and built by the
-serialized master deployment path. Before installation, back up both
-`agent-bridge.real` and the independently installed wrapper. After deployment,
-verify the installed version/hash, repeat the read-only preflight through the
-wrapper, check daemon/HTTP/Palace health, and reconnect each MCP client that
-must load the new inode.
+- Commit `925cf3fe61867c116fc4ab1602c45b233d48386f` was fast-forwarded to
+  `origin/master`. The serialized master deployment path rebuilt that exact
+  commit twice: first as a mutation-free dry run and then for installation.
+  Both runs retained all nine deployed capability sentinels.
+- The installed binary reports
+  `agent-bridge 0.14.0 (v0.14.0-1866-g925cf3fe; 925cf3fe6186)` and hashes to
+  `94ec3c7b6b84ab555e4096127f227427f1772e25a9d7973acc1699045509b3a9`.
+  The independently installed wrapper is byte-identical to the repository
+  template and hashes to
+  `462d21056273aabe607683bd9c4fbe97be0a5d6401aab56d666ccbc0680e1e1a`.
+- The installed wrapper's read-only `resident risk-preflight --json` returned
+  `owner_loss_tolerant_profile_admitted=true`,
+  `strict_profile_admitted=false`, `remaining_blockers=[]`, and confirmed
+  that it neither started the provider nor read authentication nor wrote
+  Resident state.
+- Daemon, daemon-http, and Palace were restarted onto the installed inode.
+  Every `/proc/<pid>/exe` hash matched the installed binary; both
+  `http://127.0.0.1:7878/healthz` and
+  `http://127.0.0.1:7979/healthz` returned `ok`.
+- An online SQLite backup was created before deployment at
+  `~/.local/share/agent-bridge/backups/state.db.pre-loss-tolerant-20260825T100942`;
+  both that backup and the live database returned `PRAGMA quick_check=ok`.
+  Binary, wrapper, audio-adapter, and runtime-asset rollback copies were also
+  retained.
+- Installed Doctor closed with zero failures and one expected owner-local
+  sleeping-display warning. Session-scoped MCP clients still need their normal
+  reconnect before they can adopt the new inode; this is not a Resident CLI or
+  service deployment blocker.
