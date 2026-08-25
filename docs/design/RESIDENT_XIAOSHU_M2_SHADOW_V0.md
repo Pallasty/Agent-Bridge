@@ -2,9 +2,9 @@
 
 Date: 2026-08-25 (America/Los_Angeles)
 
-Status: approved bounded implementation, deployed 2026-08-25. This is a
-default-off policy evaluator and optional private report ledger. It is not M2
-runtime admission.
+Status: approved bounded implementation and read-only review gate, deployed
+2026-08-25. This is a default-off policy evaluator, optional private report
+ledger, and evidence aggregator. It is not M2 runtime admission.
 
 ## Decision and purpose
 
