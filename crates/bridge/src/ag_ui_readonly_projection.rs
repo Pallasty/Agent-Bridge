@@ -201,19 +201,143 @@ struct Counters {
     run_payload_bytes: usize,
 }
 
-/// Project one bounded AG-UI 0.0.57 batch without performing I/O or mutation.
-///
-/// # Errors
-///
-/// Returns [`AgUiProjectionError`] when the request exceeds its budget, does
-/// not match the pinned projection envelope, or contains a malformed known
-/// AG-UI 0.0.57 event.
-pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionError> {
+#[derive(Debug, Default)]
+struct ProjectionState {
+    counters: Counters,
+    runs: BTreeMap<String, RunProjection>,
+    tool_calls: BTreeMap<String, ToolCallProjection>,
+    open_steps: BTreeSet<(String, String)>,
+    projected_events: Vec<Value>,
+    violations: Vec<Violation>,
+    current_run_hash: Option<String>,
+}
+
+struct ProjectionContext<'a> {
+    counters: &'a mut Counters,
+    runs: &'a mut BTreeMap<String, RunProjection>,
+    tool_calls: &'a mut BTreeMap<String, ToolCallProjection>,
+    open_steps: &'a mut BTreeSet<(String, String)>,
+    projected_events: &'a mut Vec<Value>,
+    violations: &'a mut Vec<Violation>,
+    current_run_hash: &'a mut Option<String>,
+}
+
+impl Counters {
+    fn observations_json(&self) -> Value {
+        json!({
+            "content_bytes_omitted": self.content_bytes_omitted,
+            "tool_args_chunks": self.tool_args_chunks,
+            "tool_args_bytes": self.tool_args_bytes,
+            "tool_chunk_events": self.tool_chunk_events,
+            "tool_chunk_bytes": self.tool_chunk_bytes,
+            "message_snapshots": self.message_snapshots,
+            "messages_observed": self.messages_observed,
+            "state_snapshot_keys": self.state_snapshot_keys,
+            "state_snapshot_bytes": self.state_snapshot_bytes,
+            "state_delta_operations": self.state_delta_operations,
+            "state_delta_bytes": self.state_delta_bytes,
+            "activity_events": self.activity_events,
+            "activity_payload_bytes": self.activity_payload_bytes,
+            "extension_events": self.extension_events,
+            "extension_payload_bytes": self.extension_payload_bytes,
+            "error_message_bytes": self.error_message_bytes,
+            "run_payload_bytes": self.run_payload_bytes,
+        })
+    }
+}
+
+impl ProjectionState {
+    fn context(&mut self) -> ProjectionContext<'_> {
+        ProjectionContext {
+            counters: &mut self.counters,
+            runs: &mut self.runs,
+            tool_calls: &mut self.tool_calls,
+            open_steps: &mut self.open_steps,
+            projected_events: &mut self.projected_events,
+            violations: &mut self.violations,
+            current_run_hash: &mut self.current_run_hash,
+        }
+    }
+
+    fn finish(&mut self, event_count: usize) {
+        for call in self.tool_calls.values() {
+            if call.status.is_open() {
+                self.violations.push(Violation {
+                    index: event_count,
+                    code: "open_tool_call_at_batch_end",
+                });
+            }
+        }
+        for _ in &self.open_steps {
+            self.violations.push(Violation {
+                index: event_count,
+                code: "open_step_at_batch_end",
+            });
+        }
+    }
+
+    fn stream_complete(&self) -> bool {
+        self.counters.unknown_event_types == 0
+            && self.violations.is_empty()
+            && !self.runs.is_empty()
+            && self.runs.values().all(|run| run.status.is_terminal())
+            && self.tool_calls.values().all(|call| !call.status.is_open())
+            && self.open_steps.is_empty()
+    }
+
+    fn into_json(self, input_events: usize) -> Value {
+        let stream_complete = self.stream_complete();
+        let runs = self
+            .runs
+            .values()
+            .map(RunProjection::to_json)
+            .collect::<Vec<_>>();
+        let tool_calls = self
+            .tool_calls
+            .values()
+            .map(ToolCallProjection::to_json)
+            .collect::<Vec<_>>();
+        let violations = self
+            .violations
+            .iter()
+            .map(Violation::to_json)
+            .collect::<Vec<_>>();
+        json!({
+            "schema": PROJECTION_SCHEMA,
+            "read_only": true,
+            "executes_actions": false,
+            "writes_store": false,
+            "changes_policy": false,
+            "protocol": {
+                "name": PROTOCOL_NAME,
+                "core_version": CORE_VERSION,
+            },
+            "counts": {
+                "input_events": input_events,
+                "projected_events": self.projected_events.len(),
+                "omitted_content_events": self.counters.omitted_content_events,
+                "unknown_event_types": self.counters.unknown_event_types,
+                "violations": self.violations.len(),
+            },
+            "observations": self.counters.observations_json(),
+            "runs": runs,
+            "tool_calls": tool_calls,
+            "projected_events": self.projected_events,
+            "violations": violations,
+            "claims": {
+                "all_actions_traceable": false,
+                "external_effects_verified": false,
+                "stream_complete": stream_complete,
+            }
+        })
+    }
+}
+
+fn validate_projection_request(input: &Value) -> Result<&[Value], AgUiProjectionError> {
     validate_request_budget(input)?;
     let request = input
         .as_object()
         .ok_or(AgUiProjectionError::InvalidRequestField { field: "request" })?;
-
     let schema = request
         .get("schema")
         .and_then(Value::as_str)
@@ -222,24 +346,7 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
         return Err(AgUiProjectionError::UnsupportedRequestSchema);
     }
 
-    let protocol = request
-        .get("protocol")
-        .and_then(Value::as_object)
-        .ok_or(AgUiProjectionError::InvalidRequestField { field: "protocol" })?;
-    let protocol_name = protocol.get("name").and_then(Value::as_str).ok_or(
-        AgUiProjectionError::InvalidRequestField {
-            field: "protocol.name",
-        },
-    )?;
-    let core_version = protocol.get("core_version").and_then(Value::as_str).ok_or(
-        AgUiProjectionError::InvalidRequestField {
-            field: "protocol.core_version",
-        },
-    )?;
-    if protocol_name != PROTOCOL_NAME || core_version != CORE_VERSION {
-        return Err(AgUiProjectionError::UnsupportedProtocol);
-    }
-
+    validate_protocol(request)?;
     let source = request
         .get("source")
         .and_then(Value::as_object)
@@ -257,805 +364,1188 @@ pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionErro
             max: MAX_EVENTS,
         });
     }
+    Ok(events)
+}
 
-    let mut counters = Counters::default();
-    let mut runs = BTreeMap::<String, RunProjection>::new();
-    let mut tool_calls = BTreeMap::<String, ToolCallProjection>::new();
-    let mut open_steps = BTreeSet::<(String, String)>::new();
-    let mut projected_events = Vec::<Value>::new();
-    let mut violations = Vec::<Violation>::new();
-    let mut current_run_hash: Option<String> = None;
+fn validate_protocol(request: &serde_json::Map<String, Value>) -> Result<(), AgUiProjectionError> {
+    let protocol = request
+        .get("protocol")
+        .and_then(Value::as_object)
+        .ok_or(AgUiProjectionError::InvalidRequestField { field: "protocol" })?;
+    let protocol_name = protocol.get("name").and_then(Value::as_str).ok_or(
+        AgUiProjectionError::InvalidRequestField {
+            field: "protocol.name",
+        },
+    )?;
+    let core_version = protocol.get("core_version").and_then(Value::as_str).ok_or(
+        AgUiProjectionError::InvalidRequestField {
+            field: "protocol.core_version",
+        },
+    )?;
+    if protocol_name != PROTOCOL_NAME || core_version != CORE_VERSION {
+        return Err(AgUiProjectionError::UnsupportedProtocol);
+    }
+    Ok(())
+}
 
+/// Project one bounded AG-UI 0.0.57 batch without performing I/O or mutation.
+///
+/// # Errors
+///
+/// Returns [`AgUiProjectionError`] when the request exceeds its budget, does
+/// not match the pinned projection envelope, or contains a malformed known
+/// AG-UI 0.0.57 event.
+pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionError> {
+    let events = validate_projection_request(input)?;
+    let mut state = ProjectionState::default();
+    process_events(events, &mut state)?;
+    state.finish(events.len());
+    Ok(state.into_json(events.len()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventFamily {
+    Run,
+    Step,
+    Tool,
+    Observation,
+    Content,
+    Unknown,
+}
+
+impl EventFamily {
+    fn classify(event_type: &str) -> Self {
+        match event_type {
+            "RUN_STARTED" | "RUN_FINISHED" | "RUN_ERROR" => Self::Run,
+            "STEP_STARTED" | "STEP_FINISHED" => Self::Step,
+            "TOOL_CALL_START" | "TOOL_CALL_ARGS" | "TOOL_CALL_END" | "TOOL_CALL_RESULT"
+            | "TOOL_CALL_CHUNK" => Self::Tool,
+            "STATE_SNAPSHOT" | "STATE_DELTA" | "MESSAGES_SNAPSHOT" | "ACTIVITY_SNAPSHOT"
+            | "ACTIVITY_DELTA" | "RAW" | "CUSTOM" => Self::Observation,
+            "TEXT_MESSAGE_START"
+            | "TEXT_MESSAGE_CONTENT"
+            | "TEXT_MESSAGE_END"
+            | "TEXT_MESSAGE_CHUNK"
+            | "THINKING_START"
+            | "THINKING_END"
+            | "THINKING_TEXT_MESSAGE_START"
+            | "THINKING_TEXT_MESSAGE_CONTENT"
+            | "THINKING_TEXT_MESSAGE_END"
+            | "REASONING_START"
+            | "REASONING_MESSAGE_START"
+            | "REASONING_MESSAGE_CONTENT"
+            | "REASONING_MESSAGE_END"
+            | "REASONING_MESSAGE_CHUNK"
+            | "REASONING_ENCRYPTED_VALUE"
+            | "REASONING_END" => Self::Content,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+fn process_events(
+    events: &[Value],
+    state: &mut ProjectionState,
+) -> Result<(), AgUiProjectionError> {
     for (index, event_value) in events.iter().enumerate() {
-        let event = event_value
-            .as_object()
+        process_event(event_value, index, state)?;
+    }
+    Ok(())
+}
+
+fn process_event(
+    event_value: &Value,
+    index: usize,
+    state: &mut ProjectionState,
+) -> Result<(), AgUiProjectionError> {
+    let event = event_value
+        .as_object()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: "event",
+        })?;
+    let event_type = required_string(event, index, "type")?;
+    validate_base_event_fields(event, index)?;
+    let mut omitted_event = event.contains_key("rawEvent");
+    let mut omitted_bytes = event.get("rawEvent").map(serialized_len).unwrap_or(0);
+    note_event_after_terminal(event_type, index, state);
+
+    match EventFamily::classify(event_type) {
+        EventFamily::Run => handle_run_event(
+            event_type,
+            event,
+            index,
+            state.context(),
+            &mut omitted_event,
+            &mut omitted_bytes,
+        )?,
+        EventFamily::Step => handle_step_event(event_type, event, index, state.context())?,
+        EventFamily::Tool => handle_tool_event(
+            event_type,
+            event,
+            index,
+            state.context(),
+            &mut omitted_event,
+            &mut omitted_bytes,
+        )?,
+        EventFamily::Observation => handle_observation_event(
+            event_type,
+            event,
+            index,
+            state.context(),
+            &mut omitted_event,
+            &mut omitted_bytes,
+        )?,
+        EventFamily::Content => handle_content_event(
+            event_type,
+            event,
+            index,
+            state.context(),
+            &mut omitted_event,
+            &mut omitted_bytes,
+        )?,
+        EventFamily::Unknown => {
+            state.counters.unknown_event_types += 1;
+            omitted_event = true;
+            omitted_bytes = serialized_len(event_value);
+        }
+    }
+
+    if omitted_event {
+        state.counters.omitted_content_events += 1;
+        state.counters.content_bytes_omitted += omitted_bytes;
+    }
+    Ok(())
+}
+
+fn note_event_after_terminal(event_type: &str, index: usize, state: &mut ProjectionState) {
+    if event_type != "RUN_STARTED"
+        && state
+            .current_run_hash
+            .as_ref()
+            .and_then(|hash| state.runs.get(hash))
+            .is_some_and(|run| run.status.is_terminal())
+    {
+        state.violations.push(Violation {
+            index,
+            code: "event_after_terminal_run",
+        });
+    }
+}
+
+fn handle_content_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    if event_type.starts_with("TEXT_MESSAGE_") {
+        handle_text_event(
+            event_type,
+            event,
+            index,
+            context,
+            omitted_event,
+            omitted_bytes,
+        )
+    } else if event_type.starts_with("THINKING_") {
+        handle_thinking_event(
+            event_type,
+            event,
+            index,
+            context,
+            omitted_event,
+            omitted_bytes,
+        )
+    } else {
+        handle_reasoning_event(
+            event_type,
+            event,
+            index,
+            context,
+            omitted_event,
+            omitted_bytes,
+        )
+    }
+}
+
+fn handle_text_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    match event_type {
+        "TEXT_MESSAGE_START" => {
+            required_identifier(event, index, "messageId")?;
+            optional_identifier(event, index, "name")?;
+            optional_enum(
+                event,
+                index,
+                "role",
+                &["developer", "system", "assistant", "user"],
+            )?;
+        }
+        "TEXT_MESSAGE_CONTENT" => {
+            required_identifier(event, index, "messageId")?;
+            *omitted_bytes += required_string(event, index, "delta")?.len();
+        }
+        "TEXT_MESSAGE_END" => {
+            required_identifier(event, index, "messageId")?;
+        }
+        "TEXT_MESSAGE_CHUNK" => {
+            optional_identifier(event, index, "messageId")?;
+            optional_identifier(event, index, "name")?;
+            optional_enum(
+                event,
+                index,
+                "role",
+                &["developer", "system", "assistant", "user"],
+            )?;
+            *omitted_bytes += optional_string(event, index, "delta")?
+                .map(str::len)
+                .unwrap_or(0);
+        }
+        _ => unreachable!("text handler called with non-text event"),
+    }
+    *omitted_event = true;
+    require_active_run(index, current_run_hash, runs, violations);
+    Ok(())
+}
+
+fn handle_thinking_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    match event_type {
+        "THINKING_START" => {
+            *omitted_bytes += optional_string(event, index, "title")?
+                .map(str::len)
+                .unwrap_or(0);
+        }
+        "THINKING_TEXT_MESSAGE_CONTENT" => {
+            *omitted_bytes += required_string(event, index, "delta")?.len();
+        }
+        "THINKING_END" | "THINKING_TEXT_MESSAGE_START" | "THINKING_TEXT_MESSAGE_END" => {}
+        _ => unreachable!("thinking handler called with non-thinking event"),
+    }
+    *omitted_event = true;
+    require_active_run(index, current_run_hash, runs, violations);
+    Ok(())
+}
+
+fn handle_reasoning_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    match event_type {
+        "REASONING_START"
+        | "REASONING_MESSAGE_START"
+        | "REASONING_MESSAGE_END"
+        | "REASONING_END" => {
+            required_identifier(event, index, "messageId")?;
+            if event_type == "REASONING_MESSAGE_START" {
+                required_literal(event, index, "role", "reasoning")?;
+            }
+        }
+        "REASONING_MESSAGE_CONTENT" => {
+            required_identifier(event, index, "messageId")?;
+            *omitted_bytes += required_string(event, index, "delta")?.len();
+        }
+        "REASONING_MESSAGE_CHUNK" => {
+            optional_identifier(event, index, "messageId")?;
+            *omitted_bytes += optional_string(event, index, "delta")?
+                .map(str::len)
+                .unwrap_or(0);
+        }
+        "REASONING_ENCRYPTED_VALUE" => {
+            required_enum(event, index, "subtype", &["tool-call", "message"])?;
+            required_identifier(event, index, "entityId")?;
+            *omitted_bytes += required_string(event, index, "encryptedValue")?.len();
+        }
+        _ => unreachable!("reasoning handler called with non-reasoning event"),
+    }
+    *omitted_event = true;
+    require_active_run(index, current_run_hash, runs, violations);
+    Ok(())
+}
+
+fn handle_observation_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    match event_type {
+        "STATE_SNAPSHOT" => {
+            handle_state_snapshot(event, index, context, omitted_event, omitted_bytes)
+        }
+        "STATE_DELTA" => handle_state_delta(event, index, context, omitted_event, omitted_bytes),
+        "MESSAGES_SNAPSHOT" => {
+            handle_messages_snapshot(event, index, context, omitted_event, omitted_bytes)
+        }
+        "ACTIVITY_SNAPSHOT" | "ACTIVITY_DELTA" => handle_activity_event(
+            event_type,
+            event,
+            index,
+            context,
+            omitted_event,
+            omitted_bytes,
+        ),
+        "RAW" | "CUSTOM" => handle_extension_event(
+            event_type,
+            event,
+            index,
+            context,
+            omitted_event,
+            omitted_bytes,
+        ),
+        _ => unreachable!("observation handler called with unrelated event"),
+    }
+}
+
+fn handle_state_snapshot(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let snapshot = event
+        .get("snapshot")
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: "snapshot",
+        })?;
+    let bytes = serialized_len(snapshot);
+    *omitted_event = true;
+    *omitted_bytes += bytes;
+    counters.state_snapshot_keys += snapshot.as_object().map_or(0, |value| value.len());
+    counters.state_snapshot_bytes += bytes;
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        projected_events.push(ssb_event(
+            index,
+            "state_observed",
+            &run_hash,
+            "agent_state",
+            "observation",
+            "low",
+            false,
+            "unknown",
+            "ag_ui_state_snapshot_content_omitted",
+        ));
+    }
+    Ok(())
+}
+
+fn handle_state_delta(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let delta_value = event
+        .get("delta")
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: "delta",
+        })?;
+    let delta = delta_value
+        .as_array()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: "delta",
+        })?;
+    let bytes = serialized_len(delta_value);
+    *omitted_event = true;
+    *omitted_bytes += bytes;
+    counters.state_delta_operations += delta.len();
+    counters.state_delta_bytes += bytes;
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        projected_events.push(ssb_event(
+            index,
+            "state_observed",
+            &run_hash,
+            "agent_state",
+            "observation",
+            "low",
+            false,
+            "unknown",
+            "ag_ui_state_delta_paths_and_values_omitted",
+        ));
+    }
+    Ok(())
+}
+
+fn handle_messages_snapshot(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let messages_value = event
+        .get("messages")
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: "messages",
+        })?;
+    let messages = messages_value
+        .as_array()
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: "messages",
+        })?;
+    validate_messages(messages, index)?;
+    *omitted_event = true;
+    *omitted_bytes += serialized_len(messages_value);
+    counters.message_snapshots += 1;
+    counters.messages_observed += messages.len();
+    require_active_run(index, current_run_hash, runs, violations);
+    Ok(())
+}
+
+fn handle_activity_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let message_id = required_identifier(event, index, "messageId")?;
+    required_identifier(event, index, "activityType")?;
+    let payload_field = if event_type == "ACTIVITY_SNAPSHOT" {
+        "content"
+    } else {
+        "patch"
+    };
+    let payload = event
+        .get(payload_field)
+        .ok_or(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: payload_field,
+        })?;
+    if (event_type == "ACTIVITY_SNAPSHOT" && !payload.is_object())
+        || (event_type == "ACTIVITY_DELTA" && !payload.is_array())
+    {
+        return Err(AgUiProjectionError::InvalidEventField {
+            event_index: index,
+            field: payload_field,
+        });
+    }
+    if event_type == "ACTIVITY_SNAPSHOT" {
+        optional_bool(event, index, "replace")?;
+    }
+    let bytes = serialized_len(payload);
+    *omitted_event = true;
+    *omitted_bytes += bytes;
+    counters.activity_events += 1;
+    counters.activity_payload_bytes += bytes;
+    if active_run(index, current_run_hash, runs, violations).is_some() {
+        let message_hash = domain_hash("message", message_id);
+        projected_events.push(ssb_event(
+            index,
+            "activity_observed",
+            &message_hash,
+            "agent_activity",
+            "observation",
+            "low",
+            false,
+            "unknown",
+            "ag_ui_activity_body_omitted",
+        ));
+    }
+    Ok(())
+}
+
+fn handle_extension_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let payload = if event_type == "RAW" {
+        optional_identifier(event, index, "source")?;
+        event
+            .get("event")
             .ok_or(AgUiProjectionError::InvalidEventField {
                 event_index: index,
                 field: "event",
-            })?;
-        let event_type = required_string(event, index, "type")?;
-        validate_base_event_fields(event, index)?;
-        let mut omitted_event = event.contains_key("rawEvent");
-        let mut omitted_bytes = event.get("rawEvent").map(serialized_len).unwrap_or(0);
+            })?
+    } else {
+        required_identifier(event, index, "name")?;
+        event
+            .get("value")
+            .ok_or(AgUiProjectionError::InvalidEventField {
+                event_index: index,
+                field: "value",
+            })?
+    };
+    let bytes = serialized_len(payload);
+    *omitted_event = true;
+    *omitted_bytes += bytes;
+    counters.extension_events += 1;
+    counters.extension_payload_bytes += bytes;
+    require_active_run(index, current_run_hash, runs, violations);
+    Ok(())
+}
 
-        if event_type != "RUN_STARTED"
-            && current_run_hash
-                .as_ref()
-                .and_then(|hash| runs.get(hash))
-                .is_some_and(|run| run.status.is_terminal())
-        {
+fn handle_tool_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    match event_type {
+        "TOOL_CALL_START" => handle_tool_start(event, index, context),
+        "TOOL_CALL_ARGS" => handle_tool_args(event, index, context, omitted_event, omitted_bytes),
+        "TOOL_CALL_END" => handle_tool_end(event, index, context),
+        "TOOL_CALL_RESULT" => {
+            handle_tool_result(event, index, context, omitted_event, omitted_bytes)
+        }
+        "TOOL_CALL_CHUNK" => handle_tool_chunk(event, index, context, omitted_event, omitted_bytes),
+        _ => unreachable!("tool handler called with non-tool event"),
+    }
+}
+
+fn handle_tool_start(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        tool_calls,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let tool_call_id = required_identifier(event, index, "toolCallId")?;
+    let tool_name = required_identifier(event, index, "toolCallName")?;
+    optional_identifier(event, index, "parentMessageId")?;
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        let call_hash = domain_hash("tool-call", tool_call_id);
+        let tool_name_hash = domain_hash("tool-name", tool_name);
+        let mut inserted = false;
+        if let Some(existing) = tool_calls.get(&call_hash) {
             violations.push(Violation {
                 index,
-                code: "event_after_terminal_run",
+                code: if existing.run_id_hash == run_hash {
+                    "duplicate_tool_call_start"
+                } else {
+                    "cross_run_tool_call_id_reuse"
+                },
             });
+        } else {
+            inserted = true;
+            tool_calls.insert(
+                call_hash.clone(),
+                ToolCallProjection {
+                    tool_call_id_hash: call_hash.clone(),
+                    tool_name_hash,
+                    run_id_hash: run_hash,
+                    status: ToolCallStatus::Started,
+                    args_chunks: 0,
+                    args_bytes: 0,
+                    result_size_bucket: None,
+                },
+            );
         }
-
-        match event_type {
-            "RUN_STARTED" => {
-                let thread_id = required_identifier(event, index, "threadId")?;
-                let run_id = required_identifier(event, index, "runId")?;
-                let parent_run_id = optional_identifier(event, index, "parentRunId")?;
-                if let Some(payload) = event.get("input") {
-                    validate_run_input(payload, index)?;
-                    omitted_event = true;
-                    omitted_bytes += serialized_len(payload);
-                    counters.run_payload_bytes += serialized_len(payload);
-                }
-
-                if current_run_hash
-                    .as_ref()
-                    .and_then(|hash| runs.get(hash))
-                    .is_some_and(|run| !run.status.is_terminal())
-                {
-                    violations.push(Violation {
-                        index,
-                        code: "run_started_before_prior_terminal",
-                    });
-                }
-
-                let run_hash = domain_hash("run", run_id);
-                let thread_hash = domain_hash("thread", thread_id);
-                let parent_hash = parent_run_id.map(|value| domain_hash("run", value));
-                let mut inserted = false;
-                if let Some(existing) = runs.get(&run_hash) {
-                    violations.push(Violation {
-                        index,
-                        code: "duplicate_run_start",
-                    });
-                    if existing.thread_id_hash != thread_hash {
-                        violations.push(Violation {
-                            index,
-                            code: "conflicting_thread_id",
-                        });
-                    }
-                } else {
-                    inserted = true;
-                    runs.insert(
-                        run_hash.clone(),
-                        RunProjection {
-                            run_id_hash: run_hash.clone(),
-                            thread_id_hash: thread_hash,
-                            parent_run_id_hash: parent_hash,
-                            error_code_hash: None,
-                            status: RunStatus::Open,
-                        },
-                    );
-                }
-                current_run_hash = Some(run_hash.clone());
-                if inserted {
-                    projected_events.push(ssb_event(
-                        index,
-                        "run_opened",
-                        &run_hash,
-                        "agent_run",
-                        "lifecycle",
-                        "low",
-                        false,
-                        "unknown",
-                        "ag_ui_run_started_observation",
-                    ));
-                }
-            }
-            "RUN_FINISHED" => {
-                let thread_id = required_identifier(event, index, "threadId")?;
-                let run_id = required_identifier(event, index, "runId")?;
-                let run_hash = domain_hash("run", run_id);
-                let thread_hash = domain_hash("thread", thread_id);
-                let interrupted =
-                    validate_run_outcome(event, index, &mut omitted_event, &mut omitted_bytes)?;
-                if let Some(result) = event.get("result") {
-                    omitted_event = true;
-                    let bytes = serialized_len(result);
-                    omitted_bytes += bytes;
-                    counters.run_payload_bytes += bytes;
-                }
-
-                if current_run_hash.as_deref() != Some(run_hash.as_str()) {
-                    violations.push(Violation {
-                        index,
-                        code: "conflicting_run_id",
-                    });
-                }
-                let status = if interrupted {
-                    RunStatus::Interrupted
-                } else {
-                    RunStatus::Finished
-                };
-                let mut transitioned = false;
-                if let Some(run) = runs.get_mut(&run_hash) {
-                    if run.thread_id_hash != thread_hash {
-                        violations.push(Violation {
-                            index,
-                            code: "conflicting_thread_id",
-                        });
-                    }
-                    if run.status.is_terminal() {
-                        violations.push(Violation {
-                            index,
-                            code: "duplicate_run_terminal",
-                        });
-                    } else if run.thread_id_hash == thread_hash
-                        && current_run_hash.as_deref() == Some(run_hash.as_str())
-                    {
-                        run.status = status;
-                        transitioned = true;
-                    }
-                } else {
-                    violations.push(Violation {
-                        index,
-                        code: "run_terminal_before_start",
-                    });
-                }
-                current_run_hash = Some(run_hash.clone());
-                if transitioned {
-                    mark_terminal_open_tools(&run_hash, index, &tool_calls, &mut violations);
-                    mark_terminal_open_steps(&run_hash, index, &open_steps, &mut violations);
-                    projected_events.push(ssb_event(
-                        index,
-                        "run_closed",
-                        &run_hash,
-                        "agent_run",
-                        "lifecycle",
-                        "low",
-                        false,
-                        status.verdict_status(),
-                        if interrupted {
-                            "ag_ui_run_interrupted_observation"
-                        } else {
-                            "ag_ui_run_finished_no_external_effect_readback"
-                        },
-                    ));
-                }
-            }
-            "RUN_ERROR" => {
-                let message = required_string(event, index, "message")?;
-                omitted_event = true;
-                omitted_bytes += message.len();
-                counters.error_message_bytes += message.len();
-                let code = optional_identifier(event, index, "code")?;
-                if let Some(run_hash) = current_run_hash.clone() {
-                    if let Some(run) = runs.get_mut(&run_hash) {
-                        if run.status.is_terminal() {
-                            violations.push(Violation {
-                                index,
-                                code: "duplicate_run_terminal",
-                            });
-                        } else {
-                            run.status = RunStatus::Error;
-                            run.error_code_hash =
-                                code.map(|value| domain_hash("error-code", value));
-                            mark_terminal_open_tools(
-                                &run_hash,
-                                index,
-                                &tool_calls,
-                                &mut violations,
-                            );
-                            mark_terminal_open_steps(
-                                &run_hash,
-                                index,
-                                &open_steps,
-                                &mut violations,
-                            );
-                            projected_events.push(ssb_event(
-                                index,
-                                "run_failed",
-                                &run_hash,
-                                "agent_run",
-                                "lifecycle",
-                                "low",
-                                false,
-                                "not_verified",
-                                "ag_ui_run_error_observation",
-                            ));
-                        }
-                    }
-                } else {
-                    violations.push(Violation {
-                        index,
-                        code: "run_error_before_start",
-                    });
-                }
-            }
-            "STEP_STARTED" | "STEP_FINISHED" => {
-                let step_name = required_identifier(event, index, "stepName")?;
-                let step_hash = domain_hash("step", step_name);
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    let key = (run_hash, step_hash.clone());
-                    let transitioned = if event_type == "STEP_STARTED" {
-                        if open_steps.insert(key) {
-                            true
-                        } else {
-                            violations.push(Violation {
-                                index,
-                                code: "duplicate_step_start",
-                            });
-                            false
-                        }
-                    } else if open_steps.remove(&key) {
-                        true
-                    } else {
-                        violations.push(Violation {
-                            index,
-                            code: "step_finish_before_start",
-                        });
-                        false
-                    };
-                    if transitioned {
-                        projected_events.push(ssb_event(
-                            index,
-                            if event_type == "STEP_STARTED" {
-                                "step_opened"
-                            } else {
-                                "step_closed"
-                            },
-                            &step_hash,
-                            "agent_step",
-                            "lifecycle",
-                            "low",
-                            false,
-                            "unknown",
-                            "ag_ui_step_lifecycle_observation",
-                        ));
-                    }
-                }
-            }
-            "TOOL_CALL_START" => {
-                let tool_call_id = required_identifier(event, index, "toolCallId")?;
-                let tool_name = required_identifier(event, index, "toolCallName")?;
-                optional_identifier(event, index, "parentMessageId")?;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    let call_hash = domain_hash("tool-call", tool_call_id);
-                    let tool_name_hash = domain_hash("tool-name", tool_name);
-                    let mut inserted = false;
-                    if let Some(existing) = tool_calls.get(&call_hash) {
-                        violations.push(Violation {
-                            index,
-                            code: if existing.run_id_hash == run_hash {
-                                "duplicate_tool_call_start"
-                            } else {
-                                "cross_run_tool_call_id_reuse"
-                            },
-                        });
-                    } else {
-                        inserted = true;
-                        tool_calls.insert(
-                            call_hash.clone(),
-                            ToolCallProjection {
-                                tool_call_id_hash: call_hash.clone(),
-                                tool_name_hash,
-                                run_id_hash: run_hash,
-                                status: ToolCallStatus::Started,
-                                args_chunks: 0,
-                                args_bytes: 0,
-                                result_size_bucket: None,
-                            },
-                        );
-                    }
-                    if inserted {
-                        projected_events.push(ssb_event(
-                            index,
-                            "intent_opened",
-                            &call_hash,
-                            "agent_tool_call",
-                            "tool_call",
-                            "medium",
-                            true,
-                            "unknown",
-                            "ag_ui_tool_intent_no_execution_authority",
-                        ));
-                    }
-                }
-            }
-            "TOOL_CALL_ARGS" => {
-                let tool_call_id = required_identifier(event, index, "toolCallId")?;
-                let delta = required_string(event, index, "delta")?;
-                omitted_event = true;
-                omitted_bytes += delta.len();
-                counters.tool_args_chunks += 1;
-                counters.tool_args_bytes += delta.len();
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    let call_hash = domain_hash("tool-call", tool_call_id);
-                    match tool_calls.get_mut(&call_hash) {
-                        None => violations.push(Violation {
-                            index,
-                            code: "tool_args_before_start",
-                        }),
-                        Some(call) if call.run_id_hash != run_hash => violations.push(Violation {
-                            index,
-                            code: "cross_run_tool_call_id_reuse",
-                        }),
-                        Some(call)
-                            if matches!(
-                                call.status,
-                                ToolCallStatus::RequestClosed | ToolCallStatus::ResultObserved
-                            ) =>
-                        {
-                            violations.push(Violation {
-                                index,
-                                code: "tool_args_after_end",
-                            })
-                        }
-                        Some(call) => {
-                            call.status = ToolCallStatus::ArgsObserved;
-                            call.args_chunks += 1;
-                            call.args_bytes += delta.len();
-                        }
-                    }
-                }
-            }
-            "TOOL_CALL_END" => {
-                let tool_call_id = required_identifier(event, index, "toolCallId")?;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    let call_hash = domain_hash("tool-call", tool_call_id);
-                    let mut transitioned = false;
-                    match tool_calls.get_mut(&call_hash) {
-                        None => violations.push(Violation {
-                            index,
-                            code: "tool_end_before_start",
-                        }),
-                        Some(call) if call.run_id_hash != run_hash => violations.push(Violation {
-                            index,
-                            code: "cross_run_tool_call_id_reuse",
-                        }),
-                        Some(call)
-                            if matches!(
-                                call.status,
-                                ToolCallStatus::RequestClosed | ToolCallStatus::ResultObserved
-                            ) =>
-                        {
-                            violations.push(Violation {
-                                index,
-                                code: "duplicate_tool_call_end",
-                            })
-                        }
-                        Some(call) => {
-                            call.status = ToolCallStatus::RequestClosed;
-                            transitioned = true;
-                        }
-                    }
-                    if transitioned {
-                        projected_events.push(ssb_event(
-                            index,
-                            "request_closed",
-                            &call_hash,
-                            "agent_tool_call",
-                            "tool_call",
-                            "medium",
-                            true,
-                            "unknown",
-                            "ag_ui_tool_call_end_no_dispatch_or_effect_proof",
-                        ));
-                    }
-                }
-            }
-            "TOOL_CALL_RESULT" => {
-                required_identifier(event, index, "messageId")?;
-                let tool_call_id = required_identifier(event, index, "toolCallId")?;
-                let content = required_string(event, index, "content")?;
-                optional_literal(event, index, "role", "tool")?;
-                omitted_event = true;
-                omitted_bytes += content.len();
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    let call_hash = domain_hash("tool-call", tool_call_id);
-                    let mut transitioned = false;
-                    match tool_calls.get_mut(&call_hash) {
-                        None => violations.push(Violation {
-                            index,
-                            code: "tool_result_before_start",
-                        }),
-                        Some(call) if call.run_id_hash != run_hash => violations.push(Violation {
-                            index,
-                            code: "cross_run_tool_call_id_reuse",
-                        }),
-                        Some(call) if call.status == ToolCallStatus::ResultObserved => violations
-                            .push(Violation {
-                                index,
-                                code: "duplicate_tool_call_result",
-                            }),
-                        Some(call) if call.status == ToolCallStatus::RequestClosed => {
-                            call.status = ToolCallStatus::ResultObserved;
-                            call.result_size_bucket = Some(size_bucket(content.len()));
-                            transitioned = true;
-                        }
-                        Some(_) => violations.push(Violation {
-                            index,
-                            code: "tool_result_before_end",
-                        }),
-                    }
-                    if transitioned {
-                        projected_events.push(ssb_event(
-                            index,
-                            "result_observed",
-                            &call_hash,
-                            "agent_tool_call",
-                            "tool_call",
-                            "medium",
-                            true,
-                            "unknown",
-                            "ag_ui_tool_result_content_has_no_normative_effect_readback",
-                        ));
-                    }
-                }
-            }
-            "TOOL_CALL_CHUNK" => {
-                optional_identifier(event, index, "toolCallId")?;
-                optional_identifier(event, index, "toolCallName")?;
-                optional_identifier(event, index, "parentMessageId")?;
-                let delta = optional_string(event, index, "delta")?;
-                omitted_event = true;
-                let bytes = delta.map(str::len).unwrap_or(0);
-                omitted_bytes += bytes;
-                counters.tool_chunk_events += 1;
-                counters.tool_chunk_bytes += bytes;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "STATE_SNAPSHOT" => {
-                let snapshot =
-                    event
-                        .get("snapshot")
-                        .ok_or(AgUiProjectionError::InvalidEventField {
-                            event_index: index,
-                            field: "snapshot",
-                        })?;
-                let bytes = serialized_len(snapshot);
-                omitted_event = true;
-                omitted_bytes += bytes;
-                counters.state_snapshot_keys += snapshot.as_object().map_or(0, |value| value.len());
-                counters.state_snapshot_bytes += bytes;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    projected_events.push(ssb_event(
-                        index,
-                        "state_observed",
-                        &run_hash,
-                        "agent_state",
-                        "observation",
-                        "low",
-                        false,
-                        "unknown",
-                        "ag_ui_state_snapshot_content_omitted",
-                    ));
-                }
-            }
-            "STATE_DELTA" => {
-                let delta_value =
-                    event
-                        .get("delta")
-                        .ok_or(AgUiProjectionError::InvalidEventField {
-                            event_index: index,
-                            field: "delta",
-                        })?;
-                let delta =
-                    delta_value
-                        .as_array()
-                        .ok_or(AgUiProjectionError::InvalidEventField {
-                            event_index: index,
-                            field: "delta",
-                        })?;
-                let bytes = serialized_len(delta_value);
-                omitted_event = true;
-                omitted_bytes += bytes;
-                counters.state_delta_operations += delta.len();
-                counters.state_delta_bytes += bytes;
-                if let Some(run_hash) = active_run(index, &current_run_hash, &runs, &mut violations)
-                {
-                    projected_events.push(ssb_event(
-                        index,
-                        "state_observed",
-                        &run_hash,
-                        "agent_state",
-                        "observation",
-                        "low",
-                        false,
-                        "unknown",
-                        "ag_ui_state_delta_paths_and_values_omitted",
-                    ));
-                }
-            }
-            "MESSAGES_SNAPSHOT" => {
-                let messages_value =
-                    event
-                        .get("messages")
-                        .ok_or(AgUiProjectionError::InvalidEventField {
-                            event_index: index,
-                            field: "messages",
-                        })?;
-                let messages =
-                    messages_value
-                        .as_array()
-                        .ok_or(AgUiProjectionError::InvalidEventField {
-                            event_index: index,
-                            field: "messages",
-                        })?;
-                validate_messages(messages, index)?;
-                omitted_event = true;
-                omitted_bytes += serialized_len(messages_value);
-                counters.message_snapshots += 1;
-                counters.messages_observed += messages.len();
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "ACTIVITY_SNAPSHOT" | "ACTIVITY_DELTA" => {
-                let message_id = required_identifier(event, index, "messageId")?;
-                required_identifier(event, index, "activityType")?;
-                let payload_field = if event_type == "ACTIVITY_SNAPSHOT" {
-                    "content"
-                } else {
-                    "patch"
-                };
-                let payload =
-                    event
-                        .get(payload_field)
-                        .ok_or(AgUiProjectionError::InvalidEventField {
-                            event_index: index,
-                            field: payload_field,
-                        })?;
-                if (event_type == "ACTIVITY_SNAPSHOT" && !payload.is_object())
-                    || (event_type == "ACTIVITY_DELTA" && !payload.is_array())
-                {
-                    return Err(AgUiProjectionError::InvalidEventField {
-                        event_index: index,
-                        field: payload_field,
-                    });
-                }
-                if event_type == "ACTIVITY_SNAPSHOT" {
-                    optional_bool(event, index, "replace")?;
-                }
-                let bytes = serialized_len(payload);
-                omitted_event = true;
-                omitted_bytes += bytes;
-                counters.activity_events += 1;
-                counters.activity_payload_bytes += bytes;
-                if active_run(index, &current_run_hash, &runs, &mut violations).is_some() {
-                    let message_hash = domain_hash("message", message_id);
-                    projected_events.push(ssb_event(
-                        index,
-                        "activity_observed",
-                        &message_hash,
-                        "agent_activity",
-                        "observation",
-                        "low",
-                        false,
-                        "unknown",
-                        "ag_ui_activity_body_omitted",
-                    ));
-                }
-            }
-            "RAW" => {
-                optional_identifier(event, index, "source")?;
-                let payload = event
-                    .get("event")
-                    .ok_or(AgUiProjectionError::InvalidEventField {
-                        event_index: index,
-                        field: "event",
-                    })?;
-                let bytes = serialized_len(payload);
-                omitted_event = true;
-                omitted_bytes += bytes;
-                counters.extension_events += 1;
-                counters.extension_payload_bytes += bytes;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "CUSTOM" => {
-                required_identifier(event, index, "name")?;
-                let payload = event
-                    .get("value")
-                    .ok_or(AgUiProjectionError::InvalidEventField {
-                        event_index: index,
-                        field: "value",
-                    })?;
-                let bytes = serialized_len(payload);
-                omitted_event = true;
-                omitted_bytes += bytes;
-                counters.extension_events += 1;
-                counters.extension_payload_bytes += bytes;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "TEXT_MESSAGE_START" => {
-                required_identifier(event, index, "messageId")?;
-                optional_identifier(event, index, "name")?;
-                optional_enum(
-                    event,
-                    index,
-                    "role",
-                    &["developer", "system", "assistant", "user"],
-                )?;
-                omitted_event = true;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "TEXT_MESSAGE_CONTENT" => {
-                required_identifier(event, index, "messageId")?;
-                let delta = required_string(event, index, "delta")?;
-                omitted_event = true;
-                omitted_bytes += delta.len();
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "TEXT_MESSAGE_END" => {
-                required_identifier(event, index, "messageId")?;
-                omitted_event = true;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "TEXT_MESSAGE_CHUNK" => {
-                optional_identifier(event, index, "messageId")?;
-                optional_identifier(event, index, "name")?;
-                optional_enum(
-                    event,
-                    index,
-                    "role",
-                    &["developer", "system", "assistant", "user"],
-                )?;
-                let delta = optional_string(event, index, "delta")?;
-                omitted_event = true;
-                omitted_bytes += delta.map(str::len).unwrap_or(0);
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "THINKING_START" => {
-                let title = optional_string(event, index, "title")?;
-                omitted_event = true;
-                omitted_bytes += title.map(str::len).unwrap_or(0);
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "THINKING_END" | "THINKING_TEXT_MESSAGE_START" | "THINKING_TEXT_MESSAGE_END" => {
-                omitted_event = true;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "THINKING_TEXT_MESSAGE_CONTENT" => {
-                let delta = required_string(event, index, "delta")?;
-                omitted_event = true;
-                omitted_bytes += delta.len();
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "REASONING_START"
-            | "REASONING_MESSAGE_START"
-            | "REASONING_MESSAGE_END"
-            | "REASONING_END" => {
-                required_identifier(event, index, "messageId")?;
-                if event_type == "REASONING_MESSAGE_START" {
-                    required_literal(event, index, "role", "reasoning")?;
-                }
-                omitted_event = true;
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "REASONING_MESSAGE_CONTENT" => {
-                required_identifier(event, index, "messageId")?;
-                let delta = required_string(event, index, "delta")?;
-                omitted_event = true;
-                omitted_bytes += delta.len();
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "REASONING_MESSAGE_CHUNK" => {
-                optional_identifier(event, index, "messageId")?;
-                let delta = optional_string(event, index, "delta")?;
-                omitted_event = true;
-                omitted_bytes += delta.map(str::len).unwrap_or(0);
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            "REASONING_ENCRYPTED_VALUE" => {
-                required_enum(event, index, "subtype", &["tool-call", "message"])?;
-                required_identifier(event, index, "entityId")?;
-                let encrypted = required_string(event, index, "encryptedValue")?;
-                omitted_event = true;
-                omitted_bytes += encrypted.len();
-                require_active_run(index, &current_run_hash, &runs, &mut violations);
-            }
-            _ => {
-                counters.unknown_event_types += 1;
-                omitted_event = true;
-                omitted_bytes = serialized_len(event_value);
-            }
-        }
-
-        if omitted_event {
-            counters.omitted_content_events += 1;
-            counters.content_bytes_omitted += omitted_bytes;
+        if inserted {
+            projected_events.push(ssb_event(
+                index,
+                "intent_opened",
+                &call_hash,
+                "agent_tool_call",
+                "tool_call",
+                "medium",
+                true,
+                "unknown",
+                "ag_ui_tool_intent_no_execution_authority",
+            ));
         }
     }
+    Ok(())
+}
 
-    for call in tool_calls.values() {
-        if call.status.is_open() {
+fn handle_tool_args(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        tool_calls,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let tool_call_id = required_identifier(event, index, "toolCallId")?;
+    let delta = required_string(event, index, "delta")?;
+    *omitted_event = true;
+    *omitted_bytes += delta.len();
+    counters.tool_args_chunks += 1;
+    counters.tool_args_bytes += delta.len();
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        let call_hash = domain_hash("tool-call", tool_call_id);
+        match tool_calls.get_mut(&call_hash) {
+            None => violations.push(Violation {
+                index,
+                code: "tool_args_before_start",
+            }),
+            Some(call) if call.run_id_hash != run_hash => violations.push(Violation {
+                index,
+                code: "cross_run_tool_call_id_reuse",
+            }),
+            Some(call)
+                if matches!(
+                    call.status,
+                    ToolCallStatus::RequestClosed | ToolCallStatus::ResultObserved
+                ) =>
+            {
+                violations.push(Violation {
+                    index,
+                    code: "tool_args_after_end",
+                });
+            }
+            Some(call) => {
+                call.status = ToolCallStatus::ArgsObserved;
+                call.args_chunks += 1;
+                call.args_bytes += delta.len();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_tool_end(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        tool_calls,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let tool_call_id = required_identifier(event, index, "toolCallId")?;
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        let call_hash = domain_hash("tool-call", tool_call_id);
+        let mut transitioned = false;
+        match tool_calls.get_mut(&call_hash) {
+            None => violations.push(Violation {
+                index,
+                code: "tool_end_before_start",
+            }),
+            Some(call) if call.run_id_hash != run_hash => violations.push(Violation {
+                index,
+                code: "cross_run_tool_call_id_reuse",
+            }),
+            Some(call)
+                if matches!(
+                    call.status,
+                    ToolCallStatus::RequestClosed | ToolCallStatus::ResultObserved
+                ) =>
+            {
+                violations.push(Violation {
+                    index,
+                    code: "duplicate_tool_call_end",
+                });
+            }
+            Some(call) => {
+                call.status = ToolCallStatus::RequestClosed;
+                transitioned = true;
+            }
+        }
+        if transitioned {
+            projected_events.push(ssb_event(
+                index,
+                "request_closed",
+                &call_hash,
+                "agent_tool_call",
+                "tool_call",
+                "medium",
+                true,
+                "unknown",
+                "ag_ui_tool_call_end_no_dispatch_or_effect_proof",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn handle_tool_result(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        tool_calls,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    required_identifier(event, index, "messageId")?;
+    let tool_call_id = required_identifier(event, index, "toolCallId")?;
+    let content = required_string(event, index, "content")?;
+    optional_literal(event, index, "role", "tool")?;
+    *omitted_event = true;
+    *omitted_bytes += content.len();
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        let call_hash = domain_hash("tool-call", tool_call_id);
+        let mut transitioned = false;
+        match tool_calls.get_mut(&call_hash) {
+            None => violations.push(Violation {
+                index,
+                code: "tool_result_before_start",
+            }),
+            Some(call) if call.run_id_hash != run_hash => violations.push(Violation {
+                index,
+                code: "cross_run_tool_call_id_reuse",
+            }),
+            Some(call) if call.status == ToolCallStatus::ResultObserved => {
+                violations.push(Violation {
+                    index,
+                    code: "duplicate_tool_call_result",
+                });
+            }
+            Some(call) if call.status == ToolCallStatus::RequestClosed => {
+                call.status = ToolCallStatus::ResultObserved;
+                call.result_size_bucket = Some(size_bucket(content.len()));
+                transitioned = true;
+            }
+            Some(_) => violations.push(Violation {
+                index,
+                code: "tool_result_before_end",
+            }),
+        }
+        if transitioned {
+            projected_events.push(ssb_event(
+                index,
+                "result_observed",
+                &call_hash,
+                "agent_tool_call",
+                "tool_call",
+                "medium",
+                true,
+                "unknown",
+                "ag_ui_tool_result_content_has_no_normative_effect_readback",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn handle_tool_chunk(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    optional_identifier(event, index, "toolCallId")?;
+    optional_identifier(event, index, "toolCallName")?;
+    optional_identifier(event, index, "parentMessageId")?;
+    let delta = optional_string(event, index, "delta")?;
+    *omitted_event = true;
+    let bytes = delta.map(str::len).unwrap_or(0);
+    *omitted_bytes += bytes;
+    counters.tool_chunk_events += 1;
+    counters.tool_chunk_bytes += bytes;
+    require_active_run(index, current_run_hash, runs, violations);
+    Ok(())
+}
+
+fn handle_step_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        runs,
+        open_steps,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let step_name = required_identifier(event, index, "stepName")?;
+    let step_hash = domain_hash("step", step_name);
+    if let Some(run_hash) = active_run(index, current_run_hash, runs, violations) {
+        let key = (run_hash, step_hash.clone());
+        let transitioned = if event_type == "STEP_STARTED" {
+            if open_steps.insert(key) {
+                true
+            } else {
+                violations.push(Violation {
+                    index,
+                    code: "duplicate_step_start",
+                });
+                false
+            }
+        } else if open_steps.remove(&key) {
+            true
+        } else {
             violations.push(Violation {
-                index: events.len(),
-                code: "open_tool_call_at_batch_end",
+                index,
+                code: "step_finish_before_start",
             });
+            false
+        };
+        if transitioned {
+            projected_events.push(ssb_event(
+                index,
+                if event_type == "STEP_STARTED" {
+                    "step_opened"
+                } else {
+                    "step_closed"
+                },
+                &step_hash,
+                "agent_step",
+                "lifecycle",
+                "low",
+                false,
+                "unknown",
+                "ag_ui_step_lifecycle_observation",
+            ));
         }
     }
-    for _ in &open_steps {
+    Ok(())
+}
+
+fn handle_run_event(
+    event_type: &str,
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    match event_type {
+        "RUN_STARTED" => handle_run_started(event, index, context, omitted_event, omitted_bytes),
+        "RUN_FINISHED" => handle_run_finished(event, index, context, omitted_event, omitted_bytes),
+        "RUN_ERROR" => handle_run_error(event, index, context, omitted_event, omitted_bytes),
+        _ => unreachable!("run handler called with non-run event"),
+    }
+}
+
+fn handle_run_started(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        projected_events,
+        violations,
+        current_run_hash,
+        ..
+    } = context;
+    let thread_id = required_identifier(event, index, "threadId")?;
+    let run_id = required_identifier(event, index, "runId")?;
+    let parent_run_id = optional_identifier(event, index, "parentRunId")?;
+    if let Some(payload) = event.get("input") {
+        validate_run_input(payload, index)?;
+        *omitted_event = true;
+        let bytes = serialized_len(payload);
+        *omitted_bytes += bytes;
+        counters.run_payload_bytes += bytes;
+    }
+
+    if current_run_hash
+        .as_ref()
+        .and_then(|hash| runs.get(hash))
+        .is_some_and(|run| !run.status.is_terminal())
+    {
         violations.push(Violation {
-            index: events.len(),
-            code: "open_step_at_batch_end",
+            index,
+            code: "run_started_before_prior_terminal",
         });
     }
 
-    let stream_complete = counters.unknown_event_types == 0
-        && violations.is_empty()
-        && !runs.is_empty()
-        && runs.values().all(|run| run.status.is_terminal())
-        && tool_calls.values().all(|call| !call.status.is_open())
-        && open_steps.is_empty();
-
-    let run_values = runs
-        .values()
-        .map(RunProjection::to_json)
-        .collect::<Vec<_>>();
-    let tool_values = tool_calls
-        .values()
-        .map(ToolCallProjection::to_json)
-        .collect::<Vec<_>>();
-    let violation_values = violations
-        .iter()
-        .map(Violation::to_json)
-        .collect::<Vec<_>>();
-
-    Ok(json!({
-        "schema": PROJECTION_SCHEMA,
-        "read_only": true,
-        "executes_actions": false,
-        "writes_store": false,
-        "changes_policy": false,
-        "protocol": {
-            "name": PROTOCOL_NAME,
-            "core_version": CORE_VERSION,
-        },
-        "counts": {
-            "input_events": events.len(),
-            "projected_events": projected_events.len(),
-            "omitted_content_events": counters.omitted_content_events,
-            "unknown_event_types": counters.unknown_event_types,
-            "violations": violations.len(),
-        },
-        "observations": {
-            "content_bytes_omitted": counters.content_bytes_omitted,
-            "tool_args_chunks": counters.tool_args_chunks,
-            "tool_args_bytes": counters.tool_args_bytes,
-            "tool_chunk_events": counters.tool_chunk_events,
-            "tool_chunk_bytes": counters.tool_chunk_bytes,
-            "message_snapshots": counters.message_snapshots,
-            "messages_observed": counters.messages_observed,
-            "state_snapshot_keys": counters.state_snapshot_keys,
-            "state_snapshot_bytes": counters.state_snapshot_bytes,
-            "state_delta_operations": counters.state_delta_operations,
-            "state_delta_bytes": counters.state_delta_bytes,
-            "activity_events": counters.activity_events,
-            "activity_payload_bytes": counters.activity_payload_bytes,
-            "extension_events": counters.extension_events,
-            "extension_payload_bytes": counters.extension_payload_bytes,
-            "error_message_bytes": counters.error_message_bytes,
-            "run_payload_bytes": counters.run_payload_bytes,
-        },
-        "runs": run_values,
-        "tool_calls": tool_values,
-        "projected_events": projected_events,
-        "violations": violation_values,
-        "claims": {
-            "all_actions_traceable": false,
-            "external_effects_verified": false,
-            "stream_complete": stream_complete,
+    let run_hash = domain_hash("run", run_id);
+    let thread_hash = domain_hash("thread", thread_id);
+    let parent_hash = parent_run_id.map(|value| domain_hash("run", value));
+    let mut inserted = false;
+    if let Some(existing) = runs.get(&run_hash) {
+        violations.push(Violation {
+            index,
+            code: "duplicate_run_start",
+        });
+        if existing.thread_id_hash != thread_hash {
+            violations.push(Violation {
+                index,
+                code: "conflicting_thread_id",
+            });
         }
-    }))
+    } else {
+        inserted = true;
+        runs.insert(
+            run_hash.clone(),
+            RunProjection {
+                run_id_hash: run_hash.clone(),
+                thread_id_hash: thread_hash,
+                parent_run_id_hash: parent_hash,
+                error_code_hash: None,
+                status: RunStatus::Open,
+            },
+        );
+    }
+    *current_run_hash = Some(run_hash.clone());
+    if inserted {
+        projected_events.push(ssb_event(
+            index,
+            "run_opened",
+            &run_hash,
+            "agent_run",
+            "lifecycle",
+            "low",
+            false,
+            "unknown",
+            "ag_ui_run_started_observation",
+        ));
+    }
+    Ok(())
+}
+
+fn handle_run_finished(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        tool_calls,
+        open_steps,
+        projected_events,
+        violations,
+        current_run_hash,
+    } = context;
+    let thread_id = required_identifier(event, index, "threadId")?;
+    let run_id = required_identifier(event, index, "runId")?;
+    let run_hash = domain_hash("run", run_id);
+    let thread_hash = domain_hash("thread", thread_id);
+    let interrupted = validate_run_outcome(event, index, omitted_event, omitted_bytes)?;
+    if let Some(result) = event.get("result") {
+        *omitted_event = true;
+        let bytes = serialized_len(result);
+        *omitted_bytes += bytes;
+        counters.run_payload_bytes += bytes;
+    }
+
+    if current_run_hash.as_deref() != Some(run_hash.as_str()) {
+        violations.push(Violation {
+            index,
+            code: "conflicting_run_id",
+        });
+    }
+    let status = if interrupted {
+        RunStatus::Interrupted
+    } else {
+        RunStatus::Finished
+    };
+    let mut transitioned = false;
+    if let Some(run) = runs.get_mut(&run_hash) {
+        if run.thread_id_hash != thread_hash {
+            violations.push(Violation {
+                index,
+                code: "conflicting_thread_id",
+            });
+        }
+        if run.status.is_terminal() {
+            violations.push(Violation {
+                index,
+                code: "duplicate_run_terminal",
+            });
+        } else if run.thread_id_hash == thread_hash
+            && current_run_hash.as_deref() == Some(run_hash.as_str())
+        {
+            run.status = status;
+            transitioned = true;
+        }
+    } else {
+        violations.push(Violation {
+            index,
+            code: "run_terminal_before_start",
+        });
+    }
+    *current_run_hash = Some(run_hash.clone());
+    if transitioned {
+        mark_terminal_open_tools(&run_hash, index, tool_calls, violations);
+        mark_terminal_open_steps(&run_hash, index, open_steps, violations);
+        projected_events.push(ssb_event(
+            index,
+            "run_closed",
+            &run_hash,
+            "agent_run",
+            "lifecycle",
+            "low",
+            false,
+            status.verdict_status(),
+            if interrupted {
+                "ag_ui_run_interrupted_observation"
+            } else {
+                "ag_ui_run_finished_no_external_effect_readback"
+            },
+        ));
+    }
+    Ok(())
+}
+
+fn handle_run_error(
+    event: &serde_json::Map<String, Value>,
+    index: usize,
+    context: ProjectionContext<'_>,
+    omitted_event: &mut bool,
+    omitted_bytes: &mut usize,
+) -> Result<(), AgUiProjectionError> {
+    let ProjectionContext {
+        counters,
+        runs,
+        tool_calls,
+        open_steps,
+        projected_events,
+        violations,
+        current_run_hash,
+    } = context;
+    let message = required_string(event, index, "message")?;
+    *omitted_event = true;
+    *omitted_bytes += message.len();
+    counters.error_message_bytes += message.len();
+    let code = optional_identifier(event, index, "code")?;
+    if let Some(run_hash) = current_run_hash.clone() {
+        if let Some(run) = runs.get_mut(&run_hash) {
+            if run.status.is_terminal() {
+                violations.push(Violation {
+                    index,
+                    code: "duplicate_run_terminal",
+                });
+            } else {
+                run.status = RunStatus::Error;
+                run.error_code_hash = code.map(|value| domain_hash("error-code", value));
+                mark_terminal_open_tools(&run_hash, index, tool_calls, violations);
+                mark_terminal_open_steps(&run_hash, index, open_steps, violations);
+                projected_events.push(ssb_event(
+                    index,
+                    "run_failed",
+                    &run_hash,
+                    "agent_run",
+                    "lifecycle",
+                    "low",
+                    false,
+                    "not_verified",
+                    "ag_ui_run_error_observation",
+                ));
+            }
+        }
+    } else {
+        violations.push(Violation {
+            index,
+            code: "run_error_before_start",
+        });
+    }
+    Ok(())
 }
 
 /// Return an RFC 8785/JCS-style canonical JSON encoding for deterministic receipts.
@@ -1937,6 +2427,15 @@ mod tests {
         serde_json::from_str(source).expect("valid fixture")
     }
 
+    fn request_with_events(events: Vec<Value>) -> Value {
+        json!({
+            "schema": REQUEST_SCHEMA,
+            "protocol": {"name": PROTOCOL_NAME, "core_version": CORE_VERSION},
+            "source": {"adapter_id": "property-corpus", "agent_id_hash": "agent"},
+            "events": events,
+        })
+    }
+
     fn verdict_statuses(value: &Value, output: &mut Vec<String>) {
         match value {
             Value::Array(values) => {
@@ -2152,6 +2651,167 @@ mod tests {
         assert!(!actions.contains(&"request_closed"));
         assert!(!actions.contains(&"result_observed"));
         assert_eq!(output["claims"]["stream_complete"], false);
+    }
+
+    #[test]
+    fn exhaustive_tool_transition_sequences_remain_fail_closed() {
+        const ACTION_ORDER: [&str; 3] = ["intent_opened", "request_closed", "result_observed"];
+        for sequence_len in 0..=5_u32 {
+            for mut sequence_code in 0..4_usize.pow(sequence_len) {
+                let mut events = vec![json!({
+                    "type": "RUN_STARTED",
+                    "threadId": "thread",
+                    "runId": "run"
+                })];
+                for _ in 0..sequence_len {
+                    let event = match sequence_code % 4 {
+                        0 => json!({
+                            "type": "TOOL_CALL_START",
+                            "toolCallId": "call",
+                            "toolCallName": "tool"
+                        }),
+                        1 => json!({
+                            "type": "TOOL_CALL_ARGS",
+                            "toolCallId": "call",
+                            "delta": "sequence-canary-args"
+                        }),
+                        2 => json!({"type": "TOOL_CALL_END", "toolCallId": "call"}),
+                        _ => json!({
+                            "type": "TOOL_CALL_RESULT",
+                            "messageId": "message",
+                            "toolCallId": "call",
+                            "content": "sequence-canary-result",
+                            "role": "tool"
+                        }),
+                    };
+                    events.push(event);
+                    sequence_code /= 4;
+                }
+                events.push(json!({
+                    "type": "RUN_FINISHED",
+                    "threadId": "thread",
+                    "runId": "run"
+                }));
+
+                let input = request_with_events(events);
+                let output = project_ag_ui_readonly(&input).expect("valid transition corpus case");
+                let actions = output["projected_events"]
+                    .as_array()
+                    .expect("projected events")
+                    .iter()
+                    .filter(|event| event["object"]["object_type"] == "agent_tool_call")
+                    .filter_map(|event| event["action"].as_str())
+                    .collect::<Vec<_>>();
+                assert!(actions.len() <= ACTION_ORDER.len());
+                assert_eq!(actions, ACTION_ORDER[..actions.len()]);
+                assert_eq!(output["claims"]["external_effects_verified"], false);
+
+                let mut statuses = Vec::new();
+                verdict_statuses(&output, &mut statuses);
+                assert!(statuses.iter().all(|status| status != "verified"));
+                let serialized = serde_json::to_string(&output).expect("serialized projection");
+                assert!(!serialized.contains("sequence-canary"));
+            }
+        }
+    }
+
+    #[test]
+    fn deterministic_mixed_sequence_corpus_preserves_projection_invariants() {
+        for seed in 0..128_u64 {
+            let mut generator = seed;
+            let mut events = vec![json!({
+                "type": "RUN_STARTED",
+                "threadId": "thread",
+                "runId": "run"
+            })];
+            for _ in 0..12 {
+                generator = generator
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                let event = match generator % 12 {
+                    0 => json!({"type": "STEP_STARTED", "stepName": "step"}),
+                    1 => json!({"type": "STEP_FINISHED", "stepName": "step"}),
+                    2 => json!({
+                        "type": "TOOL_CALL_START",
+                        "toolCallId": "call",
+                        "toolCallName": "tool"
+                    }),
+                    3 => json!({
+                        "type": "TOOL_CALL_ARGS",
+                        "toolCallId": "call",
+                        "delta": "mixed-sequence-canary"
+                    }),
+                    4 => json!({"type": "TOOL_CALL_END", "toolCallId": "call"}),
+                    5 => json!({
+                        "type": "TOOL_CALL_RESULT",
+                        "messageId": "message",
+                        "toolCallId": "call",
+                        "content": "mixed-sequence-canary",
+                        "role": "tool"
+                    }),
+                    6 => json!({
+                        "type": "STATE_SNAPSHOT",
+                        "snapshot": {"private": "mixed-sequence-canary"}
+                    }),
+                    7 => json!({
+                        "type": "STATE_DELTA",
+                        "delta": [{"op": "replace", "path": "/private", "value": "mixed-sequence-canary"}]
+                    }),
+                    8 => json!({
+                        "type": "ACTIVITY_SNAPSHOT",
+                        "messageId": "message",
+                        "activityType": "progress",
+                        "content": {"private": "mixed-sequence-canary"}
+                    }),
+                    9 => json!({
+                        "type": "TEXT_MESSAGE_CONTENT",
+                        "messageId": "message",
+                        "delta": "mixed-sequence-canary"
+                    }),
+                    10 => json!({
+                        "type": "CUSTOM",
+                        "name": "extension",
+                        "value": {"private": "mixed-sequence-canary"}
+                    }),
+                    _ => json!({
+                        "type": "FUTURE_PRIVATE_EVENT",
+                        "private": "mixed-sequence-canary"
+                    }),
+                };
+                events.push(event);
+            }
+            events.push(json!({
+                "type": "RUN_FINISHED",
+                "threadId": "thread",
+                "runId": "run"
+            }));
+
+            let input = request_with_events(events);
+            let first = project_ag_ui_readonly(&input).expect("first projection");
+            let second = project_ag_ui_readonly(&input).expect("second projection");
+            assert_eq!(first, second);
+            assert_eq!(first["claims"]["external_effects_verified"], false);
+            assert_eq!(
+                first["counts"]["projected_events"].as_u64(),
+                Some(
+                    first["projected_events"]
+                        .as_array()
+                        .expect("projected events")
+                        .len() as u64
+                )
+            );
+            assert!(first["projected_events"]
+                .as_array()
+                .expect("projected events")
+                .windows(2)
+                .all(|pair| pair[0]["event_index"].as_u64() <= pair[1]["event_index"].as_u64()));
+            let mut statuses = Vec::new();
+            verdict_statuses(&first, &mut statuses);
+            assert!(statuses.iter().all(|status| status != "verified"));
+            assert!(!serde_json::to_string(&first)
+                .expect("serialized projection")
+                .contains("mixed-sequence-canary"));
+        }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # AG-UI -> Semantic System Bus Read-Only Adapter v0
 
 - Date: 2026-08-23
-- Status: hardened pure implementation candidate; no MCP or runtime wiring
+- Status: maintainability-hardened pure implementation candidate; no MCP or runtime wiring
 - External wire pin: `@ag-ui/core@0.0.57`
 - External source pin: `ag-ui-protocol/ag-ui@54f13419055b4d0f442c71e1efab18b310982ce1`
 - Reference consumer: `CopilotKit/OpenBot@2251ad266406ec8212235adba365d2c478437a0c`
@@ -259,7 +259,11 @@ independent review may admit a read-only MCP wrapper only after the pure tests a
   projection; malformed known events fail the whole batch;
 - `STATE_SNAPSHOT.snapshot` accepts any JSON value, matching the pinned `StateSchema`;
 - invalid tool and step transitions produce violations without normal semantic events;
-- focused unit gate: 14 passed, 0 failed;
+- the public entrypoint delegates to bounded request validation, an explicit projection state, and
+  run/step/tool/observation/content event-family handlers instead of one monolithic dispatcher;
+- deterministic sequence property corpora exhaust every tool transition sequence through length
+  five and exercise 128 mixed-event streams without adding a fuzzing runtime dependency;
+- focused unit gate: 16 passed, 0 failed;
 - `mcp_tools.rs`, store adapters, policy, leases, transports, process control, browser, and mobile
   code are unchanged.
 
@@ -280,7 +284,7 @@ Not part of P1:
 
 ## Gate
 
-Current verdict: `P1_HARDENED_CANDIDATE_READY_FOR_READ_ONLY_REVIEW`.
+Current verdict: `P1_MAINTAINABILITY_AND_SEQUENCE_CORPUS_READY_FOR_INDEPENDENT_REVIEW`.
 
 The next gate is independent review of mapping fidelity, content minimization, ordering rules, and
 the assertion that no AG-UI lifecycle event can be laundered into a verified real-world outcome.
