@@ -111,7 +111,7 @@ estimates under this frozen shadow policy, not observed execution.
 ## Measurement and next gate
 
 Retain only privacy-minimal reports for real, manually identified candidates.
-Review:
+Classify every retained report explicitly at review time, then review:
 
 - eligible versus suppressed counts by typed trigger;
 - suppression reasons, especially foreground collision and quiet hours;
@@ -120,11 +120,44 @@ Review:
 - owner labels on any later explicit M1 wakes; and
 - false-positive, stale, distracting, or harmful candidate reports.
 
+The read-only review command is:
+
+```text
+agent-bridge resident shadow-review \
+  --natural-report-id <real-task-report> \
+  --mechanics-report-id <technical-acceptance-report>
+```
+
+Both options are repeatable. The natural/mechanics classification is an
+explicit invocation-local operating assertion: it is neither persisted nor
+cryptographically authenticated. Every report currently in the private
+ledger must be classified for the packet to become ready; leaving reports
+unclassified cannot produce a partial or cherry-picked ready result. Unknown,
+duplicate, or overlapping report IDs fail closed.
+
+The review packet remains `collecting` until all of the following are true:
+
+- at least three natural real-task reports exist;
+- those reports cover at least two distinct typed trigger kinds;
+- at least one natural report says `would_wake=true`;
+- at least one natural report was suppressed;
+- every report retains a valid useful-owner basis and the exact safe boundary;
+- aggregate actual provider calls and wakes remain zero; and
+- no later `distracting` or `harmful` owner label is active.
+
+A passing packet says only
+`owner_review_of_candidate_source_design_only`. It hard-codes
+`m2_admitted=false` and grants no source, schedule, provider, wake, tool,
+action, runtime, or memory authority. The command acquires no writer lease and
+does not create, rewrite, relabel, or touch report files.
+
 Source tests and one current-state report prove mechanics, not unattended-wake
-value. The next gate requires natural real-task candidates, owner review of
-their counterfactual decisions, and a separate decision on candidate-source,
-frequency, quiet-hour, cost, and stop controls. Until then, adding discovery,
-a timer, a scheduler, or any real provider invocation is prohibited.
+value. The current report must be classified as mechanics evidence, leaving
+zero natural reports. The next gate requires the natural real-task evidence
+above, owner review of its counterfactual decisions, and a separate decision
+on candidate-source, frequency, quiet-hour, cost, and stop controls. Until
+then, adding discovery, a timer, a scheduler, or any real provider invocation
+is prohibited.
 
 Two increments without observed use-value refreeze the lane. Any stop label,
 raw-content persistence, unexpected provider/tool event, wake creation,

@@ -943,6 +943,19 @@ enum ResidentOp {
         #[arg(long)]
         record: bool,
     },
+    /// Review private M2 shadow evidence without modifying reports or waking.
+    ///
+    /// Classifications are explicit, invocation-local operating assertions;
+    /// they are not persisted or cryptographically authenticated. A ready
+    /// packet permits only a separate owner review, never M2 admission.
+    ShadowReview {
+        /// Real-task report ID. Repeat for each natural candidate report.
+        #[arg(long = "natural-report-id")]
+        natural_report_ids: Vec<String>,
+        /// Mechanics-only report ID. Repeat for each technical acceptance report.
+        #[arg(long = "mechanics-report-id")]
+        mechanics_report_ids: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -5249,6 +5262,19 @@ async fn real_main() -> Result<()> {
                 options.record = *record;
                 let packet =
                     ab_bridge::resident_m2_shadow::evaluate_resident_m2_shadow(options)?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+                Ok(())
+            }
+            ResidentOp::ShadowReview {
+                natural_report_ids,
+                mechanics_report_ids,
+            } => {
+                let mut options =
+                    ab_bridge::resident_m2_shadow::ResidentM2ShadowReviewOptions::new();
+                options.natural_report_ids = natural_report_ids.clone();
+                options.mechanics_report_ids = mechanics_report_ids.clone();
+                let packet =
+                    ab_bridge::resident_m2_shadow::review_resident_m2_shadow(options)?;
                 println!("{}", serde_json::to_string_pretty(&packet)?);
                 Ok(())
             }

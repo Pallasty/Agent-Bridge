@@ -12,6 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -20,7 +21,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub const RESIDENT_M2_SHADOW_SCHEMA_V0: &str = "agent_bridge.resident_m2_shadow.v0";
+pub const RESIDENT_M2_SHADOW_REVIEW_SCHEMA_V0: &str = "agent_bridge.resident_m2_shadow_review.v0";
 const POLICY_REVISION: u64 = 1;
+const MIN_NATURAL_REPORTS_FOR_OWNER_REVIEW: usize = 3;
+const MIN_NATURAL_TRIGGER_KINDS_FOR_OWNER_REVIEW: usize = 2;
 const MAX_REPORT_BYTES: u64 = 16_384;
 const MILLIS_PER_SECOND: u64 = 1_000;
 const SECONDS_PER_DAY: i64 = 86_400;
@@ -69,12 +73,45 @@ impl ResidentM2ShadowOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ResidentM2ShadowReviewOptions {
+    pub natural_report_ids: Vec<String>,
+    pub mechanics_report_ids: Vec<String>,
+    pub journal_root: PathBuf,
+}
+
+impl ResidentM2ShadowReviewOptions {
+    pub fn new() -> Self {
+        Self {
+            natural_report_ids: Vec::new(),
+            mechanics_report_ids: Vec::new(),
+            journal_root: default_resident_state_root().join("resident-xiaoshu-v0"),
+        }
+    }
+}
+
+impl Default for ResidentM2ShadowReviewOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResidentM2ShadowTriggerKind {
     CommitmentDue,
     Recovery,
     Failure,
+}
+
+impl ResidentM2ShadowTriggerKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::CommitmentDue => "commitment_due",
+            Self::Recovery => "recovery",
+            Self::Failure => "failure",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -432,6 +469,26 @@ fn load_report(path: &Path) -> Result<ResidentM2ShadowReport, ResidentM2ShadowEr
     Ok(report)
 }
 
+fn validate_report_basis_binding(
+    root: &Path,
+    report: &ResidentM2ShadowReport,
+) -> Result<u64, ResidentM2ShadowError> {
+    let basis = load_bound_resident_owner_evaluation(root, &report.basis_wake_id)
+        .map_err(|_| ResidentM2ShadowError::Corrupt)?
+        .ok_or(ResidentM2ShadowError::Corrupt)?;
+    let basis_bytes = serde_json::to_vec(&basis).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+    if basis.label != ResidentOwnerLabel::Useful
+        || basis.decision.value_signal != "positive"
+        || basis.decision.stop_rule_triggered
+        || basis.evaluation_id != report.basis_evaluation_id
+        || sha256_hex(basis_bytes) != report.basis_evaluation_sha256
+        || basis.recorded_at_unix_ms > report.candidate.evaluated_at_unix_ms
+    {
+        return Err(ResidentM2ShadowError::Corrupt);
+    }
+    Ok(basis.recorded_at_unix_ms)
+}
+
 fn load_history(root: &Path) -> Result<Vec<ResidentM2ShadowReport>, ResidentM2ShadowError> {
     let directory = shadow_directory(root);
     let metadata = match std::fs::symlink_metadata(&directory) {
@@ -454,6 +511,7 @@ fn load_history(root: &Path) -> Result<Vec<ResidentM2ShadowReport>, ResidentM2Sh
         if file_name != format!("{}.json", report.report_id) {
             return Err(ResidentM2ShadowError::Corrupt);
         }
+        validate_report_basis_binding(root, &report)?;
         reports.push(report);
     }
     Ok(reports)
@@ -718,6 +776,231 @@ pub fn evaluate_resident_m2_shadow(options: ResidentM2ShadowOptions) -> Result<V
     }
 }
 
+fn classified_report_ids(values: Vec<String>) -> Result<BTreeSet<String>, ResidentM2ShadowError> {
+    let mut ids = BTreeSet::new();
+    for value in values {
+        let value = value.trim().to_string();
+        if !value.starts_with("shadow-") || !validate_identifier(&value) || !ids.insert(value) {
+            return Err(ResidentM2ShadowError::InvalidConfiguration);
+        }
+    }
+    Ok(ids)
+}
+
+/// Build a read-only evidence packet over private M2 shadow reports.
+///
+/// The caller explicitly classifies report IDs as natural real-task evidence
+/// or mechanics-only evidence for this invocation. Those classifications are
+/// neither persisted nor authenticated. Even a ready packet admits only a
+/// separate owner review of a candidate-source design; it never admits M2.
+pub fn review_resident_m2_shadow(options: ResidentM2ShadowReviewOptions) -> Result<Value> {
+    if !options.journal_root.is_absolute() || !options.journal_root.is_dir() {
+        bail!(ResidentM2ShadowError::InvalidConfiguration);
+    }
+    let natural_ids =
+        classified_report_ids(options.natural_report_ids).map_err(|error| anyhow!(error))?;
+    let mechanics_ids =
+        classified_report_ids(options.mechanics_report_ids).map_err(|error| anyhow!(error))?;
+    if natural_ids.iter().any(|id| mechanics_ids.contains(id)) {
+        bail!(ResidentM2ShadowError::InvalidConfiguration);
+    }
+
+    let mut reports = load_history(&options.journal_root).map_err(|error| anyhow!(error))?;
+    reports.sort_by(|left, right| {
+        left.candidate
+            .evaluated_at_unix_ms
+            .cmp(&right.candidate.evaluated_at_unix_ms)
+            .then_with(|| left.report_id.cmp(&right.report_id))
+    });
+    let report_ids = reports
+        .iter()
+        .map(|report| report.report_id.clone())
+        .collect::<BTreeSet<_>>();
+    if natural_ids
+        .iter()
+        .chain(mechanics_ids.iter())
+        .any(|id| !report_ids.contains(id))
+    {
+        bail!(ResidentM2ShadowError::InvalidConfiguration);
+    }
+
+    let unclassified_ids = report_ids
+        .difference(&natural_ids)
+        .filter(|id| !mechanics_ids.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let natural_reports = reports
+        .iter()
+        .filter(|report| natural_ids.contains(&report.report_id))
+        .collect::<Vec<_>>();
+
+    let mut all_trigger_counts = BTreeMap::<String, usize>::new();
+    let mut natural_trigger_counts = BTreeMap::<String, usize>::new();
+    let mut natural_suppression_reason_counts = BTreeMap::<String, usize>::new();
+    let mut actual_provider_calls = 0_u64;
+    let mut actual_wakes_created = 0_u64;
+    for report in &reports {
+        *all_trigger_counts
+            .entry(report.candidate.trigger_kind.as_str().to_string())
+            .or_default() += 1;
+        actual_provider_calls =
+            actual_provider_calls.saturating_add(u64::from(report.decision.actual_provider_calls));
+        actual_wakes_created =
+            actual_wakes_created.saturating_add(u64::from(report.decision.actual_wakes_created));
+    }
+    let mut natural_would_wake_count = 0_usize;
+    let mut natural_suppressed_count = 0_usize;
+    for report in &natural_reports {
+        *natural_trigger_counts
+            .entry(report.candidate.trigger_kind.as_str().to_string())
+            .or_default() += 1;
+        if report.decision.would_wake {
+            natural_would_wake_count += 1;
+        } else {
+            natural_suppressed_count += 1;
+            for reason in &report.decision.suppression_reasons {
+                *natural_suppression_reason_counts
+                    .entry(reason.clone())
+                    .or_default() += 1;
+            }
+        }
+    }
+
+    let mut stop_label_active = false;
+    let basis_times = reports
+        .iter()
+        .map(|report| validate_report_basis_binding(&options.journal_root, report))
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map_err(|error| anyhow!(error))?;
+    for basis_time in basis_times {
+        match ensure_no_later_stop_evaluation(&options.journal_root, basis_time) {
+            Ok(()) => {}
+            Err(ResidentM2ShadowError::StopLabelActive) => stop_label_active = true,
+            Err(error) => return Err(anyhow!(error)),
+        }
+    }
+
+    let classifications_complete = unclassified_ids.is_empty();
+    let enough_natural_reports = natural_reports.len() >= MIN_NATURAL_REPORTS_FOR_OWNER_REVIEW;
+    let enough_natural_trigger_kinds =
+        natural_trigger_counts.len() >= MIN_NATURAL_TRIGGER_KINDS_FOR_OWNER_REVIEW;
+    let includes_natural_would_wake = natural_would_wake_count > 0;
+    let includes_natural_suppression = natural_suppressed_count > 0;
+    let safe_boundaries = reports.iter().all(|report| report.boundary == boundary())
+        && actual_provider_calls == 0
+        && actual_wakes_created == 0;
+    let ready_for_owner_review = classifications_complete
+        && enough_natural_reports
+        && enough_natural_trigger_kinds
+        && includes_natural_would_wake
+        && includes_natural_suppression
+        && safe_boundaries
+        && !stop_label_active;
+
+    let mut block_reasons = Vec::new();
+    if reports.is_empty() {
+        block_reasons.push("no_shadow_reports");
+    }
+    if !classifications_complete {
+        block_reasons.push("report_classification_incomplete");
+    }
+    if !enough_natural_reports {
+        block_reasons.push("fewer_than_3_natural_reports");
+    }
+    if !enough_natural_trigger_kinds {
+        block_reasons.push("fewer_than_2_natural_trigger_kinds");
+    }
+    if !includes_natural_would_wake {
+        block_reasons.push("missing_natural_would_wake");
+    }
+    if !includes_natural_suppression {
+        block_reasons.push("missing_natural_suppression");
+    }
+    if !safe_boundaries {
+        block_reasons.push("unsafe_shadow_boundary");
+    }
+    if stop_label_active {
+        block_reasons.push("owner_stop_label_active");
+    }
+
+    let earliest_evaluated_at_unix_ms = reports
+        .first()
+        .map(|report| report.candidate.evaluated_at_unix_ms);
+    let latest_evaluated_at_unix_ms = reports
+        .last()
+        .map(|report| report.candidate.evaluated_at_unix_ms);
+    let status = if stop_label_active {
+        "stopped_by_owner_label"
+    } else if ready_for_owner_review {
+        "ready_for_owner_review"
+    } else {
+        "collecting"
+    };
+    let recommended_next_gate = if stop_label_active {
+        "stop_shadow_collection_and_prepare_disable_or_rollback_review"
+    } else if ready_for_owner_review {
+        "owner_review_of_candidate_source_design_only"
+    } else {
+        "continue_bounded_manual_shadow_collection"
+    };
+
+    Ok(json!({
+        "schema": RESIDENT_M2_SHADOW_REVIEW_SCHEMA_V0,
+        "status": status,
+        "evidence": {
+            "report_count": reports.len(),
+            "natural_report_count": natural_reports.len(),
+            "mechanics_report_count": mechanics_ids.len(),
+            "unclassified_report_count": unclassified_ids.len(),
+            "natural_report_ids": natural_ids,
+            "mechanics_report_ids": mechanics_ids,
+            "unclassified_report_ids": unclassified_ids,
+            "all_trigger_counts": all_trigger_counts,
+            "natural_trigger_counts": natural_trigger_counts,
+            "natural_would_wake_count": natural_would_wake_count,
+            "natural_suppressed_count": natural_suppressed_count,
+            "natural_suppression_reason_counts": natural_suppression_reason_counts,
+            "earliest_evaluated_at_unix_ms": earliest_evaluated_at_unix_ms,
+            "latest_evaluated_at_unix_ms": latest_evaluated_at_unix_ms,
+            "basis_binding_valid_count": reports.len(),
+            "safe_boundary_report_count": reports.len(),
+            "actual_provider_calls": actual_provider_calls,
+            "actual_wakes_created": actual_wakes_created
+        },
+        "criteria": {
+            "classifications_complete": classifications_complete,
+            "minimum_natural_reports": MIN_NATURAL_REPORTS_FOR_OWNER_REVIEW,
+            "enough_natural_reports": enough_natural_reports,
+            "minimum_natural_trigger_kinds": MIN_NATURAL_TRIGGER_KINDS_FOR_OWNER_REVIEW,
+            "enough_natural_trigger_kinds": enough_natural_trigger_kinds,
+            "includes_natural_would_wake": includes_natural_would_wake,
+            "includes_natural_suppression": includes_natural_suppression,
+            "safe_boundaries": safe_boundaries,
+            "owner_stop_label_active": stop_label_active,
+            "ready_for_owner_review": ready_for_owner_review,
+            "block_reasons": block_reasons
+        },
+        "decision": {
+            "recommended_next_gate": recommended_next_gate,
+            "m2_admitted": false
+        },
+        "boundary": {
+            "read_only": true,
+            "report_files_modified": false,
+            "classification_persisted": false,
+            "classification_source": "explicit_local_cli_argument",
+            "classification_cryptographically_authenticated": false,
+            "provider_invoked": false,
+            "creates_cognitive_wake": false,
+            "scheduler_installed": false,
+            "executes_action": false,
+            "automatic_runtime_change": false,
+            "automatic_memory_promotion": false,
+            "m2_admitted": false
+        }
+    }))
+}
+
 fn packet(status: &str, report: ResidentM2ShadowReport) -> Value {
     json!({
         "schema": RESIDENT_M2_SHADOW_SCHEMA_V0,
@@ -791,6 +1074,26 @@ mod tests {
 
     fn day_after(timestamp_unix_ms: u64) -> u64 {
         timestamp_unix_ms / DAY_MS + 2
+    }
+
+    fn record_report(mut options: ResidentM2ShadowOptions) -> String {
+        options.record = true;
+        evaluate_resident_m2_shadow(options).unwrap()["report"]["report_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn review_options(
+        root: &Path,
+        natural_report_ids: Vec<String>,
+        mechanics_report_ids: Vec<String>,
+    ) -> ResidentM2ShadowReviewOptions {
+        ResidentM2ShadowReviewOptions {
+            natural_report_ids,
+            mechanics_report_ids,
+            journal_root: root.to_path_buf(),
+        }
     }
 
     #[test]
@@ -978,5 +1281,172 @@ mod tests {
         assert!(error
             .to_string()
             .contains("resident_m2_shadow_stop_label_active"));
+    }
+
+    #[test]
+    fn review_classifies_mechanics_sample_without_writing_or_admitting_m2() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let report_id = record_report(options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            'a',
+            daytime(day_after(basis_at), 12),
+        ));
+        let path = report_path(&root, &report_id);
+        let before = fs::read(&path).unwrap();
+
+        let packet =
+            review_resident_m2_shadow(review_options(&root, Vec::new(), vec![report_id])).unwrap();
+        assert_eq!(packet["status"], "collecting");
+        assert_eq!(packet["evidence"]["report_count"], 1);
+        assert_eq!(packet["evidence"]["natural_report_count"], 0);
+        assert_eq!(packet["evidence"]["mechanics_report_count"], 1);
+        assert_eq!(packet["criteria"]["classifications_complete"], true);
+        assert_eq!(packet["criteria"]["ready_for_owner_review"], false);
+        assert_eq!(packet["decision"]["m2_admitted"], false);
+        assert_eq!(packet["boundary"]["read_only"], true);
+        assert_eq!(packet["boundary"]["report_files_modified"], false);
+        assert_eq!(packet["boundary"]["provider_invoked"], false);
+        assert_eq!(packet["boundary"]["creates_cognitive_wake"], false);
+        assert_eq!(fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn three_diverse_natural_reports_prepare_owner_review_only() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let day = day_after(basis_at);
+
+        let first = record_report(options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            'b',
+            daytime(day, 8),
+        ));
+        let mut failure = options(
+            &root,
+            ResidentM2ShadowTriggerKind::Failure,
+            'c',
+            daytime(day, 10),
+        );
+        failure.severity = ResidentM2ShadowSeverity::Warning;
+        let second = record_report(failure);
+        let mut commitment = options(
+            &root,
+            ResidentM2ShadowTriggerKind::CommitmentDue,
+            'd',
+            daytime(day + 1, 9),
+        );
+        commitment.due_at_unix_ms = Some(commitment.evaluated_at_unix_ms - 1);
+        let third = record_report(commitment);
+
+        let packet = review_resident_m2_shadow(review_options(
+            &root,
+            vec![first, second, third],
+            Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(packet["status"], "ready_for_owner_review");
+        assert_eq!(packet["evidence"]["natural_report_count"], 3);
+        assert_eq!(packet["evidence"]["natural_would_wake_count"], 2);
+        assert_eq!(packet["evidence"]["natural_suppressed_count"], 1);
+        assert_eq!(packet["criteria"]["enough_natural_trigger_kinds"], true);
+        assert_eq!(packet["criteria"]["ready_for_owner_review"], true);
+        assert_eq!(
+            packet["decision"]["recommended_next_gate"],
+            "owner_review_of_candidate_source_design_only"
+        );
+        assert_eq!(packet["decision"]["m2_admitted"], false);
+    }
+
+    #[test]
+    fn review_rejects_unknown_duplicate_or_overlapping_classification() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let report_id = record_report(options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            'e',
+            daytime(day_after(basis_at), 12),
+        ));
+
+        for options in [
+            review_options(&root, vec!["shadow-not-present".to_string()], Vec::new()),
+            review_options(
+                &root,
+                vec![report_id.clone(), report_id.clone()],
+                Vec::new(),
+            ),
+            review_options(&root, vec![report_id.clone()], vec![report_id.clone()]),
+        ] {
+            let error = review_resident_m2_shadow(options).unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("resident_m2_shadow_invalid_configuration"));
+        }
+    }
+
+    #[test]
+    fn review_surfaces_later_stop_label_and_never_becomes_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let report_id = record_report(options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            'f',
+            daytime(day_after(basis_at), 12),
+        ));
+        owner_evaluation(
+            &root,
+            "wake-shadow-stop-review",
+            ResidentOwnerLabel::Harmful,
+        );
+
+        let packet =
+            review_resident_m2_shadow(review_options(&root, vec![report_id], Vec::new())).unwrap();
+        assert_eq!(packet["status"], "stopped_by_owner_label");
+        assert_eq!(packet["criteria"]["owner_stop_label_active"], true);
+        assert_eq!(packet["criteria"]["ready_for_owner_review"], false);
+        assert_eq!(
+            packet["decision"]["recommended_next_gate"],
+            "stop_shadow_collection_and_prepare_disable_or_rollback_review"
+        );
+        assert_eq!(packet["decision"]["m2_admitted"], false);
+    }
+
+    #[test]
+    fn history_with_changed_basis_receipt_cannot_influence_review_or_policy() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let report_id = record_report(options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            '1',
+            daytime(day_after(basis_at), 12),
+        ));
+        let evaluation_path = root.join("evaluations/wake-shadow-basis.json");
+        let mut evaluation: Value =
+            serde_json::from_slice(&fs::read(&evaluation_path).unwrap()).unwrap();
+        evaluation["recorded_at_unix_ms"] = Value::from(basis_at + 1);
+        fs::write(&evaluation_path, serde_json::to_vec(&evaluation).unwrap()).unwrap();
+
+        let error = review_resident_m2_shadow(review_options(&root, vec![report_id], Vec::new()))
+            .unwrap_err();
+        assert!(error.to_string().contains("resident_m2_shadow_corrupt"));
+
+        let future = options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            '2',
+            daytime(day_after(basis_at) + 1, 12),
+        );
+        let error = evaluate_resident_m2_shadow(future).unwrap_err();
+        assert!(error.to_string().contains("resident_m2_shadow_corrupt"));
     }
 }
