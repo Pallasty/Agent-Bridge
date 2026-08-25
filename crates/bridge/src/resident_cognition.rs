@@ -5,6 +5,7 @@
 //! disposable cognition provider only. No result in this module executes an
 //! action, schedules another wake, or promotes itself into durable memory.
 
+use crate::resident_owner_evaluation::load_bound_resident_owner_evaluation;
 use crate::resident_wake_journal::{
     ResidentSubjectLease, ResidentWakeJournalError, ResidentWakeReservation,
 };
@@ -514,6 +515,7 @@ fn journal_error(error: ResidentWakeJournalError) -> anyhow::Error {
 
 async fn recover_prior_sleep_digest(
     store: Option<&Arc<dyn StateStore>>,
+    journal_root: &Path,
 ) -> Result<Option<ResidentSleepDigest>> {
     let Some(store) = store else {
         return Ok(None);
@@ -533,7 +535,7 @@ async fn recover_prior_sleep_digest(
         let Some(value) = facts.get("sleep_digest") else {
             continue;
         };
-        let Ok(digest) = serde_json::from_value::<ResidentSleepDigest>(value.clone()) else {
+        let Ok(mut digest) = serde_json::from_value::<ResidentSleepDigest>(value.clone()) else {
             continue;
         };
         if digest.schema_version == RESIDENT_SLEEP_DIGEST_SCHEMA_V0
@@ -541,6 +543,13 @@ async fn recover_prior_sleep_digest(
             && digest.lineage_id == RESIDENT_LINEAGE_ID
             && digest.manifest_revision == RESIDENT_MANIFEST_REVISION
         {
+            if let Some(evaluation) =
+                load_bound_resident_owner_evaluation(journal_root, &digest.wake_id)
+                    .map_err(|error| anyhow!(error))
+                    .context("recover resident owner evaluation")?
+            {
+                digest.owner_acceptance = evaluation.label.as_str().to_string();
+            }
             return Ok(Some(digest));
         }
     }
@@ -670,7 +679,7 @@ pub async fn run_resident_cognition(
                 .context("acquire resident subject writer lease")?,
         )
     };
-    let prior = recover_prior_sleep_digest(store.as_ref()).await?;
+    let prior = recover_prior_sleep_digest(store.as_ref(), &request.journal_root).await?;
     let packet = wake_packet(&request, &wake_id, &episode_id, prior.as_ref());
     let packet_bytes = serde_json::to_vec(&packet).context("serialize resident wake packet")?;
     let wake_packet_sha256 = digest(&packet_bytes);
@@ -914,6 +923,9 @@ pub async fn run_resident_cognition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resident_owner_evaluation::{
+        record_resident_owner_evaluation, ResidentOwnerEvaluationOptions, ResidentOwnerLabel,
+    };
     use ab_store::SqliteStore;
     use std::fs;
     #[cfg(unix)]
@@ -1027,6 +1039,25 @@ printf '%s\n' '{{"type":"turn.completed"}}'
         assert_eq!(first["receipt"]["recorded"], true);
         assert_eq!(first["cognition"]["provider_child_exited"], true);
 
+        let first_wake_id = first["wake"]["wake_id"]
+            .as_str()
+            .expect("first wake id")
+            .to_string();
+        record_resident_owner_evaluation(ResidentOwnerEvaluationOptions {
+            wake_id: first_wake_id,
+            label: ResidentOwnerLabel::Useful,
+            journal_root: temp.path().join("resident-state"),
+            dry_run: false,
+        })
+        .expect("owner evaluation");
+        let trait_store: Arc<dyn StateStore> = store.clone();
+        let evaluated_prior =
+            recover_prior_sleep_digest(Some(&trait_store), &temp.path().join("resident-state"))
+                .await
+                .expect("recover evaluated prior")
+                .expect("prior digest");
+        assert_eq!(evaluated_prior.owner_acceptance, "useful");
+
         let mut second_options = options(temp.path(), &fake);
         second_options.event_id = Some("event:test-2".to_string());
         let second = run_resident_cognition(second_options, Some(store.clone()))
@@ -1037,6 +1068,7 @@ printf '%s\n' '{{"type":"turn.completed"}}'
             RESIDENT_SUBJECT_ID
         );
         assert_eq!(second["wake"]["prior_sleep_digest_recovered"], true);
+        assert_eq!(second["sleep_digest"]["owner_acceptance"], "unknown");
 
         let events = store
             .recent_semantic_events(3600, 10)

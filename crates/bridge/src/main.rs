@@ -883,6 +883,42 @@ enum ResidentOp {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Bind an explicit owner usefulness label to one completed wake.
+    ///
+    /// The label is a local CLI assertion, not a model judgment or
+    /// cryptographically authenticated identity claim. It never changes
+    /// runtime authority or admits M2 automatically.
+    Evaluate {
+        /// Completed resident wake ID returned by `resident cognition`.
+        #[arg(long)]
+        wake_id: String,
+        /// Owner-observed product value for this one wake.
+        #[arg(long, value_enum)]
+        label: ResidentOwnerLabelArg,
+        /// Preview the evaluation contract without reading or writing state.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ResidentOwnerLabelArg {
+    Useful,
+    Neutral,
+    Distracting,
+    Harmful,
+}
+
+impl From<ResidentOwnerLabelArg> for ab_bridge::resident_owner_evaluation::ResidentOwnerLabel {
+    fn from(value: ResidentOwnerLabelArg) -> Self {
+        use ab_bridge::resident_owner_evaluation::ResidentOwnerLabel;
+        match value {
+            ResidentOwnerLabelArg::Useful => ResidentOwnerLabel::Useful,
+            ResidentOwnerLabelArg::Neutral => ResidentOwnerLabel::Neutral,
+            ResidentOwnerLabelArg::Distracting => ResidentOwnerLabel::Distracting,
+            ResidentOwnerLabelArg::Harmful => ResidentOwnerLabel::Harmful,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -5021,6 +5057,24 @@ async fn real_main() -> Result<()> {
                 };
                 let packet =
                     ab_bridge::resident_cognition::run_resident_cognition(options, store).await?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+                Ok(())
+            }
+            ResidentOp::Evaluate {
+                wake_id,
+                label,
+                dry_run,
+            } => {
+                let mut options =
+                    ab_bridge::resident_owner_evaluation::ResidentOwnerEvaluationOptions::new(
+                        wake_id.clone(),
+                        (*label).into(),
+                    );
+                options.dry_run = *dry_run;
+                let packet =
+                    ab_bridge::resident_owner_evaluation::record_resident_owner_evaluation(
+                        options,
+                    )?;
                 println!("{}", serde_json::to_string_pretty(&packet)?);
                 Ok(())
             }

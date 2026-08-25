@@ -299,6 +299,53 @@ the optional separate R4-A boundary and was not needed to prove M1 continuity.
 It also adds no scheduler, daemon, service, autostart, unattended wake, tool
 authority, action executor, or memory-promotion path.
 
+### Explicit owner-evaluation closure (R7-E1, 2026-08-25)
+
+M1 originally persisted every new sleep digest with
+`owner_acceptance="unknown"` but exposed no write path by which the owner could
+close that field. R7-E1 adds only this missing product-evaluation seam:
+
+```text
+agent-bridge resident evaluate \
+  --wake-id <completed-wake-id> \
+  --label <useful|neutral|distracting|harmful>
+```
+
+The command accepts only a private wake-journal record whose state is
+`completed`, whose subject is Resident Xiao Shu, and whose final-output and
+execution-receipt hashes remain valid. It then writes one 0600 no-replace
+receipt beneath the private 0700 resident journal. The complete bytes are
+synced under a private temporary name before an atomic no-overwrite link makes
+the final path visible. The receipt stores the
+fixed label, wake/subject IDs, existing hashes, cognition disposition, and a
+deterministic evaluation ID. It stores no observed event, prompt, provider
+response, arbitrary note, or owner-identifying content.
+
+An identical repeated label is idempotent and returns the existing receipt. A
+different label for the same wake fails closed and cannot rewrite history.
+Hash or wake-journal tampering also fails closed. The next explicit cognition
+may restore the label onto that prior sleep digest; every new result still
+starts at `owner_acceptance="unknown"` until separately evaluated.
+
+The label source is honestly recorded as `explicit_local_cli_argument`. This
+is an owner-local operating assertion, not cryptographic owner authentication.
+Codex/model processes do not generate, infer, or record this label. Evaluation
+invokes no provider, creates no wake, executes no action, rewrites no provider
+result, promotes no memory automatically, changes no runtime, and does not
+admit M2.
+
+The fixed product decisions are deliberately conservative:
+
+- `useful`: positive M1 value signal; permits only a separate owner review of
+  an M2 shadow-design proposal;
+- `neutral`: retain explicit M1 without expansion;
+- `distracting`: trigger the stop rule and prepare a disable review;
+- `harmful`: trigger the stop rule and prepare a rollback review.
+
+None of these recommendations executes automatically. A technical fixture
+label used in an isolated state root validates mechanics but is not owner
+product evidence.
+
 ## Measures of value and cost
 
 The lane exists to reduce continuity cost, not to maximize autonomous events.
