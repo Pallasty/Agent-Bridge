@@ -1,7 +1,7 @@
 # AG-UI Read-Only MCP Wrapper v0
 
 - Date: 2026-08-25
-- Status: D4.1 source remediation verified; registered default-off, not published or activated
+- Status: D5 runtime gate authorized; integration candidate not yet published or activated
 - Pure projector: `agent_bridge.ag_ui_readonly_projection.v0`
 - Tool: `ag_ui_readonly_project`
 - External wire pin: `@ag-ui/core@0.0.57`
@@ -300,11 +300,11 @@ server-side request forgery concerns that are deliberately outside v0.
    closed request envelope plus toolset-authority and document clarification.
 6. **D4.1 — source remediation:** verified in this candidate; focused projection/wrapper tests,
    registry regression, all-target compilation, formatting, and content-minimization review pass.
-7. **D5 — runtime gate:** only after separate authorization, reconcile the shared remotes,
+7. **D5 — runtime gate:** authorized 2026-08-26; reconcile the shared remotes,
    merge/build/install, reconnect MCP, and verify the exact fresh-process tool list and projection
-   behavior.
+   behavior. Runtime acceptance remains process-bound evidence outside this source document.
 
-Current verdict: `D4_1_SOURCE_REMEDIATION_VERIFIED_D5_NOT_AUTHORIZED`.
+Current verdict: `D5_AUTHORIZED_INTEGRATION_CANDIDATE_PENDING_RUNTIME_VERIFICATION`.
 
-This verdict grants no remote publication, merge, deployment, MCP reconnection, or runtime
-enablement.
+This verdict records authorization but does not claim that publication, deployment, MCP
+reconnection, or runtime verification has completed.
