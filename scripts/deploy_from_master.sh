@@ -31,6 +31,9 @@
 #   scripts/deploy_from_master.sh              # build latest master, gate, backup, deploy
 #   scripts/deploy_from_master.sh --dry-run    # build + gate + show plan, but no backup/cp
 #   scripts/deploy_from_master.sh --yes        # skip the interactive confirm
+#   scripts/deploy_from_master.sh --admit-fresh-mcp
+#                                             # consume one matching pending admission
+#                                             # after an independent MCP stdio probe
 #   scripts/deploy_from_master.sh --use-binary PATH   # skip build; deploy PATH (still gated+backed up)
 #                                                     # (provenance NOT verified — prints a warning)
 #
@@ -150,12 +153,14 @@ fi
 
 DRY_RUN=0
 ASSUME_YES=0
+ADMIT_FRESH_MCP=0
 USE_BINARY=""
 DEPLOY_ORIGINAL_ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
         --yes|-y) ASSUME_YES=1 ;;
+        --admit-fresh-mcp) ADMIT_FRESH_MCP=1 ;;
         --use-binary) shift; USE_BINARY="${1:-}";;
         -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -165,6 +170,12 @@ done
 
 say()  { printf '%s\n' "$*"; }
 die()  { LEASE_FAILURE_REASON="$*"; printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+if [ "$ADMIT_FRESH_MCP" -eq 1 ]; then
+    [ "$DRY_RUN" -eq 0 ] || die "--admit-fresh-mcp cannot be combined with --dry-run"
+    [ "$ASSUME_YES" -eq 0 ] || die "--admit-fresh-mcp does not accept --yes"
+    [ -z "$USE_BINARY" ] || die "--admit-fresh-mcp cannot be combined with --use-binary"
+fi
 
 file_inode() {
     stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null
@@ -469,6 +480,25 @@ path_has_symlink_component() {
     return 1
 }
 
+ensure_physical_directory_path() {
+    local path="$1" rest part current=""
+    case "$path" in /*) rest="${path#/}" ;; *) die "physical directory path must be absolute: $path" ;; esac
+    while [ -n "$rest" ]; do
+        case "$rest" in */*) part="${rest%%/*}"; rest="${rest#*/}" ;; *) part="$rest"; rest="" ;; esac
+        [ -n "$part" ] || continue
+        case "$part" in .|..) die "physical directory path contains a non-canonical component: $path" ;; esac
+        current="$current/$part"
+        if [ -e "$current" ] || [ -L "$current" ]; then
+            [ -d "$current" ] && [ ! -L "$current" ] ||
+                die "publisher state path component is not a physical directory: $current"
+        else
+            mkdir "$current" || die "cannot create publisher state directory component: $current"
+            [ -d "$current" ] && [ ! -L "$current" ] ||
+                die "created publisher state component is not a physical directory: $current"
+        fi
+    done
+}
+
 canonical_contained_test_path() {
     local raw="$1" root="$2" label="$3" probe component suffix="" canonical
     [ -n "$raw" ] || die "publisher lease test $label path is empty"
@@ -513,7 +543,8 @@ validate_lease_test_environment() {
     canonical_contained_test_path "${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}" "$root" state >/dev/null
     for path in "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_PAYLOAD:-}" \
         "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE:-}" \
-        "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG:-}"; do
+        "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG:-}" \
+        "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE:-}"; do
         [ -z "$path" ] || canonical_contained_test_path "$path" "$root" artifact >/dev/null
     done
     if [ -z "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ]; then
@@ -656,6 +687,7 @@ CLEANUP_PKG_CONFIG=""
 CLEANUP_BINARY_STAGE=""
 CLEANUP_DEPLOY_LOCK=""
 CLEANUP_LEASE_INTENT=""
+CLEANUP_FRESH_MCP_TMP=""
 LEASE_OWNED=0
 LEASE_FINALIZED=0
 LEASE_PHASE=""
@@ -707,10 +739,24 @@ case "$RECOVERY_MODE" in
     *) die "AGENT_BRIDGE_DEPLOY_RECOVERY must be none or roll_forward" ;;
 esac
 
+if [ "$ADMIT_FRESH_MCP" -eq 1 ]; then
+    [ "$FORCE_REINSTALL" -eq 0 ] || die "fresh MCP admission cannot force a reinstall"
+    [ "$SUPERSEDE_PENDING" -eq 0 ] || die "fresh MCP admission cannot supersede pending state"
+    [ "$RECOVERY_MODE" = none ] || die "fresh MCP admission cannot perform publisher recovery"
+fi
+
 [ ! -L "$REAL_PATH" ] || [ -e "$REAL_PATH" ] ||
     die "deployment target is a dangling final symlink; fail closed: $REAL_PATH"
 LEASE_TEST_MODE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE:-0}"
 case "$LEASE_TEST_MODE" in 0|1) ;; *) die "AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE must be 0 or 1" ;; esac
+LEASE_TEST_LIVE_FRESH_MCP="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_LIVE_FRESH_MCP:-0}"
+LEASE_TEST_HOLD_AFTER_FRESH_MCP="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_HOLD_AFTER_FRESH_MCP_SETTLED:-0}"
+case "$LEASE_TEST_LIVE_FRESH_MCP" in 0|1) ;; *) die "AGENT_BRIDGE_DEPLOY_LEASE_TEST_LIVE_FRESH_MCP must be 0 or 1" ;; esac
+case "$LEASE_TEST_HOLD_AFTER_FRESH_MCP" in 0|1) ;; *) die "AGENT_BRIDGE_DEPLOY_LEASE_TEST_HOLD_AFTER_FRESH_MCP_SETTLED must be 0 or 1" ;; esac
+if [ "$LEASE_TEST_MODE" != 1 ] &&
+        { [ "$LEASE_TEST_LIVE_FRESH_MCP" = 1 ] || [ "$LEASE_TEST_HOLD_AFTER_FRESH_MCP" = 1 ]; }; then
+    die "fresh MCP lease-test controls require AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1"
+fi
 if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ] && [ "$LEASE_TEST_MODE" != 1 ]; then
     die "publisher lease test action requires AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1"
 fi
@@ -736,7 +782,7 @@ else
     LEASE_STATE_RAW="$ACCOUNT_HOME/.local/state/agent-bridge/deploy"
 fi
 [ ! -L "$LEASE_STATE_RAW" ] || die "publisher lease state root must not be a symlink: $LEASE_STATE_RAW"
-mkdir -p "$LEASE_STATE_RAW"
+ensure_physical_directory_path "$LEASE_STATE_RAW"
 LEASE_STATE_ROOT="$(cd -P "$LEASE_STATE_RAW" && pwd -P)"
 LEASE_RECEIPT_DIR="$LEASE_STATE_ROOT/receipts"
 LEASE_QUARANTINE_DIR="$LEASE_STATE_ROOT/quarantine"
@@ -745,9 +791,12 @@ PENDING_ADMISSION="$LEASE_STATE_ROOT/pending-admission.meta"
 RECOVERY_HANDOFF="$LEASE_STATE_ROOT/recovery-handoff.meta"
 HANDOFF_COMPLETION_INTENT="$LEASE_STATE_ROOT/recovery-handoff-completion.meta"
 RELEASE_INTENT="$LEASE_STATE_ROOT/release-intent.meta"
+FRESH_MCP_ADMISSION_INTENT="$LEASE_STATE_ROOT/fresh-mcp-admission-intent.meta"
 deploy_lock="$LEASE_STATE_ROOT/active.lock"
 ACTIVE_META="$deploy_lock/lease.meta"
-mkdir -p "$LEASE_RECEIPT_DIR" "$LEASE_QUARANTINE_DIR" "$LEASE_INTENT_DIR"
+ensure_physical_directory_path "$LEASE_RECEIPT_DIR"
+ensure_physical_directory_path "$LEASE_QUARANTINE_DIR"
+ensure_physical_directory_path "$LEASE_INTENT_DIR"
 chmod 700 "$LEASE_STATE_ROOT" "$LEASE_RECEIPT_DIR" "$LEASE_QUARANTINE_DIR" "$LEASE_INTENT_DIR" 2>/dev/null || true
 KERNEL_LOCK_FILE="$LEASE_STATE_ROOT/publisher.kernel.lock"
 PUBLISHER_PREVIOUS_UMASK="$(umask)"
@@ -820,17 +869,21 @@ installed_assets_sha256() {
     adapter_dir="$(dirname "$ADAPTER_PATH")"
     adapter_root="$(dirname "$adapter_dir")"
     {
+        path_has_symlink_component "$ADAPTER_PATH" && die "installed adapter path must not traverse a symlink: $ADAPTER_PATH"
         printf 'adapter\t%s\t%s\t%s\n' "$ADAPTER_PATH" "$(sha256_file "$ADAPTER_PATH")" "$(file_mode "$ADAPTER_PATH")"
         for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
             path="$adapter_dir/$asset"
+            path_has_symlink_component "$path" && die "installed companion path must not traverse a symlink: $path"
             printf 'companion\t%s\t%s\t%s\n' "$path" "$(sha256_file "$path")" "$(file_mode "$path")"
         done
         for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
             path="$adapter_root/$asset"
+            path_has_symlink_component "$path" && die "installed policy path must not traverse a symlink: $path"
             printf 'policy\t%s\t%s\t%s\n' "$path" "$(sha256_file "$path")" "$(file_mode "$path")"
         done
         for asset in "${RUNTIME_ASSETS[@]}"; do
             path="$RUNTIME_ASSET_DIR/$asset"
+            path_has_symlink_component "$path" && die "installed runtime path must not traverse a symlink: $path"
             printf 'runtime\t%s\t%s\t%s\n' "$path" "$(sha256_file "$path")" "$(file_mode "$path")"
         done
     } | sha256_text
@@ -1516,6 +1569,7 @@ cleanup() {
     [ -n "$CLEANUP_PKG_CONFIG" ] && rm -rf "$CLEANUP_PKG_CONFIG" 2>/dev/null || true
     [ -n "$CLEANUP_BINARY_STAGE" ] && rm -f "$CLEANUP_BINARY_STAGE" 2>/dev/null || true
     [ -n "$CLEANUP_LEASE_INTENT" ] && rm -rf "$CLEANUP_LEASE_INTENT" 2>/dev/null || true
+    [ -n "$CLEANUP_FRESH_MCP_TMP" ] && rm -rf "$CLEANUP_FRESH_MCP_TMP" 2>/dev/null || true
     if [ "$LEASE_OWNED" -eq 1 ] && [ "$LEASE_FINALIZED" -eq 0 ] &&
         { [ -e "$RELEASE_INTENT" ] || [ -L "$RELEASE_INTENT" ]; }; then
         # A normal signal may arrive anywhere in the release transaction.
@@ -1772,6 +1826,402 @@ write_pending_admission() {
     mv -f "$tmp" "$PENDING_ADMISSION"
 }
 
+read_fresh_mcp_probe() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,evidence_sha256" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 10 ] || return 1
+    F_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    F_SERVER_NAME="$(meta_value "$file" 2 server_name)" || return 1
+    F_SERVER_VERSION="$(meta_value "$file" 3 server_version)" || return 1
+    F_PROTOCOL_VERSION="$(meta_value "$file" 4 protocol_version)" || return 1
+    F_BUILD_SHA="$(meta_value "$file" 5 build_git_sha)" || return 1
+    F_TOOLSET="$(meta_value "$file" 6 toolset)" || return 1
+    F_TOOL_COUNT="$(meta_value "$file" 7 tool_count)" || return 1
+    F_CAPABILITIES_PRESENT="$(meta_value "$file" 8 capabilities_tool_present)" || return 1
+    F_METHOD="$(meta_value "$file" 9 probe_method)" || return 1
+    F_EVIDENCE_SHA="$(meta_value "$file" 10 evidence_sha256)" || return 1
+    case "$F_TOOL_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$F_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v0 ] &&
+        [ "$F_SERVER_NAME" = agent-bridge ] &&
+        [ "$F_PROTOCOL_VERSION" = 2024-11-05 ] &&
+        [ "$F_CAPABILITIES_PRESENT" = true ] &&
+        [ "$F_METHOD" = independent_stdio_exact_installed_binary ] &&
+        is_safe_candidate "$F_SERVER_VERSION" && is_safe_candidate "$F_TOOLSET" &&
+        is_sha256_value "$F_EVIDENCE_SHA" &&
+        printf '%s\n' "$F_BUILD_SHA" | grep -Eq '^[0-9a-f]{12}$' &&
+        [ "$(fresh_mcp_evidence_sha256 "$F_SCHEMA" "$F_SERVER_NAME" "$F_SERVER_VERSION" \
+            "$F_PROTOCOL_VERSION" "$F_BUILD_SHA" "$F_TOOLSET" "$F_TOOL_COUNT" \
+            "$F_CAPABILITIES_PRESENT" "$F_METHOD")" = "$F_EVIDENCE_SHA" ]
+}
+
+fresh_mcp_evidence_sha256() {
+    [ "$#" -eq 9 ] || return 1
+    {
+        printf 'schema=%s\n' "$1"
+        printf 'server_name=%s\n' "$2"
+        printf 'server_version=%s\n' "$3"
+        printf 'protocol_version=%s\n' "$4"
+        printf 'build_git_sha=%s\n' "$5"
+        printf 'toolset=%s\n' "$6"
+        printf 'tool_count=%s\n' "$7"
+        printf 'capabilities_tool_present=%s\n' "$8"
+        printf 'probe_method=%s\n' "$9"
+    } | sha256_text
+}
+
+read_fresh_mcp_admission_intent() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,pending_lease_id,pending_challenge,candidate_commit,real_path,shared_targets,pending_sha256,receipt_path,quarantine_path,probe_schema,probe_server_name,probe_server_version,probe_protocol_version,probe_build_git_sha,probe_toolset,probe_tool_count,probe_capabilities_tool_present,probe_method,probe_evidence_sha256" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 19 ] || return 1
+    A_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    A_PENDING_LEASE_ID="$(meta_value "$file" 2 pending_lease_id)" || return 1
+    A_PENDING_CHALLENGE="$(meta_value "$file" 3 pending_challenge)" || return 1
+    A_CANDIDATE="$(meta_value "$file" 4 candidate_commit)" || return 1
+    A_REAL_PATH="$(meta_value "$file" 5 real_path)" || return 1
+    A_SHARED_TARGETS="$(meta_value "$file" 6 shared_targets)" || return 1
+    A_PENDING_SHA="$(meta_value "$file" 7 pending_sha256)" || return 1
+    A_RECEIPT_PATH="$(meta_value "$file" 8 receipt_path)" || return 1
+    A_QUARANTINE_PATH="$(meta_value "$file" 9 quarantine_path)" || return 1
+    A_PROBE_SCHEMA="$(meta_value "$file" 10 probe_schema)" || return 1
+    A_PROBE_SERVER_NAME="$(meta_value "$file" 11 probe_server_name)" || return 1
+    A_PROBE_SERVER_VERSION="$(meta_value "$file" 12 probe_server_version)" || return 1
+    A_PROBE_PROTOCOL_VERSION="$(meta_value "$file" 13 probe_protocol_version)" || return 1
+    A_PROBE_BUILD_SHA="$(meta_value "$file" 14 probe_build_git_sha)" || return 1
+    A_PROBE_TOOLSET="$(meta_value "$file" 15 probe_toolset)" || return 1
+    A_PROBE_TOOL_COUNT="$(meta_value "$file" 16 probe_tool_count)" || return 1
+    A_PROBE_CAPABILITIES_PRESENT="$(meta_value "$file" 17 probe_capabilities_tool_present)" || return 1
+    A_PROBE_METHOD="$(meta_value "$file" 18 probe_method)" || return 1
+    A_PROBE_EVIDENCE_SHA="$(meta_value "$file" 19 probe_evidence_sha256)" || return 1
+    case "$A_PROBE_TOOL_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$A_SCHEMA" = agent_bridge.publisher_fresh_mcp_admission_intent.v0 ] &&
+        is_safe_id "$A_PENDING_LEASE_ID" && is_sha256_value "$A_PENDING_CHALLENGE" &&
+        printf '%s\n' "$A_CANDIDATE" | grep -Eq '^[0-9a-f]{40}$' &&
+        case "$A_REAL_PATH" in /*) true ;; *) false ;; esac && [ -n "$A_SHARED_TARGETS" ] &&
+        is_sha256_value "$A_PENDING_SHA" &&
+        [ "$A_PROBE_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v0 ] &&
+        [ "$A_PROBE_SERVER_NAME" = agent-bridge ] &&
+        is_safe_candidate "$A_PROBE_SERVER_VERSION" &&
+        [ "$A_PROBE_PROTOCOL_VERSION" = 2024-11-05 ] &&
+        [ "$A_PROBE_BUILD_SHA" = "${A_CANDIDATE:0:12}" ] &&
+        [ "$A_PROBE_TOOLSET" = codex-essential ] &&
+        [ "$A_PROBE_CAPABILITIES_PRESENT" = true ] &&
+        [ "$A_PROBE_METHOD" = independent_stdio_exact_installed_binary ] &&
+        is_sha256_value "$A_PROBE_EVIDENCE_SHA" &&
+        [ "$(fresh_mcp_evidence_sha256 "$A_PROBE_SCHEMA" "$A_PROBE_SERVER_NAME" \
+            "$A_PROBE_SERVER_VERSION" "$A_PROBE_PROTOCOL_VERSION" "$A_PROBE_BUILD_SHA" \
+            "$A_PROBE_TOOLSET" "$A_PROBE_TOOL_COUNT" "$A_PROBE_CAPABILITIES_PRESENT" \
+            "$A_PROBE_METHOD")" = "$A_PROBE_EVIDENCE_SHA" ]
+}
+
+write_fresh_mcp_admission_intent() {
+    local pending_sha="$1" receipt="$2" quarantine="$3" tmp
+    [ ! -e "$FRESH_MCP_ADMISSION_INTENT" ] && [ ! -L "$FRESH_MCP_ADMISSION_INTENT" ] ||
+        die "an unsettled fresh MCP admission intent already exists"
+    tmp="$FRESH_MCP_ADMISSION_INTENT.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_admission_intent.v0
+        printf 'pending_lease_id=%s\n' "$P_LEASE_ID"
+        printf 'pending_challenge=%s\n' "$P_CHALLENGE"
+        printf 'candidate_commit=%s\n' "$P_CANDIDATE"
+        printf 'real_path=%s\n' "$P_REAL_PATH"
+        printf 'shared_targets=%s\n' "$P_SHARED_TARGETS"
+        printf 'pending_sha256=%s\n' "$pending_sha"
+        printf 'receipt_path=%s\n' "$receipt"
+        printf 'quarantine_path=%s\n' "$quarantine"
+        printf 'probe_schema=%s\n' "$F_SCHEMA"
+        printf 'probe_server_name=%s\n' "$F_SERVER_NAME"
+        printf 'probe_server_version=%s\n' "$F_SERVER_VERSION"
+        printf 'probe_protocol_version=%s\n' "$F_PROTOCOL_VERSION"
+        printf 'probe_build_git_sha=%s\n' "$F_BUILD_SHA"
+        printf 'probe_toolset=%s\n' "$F_TOOLSET"
+        printf 'probe_tool_count=%s\n' "$F_TOOL_COUNT"
+        printf 'probe_capabilities_tool_present=%s\n' "$F_CAPABILITIES_PRESENT"
+        printf 'probe_method=%s\n' "$F_METHOD"
+        printf 'probe_evidence_sha256=%s\n' "$F_EVIDENCE_SHA"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$FRESH_MCP_ADMISSION_INTENT" ||
+        die "cannot atomically publish fresh MCP admission intent"
+    read_fresh_mcp_admission_intent "$FRESH_MCP_ADMISSION_INTENT" &&
+        [ "$A_PENDING_SHA" = "$pending_sha" ] && [ "$A_RECEIPT_PATH" = "$receipt" ] &&
+        [ "$A_QUARANTINE_PATH" = "$quarantine" ] ||
+        die "fresh MCP admission intent failed strict self-validation"
+}
+
+settle_fresh_mcp_admission_intent() {
+    local source prepared receipt_leaf quarantine_leaf
+    FRESH_MCP_ADMISSION_SETTLED=0
+    [ -e "$FRESH_MCP_ADMISSION_INTENT" ] || [ -L "$FRESH_MCP_ADMISSION_INTENT" ] || return 0
+    [ ! -L "$FRESH_MCP_ADMISSION_INTENT" ] || die "fresh MCP admission intent must not be a symlink"
+    read_fresh_mcp_admission_intent "$FRESH_MCP_ADMISSION_INTENT" ||
+        die "fresh MCP admission intent is unknown or corrupt; fail closed"
+    [ "$A_REAL_PATH" = "$REAL_PATH" ] && [ "$A_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+        die "fresh MCP admission intent targets do not match this publisher"
+    case "$A_RECEIPT_PATH" in "$LEASE_RECEIPT_DIR"/*.meta) ;; *) die "fresh MCP admission receipt escapes the fixed receipt root" ;; esac
+    case "$A_QUARANTINE_PATH" in "$LEASE_QUARANTINE_DIR"/*.meta) ;; *) die "fresh MCP admission quarantine escapes the fixed quarantine root" ;; esac
+    receipt_leaf="${A_RECEIPT_PATH#"$LEASE_RECEIPT_DIR/"}"
+    quarantine_leaf="${A_QUARANTINE_PATH#"$LEASE_QUARANTINE_DIR/"}"
+    case "$receipt_leaf" in ''|*/*) die "fresh MCP admission receipt must be a direct child of the fixed receipt root" ;; esac
+    case "$quarantine_leaf" in ''|*/*) die "fresh MCP admission quarantine must be a direct child of the fixed quarantine root" ;; esac
+
+    if [ -e "$A_QUARANTINE_PATH" ] || [ -L "$A_QUARANTINE_PATH" ]; then
+        [ ! -L "$A_QUARANTINE_PATH" ] && [ -f "$A_QUARANTINE_PATH" ] ||
+            die "fresh MCP admitted pending quarantine is not a physical file"
+        [ ! -e "$PENDING_ADMISSION" ] && [ ! -L "$PENDING_ADMISSION" ] ||
+            die "fresh MCP admission intent has both canonical and quarantined pending state"
+        source="$A_QUARANTINE_PATH"
+    elif [ -e "$PENDING_ADMISSION" ] || [ -L "$PENDING_ADMISSION" ]; then
+        [ ! -L "$PENDING_ADMISSION" ] && [ -f "$PENDING_ADMISSION" ] ||
+            die "fresh MCP pending admission is not a physical file"
+        source="$PENDING_ADMISSION"
+    else
+        die "fresh MCP admission intent has neither canonical nor quarantined pending state"
+    fi
+    [ "$(sha256_file "$source")" = "$A_PENDING_SHA" ] ||
+        die "fresh MCP pending admission does not match its completion intent"
+    read_pending_admission "$source" || die "fresh MCP pending admission is corrupt"
+    [ "$P_LEASE_ID" = "$A_PENDING_LEASE_ID" ] && [ "$P_CHALLENGE" = "$A_PENDING_CHALLENGE" ] &&
+        [ "$P_CANDIDATE" = "$A_CANDIDATE" ] && [ "$P_REAL_PATH" = "$A_REAL_PATH" ] &&
+        [ "$P_SHARED_TARGETS" = "$A_SHARED_TARGETS" ] ||
+        die "fresh MCP pending admission identity does not match its completion intent"
+    pending_fingerprint_matches ||
+        die "fresh MCP admitted binary/assets no longer match the completion intent"
+
+    prepared="$A_RECEIPT_PATH.prepared.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_admission.v0
+        printf 'pending_lease_id=%s\n' "$P_LEASE_ID"
+        printf 'pending_challenge=%s\n' "$P_CHALLENGE"
+        printf 'candidate_commit=%s\n' "$P_CANDIDATE"
+        printf 'real_path=%s\n' "$P_REAL_PATH"
+        printf 'shared_targets=%s\n' "$P_SHARED_TARGETS"
+        printf 'installed_binary_sha256=%s\n' "$P_SHA"
+        printf 'installed_binary_inode=%s\n' "$P_INODE"
+        printf 'installed_binary_mode=%s\n' "$P_MODE"
+        printf 'installed_assets_sha256=%s\n' "$P_ASSETS_SHA"
+        printf 'pending_installed_at=%s\n' "$P_INSTALLED_AT"
+        printf 'fresh_mcp=%s\n' verified
+        printf 'probe_schema=%s\n' "$A_PROBE_SCHEMA"
+        printf 'probe_server_name=%s\n' "$A_PROBE_SERVER_NAME"
+        printf 'probe_server_version=%s\n' "$A_PROBE_SERVER_VERSION"
+        printf 'probe_protocol_version=%s\n' "$A_PROBE_PROTOCOL_VERSION"
+        printf 'probe_build_git_sha=%s\n' "$A_PROBE_BUILD_SHA"
+        printf 'probe_toolset=%s\n' "$A_PROBE_TOOLSET"
+        printf 'probe_tool_count=%s\n' "$A_PROBE_TOOL_COUNT"
+        printf 'probe_capabilities_tool_present=%s\n' "$A_PROBE_CAPABILITIES_PRESENT"
+        printf 'probe_method=%s\n' "$A_PROBE_METHOD"
+        printf 'probe_evidence_sha256=%s\n' "$A_PROBE_EVIDENCE_SHA"
+    } > "$prepared"
+    chmod 600 "$prepared"
+    publish_exact_receipt "$prepared" "$A_RECEIPT_PATH"
+
+    if [ "$source" = "$PENDING_ADMISSION" ]; then
+        [ ! -e "$A_QUARANTINE_PATH" ] && [ ! -L "$A_QUARANTINE_PATH" ] ||
+            die "fresh MCP admission quarantine target appeared during settlement"
+        mv "$PENDING_ADMISSION" "$A_QUARANTINE_PATH" ||
+            die "cannot atomically retire the admitted pending state"
+    fi
+    [ "$(sha256_file "$A_QUARANTINE_PATH")" = "$A_PENDING_SHA" ] ||
+        die "retired pending admission content changed"
+    FRESH_MCP_ADMISSION_SETTLED=1
+}
+
+retire_fresh_mcp_admission_intent() {
+    local retired
+    [ "$FRESH_MCP_ADMISSION_SETTLED" -eq 1 ] || die "fresh MCP admission intent is not settled"
+    retired="$LEASE_QUARANTINE_DIR/$A_PENDING_LEASE_ID.$A_PENDING_CHALLENGE.fresh-mcp-admission-intent.settled.meta"
+    [ ! -e "$retired" ] && [ ! -L "$retired" ] ||
+        die "fresh MCP admission settled-intent target already exists"
+    mv "$FRESH_MCP_ADMISSION_INTENT" "$retired" ||
+        die "cannot retire the settled fresh MCP admission intent"
+}
+
+run_fresh_mcp_probe() {
+    local probe_root probe_meta probe_stderr
+    probe_root="$(mktemp -d "$DEPLOY_TMPDIR/ab-publisher-fresh-mcp.XXXXXX")"
+    chmod 700 "$probe_root" 2>/dev/null || true
+    CLEANUP_FRESH_MCP_TMP="$probe_root"
+    probe_meta="$probe_root/probe.meta"
+    probe_stderr="$probe_root/probe.stderr"
+
+    if [ "$LEASE_TEST_MODE" = 1 ] && [ "$LEASE_TEST_LIVE_FRESH_MCP" != 1 ]; then
+        [ -f "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE:-}" ] ||
+            die "lease test fresh MCP probe fixture missing"
+        cp "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE" "$probe_meta"
+    else
+        command -v python3 >/dev/null 2>&1 || die "python3 is required for fresh MCP admission"
+        if ! python3 - "$P_REAL_PATH" "$P_CANDIDATE" "$probe_root" >"$probe_meta" 2>"$probe_stderr" <<'PY'
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+
+binary, expected_commit, probe_root = sys.argv[1:]
+if not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
+    raise SystemExit("pending candidate is not an authoritative commit")
+
+env = os.environ.copy()
+for key in list(env):
+    if key.startswith("AGENT_BRIDGE_DEPLOY_"):
+        env.pop(key, None)
+env.update({
+    "XDG_DATA_HOME": os.path.join(probe_root, "xdg"),
+    "AGENT_BRIDGE_STATE_DIR": os.path.join(probe_root, "private-state"),
+    "AGENT_BRIDGE_TOOLSET": "codex-essential",
+    "AGENT_BRIDGE_TERMINAL": "pty",
+    "AGENT_BRIDGE_CLIENT": "publisher-admission-probe",
+    "AGENT_BRIDGE_MCP_SOURCE": "publisher-admission-probe",
+})
+
+messages = [
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "publisher-admission-probe", "version": "0"},
+        },
+    },
+    {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "capabilities", "arguments": {"compact": True}},
+    },
+]
+payload = "".join(json.dumps(item, separators=(",", ":")) + "\n" for item in messages)
+completed = subprocess.run(
+    [binary, "mcp"],
+    input=payload,
+    text=True,
+    capture_output=True,
+    env=env,
+    timeout=45,
+    check=False,
+)
+if completed.returncode != 0:
+    raise SystemExit("fresh MCP process failed")
+
+responses = {}
+response_counts = {}
+for line in completed.stdout.splitlines():
+    value = json.loads(line)
+    if value.get("id") is not None:
+        response_counts[value["id"]] = response_counts.get(value["id"], 0) + 1
+        responses[value["id"]] = value
+if set(responses) != {1, 2, 3} or any(response_counts.get(idx) != 1 for idx in (1, 2, 3)):
+    raise SystemExit("fresh MCP response set is incomplete")
+if any("error" in responses[idx] for idx in (1, 2, 3)):
+    raise SystemExit("fresh MCP returned a protocol error")
+
+init = responses[1]["result"]
+server = init["serverInfo"]
+if server.get("name") != "agent-bridge" or init.get("protocolVersion") != "2024-11-05":
+    raise SystemExit("fresh MCP identity mismatch")
+
+tools = responses[2]["result"]["tools"]
+tool_names = [tool.get("name") for tool in tools]
+if tool_names.count("capabilities") != 1:
+    raise SystemExit("capabilities tool is not exposed exactly once")
+
+result = responses[3]["result"]
+text_blocks = [block.get("text") for block in result.get("content", []) if block.get("type") == "text"]
+if len(text_blocks) != 1:
+    raise SystemExit("capabilities result is not a single structured text block")
+capabilities = json.loads(text_blocks[0])
+build_sha = capabilities["build"]["git_sha"]
+toolset = capabilities["mcp"]["toolset"]
+exposed_count = capabilities["mcp"]["exposed_tool_count"]
+if build_sha != expected_commit[:12]:
+    raise SystemExit("fresh MCP build does not match pending candidate")
+if toolset != "codex-essential" or exposed_count != len(tools):
+    raise SystemExit("fresh MCP tool manifest mismatch")
+
+evidence = {
+    "schema": "agent_bridge.publisher_fresh_mcp_probe.v0",
+    "server_name": server["name"],
+    "server_version": server["version"],
+    "protocol_version": init["protocolVersion"],
+    "build_git_sha": build_sha,
+    "toolset": toolset,
+    "tool_count": len(tools),
+    "capabilities_tool_present": True,
+    "probe_method": "independent_stdio_exact_installed_binary",
+}
+ordered_keys = (
+    "schema", "server_name", "server_version", "protocol_version", "build_git_sha",
+    "toolset", "tool_count", "capabilities_tool_present", "probe_method",
+)
+evidence_lines = []
+for key in ordered_keys:
+    value = evidence[key]
+    if isinstance(value, bool):
+        value = str(value).lower()
+    evidence_lines.append(f"{key}={value}")
+digest = hashlib.sha256(("\n".join(evidence_lines) + "\n").encode()).hexdigest()
+for line in evidence_lines:
+    print(line)
+print(f"evidence_sha256={digest}")
+PY
+        then
+            die "fresh MCP admission probe failed; diagnostic details intentionally suppressed"
+        fi
+    fi
+
+    chmod 600 "$probe_meta" 2>/dev/null || true
+    read_fresh_mcp_probe "$probe_meta" || die "fresh MCP admission probe receipt is invalid"
+    [ "$F_BUILD_SHA" = "${P_CANDIDATE:0:12}" ] ||
+        die "fresh MCP admission probe build does not match pending candidate"
+}
+
+admit_pending_fresh_mcp() {
+    local pending_sha receipt quarantine
+    [ -e "$PENDING_ADMISSION" ] || die "no publisher pending admission exists"
+    read_pending_admission "$PENDING_ADMISSION" ||
+        die "pending-admission metadata is missing, unknown, or corrupt; fail closed"
+    [ "$P_REAL_PATH" = "$REAL_PATH" ] && [ "$P_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+        die "pending admission targets do not match this publisher"
+    printf '%s\n' "$P_CANDIDATE" | grep -Eq '^[0-9a-f]{40}$' ||
+        die "fresh MCP admission requires an authoritative commit candidate"
+    pending_fingerprint_matches ||
+        die "pending-admission fingerprint no longer matches the installed binary/assets"
+    pending_sha="$(sha256_file "$PENDING_ADMISSION")"
+
+    LEASE_CANDIDATE="$P_CANDIDATE"
+    lease_phase_update prepared
+    run_fresh_mcp_probe
+
+    [ "$(sha256_file "$PENDING_ADMISSION")" = "$pending_sha" ] ||
+        die "pending admission changed during the fresh MCP probe"
+    read_pending_admission "$PENDING_ADMISSION" && pending_fingerprint_matches ||
+        die "pending admission fingerprint changed during the fresh MCP probe"
+
+    receipt="$LEASE_RECEIPT_DIR/$P_LEASE_ID.$P_CHALLENGE.fresh-mcp-admitted.meta"
+    quarantine="$LEASE_QUARANTINE_DIR/$P_LEASE_ID.$P_CHALLENGE.fresh-mcp-admitted.pending.meta"
+    write_fresh_mcp_admission_intent "$pending_sha" "$receipt" "$quarantine"
+    settle_fresh_mcp_admission_intent
+
+    if [ "$LEASE_TEST_MODE" = 1 ] && [ "$LEASE_TEST_HOLD_AFTER_FRESH_MCP" = 1 ]; then
+        [ -z "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE:-}" ] ||
+            printf '%s\n' "$$" > "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE"
+        while :; do sleep 1; done
+    fi
+
+    say "publisher fresh MCP admission: verified ($P_CANDIDATE, toolset=$F_TOOLSET, tools=$F_TOOL_COUNT)"
+    release_active_lease fresh_mcp_admitted exact_independent_stdio_probe
+    retire_fresh_mcp_admission_intent
+}
+
 lease_test_advance() {
     case "$1" in
         acquired) ;;
@@ -1782,8 +2232,25 @@ lease_test_advance() {
     esac
 }
 
+FRESH_MCP_ADMISSION_SETTLED=0
+if [ -e "$FRESH_MCP_ADMISSION_INTENT" ] || [ -L "$FRESH_MCP_ADMISSION_INTENT" ]; then
+    settle_fresh_mcp_admission_intent
+    if [ "$ADMIT_FRESH_MCP" -eq 1 ] ||
+            [ "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" = admit-fresh-mcp ]; then
+        say "publisher fresh MCP admission: recovered exact settled intent ($A_CANDIDATE)"
+        release_active_lease fresh_mcp_admission_recovered exact_completion_intent_replay
+        retire_fresh_mcp_admission_intent
+        exit 0
+    fi
+    retire_fresh_mcp_admission_intent
+fi
+
 if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ]; then
     test_root="$TEST_PHYSICAL_ROOT"
+    if [ "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION" = admit-fresh-mcp ]; then
+        admit_pending_fresh_mcp
+        exit 0
+    fi
     LEASE_CANDIDATE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_CANDIDATE:-test-candidate}"
     is_safe_candidate "$LEASE_CANDIDATE" || die "publisher lease test candidate is invalid"
     lease_phase_update acquired
@@ -1816,6 +2283,11 @@ if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ]; then
             ;;
         *) die "unknown publisher lease test action: $AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION" ;;
     esac
+fi
+
+if [ "$ADMIT_FRESH_MCP" -eq 1 ]; then
+    admit_pending_fresh_mcp
+    exit 0
 fi
 
 # ---- 1. obtain the NEW binary (build from latest master, or --use-binary) ----

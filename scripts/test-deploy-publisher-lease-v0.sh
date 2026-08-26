@@ -122,7 +122,8 @@ new_case() {
 }
 
 run_lease() {
-    local root="$1" action="$2" candidate="$3" payload="${4:-$1/payload-a}"
+    local root="$1" action="$2" candidate="$3" payload="${4:-$1/payload-a}" fresh_probe="${5:-}"
+    local live_fresh_probe="${6:-0}" hold_after_settled="${7:-0}"
     HOME="$root/home" \
     AGENT_BRIDGE_INSTALL_DIR="$root/bin" \
     AGENT_BRIDGE_REAL_BIN="$root/bin/agent-bridge.real" \
@@ -133,7 +134,104 @@ run_lease() {
     AGENT_BRIDGE_DEPLOY_LEASE_TEST_CANDIDATE="$candidate" \
     AGENT_BRIDGE_DEPLOY_LEASE_TEST_PAYLOAD="$payload" \
     AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG="$root/mutations.log" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE="$fresh_probe" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_LIVE_FRESH_MCP="$live_fresh_probe" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_HOLD_AFTER_FRESH_MCP_SETTLED="$hold_after_settled" \
         "$DEPLOY" --yes
+}
+
+write_fresh_mcp_probe_fixture() {
+    local path="$1" build_sha="$2" evidence="${3:-}"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_probe.v0
+        printf 'server_name=%s\n' agent-bridge
+        printf 'server_version=%s\n' 0.14.0-test
+        printf 'protocol_version=%s\n' 2024-11-05
+        printf 'build_git_sha=%s\n' "$build_sha"
+        printf 'toolset=%s\n' codex-essential
+        printf 'tool_count=%s\n' 110
+        printf 'capabilities_tool_present=%s\n' true
+        printf 'probe_method=%s\n' independent_stdio_exact_installed_binary
+    } > "$path"
+    [ -n "$evidence" ] || evidence="$(sha256_fixture "$path")"
+    printf 'evidence_sha256=%s\n' "$evidence" >> "$path"
+    chmod 600 "$path"
+}
+
+write_live_mcp_executable() {
+    local path="$1" build_sha="$2" mode="${3:-normal}"
+    cat > "$path" <<PY
+#!/usr/bin/env python3
+import json
+import sys
+
+BUILD_SHA = "$build_sha"
+MODE = "$mode"
+TOOLS = [
+    {"name": "capabilities", "description": "test", "inputSchema": {"type": "object"}},
+] + [
+    {"name": f"essential_test_{index}", "description": "test", "inputSchema": {"type": "object"}}
+    for index in range(109)
+]
+
+for line in sys.stdin:
+    request = json.loads(line)
+    request_id = request.get("id")
+    if request_id is None:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        result = {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "agent-bridge", "version": "0.14.0-test"},
+        }
+    elif method == "tools/list":
+        result = {"tools": TOOLS}
+    elif method == "tools/call":
+        capabilities = {
+            "build": {"git_sha": BUILD_SHA},
+            "mcp": {"toolset": "codex-essential", "exposed_tool_count": len(TOOLS)},
+        }
+        result = {"content": [{"type": "text", "text": json.dumps(capabilities)}]}
+    else:
+        continue
+    response = {"jsonrpc": "2.0", "id": request_id, "result": result}
+    print(json.dumps(response), flush=True)
+    if MODE == "duplicate-tools-list" and request_id == 2:
+        print(json.dumps(response), flush=True)
+PY
+    chmod 755 "$path"
+}
+
+fresh_admission_receipt() {
+    local root="$1" file
+    for file in "$root/state/receipts/"*.fresh-mcp-admitted.meta; do
+        [ -f "$file" ] || continue
+        printf '%s\n' "$file"
+        return 0
+    done
+    return 1
+}
+
+fresh_admission_quarantine() {
+    local root="$1" file
+    for file in "$root/state/quarantine/"*.fresh-mcp-admitted.pending.meta; do
+        [ -f "$file" ] || continue
+        printf '%s\n' "$file"
+        return 0
+    done
+    return 1
+}
+
+fresh_admission_settled_intent() {
+    local root="$1" file
+    for file in "$root/state/quarantine/"*.fresh-mcp-admission-intent.settled.meta; do
+        [ -f "$file" ] || continue
+        printf '%s\n' "$file"
+        return 0
+    done
+    return 1
 }
 
 start_holder() {
@@ -161,6 +259,33 @@ start_holder() {
         attempt=$((attempt + 1))
     done
     [ -f "$ready" ] || fail "holder did not become ready ($phase)"
+    HOLDER_CHILD_PID="$(cat "$ready")"
+}
+
+start_fresh_admission_holder() {
+    local root="$1" probe="$2" ready="$root/fresh-admission-ready"
+    (
+        trap - EXIT
+        exec env \
+            HOME="$root/home" \
+            AGENT_BRIDGE_INSTALL_DIR="$root/bin" \
+            AGENT_BRIDGE_REAL_BIN="$root/bin/agent-bridge.real" \
+            AGENT_BRIDGE_DEPLOY_STATE_DIR="$root/state" \
+            AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1 \
+            AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$TEST_ROOT" \
+            AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION=admit-fresh-mcp \
+            AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE="$probe" \
+            AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE="$ready" \
+            AGENT_BRIDGE_DEPLOY_LEASE_TEST_HOLD_AFTER_FRESH_MCP_SETTLED=1 \
+            "$DEPLOY" --yes
+    ) > "$root/fresh-admission-holder.log" 2>&1 &
+    HOLDER_PID=$!
+    attempt=0
+    while [ ! -f "$ready" ] && [ "$attempt" -lt 200 ]; do
+        sleep 0.02
+        attempt=$((attempt + 1))
+    done
+    [ -f "$ready" ] || fail "fresh MCP admission holder did not reach settled state"
     HOLDER_CHILD_PID="$(cat "$ready")"
 }
 
@@ -840,5 +965,185 @@ run_lease "$root" probe handoff-receipt-second-successor >/dev/null
     fail "replayed handoff completion duplicated its prebound formal recovery receipt"
 [ ! -e "$root/state/recovery-handoff-completion.meta" ] ||
     fail "replayed handoff completion intent remained canonical"
+
+# 25. A matching exact installed fingerprint and fresh-MCP probe consume the
+# pending state into one deterministic receipt and one quarantined source.
+new_case fresh-mcp-admission; root="$CASE_ROOT"
+candidate=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+cp "$root/state/pending-admission.meta" "$root/pending.before-admission"
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" >/dev/null
+[ ! -e "$root/state/pending-admission.meta" ] || fail "fresh MCP admission left canonical pending state"
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP admission left canonical completion intent"
+receipt="$(fresh_admission_receipt "$root")" || fail "fresh MCP admission receipt missing"
+quarantine="$(fresh_admission_quarantine "$root")" || fail "fresh MCP admitted pending quarantine missing"
+settled_intent="$(fresh_admission_settled_intent "$root")" || fail "fresh MCP settled intent archive missing"
+cmp -s "$root/pending.before-admission" "$quarantine" || fail "fresh MCP admitted pending content changed"
+[ "$(meta_field "$receipt" candidate_commit)" = "$candidate" ] || fail "fresh MCP receipt candidate mismatch"
+[ "$(meta_field "$receipt" fresh_mcp)" = verified ] || fail "fresh MCP receipt is not verified"
+[ "$(meta_field "$receipt" probe_build_git_sha)" = "${candidate:0:12}" ] || fail "fresh MCP receipt probe build mismatch"
+[ "$(meta_field "$receipt" probe_toolset)" = codex-essential ] || fail "fresh MCP receipt toolset mismatch"
+[ "$(meta_field "$receipt" probe_tool_count)" = 110 ] || fail "fresh MCP receipt tool count mismatch"
+
+# 26. Receipt publication before pending quarantine is replay-idempotent: the
+# exact receipt is reused and the still-canonical pending state is retired.
+mv "$settled_intent" "$root/state/fresh-mcp-admission-intent.meta"
+mv "$quarantine" "$root/state/pending-admission.meta"
+receipt_sha="$(sha256_fixture "$receipt")"
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" >/dev/null
+[ "$(sha256_fixture "$receipt")" = "$receipt_sha" ] || fail "fresh MCP receipt-before-move replay changed the receipt"
+[ ! -e "$root/state/pending-admission.meta" ] || fail "fresh MCP receipt-before-move replay left pending state"
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP receipt-before-move replay left completion intent"
+
+# 27. Pending quarantine before publisher release is also replay-idempotent:
+# the exact quarantined source and receipt settle the interrupted admission.
+settled_intent="$(fresh_admission_settled_intent "$root")"
+mv "$settled_intent" "$root/state/fresh-mcp-admission-intent.meta"
+quarantine="$(fresh_admission_quarantine "$root")"
+quarantine_sha="$(sha256_fixture "$quarantine")"
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" >/dev/null
+[ "$(sha256_fixture "$quarantine")" = "$quarantine_sha" ] || fail "fresh MCP post-move replay changed quarantined pending state"
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP post-move replay left completion intent"
+
+# 28. A probe for any other build fails before intent publication and preserves
+# the exact pending admission for a later authoritative retry.
+new_case fresh-mcp-wrong-build; root="$CASE_ROOT"
+candidate=cccccccccccccccccccccccccccccccccccccccc
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" dddddddddddd
+run_lease "$root" install "$candidate" >/dev/null
+pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "fresh MCP probe for a different build was accepted"
+case "$output" in *"probe build does not match pending candidate"*) ;; *)
+    fail "fresh MCP wrong-build fail-closed reason missing" ;;
+esac
+[ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] || fail "fresh MCP wrong-build failure changed pending state"
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP wrong-build failure published an intent"
+
+# 29. Binary drift after pending publication fails before the probe and leaves
+# the original pending state untouched for governed recovery.
+new_case fresh-mcp-binary-drift; root="$CASE_ROOT"
+candidate=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+printf '%s\n' externally-changed > "$root/bin/agent-bridge.real"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "fresh MCP admission accepted a drifted installed binary"
+case "$output" in *"fingerprint no longer matches"*) ;; *)
+    fail "fresh MCP binary-drift fail-closed reason missing" ;;
+esac
+[ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] || fail "fresh MCP binary-drift failure changed pending state"
+
+# 30. A conflicting prebound admission receipt fails closed after journaling;
+# neither the canonical pending source nor the intent may be silently retired.
+new_case fresh-mcp-receipt-conflict; root="$CASE_ROOT"
+candidate=ffffffffffffffffffffffffffffffffffffffff
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+pending="$root/state/pending-admission.meta"
+pending_sha="$(sha256_fixture "$pending")"
+lease_id="$(meta_field "$pending" lease_id)"
+challenge="$(meta_field "$pending" challenge)"
+receipt="$root/state/receipts/$lease_id.$challenge.fresh-mcp-admitted.meta"
+printf '%s\n' tampered > "$receipt"
+chmod 600 "$receipt"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "conflicting fresh MCP admission receipt was accepted"
+case "$output" in *"prebound publisher receipt already exists with different content"*) ;; *)
+    fail "fresh MCP conflicting-receipt fail-closed reason missing" ;;
+esac
+[ "$(sha256_fixture "$pending")" = "$pending_sha" ] || fail "fresh MCP receipt conflict changed pending state"
+[ -f "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP receipt conflict lost its durable intent"
+
+# 31. The committed integration path launches the exact installed executable
+# and validates the real JSON-RPC initialize/list/call exchange without fixture
+# substitution.
+new_case fresh-mcp-live-probe; root="$CASE_ROOT"
+candidate=1111111111111111111111111111111111111111
+chmod 755 "$root/bin/agent-bridge.real"
+write_live_mcp_executable "$root/payload-a" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "" 1 >/dev/null
+receipt="$(fresh_admission_receipt "$root")" || fail "fresh MCP live-probe admission receipt missing"
+[ "$(meta_field "$receipt" probe_build_git_sha)" = "${candidate:0:12}" ] || fail "fresh MCP live-probe build mismatch"
+[ "$(meta_field "$receipt" probe_tool_count)" = 110 ] || fail "fresh MCP live-probe tool count mismatch"
+
+# 32. Duplicate response ids from a controlled MCP executable are rejected;
+# one later response may not overwrite another in the probe parser.
+new_case fresh-mcp-live-duplicate-response; root="$CASE_ROOT"
+candidate=2222222222222222222222222222222222222222
+chmod 755 "$root/bin/agent-bridge.real"
+write_live_mcp_executable "$root/payload-a" "${candidate:0:12}" duplicate-tools-list
+run_lease "$root" install "$candidate" >/dev/null
+pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "" 1 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "fresh MCP live probe accepted duplicate response ids"
+case "$output" in *"fresh MCP admission probe failed"*) ;; *) fail "fresh MCP duplicate-response reason missing" ;; esac
+[ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] || fail "fresh MCP duplicate-response failure changed pending state"
+
+# 33. The evidence digest is recomputed from the observed fields; an arbitrary
+# shape-valid 64-hex value cannot be admitted by the synthetic contract lane.
+new_case fresh-mcp-invalid-evidence; root="$CASE_ROOT"
+candidate=3333333333333333333333333333333333333333
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+run_lease "$root" install "$candidate" >/dev/null
+pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "fresh MCP admission accepted an invalid evidence digest"
+case "$output" in *"probe receipt is invalid"*) ;; *) fail "fresh MCP invalid-evidence reason missing" ;; esac
+[ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] || fail "fresh MCP invalid-evidence failure changed pending state"
+
+# 34. SIGKILL after receipt/pending settlement but before lease release is
+# recovered directly because admission never mutates the installed baseline.
+new_case fresh-mcp-active-lease-crash; root="$CASE_ROOT"
+candidate=4444444444444444444444444444444444444444
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+start_fresh_admission_holder "$root" "$probe"
+[ -f "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP crash holder did not publish completion intent"
+[ -f "$(fresh_admission_quarantine "$root")" ] || fail "fresh MCP crash holder did not quarantine pending state"
+kill_holder_without_cleanup "$root"
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" >/dev/null
+[ ! -e "$root/state/active.lock" ] || fail "fresh MCP active-lease crash recovery left an active lease"
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP active-lease crash recovery left completion intent"
+[ "$(receipt_field_count "$root" disposition fresh_mcp_admission_recovered)" = 1 ] ||
+    fail "fresh MCP active-lease crash recovery receipt missing"
+
+# 35. Publisher state subdirectories are physical trust roots; a symlinked
+# receipt directory is rejected before lease acquisition.
+new_case publisher-state-symlink; root="$CASE_ROOT"
+mkdir -p "$root/external-receipts"
+ln -s "$root/external-receipts" "$root/state/receipts"
+set +e
+output="$(run_lease "$root" probe symlinked-state 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "publisher accepted a symlinked receipt directory"
+case "$output" in *"not a physical directory"*|*"must not traverse a symlink"*) ;; *)
+    fail "publisher state symlink fail-closed reason missing" ;;
+esac
 
 printf '%s\n' publisher-lease-v0-ok
