@@ -32,6 +32,25 @@ The service is disabled by default, is not started at boot, and returns
 `START_NOT_STICKY`. Always disable it after an explicit test. Projection does
 not require enabling it.
 
+## Recovery signer profile boundary
+
+The recovery signer adapter requires an explicit fixed profile in addition to
+the independently pinned public key:
+
+```sh
+export AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM='ES256'
+export AB_APP_CONTROL_RECOVERY_AUTH_PROFILE='biometric_strong' # or device_credential
+export AB_APP_CONTROL_RECOVERY_AUTH_PUBLIC_KEY_B64='<independently-pinned-profile-key>'
+```
+
+The Activity never changes profiles in response to device capability. Changing
+the profile requires updating the profile setting and independently repinning
+that profile's key. A missing or permanently invalidated biometric key is not
+regenerated silently. Stop and disable the service, explicitly clear app data
+or reinstall the companion, repeat provisioning, and repin the new key. An app
+data reset also removes the health token and all other companion-local state.
+Never automate reset or repinning.
+
 The LAN health endpoint is read-only. Its request line is
 `ABH1 <unix-seconds> <32-lower-hex-nonce> <HMAC-SHA256>`. Use the Agent-Bridge
 host verifier rather than hand-assembling production requests.

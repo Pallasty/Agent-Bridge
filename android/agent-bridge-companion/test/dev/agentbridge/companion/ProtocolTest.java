@@ -1,6 +1,8 @@
 package dev.agentbridge.companion;
 
 import java.nio.charset.Charset;
+import java.security.KeyPairGenerator;
+import java.security.spec.ECGenParameterSpec;
 import java.util.ArrayList;
 import java.util.Base64;
 import javax.crypto.Mac;
@@ -128,6 +130,26 @@ public final class ProtocolTest {
                 +RecoveryAuthorizationProtocol.RECEIPT_SCHEMA+"\",\"session_sha256\":\""+repeat("5",64)
                 +"\",\"workspace_sha256\":\""+repeat("4",64)+"\"}"));
         check(RecoveryAuthorizationProtocol.receiptToken(canonicalReceipt,new byte[70]).split("\\.").length==2);
+        check(RecoveryAuthorizationProtocol.requireAuthenticationProfile("biometric_strong")
+                .equals(RecoveryAuthorizationProtocol.AUTH_PROFILE_BIOMETRIC_STRONG));
+        check(RecoveryAuthorizationProtocol.requireAuthenticationProfile("device_credential")
+                .equals(RecoveryAuthorizationProtocol.AUTH_PROFILE_DEVICE_CREDENTIAL));
+        rejected=false; try { RecoveryAuthorizationProtocol.requireAuthenticationProfile(null); }
+        catch(IllegalArgumentException expected){ rejected=true; } check(rejected);
+        rejected=false; try { RecoveryAuthorizationProtocol.requireAuthenticationProfile("automatic"); }
+        catch(IllegalArgumentException expected){ rejected=true; } check(rejected);
+        KeyPairGenerator ecGenerator=KeyPairGenerator.getInstance("EC");
+        ecGenerator.initialize(new ECGenParameterSpec("secp256r1"));
+        check(!RecoveryAuthorizationProtocol.publicKeyBase64(
+                ecGenerator.generateKeyPair().getPublic().getEncoded()).isEmpty());
+        ecGenerator.initialize(new ECGenParameterSpec("secp384r1"));
+        rejected=false; try { RecoveryAuthorizationProtocol.publicKeyBase64(
+                ecGenerator.generateKeyPair().getPublic().getEncoded()); }
+        catch(IllegalArgumentException expected){ rejected=true; } check(rejected);
+        KeyPairGenerator rsaGenerator=KeyPairGenerator.getInstance("RSA"); rsaGenerator.initialize(1024);
+        rejected=false; try { RecoveryAuthorizationProtocol.publicKeyBase64(
+                rsaGenerator.generateKeyPair().getPublic().getEncoded()); }
+        catch(IllegalArgumentException expected){ rejected=true; } check(rejected);
         rejected=false; try { RecoveryAuthorizationProtocol.canonicalReceipt("bad",repeat("2",64),repeat("3",64),
                 repeat("4",64),repeat("5",64),now,now+120,"android-keystore:companion-v0",repeat("6",32)); }
         catch(IllegalArgumentException expected){ rejected=true; } check(rejected);

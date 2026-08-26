@@ -321,24 +321,40 @@ ordinary local hook is intentionally excluded as an issuer.
 ### Android recovery signer candidate v0
 
 The Android companion candidate is restricted to Android 13+ and creates a
-P-256 ECDSA (`ES256`) signing key in `AndroidKeyStore` with per-use user
-authentication. This explicit profile supports Android devices whose secure
-keystore does not expose Ed25519 key generation. A
+P-256 ECDSA (`ES256`) signing key in `AndroidKeyStore`. The mobile adapter
+requires `AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM=ES256` and one fixed
+`AB_APP_CONTROL_RECOVERY_AUTH_PROFILE`: either `biometric_strong` or
+`device_credential`. It passes that profile to the Activity; a missing or
+unknown profile fails closed. This explicit configuration supports Android
+devices whose secure keystore does not expose Ed25519 key generation. A
 foreground `BiometricPrompt` displays the bounded `next` recovery identity and
 states that signing does not execute recovery. The private key is never
 exported; the companion exposes only the DER SubjectPublicKeyInfo public key and detached signed
-receipt. The host adapter accepts that export only when its public key exactly
-matches the independently configured frontend pin. ADB may present the UI and
+receipt. The export also names the exact authentication profile. The host
+adapter accepts it only when both the profile and public key exactly match the
+independently configured profile and frontend pin. ADB may present the UI and
 read the public receipt, but cannot satisfy the keystore authentication or sign.
 
-The preferred Android authentication profile is Class 3 strong biometric with
-a per-use `CryptoObject`. If the device has no Class 3 biometric, the companion
-may use the system device credential prompt and a separate P-256 key whose
-Keystore authorization window is limited to 15 seconds; it signs the one bound
-receipt immediately in the successful system callback. A device with neither a
-strong biometric nor a secure screen lock fails closed.
+The `biometric_strong` profile requires a Class 3 strong biometric and uses a
+per-use `CryptoObject`. The `device_credential` profile independently checks
+both the system credential authenticator and secure-screen-lock capability,
+then uses a separate P-256 key whose Keystore authorization window is limited
+to 15 seconds; it signs the one bound receipt immediately in the successful
+system callback. Neither profile silently falls back to the other. Switching
+profiles is an explicit host reconfiguration and requires independently
+pinning the selected profile's public key before collection.
 
-This slice is deliberately not exposed through MCP and is not connected to the
+Strong-biometric enrollment changes may permanently invalidate its alias. The
+Activity records that the alias was provisioned and never silently regenerates
+a missing or invalidated key. Recovery is an explicit operator reset (clear the
+companion's app data or reinstall it), followed by a new authorization signing
+setup and independent repinning of the newly generated public key. Clearing app
+data also removes the companion's other local provisioning and must not be
+performed by an automated recovery path.
+
+The companion service remains disabled in the manifest; receipt collection
+through its bounded `dumpsys` export requires the existing explicit operator
+enable/start procedure and a subsequent disable. This slice is deliberately not exposed through MCP and is not connected to the
 mutating recovery path. Source/protocol qualification does not prove APK build,
 device keystore support, biometric enrollment, or a live signed round trip;
 those remain separate activation gates.

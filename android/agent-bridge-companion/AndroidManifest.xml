@@ -23,7 +23,7 @@
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <service
             android:name=".CompanionService"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
             android:foregroundServiceType="connectedDevice" />
     </application>

@@ -188,11 +188,14 @@ public final class CompanionService extends Service {
         SharedPreferences preferences=getSharedPreferences(RecoveryAuthorizationActivity.PREFS,MODE_PRIVATE);
         String receipt=preferences.getString(RecoveryAuthorizationActivity.RECEIPT_KEY,"");
         String publicKey=preferences.getString(RecoveryAuthorizationActivity.PUBLIC_KEY,"");
-        if (receipt.isEmpty() || publicKey.isEmpty())
+        String authenticationProfile=preferences.getString(RecoveryAuthorizationActivity.AUTH_PROFILE_KEY,"");
+        if (receipt.isEmpty() || publicKey.isEmpty() || authenticationProfile.isEmpty())
             return "{\"schema\":\"agent_bridge.android_companion.recovery_authorization_export.v0\",\"status\":\"empty\",\"private_key_exported\":false}";
         try {
+            RecoveryAuthorizationProtocol.requireAuthenticationProfile(authenticationProfile);
             return new org.json.JSONObject().put("schema","agent_bridge.android_companion.recovery_authorization_export.v0")
                     .put("status","signed").put("receipt",receipt).put("public_key_b64",publicKey)
+                    .put("authentication_profile",authenticationProfile)
                     .put("private_key_exported",false).put("action_invoked",false).toString();
         } catch (Exception error) {
             return "{\"schema\":\"agent_bridge.android_companion.recovery_authorization_export.v0\",\"status\":\"error\",\"private_key_exported\":false}";

@@ -76,5 +76,17 @@ class RecoveryAuthorizationTests(unittest.TestCase):
             out = MOD.authorize(receipt=receipt, public_key_b64=key_b64, ledger=self.ledger,
                 consume=False, now=self.now, **self.bindings)
         self.assertEqual(out["admission"], "source_unavailable")
+    def test_es256_wrong_curve_and_unknown_algorithm_fail_closed(self):
+        public = ec.generate_private_key(ec.SECP384R1()).public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        key_b64 = base64.urlsafe_b64encode(public).decode().rstrip("=")
+        with patch.dict(os.environ, {"AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM": "ES256"}):
+            out = MOD.authorize(receipt=self.receipt(), public_key_b64=key_b64,
+                ledger=self.ledger, consume=False, now=self.now, **self.bindings)
+        self.assertEqual(out["admission"], "source_unavailable")
+        with patch.dict(os.environ, {"AB_APP_CONTROL_RECOVERY_AUTH_ALGORITHM": "ES384"}):
+            out = MOD.authorize(receipt=self.receipt(), public_key_b64=key_b64,
+                ledger=self.ledger, consume=False, now=self.now, **self.bindings)
+        self.assertEqual(out["admission"], "source_unavailable")
 
 if __name__ == "__main__": unittest.main()
