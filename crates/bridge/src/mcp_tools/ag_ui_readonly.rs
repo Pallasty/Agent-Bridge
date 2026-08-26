@@ -2,7 +2,7 @@
 
 use crate::ag_ui_readonly_projection::{
     project_ag_ui_readonly, AgUiProjectionError, CORE_VERSION, MAX_EVENTS, MAX_IDENTIFIER_BYTES,
-    PROJECTION_SCHEMA, PROTOCOL_NAME, REQUEST_SCHEMA,
+    PROJECTION_SCHEMA, PROJECTION_SCHEMA_V1, PROTOCOL_NAME, REQUEST_SCHEMA, REQUEST_SCHEMA_V1,
 };
 use ab_core::Result;
 use ab_mcp::{ContentBlock, McpTool, ToolAnnotations, ToolContext, ToolResult, ToolSchema};
@@ -36,14 +36,18 @@ impl McpTool for AgUiReadonlyProjectTool {
 
     fn output_schema(&self) -> Option<Value> {
         Some(json!({
-            "oneOf": [projection_output_schema(), projection_error_output_schema()]
+            "oneOf": [
+                projection_output_schema(),
+                projection_output_schema_v1(),
+                projection_error_output_schema()
+            ]
         }))
     }
 
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Project one caller-supplied, bounded AG-UI 0.0.57 batch into a content-minimized read-only observation. This projector grants no action authority and makes no external-effect claim. Default-off: exposed only by codex-ag-ui-readonly or all-dev; other tools in those toolsets retain their own authority.".into(),
+            description: "Project one caller-supplied, bounded AG-UI 0.0.57 batch into a content-minimized read-only observation. Request v0 preserves the strict legacy completeness contract; request v1 separately reports run-structure and tool-result-observation completeness. Neither contract grants action authority or makes an external-effect claim. Default-off: exposed only by codex-ag-ui-readonly or all-dev; other tools in those toolsets retain their own authority.".into(),
             input_schema: projection_input_schema(),
         }
     }
@@ -61,7 +65,7 @@ fn projection_input_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "schema": {"const": REQUEST_SCHEMA},
+            "schema": {"enum": [REQUEST_SCHEMA, REQUEST_SCHEMA_V1]},
             "protocol": {
                 "type": "object",
                 "properties": {
@@ -101,10 +105,58 @@ fn projection_input_schema() -> Value {
 }
 
 fn projection_output_schema() -> Value {
+    projection_output_schema_for(PROJECTION_SCHEMA, false)
+}
+
+fn projection_output_schema_v1() -> Value {
+    projection_output_schema_for(PROJECTION_SCHEMA_V1, true)
+}
+
+fn projection_output_schema_for(schema: &'static str, split_completeness: bool) -> Value {
+    let claims_properties = if split_completeness {
+        json!({
+            "all_actions_traceable": {"const": false},
+            "external_effects_verified": {"const": false},
+            "run_stream_complete": {
+                "type": "boolean",
+                "description": "True only when run, step, and tool-request structure is complete and violation-free; it does not require or imply a tool result."
+            },
+            "tool_result_observation_complete": {
+                "type": "boolean",
+                "description": "True only when every projected tool request has a TOOL_CALL_RESULT observation; this is not external-effect verification."
+            },
+            "stream_complete": {
+                "type": "boolean",
+                "description": "Conservative aggregate: run_stream_complete and tool_result_observation_complete."
+            }
+        })
+    } else {
+        json!({
+            "all_actions_traceable": {"const": false},
+            "external_effects_verified": {"const": false},
+            "stream_complete": {"type": "boolean"}
+        })
+    };
+    let claims_required = if split_completeness {
+        json!([
+            "all_actions_traceable",
+            "external_effects_verified",
+            "run_stream_complete",
+            "tool_result_observation_complete",
+            "stream_complete"
+        ])
+    } else {
+        json!([
+            "all_actions_traceable",
+            "external_effects_verified",
+            "stream_complete"
+        ])
+    };
+
     json!({
         "type": "object",
         "properties": {
-            "schema": {"const": PROJECTION_SCHEMA},
+            "schema": {"const": schema},
             "read_only": {"const": true},
             "executes_actions": {"const": false},
             "writes_store": {"const": false},
@@ -209,14 +261,8 @@ fn projection_output_schema() -> Value {
             },
             "claims": {
                 "type": "object",
-                "properties": {
-                    "all_actions_traceable": {"const": false},
-                    "external_effects_verified": {"const": false},
-                    "stream_complete": {"type": "boolean"}
-                },
-                "required": [
-                    "all_actions_traceable", "external_effects_verified", "stream_complete"
-                ],
+                "properties": claims_properties,
+                "required": claims_required,
                 "additionalProperties": false
             }
         },
@@ -380,6 +426,7 @@ mod tests {
     const FIXTURES: &[&str] = &[
         include_str!("../../tests/fixtures/ag_ui_readonly_projection/complete_text_run.json"),
         include_str!("../../tests/fixtures/ag_ui_readonly_projection/complete_tool_run.json"),
+        include_str!("../../tests/fixtures/ag_ui_readonly_projection/openbot_tool_request_v1.json"),
         include_str!("../../tests/fixtures/ag_ui_readonly_projection/run_error.json"),
         include_str!("../../tests/fixtures/ag_ui_readonly_projection/interrupted_run.json"),
         include_str!("../../tests/fixtures/ag_ui_readonly_projection/truncated_stream.json"),
@@ -460,6 +507,10 @@ mod tests {
         let input = tool.schema().input_schema;
         assert_eq!(input["additionalProperties"], false);
         assert_eq!(
+            input["properties"]["schema"]["enum"],
+            json!([REQUEST_SCHEMA, REQUEST_SCHEMA_V1])
+        );
+        assert_eq!(
             input["properties"]["protocol"]["additionalProperties"],
             false
         );
@@ -479,6 +530,41 @@ mod tests {
             assert_eq!(branch["properties"]["changes_policy"]["const"], false);
             assert_eq!(branch["additionalProperties"], false);
         }
+
+        let success_branches = output["oneOf"]
+            .as_array()
+            .expect("output variants")
+            .iter()
+            .filter(|branch| {
+                matches!(
+                    branch["properties"]["schema"]["const"].as_str(),
+                    Some(PROJECTION_SCHEMA | PROJECTION_SCHEMA_V1)
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(success_branches.len(), 2);
+        let v0 = success_branches
+            .iter()
+            .find(|branch| branch["properties"]["schema"]["const"] == PROJECTION_SCHEMA)
+            .expect("v0 output schema");
+        assert!(v0["properties"]["claims"]["properties"]
+            .get("run_stream_complete")
+            .is_none());
+        let v1 = success_branches
+            .iter()
+            .find(|branch| branch["properties"]["schema"]["const"] == PROJECTION_SCHEMA_V1)
+            .expect("v1 output schema");
+        assert_eq!(
+            v1["properties"]["claims"]["required"],
+            json!([
+                "all_actions_traceable",
+                "external_effects_verified",
+                "run_stream_complete",
+                "tool_result_observation_complete",
+                "stream_complete"
+            ])
+        );
+        assert_eq!(v1["properties"]["claims"]["additionalProperties"], false);
     }
 
     #[test]

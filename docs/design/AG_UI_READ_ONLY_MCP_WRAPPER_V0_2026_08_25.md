@@ -7,6 +7,10 @@
 - External wire pin: `@ag-ui/core@0.0.57`
 - Related design: `AG_UI_SEMANTIC_BUS_READ_ONLY_ADAPTER_V0_2026_08_23.md`
 
+> Version note (2026-08-26): this v0 contract remains supported unchanged. The same fieldless tool's
+> opt-in v1 request/projection behavior is specified in
+> `AG_UI_OPENBOT_REQUEST_COMPLETENESS_V1_D6_2026_08_26.md`.
+
 ## Decision summary
 
 The source candidate contains a fieldless MCP wrapper that accepts one caller-supplied bounded AG-UI
