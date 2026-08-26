@@ -46,6 +46,19 @@
 #                              kept OFF /Data so ntfs-3g pressure cannot ENOSPC the release build)
 #   AGENT_BRIDGE_DEPLOY_REMOTE git remote containing authoritative master
 #                              (default: origin; use github after GitHub migration)
+#   AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 plus AGENT_BRIDGE_DEPLOY_FORCE_REASON
+#                              re-runs an exact pending candidate intentionally
+#   AGENT_BRIDGE_DEPLOY_SUPERSEDE_PENDING=1 plus reason and the exact
+#   AGENT_BRIDGE_DEPLOY_SUPERSEDE_EXPECTED_CHALLENGE
+#                              replaces a different unverified pending admission
+#   AGENT_BRIDGE_DEPLOY_RECOVERY=roll_forward plus reason
+#                              resumes a durable failed publisher/handoff from
+#                              authoritative remote source (never --use-binary/dry-run)
+#
+# Production publisher state is deliberately fixed at the real account home's
+# ~/.local/state/agent-bridge/deploy. State-root override and synthetic
+# lease-test actions are available only inside the
+# contained regression-test mode.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -138,6 +151,7 @@ fi
 DRY_RUN=0
 ASSUME_YES=0
 USE_BINARY=""
+DEPLOY_ORIGINAL_ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
@@ -150,10 +164,363 @@ while [ $# -gt 0 ]; do
 done
 
 say()  { printf '%s\n' "$*"; }
-die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+die()  { LEASE_FAILURE_REASON="$*"; printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 file_inode() {
     stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null
+}
+
+file_mode() {
+    [ -e "$1" ] || { printf '%s\n' absent; return 0; }
+    stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1" 2>/dev/null
+}
+
+sha256_file() {
+    local path="$1"
+    [ -f "$path" ] || { printf '%s\n' absent; return 0; }
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        die "sha256sum or shasum is required for publisher lease integrity"
+    fi
+}
+
+sha256_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+    else
+        die "sha256sum or shasum is required for publisher lease integrity"
+    fi
+}
+
+publish_exact_receipt() {
+    local prepared="$1" target="$2"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        [ ! -L "$target" ] && [ -f "$target" ] ||
+            die "prebound publisher receipt target is not a physical file: $target"
+        [ "$(file_mode "$target")" = 600 ] ||
+            die "prebound publisher receipt target mode is not 600: $target"
+        cmp -s "$prepared" "$target" ||
+            die "prebound publisher receipt already exists with different content: $target"
+        rm -f "$prepared"
+        return 0
+    fi
+    mv "$prepared" "$target" || die "cannot atomically publish prebound publisher receipt: $target"
+}
+
+canonical_target_path() {
+    local path="$1" dir base resolved
+    case "$path" in /*) ;; *) path="$PWD/$path" ;; esac
+    [ ! -L "$path" ] || [ -e "$path" ] || return 2
+    if [ -e "$path" ] && command -v realpath >/dev/null 2>&1; then
+        realpath "$path"
+        return
+    fi
+    dir="$(dirname "$path")"
+    base="$(basename "$path")"
+    mkdir -p "$dir"
+    resolved="$(cd -P "$dir" && pwd -P)" || return 1
+    printf '%s/%s\n' "$resolved" "$base"
+}
+
+process_start_fingerprint() {
+    local pid="$1" raw
+    if [ -r "/proc/$pid/stat" ]; then
+        raw="$(awk '{ sub(/^.*\\) /, ""); print $20 }' "/proc/$pid/stat" 2>/dev/null)"
+        [ -n "$raw" ] || return 1
+        printf 'linux:%s\n' "$raw" | sha256_text
+        return
+    fi
+    raw="$(LC_ALL=C TZ=UTC ps -p "$pid" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [ -n "$raw" ] || return 1
+    printf 'darwin:%s\n' "$raw" | sha256_text
+}
+
+process_is_zombie() {
+    local pid="$1" state
+    if [ -r "/proc/$pid/stat" ]; then
+        state="$(awk '{ sub(/^.*\\) /, ""); print $1 }' "/proc/$pid/stat" 2>/dev/null)"
+    else
+        state="$(LC_ALL=C ps -p "$pid" -o stat= 2>/dev/null | sed 's/^[[:space:]]*//')"
+    fi
+    case "$state" in Z*) return 0 ;; *) return 1 ;; esac
+}
+
+boot_identity() {
+    local raw
+    if [ -r /proc/sys/kernel/random/boot_id ]; then
+        raw="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+    elif command -v sysctl >/dev/null 2>&1; then
+        raw="$(LC_ALL=C TZ=UTC sysctl -n kern.boottime 2>/dev/null || true)"
+    else
+        raw=""
+    fi
+    [ -n "$raw" ] || return 1
+    printf '%s\n' "$raw" | sha256_text
+}
+
+account_home_directory() {
+    local uid user raw
+    uid="$(id -u)"
+    user="$(id -un)"
+    raw=""
+    if command -v dscl >/dev/null 2>&1; then
+        raw="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null |
+            awk '$1 == "NFSHomeDirectory:" { print $2; exit }')"
+    fi
+    if [ -z "$raw" ] && command -v getent >/dev/null 2>&1; then
+        raw="$(getent passwd "$uid" 2>/dev/null | awk -F: 'NR == 1 { print $6 }')"
+    fi
+    if [ -z "$raw" ] && [ -r /etc/passwd ]; then
+        raw="$(awk -F: -v uid="$uid" '$3 == uid { print $6; exit }' /etc/passwd)"
+    fi
+    [ -n "$raw" ] && [ -d "$raw" ] && [ ! -L "$raw" ] || return 1
+    (cd -P "$raw" && pwd -P)
+}
+
+utc_now() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
+receipt_stamp() { date -u '+%Y%m%dT%H%M%SZ'; }
+clean_field() { printf '%s' "$1" | tr '\r\n' '  '; }
+
+meta_keys() { cut -d= -f1 "$1" 2>/dev/null | paste -sd, -; }
+is_sha256_value() { printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{64}$'; }
+is_safe_id() {
+    [ "${#1}" -ge 1 ] && [ "${#1}" -le 128 ] &&
+        printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9._-]+$'
+}
+is_safe_candidate() {
+    [ "${#1}" -ge 1 ] && [ "${#1}" -le 256 ] &&
+        printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9._:+-]+$'
+}
+is_failed_phase() {
+    case "$1" in acquired|building|prepared|committing|services_verifying|awaiting_fresh_mcp|recovery_required|corrupt_unknown) return 0 ;; *) return 1 ;; esac
+}
+meta_value() {
+    local file="$1" line_no="$2" key="$3" line
+    line="$(sed -n "${line_no}p" "$file" 2>/dev/null)"
+    case "$line" in "$key="*) printf '%s\n' "${line#*=}" ;; *) return 1 ;; esac
+}
+
+read_active_lease() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,lease_id,pid,process_start_fingerprint,boot_identity,real_path,shared_targets,phase,state_seq,started_at,updated_at,baseline_binary_sha256,candidate_commit,challenge,force_reinstall,force_reason,failed_phase,failure_reason" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 18 ] || return 1
+    R_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    R_LEASE_ID="$(meta_value "$file" 2 lease_id)" || return 1
+    R_PID="$(meta_value "$file" 3 pid)" || return 1
+    R_START="$(meta_value "$file" 4 process_start_fingerprint)" || return 1
+    R_BOOT="$(meta_value "$file" 5 boot_identity)" || return 1
+    R_REAL_PATH="$(meta_value "$file" 6 real_path)" || return 1
+    R_SHARED_TARGETS="$(meta_value "$file" 7 shared_targets)" || return 1
+    R_PHASE="$(meta_value "$file" 8 phase)" || return 1
+    R_SEQ="$(meta_value "$file" 9 state_seq)" || return 1
+    R_STARTED="$(meta_value "$file" 10 started_at)" || return 1
+    R_UPDATED="$(meta_value "$file" 11 updated_at)" || return 1
+    R_BASELINE="$(meta_value "$file" 12 baseline_binary_sha256)" || return 1
+    R_CANDIDATE="$(meta_value "$file" 13 candidate_commit)" || return 1
+    R_CHALLENGE="$(meta_value "$file" 14 challenge)" || return 1
+    R_FORCE="$(meta_value "$file" 15 force_reinstall)" || return 1
+    R_FORCE_REASON="$(meta_value "$file" 16 force_reason)" || return 1
+    R_FAILED_PHASE="$(meta_value "$file" 17 failed_phase)" || return 1
+    R_FAILURE="$(meta_value "$file" 18 failure_reason)" || return 1
+    [ "$R_SCHEMA" = agent_bridge.publisher_lease.v0 ] || return 1
+    case "$R_PID" in ''|*[!0-9]*) return 1 ;; esac
+    case "$R_SEQ" in ''|*[!0-9]*) return 1 ;; esac
+    case "$R_PHASE" in acquired|building|prepared|committing|services_verifying|awaiting_fresh_mcp|recovery_required) ;; *) return 1 ;; esac
+    case "$R_FAILED_PHASE" in ''|acquired|building|prepared|committing|services_verifying|awaiting_fresh_mcp|recovery_required) ;; *) return 1 ;; esac
+    case "$R_FORCE" in 0|1) ;; *) return 1 ;; esac
+    case "$R_REAL_PATH" in /*) ;; *) return 1 ;; esac
+    is_safe_id "$R_LEASE_ID" && is_sha256_value "$R_START" && is_sha256_value "$R_BOOT" &&
+        [ -n "$R_SHARED_TARGETS" ] &&
+        { [ "$R_BASELINE" = absent ] || is_sha256_value "$R_BASELINE"; } &&
+        is_sha256_value "$R_CHALLENGE" &&
+        { [ "$R_CANDIDATE" = unknown ] || is_safe_candidate "$R_CANDIDATE"; }
+}
+
+read_pending_admission() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,lease_id,challenge,real_path,shared_targets,candidate_commit,installed_binary_sha256,installed_binary_inode,installed_binary_mode,installed_assets_sha256,installed_at,fresh_mcp,force_reinstall,force_reason" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 14 ] || return 1
+    P_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    P_LEASE_ID="$(meta_value "$file" 2 lease_id)" || return 1
+    P_CHALLENGE="$(meta_value "$file" 3 challenge)" || return 1
+    P_REAL_PATH="$(meta_value "$file" 4 real_path)" || return 1
+    P_SHARED_TARGETS="$(meta_value "$file" 5 shared_targets)" || return 1
+    P_CANDIDATE="$(meta_value "$file" 6 candidate_commit)" || return 1
+    P_SHA="$(meta_value "$file" 7 installed_binary_sha256)" || return 1
+    P_INODE="$(meta_value "$file" 8 installed_binary_inode)" || return 1
+    P_MODE="$(meta_value "$file" 9 installed_binary_mode)" || return 1
+    P_ASSETS_SHA="$(meta_value "$file" 10 installed_assets_sha256)" || return 1
+    P_INSTALLED_AT="$(meta_value "$file" 11 installed_at)" || return 1
+    P_FRESH="$(meta_value "$file" 12 fresh_mcp)" || return 1
+    P_FORCE="$(meta_value "$file" 13 force_reinstall)" || return 1
+    P_FORCE_REASON="$(meta_value "$file" 14 force_reason)" || return 1
+    case "$P_INODE" in ''|*[!0-9]*) return 1 ;; esac
+    case "$P_FORCE" in 0|1) ;; *) return 1 ;; esac
+    case "$P_MODE" in ''|*[!0-7]*) return 1 ;; esac
+    case "$P_REAL_PATH" in /*) ;; *) return 1 ;; esac
+    [ "$P_SCHEMA" = agent_bridge.publisher_pending_admission.v0 ] &&
+        is_safe_id "$P_LEASE_ID" && [ -n "$P_SHARED_TARGETS" ] &&
+        is_safe_candidate "$P_CANDIDATE" &&
+        [ "$P_FRESH" = unverified ] && is_sha256_value "$P_SHA" && is_sha256_value "$P_ASSETS_SHA" &&
+        is_sha256_value "$P_CHALLENGE"
+}
+
+read_recovery_handoff() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,predecessor_lease_id,predecessor_challenge,predecessor_phase,predecessor_failed_phase,predecessor_boot_identity,predecessor_binary_sha256,successor_lease_id,successor_challenge,successor_stage_path,real_path,shared_targets,started_at,reason" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 14 ] || return 1
+    H_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    H_PREDECESSOR_LEASE_ID="$(meta_value "$file" 2 predecessor_lease_id)" || return 1
+    H_PREDECESSOR_CHALLENGE="$(meta_value "$file" 3 predecessor_challenge)" || return 1
+    H_PREDECESSOR_PHASE="$(meta_value "$file" 4 predecessor_phase)" || return 1
+    H_PREDECESSOR_FAILED_PHASE="$(meta_value "$file" 5 predecessor_failed_phase)" || return 1
+    H_PREDECESSOR_BOOT="$(meta_value "$file" 6 predecessor_boot_identity)" || return 1
+    H_PREDECESSOR_BINARY_SHA="$(meta_value "$file" 7 predecessor_binary_sha256)" || return 1
+    H_SUCCESSOR_LEASE_ID="$(meta_value "$file" 8 successor_lease_id)" || return 1
+    H_SUCCESSOR_CHALLENGE="$(meta_value "$file" 9 successor_challenge)" || return 1
+    H_SUCCESSOR_STAGE_PATH="$(meta_value "$file" 10 successor_stage_path)" || return 1
+    H_REAL_PATH="$(meta_value "$file" 11 real_path)" || return 1
+    H_SHARED_TARGETS="$(meta_value "$file" 12 shared_targets)" || return 1
+    H_STARTED_AT="$(meta_value "$file" 13 started_at)" || return 1
+    H_REASON="$(meta_value "$file" 14 reason)" || return 1
+    [ "$H_SCHEMA" = agent_bridge.publisher_handoff_intent.v0 ] &&
+        is_safe_id "$H_PREDECESSOR_LEASE_ID" && is_sha256_value "$H_PREDECESSOR_CHALLENGE" &&
+        is_failed_phase "$H_PREDECESSOR_FAILED_PHASE" &&
+        is_sha256_value "$H_PREDECESSOR_BOOT" &&
+        { [ "$H_PREDECESSOR_BINARY_SHA" = absent ] || is_sha256_value "$H_PREDECESSOR_BINARY_SHA"; } &&
+        is_safe_id "$H_SUCCESSOR_LEASE_ID" && is_sha256_value "$H_SUCCESSOR_CHALLENGE" &&
+        { [ "$H_PREDECESSOR_PHASE" = recovery_required ] || [ "$H_PREDECESSOR_PHASE" = corrupt_unknown ]; } &&
+        [ "${H_SUCCESSOR_STAGE_PATH#/}" != "$H_SUCCESSOR_STAGE_PATH" ] &&
+        [ "${H_REAL_PATH#/}" != "$H_REAL_PATH" ] && [ -n "$H_SHARED_TARGETS" ] && [ -n "$H_REASON" ]
+}
+
+read_handoff_completion_intent() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,successor_lease_id,successor_challenge,successor_candidate_commit,handoff_meta_sha256,quarantine_path,handoff_receipt_path,recovery_receipt_path,started_at" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 9 ] || return 1
+    HC_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    HC_SUCCESSOR_LEASE_ID="$(meta_value "$file" 2 successor_lease_id)" || return 1
+    HC_SUCCESSOR_CHALLENGE="$(meta_value "$file" 3 successor_challenge)" || return 1
+    HC_SUCCESSOR_CANDIDATE="$(meta_value "$file" 4 successor_candidate_commit)" || return 1
+    HC_META_SHA="$(meta_value "$file" 5 handoff_meta_sha256)" || return 1
+    HC_QUARANTINE="$(meta_value "$file" 6 quarantine_path)" || return 1
+    HC_HANDOFF_RECEIPT="$(meta_value "$file" 7 handoff_receipt_path)" || return 1
+    HC_RECOVERY_RECEIPT="$(meta_value "$file" 8 recovery_receipt_path)" || return 1
+    HC_STARTED_AT="$(meta_value "$file" 9 started_at)" || return 1
+    [ "$HC_SCHEMA" = agent_bridge.publisher_handoff_completion_intent.v0 ] &&
+        is_safe_id "$HC_SUCCESSOR_LEASE_ID" && is_sha256_value "$HC_SUCCESSOR_CHALLENGE" &&
+        is_safe_candidate "$HC_SUCCESSOR_CANDIDATE" && is_sha256_value "$HC_META_SHA" &&
+        [ "${HC_QUARANTINE#/}" != "$HC_QUARANTINE" ] &&
+        [ "${HC_HANDOFF_RECEIPT#/}" != "$HC_HANDOFF_RECEIPT" ] &&
+        [ "${HC_RECOVERY_RECEIPT#/}" != "$HC_RECOVERY_RECEIPT" ] && [ -n "$HC_STARTED_AT" ]
+}
+
+read_release_intent() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,lease_id,challenge,disposition,reason,quarantine_path,active_meta_sha256,current_binary_sha256,current_binary_inode,receipt_path,real_path,shared_targets,started_at" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 13 ] || return 1
+    Q_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    Q_LEASE_ID="$(meta_value "$file" 2 lease_id)" || return 1
+    Q_CHALLENGE="$(meta_value "$file" 3 challenge)" || return 1
+    Q_DISPOSITION="$(meta_value "$file" 4 disposition)" || return 1
+    Q_REASON="$(meta_value "$file" 5 reason)" || return 1
+    Q_QUARANTINE="$(meta_value "$file" 6 quarantine_path)" || return 1
+    Q_META_SHA="$(meta_value "$file" 7 active_meta_sha256)" || return 1
+    Q_CURRENT_SHA="$(meta_value "$file" 8 current_binary_sha256)" || return 1
+    Q_CURRENT_INODE="$(meta_value "$file" 9 current_binary_inode)" || return 1
+    Q_RECEIPT="$(meta_value "$file" 10 receipt_path)" || return 1
+    Q_REAL_PATH="$(meta_value "$file" 11 real_path)" || return 1
+    Q_SHARED_TARGETS="$(meta_value "$file" 12 shared_targets)" || return 1
+    Q_STARTED_AT="$(meta_value "$file" 13 started_at)" || return 1
+    case "$Q_CURRENT_INODE" in absent) ;; ''|*[!0-9]*) return 1 ;; esac
+    [ "$Q_SCHEMA" = agent_bridge.publisher_release_intent.v0 ] &&
+        is_safe_id "$Q_LEASE_ID" && is_sha256_value "$Q_CHALLENGE" && is_safe_id "$Q_DISPOSITION" &&
+        [ -n "$Q_REASON" ] && is_sha256_value "$Q_META_SHA" &&
+        { [ "$Q_CURRENT_SHA" = absent ] || is_sha256_value "$Q_CURRENT_SHA"; } &&
+        [ "${Q_QUARANTINE#/}" != "$Q_QUARANTINE" ] && [ "${Q_RECEIPT#/}" != "$Q_RECEIPT" ] &&
+        [ "${Q_REAL_PATH#/}" != "$Q_REAL_PATH" ] &&
+        [ -n "$Q_SHARED_TARGETS" ] && [ -n "$Q_STARTED_AT" ]
+}
+
+path_has_symlink_component() {
+    local path="$1" rest part current=""
+    case "$path" in /*) rest="${path#/}" ;; *) return 0 ;; esac
+    while [ -n "$rest" ]; do
+        case "$rest" in */*) part="${rest%%/*}"; rest="${rest#*/}" ;; *) part="$rest"; rest="" ;; esac
+        [ -n "$part" ] || continue
+        current="$current/$part"
+        [ ! -L "$current" ] || return 0
+    done
+    return 1
+}
+
+canonical_contained_test_path() {
+    local raw="$1" root="$2" label="$3" probe component suffix="" canonical
+    [ -n "$raw" ] || die "publisher lease test $label path is empty"
+    case "$raw" in /*) ;; *) raw="$PWD/$raw" ;; esac
+    ! path_has_symlink_component "$raw" || die "publisher lease test $label path contains a symlink"
+    if [ -e "$raw" ]; then
+        canonical="$(realpath "$raw" 2>/dev/null)" || die "cannot canonicalize publisher lease test $label"
+    else
+        probe="$raw"
+        while [ ! -e "$probe" ]; do
+            component="$(basename "$probe")"
+            case "$component" in ''|.|..) die "publisher lease test $label contains a non-canonical path component" ;; esac
+            suffix="/$component$suffix"
+            probe="$(dirname "$probe")"
+        done
+        [ -d "$probe" ] || die "publisher lease test $label descends through a non-directory"
+        canonical="$(cd -P "$probe" && pwd -P)$suffix"
+    fi
+    case "$canonical" in "$root"|"$root"/*) ;; *) die "publisher lease test $label escapes its isolated root" ;; esac
+    printf '%s\n' "$canonical"
+}
+
+validate_lease_test_environment() {
+    local raw_root="$1" temp_base root mode path
+    [ -d "$raw_root" ] && [ ! -L "$raw_root" ] || die "publisher lease test root must be a physical directory"
+    command -v realpath >/dev/null 2>&1 || die "publisher lease test mode requires realpath"
+    temp_base="$(realpath "${TMPDIR:-/tmp}")" || die "cannot establish physical OS temp directory"
+    root="$(realpath "$raw_root")" || die "cannot canonicalize publisher lease test root"
+    [ "$(dirname "$root")" = "$temp_base" ] || die "publisher lease test root must be a direct child of the physical OS temp directory"
+    case "$(basename "$root")" in
+        ab-publisher-lease-v0.*|ab-deploy-pinned-assets.*|ab-deploy-postbuild-race.*|ab-deploy-audio-parity.*) ;;
+        *) die "publisher lease test root has an invalid name" ;;
+    esac
+    mode="$(stat -f %Lp "$root" 2>/dev/null || stat -c %a "$root" 2>/dev/null)"
+    [ "$mode" = 700 ] || die "publisher lease test root mode must be 700"
+    TEST_PHYSICAL_ROOT="$root"
+    canonical_contained_test_path "$HOME" "$root" HOME >/dev/null
+    canonical_contained_test_path "$INSTALL_DIR" "$root" install >/dev/null
+    canonical_contained_test_path "$REAL_PATH" "$root" real_path >/dev/null
+    canonical_contained_test_path "$ADAPTER_PATH" "$root" adapter >/dev/null
+    canonical_contained_test_path "$RUNTIME_ASSET_DIR" "$root" runtime_assets >/dev/null
+    canonical_contained_test_path "${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}" "$root" state >/dev/null
+    for path in "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_PAYLOAD:-}" \
+        "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE:-}" \
+        "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG:-}"; do
+        [ -z "$path" ] || canonical_contained_test_path "$path" "$root" artifact >/dev/null
+    done
+    if [ -z "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ]; then
+        canonical_contained_test_path "$REPO" "$root" repository >/dev/null
+        canonical_contained_test_path "${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}" \
+            "$root" cargo_target >/dev/null
+    fi
 }
 
 preflight_macos_launchagent() {
@@ -275,7 +642,7 @@ is_native_exe() {
 # every marker read as "absent", so a stale-build regression sailed through).
 markers_in() {
     local bin="$1" m tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$DEPLOY_TMPDIR/agent-bridge-markers.XXXXXX")"
     strings -a "$bin" 2>/dev/null > "$tmp" || true
     for m in "${SENTINELS[@]}"; do
         grep -qF -- "$m" "$tmp" && printf '%s\n' "$m"
@@ -286,34 +653,1170 @@ markers_in() {
 CLEANUP_WT=""
 CLEANUP_RUNTIME_STAGE=""
 CLEANUP_PKG_CONFIG=""
+CLEANUP_BINARY_STAGE=""
 CLEANUP_DEPLOY_LOCK=""
+CLEANUP_LEASE_INTENT=""
+LEASE_OWNED=0
+LEASE_FINALIZED=0
+LEASE_PHASE=""
+LEASE_STATE_SEQ=0
+LEASE_CANDIDATE=unknown
+LEASE_FAILURE_REASON=""
+LEASE_FAILED_PHASE=""
+RECOVERY_PREDECESSOR_LEASE_ID=""
+RECOVERY_PREDECESSOR_CHALLENGE=""
+RECOVERY_PREDECESSOR_PHASE=""
+RECOVERY_PREDECESSOR_FAILED_PHASE=""
+RECOVERY_PREDECESSOR_BOOT=""
+RECOVERY_PREDECESSOR_BINARY_SHA=""
+CONSUMED_PENDING_META=""
+CONSUMED_PENDING_ACTION=""
+CONSUMED_PENDING_LEASE_ID=""
+CONSUMED_PENDING_CHALLENGE=""
+CONSUMED_PENDING_CANDIDATE=""
+FORCE_REINSTALL="${AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL:-0}"
+FORCE_REASON="$(clean_field "${AGENT_BRIDGE_DEPLOY_FORCE_REASON:-}")"
+case "$FORCE_REINSTALL" in
+    0) ;;
+    1) [ -n "$FORCE_REASON" ] || die "AGENT_BRIDGE_DEPLOY_FORCE_REASON is required when forcing a reinstall" ;;
+    *) die "AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL must be 0 or 1" ;;
+esac
+
+SUPERSEDE_PENDING="${AGENT_BRIDGE_DEPLOY_SUPERSEDE_PENDING:-0}"
+SUPERSEDE_REASON="$(clean_field "${AGENT_BRIDGE_DEPLOY_SUPERSEDE_REASON:-}")"
+SUPERSEDE_EXPECTED_CHALLENGE="${AGENT_BRIDGE_DEPLOY_SUPERSEDE_EXPECTED_CHALLENGE:-}"
+case "$SUPERSEDE_PENDING" in
+    0) ;;
+    1)
+        [ -n "$SUPERSEDE_REASON" ] || die "AGENT_BRIDGE_DEPLOY_SUPERSEDE_REASON is required when superseding pending admission"
+        is_sha256_value "$SUPERSEDE_EXPECTED_CHALLENGE" ||
+            die "AGENT_BRIDGE_DEPLOY_SUPERSEDE_EXPECTED_CHALLENGE must bind the exact pending admission"
+        ;;
+    *) die "AGENT_BRIDGE_DEPLOY_SUPERSEDE_PENDING must be 0 or 1" ;;
+esac
+
+RECOVERY_MODE="${AGENT_BRIDGE_DEPLOY_RECOVERY:-none}"
+RECOVERY_REASON="$(clean_field "${AGENT_BRIDGE_DEPLOY_RECOVERY_REASON:-}")"
+case "$RECOVERY_MODE" in
+    none) ;;
+    roll_forward)
+        [ -n "$RECOVERY_REASON" ] || die "AGENT_BRIDGE_DEPLOY_RECOVERY_REASON is required for roll-forward recovery"
+        [ -z "$USE_BINARY" ] || die "governed roll-forward recovery requires an authoritative remote build, not --use-binary"
+        [ "$DRY_RUN" -eq 0 ] || die "governed roll-forward recovery must complete an authoritative install, not a dry-run"
+        ;;
+    *) die "AGENT_BRIDGE_DEPLOY_RECOVERY must be none or roll_forward" ;;
+esac
+
+[ ! -L "$REAL_PATH" ] || [ -e "$REAL_PATH" ] ||
+    die "deployment target is a dangling final symlink; fail closed: $REAL_PATH"
+LEASE_TEST_MODE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE:-0}"
+case "$LEASE_TEST_MODE" in 0|1) ;; *) die "AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE must be 0 or 1" ;; esac
+if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ] && [ "$LEASE_TEST_MODE" != 1 ]; then
+    die "publisher lease test action requires AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1"
+fi
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT:-}" ] ||
+        die "publisher lease test mode requires an isolated test root"
+    validate_lease_test_environment "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT"
+    DEPLOY_TMPDIR="$TEST_PHYSICAL_ROOT/tmp"
+    mkdir -p "$DEPLOY_TMPDIR"
+    chmod 700 "$DEPLOY_TMPDIR" 2>/dev/null || true
+else
+    DEPLOY_TMPDIR="${TMPDIR:-/tmp}"
+fi
+
+REAL_PATH="$(canonical_target_path "$REAL_PATH")" || die "cannot canonicalize deployment target: $REAL_PATH"
+mkdir -p "$(dirname "$REAL_PATH")"
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    LEASE_STATE_RAW="${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}"
+else
+    [ -z "${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}" ] ||
+        die "AGENT_BRIDGE_DEPLOY_STATE_DIR is test-only; production publisher lock identity is fixed"
+    ACCOUNT_HOME="$(account_home_directory)" || die "cannot resolve the real account home for the host-wide publisher lease"
+    LEASE_STATE_RAW="$ACCOUNT_HOME/.local/state/agent-bridge/deploy"
+fi
+[ ! -L "$LEASE_STATE_RAW" ] || die "publisher lease state root must not be a symlink: $LEASE_STATE_RAW"
+mkdir -p "$LEASE_STATE_RAW"
+LEASE_STATE_ROOT="$(cd -P "$LEASE_STATE_RAW" && pwd -P)"
+LEASE_RECEIPT_DIR="$LEASE_STATE_ROOT/receipts"
+LEASE_QUARANTINE_DIR="$LEASE_STATE_ROOT/quarantine"
+LEASE_INTENT_DIR="$LEASE_STATE_ROOT/intents"
+PENDING_ADMISSION="$LEASE_STATE_ROOT/pending-admission.meta"
+RECOVERY_HANDOFF="$LEASE_STATE_ROOT/recovery-handoff.meta"
+HANDOFF_COMPLETION_INTENT="$LEASE_STATE_ROOT/recovery-handoff-completion.meta"
+RELEASE_INTENT="$LEASE_STATE_ROOT/release-intent.meta"
+deploy_lock="$LEASE_STATE_ROOT/active.lock"
+ACTIVE_META="$deploy_lock/lease.meta"
+mkdir -p "$LEASE_RECEIPT_DIR" "$LEASE_QUARANTINE_DIR" "$LEASE_INTENT_DIR"
+chmod 700 "$LEASE_STATE_ROOT" "$LEASE_RECEIPT_DIR" "$LEASE_QUARANTINE_DIR" "$LEASE_INTENT_DIR" 2>/dev/null || true
+KERNEL_LOCK_FILE="$LEASE_STATE_ROOT/publisher.kernel.lock"
+PUBLISHER_PREVIOUS_UMASK="$(umask)"
+umask 077
+: >>"$KERNEL_LOCK_FILE" || die "cannot create the host-wide publisher kernel mutex"
+chmod 600 "$KERNEL_LOCK_FILE" 2>/dev/null || true
+umask "$PUBLISHER_PREVIOUS_UMASK"
+HOST_KERNEL_OS="$(/usr/bin/uname -s 2>/dev/null || uname -s)"
+PUBLISHER_LOCK_HOLDER="${AGENT_BRIDGE_DEPLOY_KERNEL_LOCK_HOLDER:-}"
+if [ -z "$PUBLISHER_LOCK_HOLDER" ]; then
+    # Acquire the advisory mutex on fd 9 in the shell that will exec this
+    # script.  The actual publisher therefore owns the open file description;
+    # there is no separate lock-holder process that can die while leaving an
+    # orphan publisher running.  Foreground descendants inherit fd 9, so a
+    # SIGKILL of the shell cannot release the mutex while its current child is
+    # still executing.
+    PUBLISHER_LOCK_PROGRAM='
+lock_file="$1"; host_os="$2"; script="$3"; shift 3
+exec 9>>"$lock_file" || exit 73
+case "$host_os" in
+    Darwin) /usr/bin/lockf -s -t 0 9 || exit $? ;;
+    Linux) flock -n 9 || exit $? ;;
+    *) exit 64 ;;
+esac
+AGENT_BRIDGE_DEPLOY_KERNEL_LOCK_HOLDER="$$"
+export AGENT_BRIDGE_DEPLOY_KERNEL_LOCK_HOLDER
+exec "$script" "$@"
+'
+    case "$HOST_KERNEL_OS" in
+        Darwin)
+            [ -x /usr/bin/lockf ] || die "macOS lockf is required for publisher serialization"
+            ;;
+        Linux)
+            KERNEL_FLOCK="$(command -v flock 2>/dev/null || true)"
+            [ -n "$KERNEL_FLOCK" ] || die "Linux flock is required for publisher serialization"
+            ;;
+        *) die "unsupported publisher mutex platform: $HOST_KERNEL_OS" ;;
+    esac
+    exec /bin/bash -c "$PUBLISHER_LOCK_PROGRAM" publisher-lock-holder \
+        "$KERNEL_LOCK_FILE" "$HOST_KERNEL_OS" "$SCRIPT_DIR/deploy_from_master.sh" "${DEPLOY_ORIGINAL_ARGS[@]}"
+fi
+case "$PUBLISHER_LOCK_HOLDER" in ''|*[!0-9]*) die "invalid publisher kernel lock-holder marker" ;; esac
+[ "$$" = "$PUBLISHER_LOCK_HOLDER" ] || die "publisher kernel lock-holder marker does not match this process"
+[ -e /dev/fd/9 ] || die "publisher process did not inherit kernel mutex fd 9"
+[ "$(file_inode /dev/fd/9 2>/dev/null || printf '%s\n' unavailable)" = "$(file_inode "$KERNEL_LOCK_FILE")" ] ||
+    die "publisher kernel mutex fd 9 does not identify the fixed lock file"
+set +e
+if [ "$HOST_KERNEL_OS" = Darwin ]; then
+    /usr/bin/lockf -s -t 0 9 2>/dev/null
+    KERNEL_LOCK_SELF_STATUS=$?
+    /usr/bin/lockf -k -s -t 0 "$KERNEL_LOCK_FILE" /usr/bin/true 2>/dev/null
+    KERNEL_LOCK_PROBE_STATUS=$?
+    KERNEL_LOCK_EXPECTED_BUSY=75
+else
+    flock -n 9 2>/dev/null
+    KERNEL_LOCK_SELF_STATUS=$?
+    flock -n "$KERNEL_LOCK_FILE" /usr/bin/true 2>/dev/null
+    KERNEL_LOCK_PROBE_STATUS=$?
+    KERNEL_LOCK_EXPECTED_BUSY=1
+fi
+set -e
+[ "$KERNEL_LOCK_SELF_STATUS" -eq 0 ] || die "publisher process does not own its inherited kernel mutex fd"
+[ "$KERNEL_LOCK_PROBE_STATUS" -eq "$KERNEL_LOCK_EXPECTED_BUSY" ] ||
+    die "publisher lock-holder marker is not backed by the expected live kernel mutex"
+CURRENT_BOOT_IDENTITY="$(boot_identity)" || die "cannot establish host boot identity for publisher lease"
+SHARED_TARGETS="$(clean_field "$REAL_PATH|$ADAPTER_PATH|$RUNTIME_ASSET_DIR|$WRAPPER_PATH")"
+
+installed_assets_sha256() {
+    local adapter_dir adapter_root asset path
+    adapter_dir="$(dirname "$ADAPTER_PATH")"
+    adapter_root="$(dirname "$adapter_dir")"
+    {
+        printf 'adapter\t%s\t%s\t%s\n' "$ADAPTER_PATH" "$(sha256_file "$ADAPTER_PATH")" "$(file_mode "$ADAPTER_PATH")"
+        for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
+            path="$adapter_dir/$asset"
+            printf 'companion\t%s\t%s\t%s\n' "$path" "$(sha256_file "$path")" "$(file_mode "$path")"
+        done
+        for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
+            path="$adapter_root/$asset"
+            printf 'policy\t%s\t%s\t%s\n' "$path" "$(sha256_file "$path")" "$(file_mode "$path")"
+        done
+        for asset in "${RUNTIME_ASSETS[@]}"; do
+            path="$RUNTIME_ASSET_DIR/$asset"
+            printf 'runtime\t%s\t%s\t%s\n' "$path" "$(sha256_file "$path")" "$(file_mode "$path")"
+        done
+    } | sha256_text
+}
+
+write_active_values() {
+    local tmp="$ACTIVE_META.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_lease.v0
+        printf 'lease_id=%s\n' "$LEASE_ID"
+        printf 'pid=%s\n' "$$"
+        printf 'process_start_fingerprint=%s\n' "$LEASE_PROCESS_START"
+        printf 'boot_identity=%s\n' "$CURRENT_BOOT_IDENTITY"
+        printf 'real_path=%s\n' "$REAL_PATH"
+        printf 'shared_targets=%s\n' "$SHARED_TARGETS"
+        printf 'phase=%s\n' "$LEASE_PHASE"
+        printf 'state_seq=%s\n' "$LEASE_STATE_SEQ"
+        printf 'started_at=%s\n' "$LEASE_STARTED_AT"
+        printf 'updated_at=%s\n' "$(utc_now)"
+        printf 'baseline_binary_sha256=%s\n' "$LEASE_BASELINE_SHA"
+        printf 'candidate_commit=%s\n' "$LEASE_CANDIDATE"
+        printf 'challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'force_reinstall=%s\n' "$FORCE_REINSTALL"
+        printf 'force_reason=%s\n' "$FORCE_REASON"
+        printf 'failed_phase=%s\n' "$LEASE_FAILED_PHASE"
+        printf 'failure_reason=%s\n' "$(clean_field "$LEASE_FAILURE_REASON")"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$ACTIVE_META"
+    printf '%s\n' "$$" > "$(dirname "$ACTIVE_META")/pid"
+}
+
+lease_phase_update() {
+    LEASE_PHASE="$1"
+    LEASE_STATE_SEQ=$((LEASE_STATE_SEQ + 1))
+    write_active_values || die "cannot atomically update publisher lease phase $LEASE_PHASE"
+}
+
+archive_active_receipt() {
+    local disposition="$1" reason="$2" meta="${3:-$ACTIVE_META}" receipt tmp current_sha current_inode
+    read_active_lease "$meta" || return 1
+    [ "$R_LEASE_ID" = "$LEASE_ID" ] && [ "$R_PID" = "$$" ] &&
+        [ "$R_START" = "$LEASE_PROCESS_START" ] && [ "$R_BOOT" = "$CURRENT_BOOT_IDENTITY" ] || return 1
+    current_sha="$(sha256_file "$REAL_PATH")"
+    current_inode="$(file_inode "$REAL_PATH" 2>/dev/null || printf '%s\n' absent)"
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$LEASE_ID.$disposition.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_lease_receipt.v0
+        sed '1d' "$meta"
+        printf 'disposition=%s\n' "$disposition"
+        printf 'reason=%s\n' "$(clean_field "$reason")"
+        printf 'finished_at=%s\n' "$(utc_now)"
+        printf 'current_binary_sha256=%s\n' "$current_sha"
+        printf 'current_binary_inode=%s\n' "$current_inode"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$receipt"
+}
+
+write_release_intent() {
+    local disposition="$1" reason="$2" quarantine="$3" meta_sha current_sha current_inode receipt tmp
+    [ ! -e "$RELEASE_INTENT" ] && [ ! -L "$RELEASE_INTENT" ] ||
+        die "an unsettled publisher release intent already exists"
+    is_safe_id "$disposition" && [ -n "$reason" ] || die "invalid publisher release disposition or reason"
+    case "$quarantine" in "$LEASE_QUARANTINE_DIR"/*.lock) ;; *) die "publisher release quarantine path escapes the fixed state root" ;; esac
+    read_active_lease "$ACTIVE_META" || die "cannot write release intent from an invalid active lease"
+    [ "$R_LEASE_ID" = "$LEASE_ID" ] && [ "$R_CHALLENGE" = "$LEASE_CHALLENGE" ] ||
+        die "active lease identity changed before release intent"
+    meta_sha="$(sha256_file "$ACTIVE_META")"
+    current_sha="$(sha256_file "$REAL_PATH")"
+    current_inode="$(file_inode "$REAL_PATH" 2>/dev/null || printf '%s\n' absent)"
+    receipt="$LEASE_RECEIPT_DIR/$LEASE_ID.$LEASE_CHALLENGE.$disposition.release-completed.meta"
+    tmp="$RELEASE_INTENT.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_release_intent.v0
+        printf 'lease_id=%s\n' "$LEASE_ID"
+        printf 'challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'disposition=%s\n' "$disposition"
+        printf 'reason=%s\n' "$(clean_field "$reason")"
+        printf 'quarantine_path=%s\n' "$quarantine"
+        printf 'active_meta_sha256=%s\n' "$meta_sha"
+        printf 'current_binary_sha256=%s\n' "$current_sha"
+        printf 'current_binary_inode=%s\n' "$current_inode"
+        printf 'receipt_path=%s\n' "$receipt"
+        printf 'real_path=%s\n' "$REAL_PATH"
+        printf 'shared_targets=%s\n' "$SHARED_TARGETS"
+        printf 'started_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$RELEASE_INTENT"
+    read_release_intent "$RELEASE_INTENT" && [ "$Q_LEASE_ID" = "$LEASE_ID" ] &&
+        [ "$Q_CHALLENGE" = "$LEASE_CHALLENGE" ] && [ "$Q_RECEIPT" = "$receipt" ] &&
+        [ "$Q_CURRENT_SHA" = "$current_sha" ] && [ "$Q_CURRENT_INODE" = "$current_inode" ] ||
+        die "publisher release intent failed strict self-validation"
+}
+
+archive_release_completion() {
+    local intent="$1" meta receipt_leaf tmp
+    read_release_intent "$intent" || die "publisher release intent is unknown or corrupt"
+    case "$Q_QUARANTINE" in "$LEASE_QUARANTINE_DIR"/*.lock) ;; *) die "publisher release intent quarantine escapes the fixed state root" ;; esac
+    meta="$Q_QUARANTINE/lease.meta"
+    [ "$(sha256_file "$meta")" = "$Q_META_SHA" ] || die "quarantined publisher lease does not match its release intent"
+    read_active_lease "$meta" || die "quarantined publisher lease metadata is corrupt"
+    [ "$R_LEASE_ID" = "$Q_LEASE_ID" ] && [ "$R_CHALLENGE" = "$Q_CHALLENGE" ] &&
+        [ "$R_REAL_PATH" = "$Q_REAL_PATH" ] && [ "$R_SHARED_TARGETS" = "$Q_SHARED_TARGETS" ] ||
+        die "quarantined publisher lease identity does not match its release intent"
+    case "$Q_RECEIPT" in "$LEASE_RECEIPT_DIR"/*.meta) ;; *) die "publisher release receipt escapes the fixed receipt root" ;; esac
+    receipt_leaf="${Q_RECEIPT#"$LEASE_RECEIPT_DIR/"}"
+    case "$receipt_leaf" in ''|*/*) die "publisher release receipt must be a direct child of the fixed receipt root" ;; esac
+    tmp="$Q_RECEIPT.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_lease_receipt.v0
+        sed '1d' "$meta"
+        printf 'disposition=%s\n' "$Q_DISPOSITION"
+        printf 'reason=%s\n' "$Q_REASON"
+        printf 'finished_at=%s\n' "$Q_STARTED_AT"
+        printf 'current_binary_sha256=%s\n' "$Q_CURRENT_SHA"
+        printf 'current_binary_inode=%s\n' "$Q_CURRENT_INODE"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    publish_exact_receipt "$tmp" "$Q_RECEIPT"
+}
+
+settle_release_intent() {
+    local settled quarantine_leaf
+    [ -e "$RELEASE_INTENT" ] || [ -L "$RELEASE_INTENT" ] || return 0
+    [ ! -L "$RELEASE_INTENT" ] || die "publisher release intent must not be a symlink"
+    read_release_intent "$RELEASE_INTENT" || die "publisher release intent is unknown or corrupt; fail closed"
+    case "$Q_QUARANTINE" in "$LEASE_QUARANTINE_DIR"/*.lock) ;; *) die "publisher release intent quarantine escapes the fixed state root" ;; esac
+    quarantine_leaf="${Q_QUARANTINE#"$LEASE_QUARANTINE_DIR/"}"
+    case "$quarantine_leaf" in ''|*/*) die "publisher release quarantine must be a direct child of the fixed quarantine root" ;; esac
+    [ "$Q_REAL_PATH" = "$REAL_PATH" ] && [ "$Q_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+        die "publisher release intent targets do not match this invocation"
+    if [ -e "$Q_QUARANTINE" ] || [ -L "$Q_QUARANTINE" ]; then
+        [ ! -L "$Q_QUARANTINE" ] && [ -d "$Q_QUARANTINE" ] ||
+            die "publisher release quarantine is not a physical directory"
+        [ ! -e "$deploy_lock" ] && [ ! -L "$deploy_lock" ] ||
+            die "publisher release intent has both active and quarantined lease state"
+    elif [ -e "$deploy_lock" ] || [ -L "$deploy_lock" ]; then
+        [ ! -L "$deploy_lock" ] && [ -d "$deploy_lock" ] || die "active publisher release source is not a physical directory"
+        [ "$(sha256_file "$deploy_lock/lease.meta")" = "$Q_META_SHA" ] ||
+            die "active publisher lease does not match the unsettled release intent"
+        mv "$deploy_lock" "$Q_QUARANTINE" || die "cannot finish the publisher release quarantine transition"
+    else
+        die "publisher release intent has neither its active nor quarantined lease state"
+    fi
+    archive_release_completion "$RELEASE_INTENT"
+    settled="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$Q_LEASE_ID.$$.$RANDOM.settled-release-intent.meta"
+    mv "$RELEASE_INTENT" "$settled" || die "cannot retire the settled publisher release intent"
+}
+
+release_active_lease() {
+    local disposition="$1" reason="$2" quarantine
+    read_active_lease "$ACTIVE_META" || die "publisher lease changed before release; recovery required"
+    [ "$R_LEASE_ID" = "$LEASE_ID" ] && [ "$R_PID" = "$$" ] &&
+        [ "$R_START" = "$LEASE_PROCESS_START" ] && [ "$R_BOOT" = "$CURRENT_BOOT_IDENTITY" ] ||
+        die "publisher lease ownership changed before release; recovery required"
+    quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$LEASE_ID.$$.$RANDOM.$disposition.lock"
+    write_release_intent "$disposition" "$reason" "$quarantine"
+    mv "$deploy_lock" "$quarantine" || die "cannot atomically quarantine released publisher lease"
+    ACTIVE_META="$quarantine/lease.meta"
+    LEASE_OWNED=0
+    settle_release_intent
+    LEASE_FINALIZED=1
+}
+
+archive_foreign_receipt() {
+    local meta="$1" disposition="$2" reason="$3" receipt tmp current_sha current_inode
+    read_active_lease "$meta" || return 1
+    current_sha="$(sha256_file "$R_REAL_PATH")"
+    current_inode="$(file_inode "$R_REAL_PATH" 2>/dev/null || printf '%s\n' absent)"
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$R_LEASE_ID.$disposition.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_lease_receipt.v0
+        sed '1d' "$meta"
+        printf 'disposition=%s\n' "$disposition"
+        printf 'reason=%s\n' "$(clean_field "$reason")"
+        printf 'finished_at=%s\n' "$(utc_now)"
+        printf 'current_binary_sha256=%s\n' "$current_sha"
+        printf 'current_binary_inode=%s\n' "$current_inode"
+    } > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$receipt"
+}
+
+archive_recovery_handoff() {
+    local stage="$1" disposition receipt tmp
+    [ -n "$RECOVERY_PREDECESSOR_LEASE_ID" ] || return 0
+    case "$stage" in
+        acquired) disposition=governed_roll_forward_successor_acquired ;;
+        completed) disposition=governed_roll_forward_recovery_completed ;;
+        *) return 1 ;;
+    esac
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$LEASE_ID.$disposition.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_recovery_handoff_receipt.v0
+        printf 'disposition=%s\n' "$disposition"
+        printf 'predecessor_lease_id=%s\n' "$RECOVERY_PREDECESSOR_LEASE_ID"
+        printf 'predecessor_challenge=%s\n' "$RECOVERY_PREDECESSOR_CHALLENGE"
+        printf 'successor_lease_id=%s\n' "$LEASE_ID"
+        printf 'successor_challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'successor_candidate_commit=%s\n' "$LEASE_CANDIDATE"
+        printf 'real_path=%s\n' "$REAL_PATH"
+        printf 'shared_targets=%s\n' "$SHARED_TARGETS"
+        printf 'recorded_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$receipt"
+}
+
+archive_recovery_handoff_marker() {
+    local disposition="$1" next_lease="$2" reason="$3" source="${4:-$RECOVERY_HANDOFF}" receipt tmp
+    read_recovery_handoff "$source" ||
+        die "recovery handoff intent is missing, unknown, or corrupt; fail closed"
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$H_SUCCESSOR_LEASE_ID.$$.$RANDOM.$disposition.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_handoff_receipt.v0
+        sed '1d' "$source"
+        printf 'disposition=%s\n' "$disposition"
+        printf 'next_successor_lease_id=%s\n' "$next_lease"
+        printf 'archive_reason=%s\n' "$(clean_field "$reason")"
+        printf 'archived_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$receipt"
+}
+
+write_recovery_handoff_intent() {
+    local predecessor_lease="$1" predecessor_challenge="$2" predecessor_phase="$3" reason="$4" tmp old_snapshot=""
+    is_safe_id "$predecessor_lease" && is_sha256_value "$predecessor_challenge" ||
+        die "cannot bind an invalid recovery predecessor identity"
+    case "$predecessor_phase" in recovery_required|corrupt_unknown) ;; *) die "invalid recovery predecessor phase" ;; esac
+    is_failed_phase "$RECOVERY_PREDECESSOR_FAILED_PHASE" || die "cannot bind recovery without the original failed phase"
+    is_sha256_value "$RECOVERY_PREDECESSOR_BOOT" || die "cannot bind recovery without the predecessor boot identity"
+    { [ "$RECOVERY_PREDECESSOR_BINARY_SHA" = absent ] || is_sha256_value "$RECOVERY_PREDECESSOR_BINARY_SHA"; } ||
+        die "cannot bind recovery without the predecessor binary fingerprint"
+    if [ -e "$RECOVERY_HANDOFF" ]; then
+        read_recovery_handoff "$RECOVERY_HANDOFF" || die "existing recovery handoff cannot be resumed because it is corrupt"
+        old_snapshot="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$H_SUCCESSOR_LEASE_ID.$$.$RANDOM.replaced-handoff.meta"
+        cp "$RECOVERY_HANDOFF" "$old_snapshot" || die "cannot preserve the replaced recovery handoff intent"
+        chmod 600 "$old_snapshot"
+    fi
+    tmp="$RECOVERY_HANDOFF.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_handoff_intent.v0
+        printf 'predecessor_lease_id=%s\n' "$predecessor_lease"
+        printf 'predecessor_challenge=%s\n' "$predecessor_challenge"
+        printf 'predecessor_phase=%s\n' "$predecessor_phase"
+        printf 'predecessor_failed_phase=%s\n' "$RECOVERY_PREDECESSOR_FAILED_PHASE"
+        printf 'predecessor_boot_identity=%s\n' "$RECOVERY_PREDECESSOR_BOOT"
+        printf 'predecessor_binary_sha256=%s\n' "$RECOVERY_PREDECESSOR_BINARY_SHA"
+        printf 'successor_lease_id=%s\n' "$LEASE_ID"
+        printf 'successor_challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'successor_stage_path=%s\n' "$LEASE_STAGED_LOCK"
+        printf 'real_path=%s\n' "$REAL_PATH"
+        printf 'shared_targets=%s\n' "$SHARED_TARGETS"
+        printf 'started_at=%s\n' "$(utc_now)"
+        printf 'reason=%s\n' "$(clean_field "$reason")"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$RECOVERY_HANDOFF"
+    read_recovery_handoff "$RECOVERY_HANDOFF" &&
+        [ "$H_SUCCESSOR_LEASE_ID" = "$LEASE_ID" ] && [ "$H_SUCCESSOR_CHALLENGE" = "$LEASE_CHALLENGE" ] ||
+        die "recovery handoff intent failed strict self-validation"
+    [ -z "$old_snapshot" ] ||
+        archive_recovery_handoff_marker governed_roll_forward_handoff_resumed "$LEASE_ID" "$reason" "$old_snapshot"
+}
+
+write_handoff_completion_intent() {
+    local quarantine="$1" meta_sha handoff_receipt recovery_receipt tmp
+    [ ! -e "$HANDOFF_COMPLETION_INTENT" ] && [ ! -L "$HANDOFF_COMPLETION_INTENT" ] ||
+        die "an unsettled recovery handoff completion intent already exists"
+    case "$quarantine" in "$LEASE_QUARANTINE_DIR"/*.meta) ;; *) die "recovery handoff completion quarantine escapes the fixed state root" ;; esac
+    read_recovery_handoff "$RECOVERY_HANDOFF" || die "recovery handoff intent became corrupt before completion"
+    [ "$H_SUCCESSOR_LEASE_ID" = "$LEASE_ID" ] && [ "$H_SUCCESSOR_CHALLENGE" = "$LEASE_CHALLENGE" ] &&
+        [ "$H_REAL_PATH" = "$REAL_PATH" ] && [ "$H_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+        die "recovery handoff completion does not match the active successor"
+    meta_sha="$(sha256_file "$RECOVERY_HANDOFF")"
+    handoff_receipt="$LEASE_RECEIPT_DIR/$LEASE_ID.$LEASE_CHALLENGE.governed_roll_forward_handoff_completed.meta"
+    recovery_receipt="$LEASE_RECEIPT_DIR/$LEASE_ID.$LEASE_CHALLENGE.governed_roll_forward_recovery_completed.meta"
+    tmp="$HANDOFF_COMPLETION_INTENT.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_handoff_completion_intent.v0
+        printf 'successor_lease_id=%s\n' "$LEASE_ID"
+        printf 'successor_challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'successor_candidate_commit=%s\n' "$LEASE_CANDIDATE"
+        printf 'handoff_meta_sha256=%s\n' "$meta_sha"
+        printf 'quarantine_path=%s\n' "$quarantine"
+        printf 'handoff_receipt_path=%s\n' "$handoff_receipt"
+        printf 'recovery_receipt_path=%s\n' "$recovery_receipt"
+        printf 'started_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$HANDOFF_COMPLETION_INTENT"
+    read_handoff_completion_intent "$HANDOFF_COMPLETION_INTENT" &&
+        [ "$HC_SUCCESSOR_LEASE_ID" = "$LEASE_ID" ] && [ "$HC_SUCCESSOR_CHALLENGE" = "$LEASE_CHALLENGE" ] &&
+        [ "$HC_SUCCESSOR_CANDIDATE" = "$LEASE_CANDIDATE" ] &&
+        [ "$HC_HANDOFF_RECEIPT" = "$handoff_receipt" ] && [ "$HC_RECOVERY_RECEIPT" = "$recovery_receipt" ] ||
+        die "recovery handoff completion intent failed strict self-validation"
+}
+
+archive_recovery_handoff_marker_exact() {
+    local source="$1" receipt="$2" recorded_at="$3" tmp
+    read_recovery_handoff "$source" ||
+        die "recovery handoff completion marker is missing, unknown, or corrupt"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_handoff_receipt.v0
+        sed '1d' "$source"
+        printf 'disposition=%s\n' governed_roll_forward_handoff_completed
+        printf 'next_successor_lease_id=%s\n' none
+        printf 'archive_reason=%s\n' recovery_completed
+        printf 'archived_at=%s\n' "$recorded_at"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    publish_exact_receipt "$tmp" "$receipt"
+}
+
+archive_recovery_completion_from_marker() {
+    local source="$1" candidate="$2" receipt="$3" recorded_at="$4" tmp
+    read_recovery_handoff "$source" ||
+        die "recovery handoff completion marker is missing, unknown, or corrupt"
+    is_safe_candidate "$candidate" || die "recovery completion candidate is invalid"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_recovery_handoff_receipt.v0
+        printf 'disposition=%s\n' governed_roll_forward_recovery_completed
+        printf 'predecessor_lease_id=%s\n' "$H_PREDECESSOR_LEASE_ID"
+        printf 'predecessor_challenge=%s\n' "$H_PREDECESSOR_CHALLENGE"
+        printf 'successor_lease_id=%s\n' "$H_SUCCESSOR_LEASE_ID"
+        printf 'successor_challenge=%s\n' "$H_SUCCESSOR_CHALLENGE"
+        printf 'successor_candidate_commit=%s\n' "$candidate"
+        printf 'real_path=%s\n' "$H_REAL_PATH"
+        printf 'shared_targets=%s\n' "$H_SHARED_TARGETS"
+        printf 'recorded_at=%s\n' "$recorded_at"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    publish_exact_receipt "$tmp" "$receipt"
+}
+
+settle_handoff_completion_intent() {
+    local settled quarantine_leaf handoff_receipt_leaf recovery_receipt_leaf
+    [ -e "$HANDOFF_COMPLETION_INTENT" ] || [ -L "$HANDOFF_COMPLETION_INTENT" ] || return 0
+    [ ! -L "$HANDOFF_COMPLETION_INTENT" ] || die "recovery handoff completion intent must not be a symlink"
+    read_handoff_completion_intent "$HANDOFF_COMPLETION_INTENT" ||
+        die "recovery handoff completion intent is unknown or corrupt; fail closed"
+    case "$HC_QUARANTINE" in "$LEASE_QUARANTINE_DIR"/*.meta) ;; *) die "recovery handoff completion quarantine escapes the fixed state root" ;; esac
+    quarantine_leaf="${HC_QUARANTINE#"$LEASE_QUARANTINE_DIR/"}"
+    case "$quarantine_leaf" in ''|*/*) die "recovery handoff completion quarantine must be a direct child of the fixed quarantine root" ;; esac
+    case "$HC_HANDOFF_RECEIPT" in "$LEASE_RECEIPT_DIR"/*.meta) ;; *) die "handoff completion receipt escapes the fixed receipt root" ;; esac
+    case "$HC_RECOVERY_RECEIPT" in "$LEASE_RECEIPT_DIR"/*.meta) ;; *) die "formal recovery completion receipt escapes the fixed receipt root" ;; esac
+    handoff_receipt_leaf="${HC_HANDOFF_RECEIPT#"$LEASE_RECEIPT_DIR/"}"
+    recovery_receipt_leaf="${HC_RECOVERY_RECEIPT#"$LEASE_RECEIPT_DIR/"}"
+    case "$handoff_receipt_leaf" in ''|*/*) die "handoff completion receipt must be a direct child of the fixed receipt root" ;; esac
+    case "$recovery_receipt_leaf" in ''|*/*) die "formal recovery completion receipt must be a direct child of the fixed receipt root" ;; esac
+    [ "$HC_HANDOFF_RECEIPT" != "$HC_RECOVERY_RECEIPT" ] ||
+        die "handoff and formal recovery completion receipts must use distinct paths"
+    if [ -e "$HC_QUARANTINE" ] || [ -L "$HC_QUARANTINE" ]; then
+        [ ! -L "$HC_QUARANTINE" ] && [ -f "$HC_QUARANTINE" ] ||
+            die "recovery handoff completion quarantine is not a physical file"
+        [ ! -e "$RECOVERY_HANDOFF" ] && [ ! -L "$RECOVERY_HANDOFF" ] ||
+            die "recovery handoff completion has both canonical and quarantined marker state"
+    elif [ -e "$RECOVERY_HANDOFF" ] || [ -L "$RECOVERY_HANDOFF" ]; then
+        [ ! -L "$RECOVERY_HANDOFF" ] && [ -f "$RECOVERY_HANDOFF" ] ||
+            die "recovery handoff completion source is not a physical file"
+        [ "$(sha256_file "$RECOVERY_HANDOFF")" = "$HC_META_SHA" ] ||
+            die "canonical recovery handoff does not match its completion intent"
+        mv "$RECOVERY_HANDOFF" "$HC_QUARANTINE" ||
+            die "cannot finish the recovery handoff completion transition"
+    else
+        die "recovery handoff completion intent has neither canonical nor quarantined marker state"
+    fi
+    [ "$(sha256_file "$HC_QUARANTINE")" = "$HC_META_SHA" ] ||
+        die "quarantined recovery handoff does not match its completion intent"
+    read_recovery_handoff "$HC_QUARANTINE" || die "quarantined recovery handoff completion marker is corrupt"
+    [ "$H_SUCCESSOR_LEASE_ID" = "$HC_SUCCESSOR_LEASE_ID" ] &&
+        [ "$H_SUCCESSOR_CHALLENGE" = "$HC_SUCCESSOR_CHALLENGE" ] &&
+        [ "$H_REAL_PATH" = "$REAL_PATH" ] && [ "$H_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+        die "quarantined recovery handoff identity does not match its completion intent"
+    archive_recovery_handoff_marker_exact "$HC_QUARANTINE" "$HC_HANDOFF_RECEIPT" "$HC_STARTED_AT"
+    archive_recovery_completion_from_marker "$HC_QUARANTINE" "$HC_SUCCESSOR_CANDIDATE" \
+        "$HC_RECOVERY_RECEIPT" "$HC_STARTED_AT"
+    settled="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$HC_SUCCESSOR_LEASE_ID.$$.$RANDOM.settled-handoff-completion.meta"
+    mv "$HANDOFF_COMPLETION_INTENT" "$settled" ||
+        die "cannot retire the settled recovery handoff completion intent"
+}
+
+complete_recovery_handoff_intent() {
+    local quarantine
+    [ -e "$RECOVERY_HANDOFF" ] || return 0
+    quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$LEASE_ID.$$.$RANDOM.completed-recovery-handoff.meta"
+    write_handoff_completion_intent "$quarantine"
+    settle_handoff_completion_intent
+}
+
+inspect_existing_recovery_handoff() {
+    local corrupt_inode corrupt_sha expected_id expected_challenge staged_owner_status active_quarantine stage_quarantine
+    HANDOFF_PRESENT=0
+    HANDOFF_ACTIVE_RELATION=none
+    HANDOFF_RESUME_AFTER_RECLAIM=0
+    [ -e "$RECOVERY_HANDOFF" ] || [ -L "$RECOVERY_HANDOFF" ] || return 0
+    [ ! -L "$RECOVERY_HANDOFF" ] || die "recovery handoff intent must not be a symlink"
+    read_recovery_handoff "$RECOVERY_HANDOFF" ||
+        die "recovery handoff intent is unknown or corrupt; fail closed"
+    case "$H_SUCCESSOR_STAGE_PATH" in "$LEASE_INTENT_DIR"/*.lock) ;; *) die "recovery handoff successor staging path escapes the intent root" ;; esac
+    [ "$H_REAL_PATH" = "$REAL_PATH" ] && [ "$H_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+        die "recovery handoff intent targets do not match this invocation"
+    [ "$RECOVERY_MODE" = roll_forward ] ||
+        die "an incomplete governed recovery handoff exists; roll_forward with a nonempty reason is required"
+    HANDOFF_PRESENT=1
+    HANDOFF_ORIGINAL_PREDECESSOR_LEASE_ID="$H_PREDECESSOR_LEASE_ID"
+    HANDOFF_ORIGINAL_PREDECESSOR_CHALLENGE="$H_PREDECESSOR_CHALLENGE"
+    HANDOFF_ORIGINAL_PREDECESSOR_PHASE="$H_PREDECESSOR_PHASE"
+    HANDOFF_ORIGINAL_PREDECESSOR_FAILED_PHASE="$H_PREDECESSOR_FAILED_PHASE"
+    HANDOFF_ORIGINAL_PREDECESSOR_BOOT="$H_PREDECESSOR_BOOT"
+    HANDOFF_ORIGINAL_PREDECESSOR_BINARY_SHA="$H_PREDECESSOR_BINARY_SHA"
+    if [ -e "$deploy_lock" ] || [ -L "$deploy_lock" ]; then
+        if ! read_active_lease "$deploy_lock/lease.meta"; then
+            [ ! -L "$deploy_lock" ] && [ -d "$deploy_lock" ] ||
+                die "corrupt recovery handoff active state is not a physical lock directory"
+            if [ -z "$(find "$deploy_lock" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] &&
+                    [ -d "$H_SUCCESSOR_STAGE_PATH" ] && [ ! -L "$H_SUCCESSOR_STAGE_PATH" ]; then
+                read_active_lease "$H_SUCCESSOR_STAGE_PATH/lease.meta" ||
+                    die "partial recovery successor stage metadata is corrupt"
+                [ "$R_LEASE_ID" = "$H_SUCCESSOR_LEASE_ID" ] && [ "$R_CHALLENGE" = "$H_SUCCESSOR_CHALLENGE" ] &&
+                    [ "$R_REAL_PATH" = "$H_REAL_PATH" ] && [ "$R_SHARED_TARGETS" = "$H_SHARED_TARGETS" ] &&
+                    [ "$R_PHASE" = acquired ] ||
+                    die "empty active claim is unrelated to the exact staged recovery successor"
+                set +e
+                owner_exact_status
+                staged_owner_status=$?
+                set -e
+                case "$staged_owner_status" in
+                    0) die "the partially published recovery successor is still live; refusing overlapping recovery" ;;
+                    2) die "the partially published recovery successor pid exists but its start fingerprint is unreadable" ;;
+                esac
+                active_quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$H_SUCCESSOR_LEASE_ID.$$.$RANDOM.partial-successor-active.lock"
+                stage_quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$H_SUCCESSOR_LEASE_ID.$$.$RANDOM.partial-successor-stage.lock"
+                mv "$deploy_lock" "$active_quarantine" ||
+                    die "cannot quarantine the interrupted recovery successor active claim"
+                mv "$H_SUCCESSOR_STAGE_PATH" "$stage_quarantine" ||
+                    die "cannot quarantine the interrupted recovery successor stage"
+                HANDOFF_ACTIVE_RELATION=partial_successor_reclaimed
+            else
+                [ "$H_PREDECESSOR_PHASE" = corrupt_unknown ] ||
+                    die "active publisher lease cannot be related to the recovery handoff; fail closed"
+                corrupt_inode="$(file_inode "$deploy_lock")" || die "cannot fingerprint corrupt handoff predecessor"
+                corrupt_sha="$(sha256_file "$REAL_PATH")"
+                expected_id="corrupt-lock-$corrupt_inode"
+                expected_challenge="$(printf '%s\n' "$expected_id|$H_PREDECESSOR_BOOT|$REAL_PATH|$SHARED_TARGETS|$H_PREDECESSOR_BINARY_SHA" | sha256_text)"
+                [ "$H_PREDECESSOR_LEASE_ID" = "$expected_id" ] &&
+                    [ "$H_PREDECESSOR_CHALLENGE" = "$expected_challenge" ] &&
+                    [ "$corrupt_sha" = "$H_PREDECESSOR_BINARY_SHA" ] ||
+                    die "corrupt active publisher lease is unrelated to the exact recovery handoff predecessor"
+                HANDOFF_ACTIVE_RELATION=corrupt_predecessor
+            fi
+        elif [ "$R_LEASE_ID" = "$H_PREDECESSOR_LEASE_ID" ] && [ "$R_CHALLENGE" = "$H_PREDECESSOR_CHALLENGE" ]; then
+            HANDOFF_ACTIVE_RELATION=predecessor
+        elif [ "$R_LEASE_ID" = "$H_SUCCESSOR_LEASE_ID" ] && [ "$R_CHALLENGE" = "$H_SUCCESSOR_CHALLENGE" ]; then
+            HANDOFF_ACTIVE_RELATION=successor
+            set +e
+            owner_exact_status
+            staged_owner_status=$?
+            set -e
+            case "$staged_owner_status" in
+                0) die "the recovery handoff successor publisher is still live; refusing overlapping recovery" ;;
+                2) die "the recovery handoff successor pid exists but its start fingerprint is unreadable" ;;
+            esac
+            case "$R_PHASE" in acquired|building|prepared) HANDOFF_RESUME_AFTER_RECLAIM=1 ;; esac
+        else
+            die "active publisher lease identity is unrelated to the recovery handoff intent"
+        fi
+    fi
+    if [ ! -e "$deploy_lock" ] && [ ! -L "$deploy_lock" ]; then
+        if [ -e "$H_SUCCESSOR_STAGE_PATH" ] || [ -L "$H_SUCCESSOR_STAGE_PATH" ]; then
+            [ ! -L "$H_SUCCESSOR_STAGE_PATH" ] && [ -d "$H_SUCCESSOR_STAGE_PATH" ] ||
+                die "recovery handoff successor stage is not a physical lease directory"
+            read_active_lease "$H_SUCCESSOR_STAGE_PATH/lease.meta" ||
+                die "recovery handoff successor stage metadata is corrupt"
+            [ "$R_LEASE_ID" = "$H_SUCCESSOR_LEASE_ID" ] && [ "$R_CHALLENGE" = "$H_SUCCESSOR_CHALLENGE" ] ||
+                die "recovery handoff successor stage identity does not match the marker"
+            set +e
+            owner_exact_status
+            staged_owner_status=$?
+            set -e
+            case "$staged_owner_status" in
+                0) die "the recovery handoff successor publisher is still live; refusing overlapping recovery" ;;
+                2) die "the recovery handoff successor pid exists but its start fingerprint is unreadable" ;;
+            esac
+            stage_quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$H_SUCCESSOR_LEASE_ID.$$.$RANDOM.interrupted-successor-stage.lock"
+            mv "$H_SUCCESSOR_STAGE_PATH" "$stage_quarantine" ||
+                die "cannot quarantine the interrupted recovery successor stage"
+        fi
+        RECOVERY_PREDECESSOR_LEASE_ID="$H_PREDECESSOR_LEASE_ID"
+        RECOVERY_PREDECESSOR_CHALLENGE="$H_PREDECESSOR_CHALLENGE"
+        RECOVERY_PREDECESSOR_PHASE="$H_PREDECESSOR_PHASE"
+        RECOVERY_PREDECESSOR_FAILED_PHASE="$H_PREDECESSOR_FAILED_PHASE"
+        RECOVERY_PREDECESSOR_BOOT="$H_PREDECESSOR_BOOT"
+        RECOVERY_PREDECESSOR_BINARY_SHA="$H_PREDECESSOR_BINARY_SHA"
+        write_recovery_handoff_intent "$RECOVERY_PREDECESSOR_LEASE_ID" "$RECOVERY_PREDECESSOR_CHALLENGE" \
+            "$RECOVERY_PREDECESSOR_PHASE" "$RECOVERY_REASON"
+    fi
+}
+
+mark_foreign_recovery_required() {
+    local reason="$1" tmp="$ACTIVE_META.tmp.$$.$RANDOM" failed_phase
+    failed_phase="$R_FAILED_PHASE"
+    [ -n "$failed_phase" ] || failed_phase="$R_PHASE"
+    R_SEQ=$((R_SEQ + 1))
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_lease.v0
+        printf 'lease_id=%s\n' "$R_LEASE_ID"
+        printf 'pid=%s\n' "$R_PID"
+        printf 'process_start_fingerprint=%s\n' "$R_START"
+        printf 'boot_identity=%s\n' "$R_BOOT"
+        printf 'real_path=%s\n' "$R_REAL_PATH"
+        printf 'shared_targets=%s\n' "$R_SHARED_TARGETS"
+        printf 'phase=%s\n' recovery_required
+        printf 'state_seq=%s\n' "$R_SEQ"
+        printf 'started_at=%s\n' "$R_STARTED"
+        printf 'updated_at=%s\n' "$(utc_now)"
+        printf 'baseline_binary_sha256=%s\n' "$R_BASELINE"
+        printf 'candidate_commit=%s\n' "$R_CANDIDATE"
+        printf 'challenge=%s\n' "$R_CHALLENGE"
+        printf 'force_reinstall=%s\n' "$R_FORCE"
+        printf 'force_reason=%s\n' "$R_FORCE_REASON"
+        printf 'failed_phase=%s\n' "$failed_phase"
+        printf 'failure_reason=%s\n' "$(clean_field "$reason")"
+    } > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ACTIVE_META"
+    read_active_lease "$ACTIVE_META" && archive_foreign_receipt "$ACTIVE_META" recovery_required "$reason" || true
+}
+
+owner_exact_status() {
+    local observed
+    [ "$R_BOOT" = "$CURRENT_BOOT_IDENTITY" ] || return 1
+    process_is_zombie "$R_PID" && return 1
+    kill -0 "$R_PID" 2>/dev/null || return 1
+    observed="$(process_start_fingerprint "$R_PID" 2>/dev/null)" || return 2
+    [ "$observed" = "$R_START" ] || return 1
+    process_is_zombie "$R_PID" && return 1
+    return 0
+}
+
+read_lease_identity() {
+    printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
+        "$R_LEASE_ID" "$R_PID" "$R_START" "$R_BOOT" "$R_PHASE" "$R_SEQ" "$R_BASELINE" "$R_REAL_PATH"
+}
+
+reconcile_corrupt_active_lease() {
+    local lock_inode current_sha predecessor_id predecessor_challenge receipt tmp quarantine
+    [ "$RECOVERY_MODE" = roll_forward ] ||
+        die "publisher lease metadata is missing, unknown, or corrupt; governed roll_forward recovery is required: $deploy_lock"
+    [ ! -L "$deploy_lock" ] && [ -d "$deploy_lock" ] ||
+        die "corrupt publisher lease is not a physical lock directory; fail closed"
+    lock_inode="$(file_inode "$deploy_lock")" || die "cannot fingerprint corrupt publisher lease directory"
+    current_sha="$(sha256_file "$REAL_PATH")"
+    predecessor_id="corrupt-lock-$lock_inode"
+    predecessor_challenge="$(printf '%s\n' "$predecessor_id|$CURRENT_BOOT_IDENTITY|$REAL_PATH|$SHARED_TARGETS|$current_sha" | sha256_text)"
+    RECOVERY_PREDECESSOR_LEASE_ID="$predecessor_id"
+    RECOVERY_PREDECESSOR_CHALLENGE="$predecessor_challenge"
+    RECOVERY_PREDECESSOR_PHASE=corrupt_unknown
+    RECOVERY_PREDECESSOR_FAILED_PHASE=corrupt_unknown
+    RECOVERY_PREDECESSOR_BOOT="$CURRENT_BOOT_IDENTITY"
+    RECOVERY_PREDECESSOR_BINARY_SHA="$current_sha"
+    write_recovery_handoff_intent "$predecessor_id" "$predecessor_challenge" corrupt_unknown "$RECOVERY_REASON"
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$predecessor_id.governed-corrupt-recovery-started.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_corrupt_lease_receipt.v0
+        printf 'disposition=%s\n' governed_corrupt_recovery_started
+        printf 'predecessor_lease_id=%s\n' "$predecessor_id"
+        printf 'predecessor_challenge=%s\n' "$predecessor_challenge"
+        printf 'lock_inode=%s\n' "$lock_inode"
+        printf 'current_binary_sha256=%s\n' "$current_sha"
+        printf 'successor_lease_id=%s\n' "$LEASE_ID"
+        printf 'successor_challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'reason=%s\n' "$RECOVERY_REASON"
+        printf 'recorded_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$receipt"
+    quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$predecessor_id.$$.$RANDOM.corrupt-recovery-started.lock"
+    mv "$deploy_lock" "$quarantine" || die "cannot atomically quarantine corrupt publisher lease"
+}
+
+reconcile_existing_lease() {
+    local observed_identity rechecked_identity current_sha owner_status quarantine disposition reason failed_phase
+    if ! read_active_lease "$ACTIVE_META"; then
+        reconcile_corrupt_active_lease
+        return 0
+    fi
+    observed_identity="$(read_lease_identity)"
+    set +e
+    owner_exact_status
+    owner_status=$?
+    set -e
+    case "$owner_status" in
+        0) die "another exact agent-bridge publisher lease is active (pid $R_PID, phase $R_PHASE, lease $R_LEASE_ID, target $R_REAL_PATH)" ;;
+        2) die "publisher pid $R_PID exists but its start fingerprint is unreadable; fail closed" ;;
+    esac
+
+    # The kernel mutex already excludes every governed publisher and is released
+    # by the OS on process death. Re-read the durable identity for audit, but do
+    # not add another mkdir-based reclaim lock with its own SIGKILL leak window.
+    read_active_lease "$ACTIVE_META" || die "publisher lease changed during reconciliation; fail closed"
+    rechecked_identity="$(read_lease_identity)"
+    [ "$rechecked_identity" = "$observed_identity" ] ||
+        die "publisher lease identity changed during reconciliation; fail closed"
+    set +e
+    owner_exact_status
+    owner_status=$?
+    set -e
+    case "$owner_status" in
+        0) die "publisher lease owner became live during reconciliation; fail closed" ;;
+        2) die "publisher pid exists but its start fingerprint became unreadable; fail closed" ;;
+    esac
+    current_sha="$(sha256_file "$R_REAL_PATH")"
+    if [ "${HANDOFF_PRESENT:-0}" -eq 1 ] && [ "${HANDOFF_RESUME_AFTER_RECLAIM:-0}" -eq 1 ]; then
+        [ "$current_sha" = "$R_BASELINE" ] || {
+            mark_foreign_recovery_required interrupted_recovery_successor_baseline_changed
+            die "interrupted pre-mutation recovery successor changed the baseline; governed recovery must be restarted"
+        }
+        disposition=governed_roll_forward_interrupted_successor_reclaimed
+        reason="$RECOVERY_REASON"
+    elif [ "${HANDOFF_PRESENT:-0}" -eq 1 ]; then
+        disposition=governed_roll_forward_recovery_started
+        reason="$RECOVERY_REASON"
+        RECOVERY_PREDECESSOR_LEASE_ID="$R_LEASE_ID"
+        RECOVERY_PREDECESSOR_CHALLENGE="$R_CHALLENGE"
+        RECOVERY_PREDECESSOR_PHASE=recovery_required
+        RECOVERY_PREDECESSOR_FAILED_PHASE="${R_FAILED_PHASE:-$R_PHASE}"
+        RECOVERY_PREDECESSOR_BOOT="$R_BOOT"
+        RECOVERY_PREDECESSOR_BINARY_SHA="$current_sha"
+        write_recovery_handoff_intent "$RECOVERY_PREDECESSOR_LEASE_ID" "$RECOVERY_PREDECESSOR_CHALLENGE" \
+            "$RECOVERY_PREDECESSOR_PHASE" "$RECOVERY_REASON"
+    else case "$R_PHASE" in
+        acquired|building|prepared)
+            if [ "$current_sha" = "$R_BASELINE" ]; then
+                disposition=aborted
+                reason=dead_owner_pre_mutation_reclaimed
+            else
+                mark_foreign_recovery_required pre_mutation_baseline_changed
+                die "dead publisher owner has a changed baseline; governed recovery required"
+            fi
+            ;;
+        recovery_required)
+            if [ "$RECOVERY_MODE" = roll_forward ]; then
+                [ "$R_REAL_PATH" = "$REAL_PATH" ] && [ "$R_SHARED_TARGETS" = "$SHARED_TARGETS" ] ||
+                    die "roll-forward recovery invocation does not match the failed publisher targets"
+                disposition=governed_roll_forward_recovery_started
+                reason="$RECOVERY_REASON"
+                RECOVERY_PREDECESSOR_LEASE_ID="$R_LEASE_ID"
+                RECOVERY_PREDECESSOR_CHALLENGE="$R_CHALLENGE"
+                RECOVERY_PREDECESSOR_PHASE=recovery_required
+                RECOVERY_PREDECESSOR_FAILED_PHASE="${R_FAILED_PHASE:-$R_PHASE}"
+                RECOVERY_PREDECESSOR_BOOT="$R_BOOT"
+                RECOVERY_PREDECESSOR_BINARY_SHA="$current_sha"
+                write_recovery_handoff_intent "$RECOVERY_PREDECESSOR_LEASE_ID" "$RECOVERY_PREDECESSOR_CHALLENGE" \
+                    "$RECOVERY_PREDECESSOR_PHASE" "$RECOVERY_REASON"
+            else
+                die "publisher lease requires governed recovery; set roll_forward with a nonempty reason"
+            fi
+            ;;
+        *)
+            failed_phase="$R_PHASE"
+            mark_foreign_recovery_required "dead_owner_after_$failed_phase"
+            die "dead publisher owner reached $R_PHASE; governed recovery required"
+            ;;
+    esac
+    fi
+    archive_foreign_receipt "$ACTIVE_META" "$disposition" "$reason" ||
+        die "cannot archive the reconciliation-started receipt before releasing the old lease"
+    quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$R_LEASE_ID.$$.$RANDOM.$disposition.lock"
+    mv "$deploy_lock" "$quarantine" || die "cannot atomically quarantine reconciled publisher lease"
+}
+
 cleanup() {
+    local status="${1:-0}" current_sha
     [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
     [ -n "$CLEANUP_RUNTIME_STAGE" ] && rm -rf "$CLEANUP_RUNTIME_STAGE" 2>/dev/null || true
     [ -n "$CLEANUP_PKG_CONFIG" ] && rm -rf "$CLEANUP_PKG_CONFIG" 2>/dev/null || true
-    if [ -n "$CLEANUP_DEPLOY_LOCK" ] &&
-            [ "$(cat "$CLEANUP_DEPLOY_LOCK/pid" 2>/dev/null || true)" = "$$" ]; then
-        rm -rf "$CLEANUP_DEPLOY_LOCK" 2>/dev/null || true
+    [ -n "$CLEANUP_BINARY_STAGE" ] && rm -f "$CLEANUP_BINARY_STAGE" 2>/dev/null || true
+    [ -n "$CLEANUP_LEASE_INTENT" ] && rm -rf "$CLEANUP_LEASE_INTENT" 2>/dev/null || true
+    if [ "$LEASE_OWNED" -eq 1 ] && [ "$LEASE_FINALIZED" -eq 0 ] &&
+        { [ -e "$RELEASE_INTENT" ] || [ -L "$RELEASE_INTENT" ]; }; then
+        # A normal signal may arrive anywhere in the release transaction.
+        # Finish its exact journaled move/receipt now; SIGKILL leaves the same
+        # intent for the next kernel-mutex holder to settle before admission.
+        settle_release_intent
+        LEASE_OWNED=0
+        LEASE_FINALIZED=1
+    fi
+    if [ "$LEASE_OWNED" -eq 1 ] && [ "$LEASE_FINALIZED" -eq 0 ]; then
+        current_sha="$(sha256_file "$REAL_PATH" 2>/dev/null || printf '%s\n' unknown)"
+        case "$LEASE_PHASE" in
+            acquired|building|prepared)
+                if [ "$current_sha" = "$LEASE_BASELINE_SHA" ]; then
+                    release_active_lease aborted "${LEASE_FAILURE_REASON:-exit_status_$status}"
+                else
+                    LEASE_FAILURE_REASON="pre_mutation_baseline_changed"
+                    LEASE_FAILED_PHASE="$LEASE_PHASE"
+                    lease_phase_update recovery_required >/dev/null 2>&1 || true
+                fi
+                ;;
+            *)
+                LEASE_FAILURE_REASON="${LEASE_FAILURE_REASON:-exit_status_$status}"
+                if [ "$LEASE_PHASE" != recovery_required ]; then
+                    LEASE_FAILED_PHASE="$LEASE_PHASE"
+                    lease_phase_update recovery_required >/dev/null 2>&1 || true
+                fi
+                ;;
+        esac
     fi
 }
-trap cleanup EXIT
+trap 'status=$?; trap - EXIT; cleanup "$status"; exit "$status"' EXIT
 
 # Serialize the complete build/install/restart transaction. Per-SHA Cargo
 # targets prevent build corruption, but the installed binary, assets, backups,
 # and launchd jobs are shared mutable state.
+settle_handoff_completion_intent
+settle_release_intent
 mkdir -p "$INSTALL_DIR"
-deploy_lock="$INSTALL_DIR/.agent-bridge-deploy.lock"
-if ! mkdir "$deploy_lock" 2>/dev/null; then
-    lock_pid="$(cat "$deploy_lock/pid" 2>/dev/null || true)"
-    [ -n "$lock_pid" ] || die "deploy lock exists without an owner: $deploy_lock"
-    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
-        die "another agent-bridge deploy is running (pid $lock_pid)"
-    fi
-    rm -rf "$deploy_lock" 2>/dev/null || die "cannot reclaim stale deploy lock: $deploy_lock"
-    mkdir "$deploy_lock" 2>/dev/null || die "another agent-bridge deploy acquired the lock"
+LEASE_ID="lease-$(date -u '+%Y%m%dT%H%M%SZ')-$$-$RANDOM"
+LEASE_PROCESS_START="$(process_start_fingerprint "$$")" || die "cannot establish publisher process start fingerprint"
+LEASE_STARTED_AT="$(utc_now)"
+LEASE_BASELINE_SHA="$(sha256_file "$REAL_PATH")"
+LEASE_CHALLENGE="$(printf '%s\n' "$LEASE_ID|$LEASE_PROCESS_START|$CURRENT_BOOT_IDENTITY|$REAL_PATH|$LEASE_STARTED_AT" | sha256_text)"
+LEASE_PHASE=acquired
+LEASE_STATE_SEQ=1
+LEASE_STAGED_LOCK="$LEASE_INTENT_DIR/$LEASE_ID.lock"
+[ ! -e "$LEASE_STAGED_LOCK" ] || die "publisher lease staging intent already exists: $LEASE_STAGED_LOCK"
+mkdir "$LEASE_STAGED_LOCK" || die "cannot create publisher lease staging intent"
+CLEANUP_LEASE_INTENT="$LEASE_STAGED_LOCK"
+ACTIVE_META="$LEASE_STAGED_LOCK/lease.meta"
+write_active_values || die "cannot initialize publisher lease metadata"
+chmod 700 "$LEASE_STAGED_LOCK" 2>/dev/null || true
+read_active_lease "$ACTIVE_META" && [ "$R_LEASE_ID" = "$LEASE_ID" ] && [ "$R_CHALLENGE" = "$LEASE_CHALLENGE" ] ||
+    die "staged publisher lease failed strict self-validation"
+STAGED_ACTIVE_META="$ACTIVE_META"
+ACTIVE_META="$deploy_lock/lease.meta"
+inspect_existing_recovery_handoff
+if [ -e "$deploy_lock" ] || [ -L "$deploy_lock" ]; then
+    reconcile_existing_lease
 fi
-printf '%s\n' "$$" > "$deploy_lock/pid"
+if [ "$HANDOFF_RESUME_AFTER_RECLAIM" -eq 1 ]; then
+    [ ! -e "$deploy_lock" ] && [ ! -L "$deploy_lock" ] ||
+        die "reclaimed recovery successor still owns the active lease path"
+    RECOVERY_PREDECESSOR_LEASE_ID="$HANDOFF_ORIGINAL_PREDECESSOR_LEASE_ID"
+    RECOVERY_PREDECESSOR_CHALLENGE="$HANDOFF_ORIGINAL_PREDECESSOR_CHALLENGE"
+    RECOVERY_PREDECESSOR_PHASE="$HANDOFF_ORIGINAL_PREDECESSOR_PHASE"
+    RECOVERY_PREDECESSOR_FAILED_PHASE="$HANDOFF_ORIGINAL_PREDECESSOR_FAILED_PHASE"
+    RECOVERY_PREDECESSOR_BOOT="$HANDOFF_ORIGINAL_PREDECESSOR_BOOT"
+    RECOVERY_PREDECESSOR_BINARY_SHA="$HANDOFF_ORIGINAL_PREDECESSOR_BINARY_SHA"
+    write_recovery_handoff_intent "$RECOVERY_PREDECESSOR_LEASE_ID" "$RECOVERY_PREDECESSOR_CHALLENGE" \
+        "$RECOVERY_PREDECESSOR_PHASE" "$RECOVERY_REASON"
+fi
+[ ! -e "$deploy_lock" ] && [ ! -L "$deploy_lock" ] ||
+    die "active publisher lease appeared while the kernel mutex was held"
+mkdir "$deploy_lock" || die "cannot exclusively claim the active publisher lease path"
+chmod 700 "$deploy_lock" 2>/dev/null || true
+mv "$LEASE_STAGED_LOCK/lease.meta" "$deploy_lock/lease.meta" ||
+    die "cannot publish the staged publisher lease metadata"
+mv "$LEASE_STAGED_LOCK/pid" "$deploy_lock/pid" ||
+    die "cannot publish the staged publisher lease pid"
+rmdir "$LEASE_STAGED_LOCK" || die "cannot retire the empty publisher lease staging directory"
+ACTIVE_META="$deploy_lock/lease.meta"
+read_active_lease "$ACTIVE_META" && [ "$R_LEASE_ID" = "$LEASE_ID" ] && [ "$R_CHALLENGE" = "$LEASE_CHALLENGE" ] ||
+    die "published publisher lease identity does not match its staged intent"
+CLEANUP_LEASE_INTENT=""
+LEASE_OWNED=1
 CLEANUP_DEPLOY_LOCK="$deploy_lock"
+if ! archive_recovery_handoff acquired; then
+    LEASE_FAILURE_REASON=recovery_successor_acquired_receipt_failed
+    LEASE_FAILED_PHASE="$LEASE_PHASE"
+    lease_phase_update recovery_required || true
+    die "cannot bind the governed recovery predecessor to the acquired successor lease"
+fi
+
+archive_pending_receipt() {
+    local meta="$1" disposition="$2" next_candidate="$3" reason="$4" receipt tmp
+    read_pending_admission "$meta" || die "pending-admission metadata is unknown or corrupt; fail closed"
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$P_LEASE_ID.pending-$disposition.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_pending_admission_receipt.v0
+        sed '1d' "$meta"
+        printf 'disposition=%s\n' "$disposition"
+        printf 'next_candidate_commit=%s\n' "$next_candidate"
+        printf 'reason=%s\n' "$(clean_field "$reason")"
+        printf 'archived_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$receipt"
+}
+
+archive_pending_completion() {
+    local receipt tmp
+    [ -n "$CONSUMED_PENDING_ACTION" ] || return 0
+    receipt="$LEASE_RECEIPT_DIR/$(receipt_stamp).$CONSUMED_PENDING_LEASE_ID.pending-$CONSUMED_PENDING_ACTION-completed.meta"
+    tmp="$receipt.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_pending_transition_receipt.v0
+        printf 'disposition=%s\n' "$CONSUMED_PENDING_ACTION-completed"
+        printf 'predecessor_lease_id=%s\n' "$CONSUMED_PENDING_LEASE_ID"
+        printf 'predecessor_challenge=%s\n' "$CONSUMED_PENDING_CHALLENGE"
+        printf 'predecessor_candidate_commit=%s\n' "$CONSUMED_PENDING_CANDIDATE"
+        printf 'successor_lease_id=%s\n' "$LEASE_ID"
+        printf 'successor_challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'successor_candidate_commit=%s\n' "$LEASE_CANDIDATE"
+        printf 'completed_at=%s\n' "$(utc_now)"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$receipt"
+}
+
+pending_fingerprint_matches() {
+    local current_sha current_inode current_mode current_assets_sha
+    current_sha="$(sha256_file "$P_REAL_PATH")"
+    current_inode="$(file_inode "$P_REAL_PATH" 2>/dev/null || printf '%s\n' absent)"
+    current_mode="$(file_mode "$P_REAL_PATH")"
+    current_assets_sha="$(installed_assets_sha256)"
+    [ "$current_sha" = "$P_SHA" ] && [ "$current_inode" = "$P_INODE" ] &&
+        [ "$current_mode" = "$P_MODE" ] &&
+        [ "$current_assets_sha" = "$P_ASSETS_SHA" ]
+}
+
+inspect_pending_for_candidate() {
+    local candidate="$1"
+    PENDING_ACTION=none
+    [ -e "$PENDING_ADMISSION" ] || return 0
+    read_pending_admission "$PENDING_ADMISSION" ||
+        die "pending-admission metadata is missing, unknown, or corrupt; fail closed"
+    [ "$SUPERSEDE_PENDING" -eq 0 ] || [ "$SUPERSEDE_EXPECTED_CHALLENGE" = "$P_CHALLENGE" ] ||
+        die "explicit supersede challenge does not match the exact pending admission"
+    PENDING_OBSERVED_SHA256="$(sha256_file "$PENDING_ADMISSION")"
+    if ! pending_fingerprint_matches; then
+        if [ "$RECOVERY_MODE" = roll_forward ] && [ "$SUPERSEDE_PENDING" -eq 1 ]; then
+            PENDING_ACTION=recovery_roll_forward
+            return 0
+        fi
+        die "pending-admission fingerprint no longer matches the installed binary/assets; governed recovery plus exact pending supersede is required"
+    fi
+    if [ "$P_CANDIDATE" = "$candidate" ] && [ "$P_REAL_PATH" = "$REAL_PATH" ] &&
+            [ "$P_SHARED_TARGETS" = "$SHARED_TARGETS" ]; then
+        if [ -n "$RECOVERY_PREDECESSOR_LEASE_ID" ]; then
+            if [ "$P_LEASE_ID" = "$RECOVERY_PREDECESSOR_LEASE_ID" ] &&
+                    [ "$P_CHALLENGE" = "$RECOVERY_PREDECESSOR_CHALLENGE" ]; then
+                PENDING_ACTION=recovery_roll_forward
+            elif [ "$SUPERSEDE_PENDING" -eq 1 ]; then
+                PENDING_ACTION=supersede
+            else
+                die "same-candidate pending admission is unrelated to the recovery predecessor; exact pending supersede is required"
+            fi
+        elif [ "$FORCE_REINSTALL" -eq 0 ]; then
+            say "publisher lease: candidate $candidate is already installed with matching pending admission; no build, overwrite, or restart performed"
+            release_active_lease idempotent_pending_match same_candidate_installed_fingerprint_match
+            exit 0
+        else
+            PENDING_ACTION=force_reinstall
+        fi
+    elif [ "$SUPERSEDE_PENDING" -eq 1 ]; then
+        PENDING_ACTION=supersede
+    else
+        die "a different candidate or target still has unverified pending admission; explicit audited supersede is required"
+    fi
+}
+
+consume_pending_before_mutation() {
+    local candidate="$1" pending_quarantine observed_sha
+    case "$PENDING_ACTION" in
+        none)
+            [ ! -e "$PENDING_ADMISSION" ] ||
+                die "pending-admission appeared after candidate inspection; fail closed"
+            ;;
+        force_reinstall|supersede|recovery_roll_forward)
+            observed_sha="$(sha256_file "$PENDING_ADMISSION")"
+            [ "$observed_sha" = "$PENDING_OBSERVED_SHA256" ] ||
+                die "pending-admission identity changed after inspection; fail closed"
+            read_pending_admission "$PENDING_ADMISSION" ||
+                die "pending-admission changed before mutation; fail closed"
+            [ "$SUPERSEDE_PENDING" -eq 0 ] || [ "$SUPERSEDE_EXPECTED_CHALLENGE" = "$P_CHALLENGE" ] ||
+                die "pending-admission challenge changed before mutation; fail closed"
+            if [ "$PENDING_ACTION" != recovery_roll_forward ]; then
+                pending_fingerprint_matches ||
+                    die "pending-admission fingerprint changed before mutation; governed recovery required"
+            fi
+            CONSUMED_PENDING_LEASE_ID="$P_LEASE_ID"
+            CONSUMED_PENDING_CHALLENGE="$P_CHALLENGE"
+            CONSUMED_PENDING_CANDIDATE="$P_CANDIDATE"
+            if [ "$PENDING_ACTION" = force_reinstall ]; then
+                [ "$P_CANDIDATE" = "$candidate" ] && [ "$P_REAL_PATH" = "$REAL_PATH" ] ||
+                    die "force-reinstall pending identity changed; fail closed"
+                CONSUMED_PENDING_ACTION=force-reinstall
+                archive_pending_receipt "$PENDING_ADMISSION" force-reinstall-started "$candidate" "$FORCE_REASON"
+            elif [ "$PENDING_ACTION" = recovery_roll_forward ]; then
+                CONSUMED_PENDING_ACTION=recovery-roll-forward
+                archive_pending_receipt "$PENDING_ADMISSION" recovery-roll-forward-started "$candidate" "$RECOVERY_REASON"
+            else
+                CONSUMED_PENDING_ACTION=supersede
+                archive_pending_receipt "$PENDING_ADMISSION" supersede-started "$candidate" "$SUPERSEDE_REASON"
+            fi
+            pending_quarantine="$LEASE_QUARANTINE_DIR/$(receipt_stamp).$P_LEASE_ID.$$.$RANDOM.pending-$PENDING_ACTION.meta"
+            mv "$PENDING_ADMISSION" "$pending_quarantine" ||
+                die "cannot atomically quarantine consumed pending admission"
+            ;;
+        *) die "unknown pending-admission action: $PENDING_ACTION" ;;
+    esac
+}
+
+write_pending_admission() {
+    local candidate="$1" installed_sha installed_inode installed_mode installed_assets installed_at tmp
+    [ ! -e "$PENDING_ADMISSION" ] || die "pending-admission already exists before commit receipt; fail closed"
+    installed_sha="$(sha256_file "$REAL_PATH")"
+    installed_inode="$(file_inode "$REAL_PATH")" || die "cannot read installed binary inode"
+    installed_mode="$(file_mode "$REAL_PATH")"
+    installed_assets="$(installed_assets_sha256)"
+    [ "$installed_sha" != absent ] || die "installed binary missing before pending admission"
+    installed_at="$(utc_now)"
+    tmp="$PENDING_ADMISSION.tmp.$$.$RANDOM"
+    {
+        printf 'schema=%s\n' agent_bridge.publisher_pending_admission.v0
+        printf 'lease_id=%s\n' "$LEASE_ID"
+        printf 'challenge=%s\n' "$LEASE_CHALLENGE"
+        printf 'real_path=%s\n' "$REAL_PATH"
+        printf 'shared_targets=%s\n' "$SHARED_TARGETS"
+        printf 'candidate_commit=%s\n' "$candidate"
+        printf 'installed_binary_sha256=%s\n' "$installed_sha"
+        printf 'installed_binary_inode=%s\n' "$installed_inode"
+        printf 'installed_binary_mode=%s\n' "$installed_mode"
+        printf 'installed_assets_sha256=%s\n' "$installed_assets"
+        printf 'installed_at=%s\n' "$installed_at"
+        printf 'fresh_mcp=%s\n' unverified
+        printf 'force_reinstall=%s\n' "$FORCE_REINSTALL"
+        printf 'force_reason=%s\n' "$FORCE_REASON"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$PENDING_ADMISSION"
+}
+
+lease_test_advance() {
+    case "$1" in
+        acquired) ;;
+        building) lease_phase_update building ;;
+        prepared) lease_phase_update building; lease_phase_update prepared ;;
+        committing) lease_phase_update building; lease_phase_update prepared; lease_phase_update committing ;;
+        *) die "unsupported lease test phase: $1" ;;
+    esac
+}
+
+if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION:-}" ]; then
+    test_root="$TEST_PHYSICAL_ROOT"
+    LEASE_CANDIDATE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_CANDIDATE:-test-candidate}"
+    is_safe_candidate "$LEASE_CANDIDATE" || die "publisher lease test candidate is invalid"
+    lease_phase_update acquired
+    inspect_pending_for_candidate "$LEASE_CANDIDATE"
+    case "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION" in
+        hold)
+            lease_test_advance "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_PHASE:-building}"
+            [ -z "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE:-}" ] || printf '%s\n' "$$" > "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE"
+            while :; do sleep 1; done
+            ;;
+        probe)
+            release_active_lease test_probe no_mutation_probe
+            exit 0
+            ;;
+        install)
+            [ -f "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_PAYLOAD:-}" ] || die "lease test install payload missing"
+            lease_phase_update building
+            lease_phase_update prepared
+            lease_phase_update committing
+            consume_pending_before_mutation "$LEASE_CANDIDATE"
+            cp "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_PAYLOAD" "$REAL_PATH"
+            [ -z "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG:-}" ] || printf '%s\n' "$LEASE_CANDIDATE" >> "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG"
+            lease_phase_update services_verifying
+            lease_phase_update awaiting_fresh_mcp
+            write_pending_admission "$LEASE_CANDIDATE"
+            archive_pending_completion
+            complete_recovery_handoff_intent
+            release_active_lease pending_admission fresh_mcp_unverified
+            exit 0
+            ;;
+        *) die "unknown publisher lease test action: $AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION" ;;
+    esac
+fi
 
 # ---- 1. obtain the NEW binary (build from latest master, or --use-binary) ----
 NEW_BIN=""
@@ -321,6 +1824,10 @@ PROVENANCE=""
 if [ -n "$USE_BINARY" ]; then
     [ -f "$USE_BINARY" ] || die "--use-binary path not found: $USE_BINARY"
     is_native_exe "$USE_BINARY" || die "--use-binary is not a native executable (ELF/Mach-O): $USE_BINARY"
+    LEASE_CANDIDATE="use-binary-sha256:$(sha256_file "$USE_BINARY")"
+    lease_phase_update acquired
+    inspect_pending_for_candidate "$LEASE_CANDIDATE"
+    lease_phase_update building
     NEW_BIN="$USE_BINARY"
     PROVENANCE="--use-binary $USE_BINARY (provenance NOT verified)"
     say "WARNING: --use-binary skips the build-from-master guarantee."
@@ -331,6 +1838,10 @@ else
     say ">> fetching $DEPLOY_REMOTE/master ..."
     git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
     MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
+    LEASE_CANDIDATE="$MASTER_SHA"
+    lease_phase_update acquired
+    inspect_pending_for_candidate "$LEASE_CANDIDATE"
+    lease_phase_update building
     PROVENANCE="$DEPLOY_REMOTE/master @ ${MASTER_SHA:0:7}"
     # Build in a worktree placed as a SIBLING of the repo so the cross-repo path
     # dep (crates/seed-bridge -> ../../../AiOT/rust/seed_neuron) resolves natively
@@ -383,7 +1894,7 @@ else
         XKB_LIB="$(ldconfig -p 2>/dev/null | awk '/libxkbcommon\.so\.0 \(/ {print $NF; exit}')"
         [ -n "$XKB_LIB" ] || XKB_LIB="/usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
         [ -e "$XKB_LIB" ] || die "linux-native-avatar build requires libxkbcommon.so.0 (install runtime xkbcommon or provide PKG_CONFIG_PATH)"
-        CLEANUP_PKG_CONFIG="$(mktemp -d /tmp/agent-bridge-pkgconfig.XXXXXX)"
+        CLEANUP_PKG_CONFIG="$(mktemp -d "$DEPLOY_TMPDIR/agent-bridge-pkgconfig.XXXXXX")"
         ln -s "$XKB_LIB" "$CLEANUP_PKG_CONFIG/libxkbcommon.so"
         cat > "$CLEANUP_PKG_CONFIG/xkbcommon.pc" <<EOF
 prefix=/usr
@@ -493,6 +2004,7 @@ else
     say "(no current $REAL_PATH — first install, nothing to regress against)"
 fi
 say "new binary markers present:"; printf '  + %s\n' $new_markers
+lease_phase_update prepared
 
 # ---- 4. plan summary ----
 new_size="$(stat -c %s "$NEW_BIN" 2>/dev/null || stat -f %z "$NEW_BIN")"
@@ -511,6 +2023,7 @@ say "  runtime    : ${#RUNTIME_ASSETS[@]} scripts from $ASSET_SOURCE_ROOT -> $RU
 if [ "$DRY_RUN" -eq 1 ]; then
     say
     say "[dry-run] gate passed; no backup/cp performed. Re-run without --dry-run to deploy."
+    release_active_lease dry_run prepared_without_mutation
     exit 0
 fi
 
@@ -521,10 +2034,15 @@ if [ "$ASSUME_YES" -ne 1 ]; then
     fi
     printf 'Proceed with deploy? [y/N] '
     read -r ans || ans=""
-    case "$ans" in y|Y|yes|YES) ;; *) say "aborted."; exit 0 ;; esac
+    case "$ans" in
+        y|Y|yes|YES) ;;
+        *) say "aborted."; release_active_lease cancelled operator_declined_before_mutation; exit 0 ;;
+    esac
 fi
 
 # ---- 6. backup current, then deploy ----
+lease_phase_update committing
+consume_pending_before_mutation "$LEASE_CANDIDATE"
 if [ -f "$REAL_PATH" ]; then
     ts="$(date +%Y%m%dT%H%M%S)"
     # NB: ${MASTER_SHA:0:7} must not be expanded on the --use-binary path, where
@@ -604,22 +2122,34 @@ fi
 CLEANUP_RUNTIME_STAGE=""
 say ">> deployed matched runtime assets -> $RUNTIME_ASSET_DIR"
 
-cp -f "$NEW_BIN" "$REAL_PATH"
-say ">> deployed -> $REAL_PATH"
-copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
-[ "$copied_size" = "$new_size" ] || die "deployed size $copied_size != built $new_size (copy failed?)"
+binary_stage="$(dirname "$REAL_PATH")/.$(basename "$REAL_PATH").stage.$LEASE_ID.$$"
+CLEANUP_BINARY_STAGE="$binary_stage"
+[ ! -e "$binary_stage" ] || die "binary activation stage already exists: $binary_stage"
+cp "$NEW_BIN" "$binary_stage"
+chmod +x "$binary_stage"
+staged_size="$(stat -c %s "$binary_stage" 2>/dev/null || stat -f %z "$binary_stage")"
+[ "$staged_size" = "$new_size" ] || die "staged binary size $staged_size != built $new_size"
+is_native_exe "$binary_stage" || die "staged binary is no longer a native executable"
 if [ "$(uname -s)" = "Darwin" ]; then
-    command -v codesign >/dev/null 2>&1 || die "codesign is required on macOS after copying the Mach-O binary"
-    codesign --force --sign - "$REAL_PATH" >/dev/null
-    say ">> ad-hoc signed macOS binary -> $REAL_PATH"
-    new_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+    command -v codesign >/dev/null 2>&1 || die "codesign is required on macOS before activating the staged Mach-O binary"
+    codesign --force --sign - "$binary_stage" >/dev/null
+    codesign --verify "$binary_stage" >/dev/null 2>&1 || die "staged macOS binary signature verification failed"
+    say ">> ad-hoc signed and verified staged macOS binary"
 fi
+"$binary_stage" --version >/dev/null 2>&1 || die "staged binary failed its execution check"
+new_size="$(stat -c %s "$binary_stage" 2>/dev/null || stat -f %z "$binary_stage")"
+mv -f "$binary_stage" "$REAL_PATH" || die "atomic binary activation failed"
+CLEANUP_BINARY_STAGE=""
+say ">> atomically deployed -> $REAL_PATH"
+copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+[ "$copied_size" = "$new_size" ] || die "deployed size $copied_size != staged $new_size"
 
 # Replacing a Mach-O does not refresh long-lived launchd processes: they keep
 # the old inode. Refresh only canonical jobs bound to this deployment, then
 # prove that each new process maps the installed binary. MCP stdio children stay
 # under their owning clients and remain covered by the reconnect report below.
 SERVICE_REFRESHED=0
+lease_phase_update services_verifying
 if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
     refresh_daemon=0
     refresh_daemon_http=0
@@ -693,6 +2223,10 @@ say "app_control action contract: OK (playlist_current, playlist_activate, durab
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086
 say "deployed markers:"; printf '  + %s\n' $(markers_in "$REAL_PATH")
+lease_phase_update awaiting_fresh_mcp
+write_pending_admission "$LEASE_CANDIDATE"
+archive_pending_completion
+complete_recovery_handoff_intent
 
 # Reconnect surface: a deployed-over .real shows as "(deleted)" in /proc/PID/exe
 # for any MCP server still mapping the OLD inode. Report the count so the operator
@@ -727,9 +2261,11 @@ if [ "$stale" -gt 0 ]; then
     say "      warns=0 pre-write gate stays blocked). Servers to reconnect:"
     printf '%s\n' "$stale_list"
 fi
-if [ -n "${bak:-}" ]; then say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"; fi
-if [ -n "${adapter_bak:-}" ]; then say "      adapter rollback: cp '$adapter_bak' '$ADAPTER_PATH'"; fi
-if [ -n "${runtime_bak:-}" ]; then say "      runtime rollback: mv '$RUNTIME_ASSET_DIR' '${RUNTIME_ASSET_DIR}.failed' && mv '$runtime_bak' '$RUNTIME_ASSET_DIR'"; fi
+if [ -n "${bak:-}${adapter_bak:-}${runtime_bak:-}" ]; then
+    say "      recovery artifacts were retained; use the governed recovery workflow"
+    say "      and its receipt checks instead of raw copy/move rollback commands."
+fi
+release_active_lease pending_admission fresh_mcp_unverified
 # Explicit success: the final command above must not leave a nonzero status (a
 # bare `[ -n "" ] && …` on a first install returns 1 and, as the last command
 # under `set -e`, would falsely report deploy failure to callers checking $?).

@@ -6,10 +6,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_SCRIPT="$SCRIPT_DIR/deploy_from_master.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ab-deploy-postbuild-race.XXXXXX")"
+TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
+TEST_TEMP_BASE="$(cd -P "${TMPDIR:-/tmp}" && pwd -P)"
 
 cleanup() {
     case "$TEST_ROOT" in
-        "${TMPDIR:-/tmp}"/ab-deploy-postbuild-race.*)
+        "$TEST_TEMP_BASE"/ab-deploy-postbuild-race.*)
             find "$TEST_ROOT" -mindepth 1 -depth -delete 2>/dev/null || true
             rmdir "$TEST_ROOT" 2>/dev/null || true
             ;;
@@ -36,6 +38,7 @@ REPO="$TEST_ROOT/repo"
 FAKE_BIN="$TEST_ROOT/fake-bin"
 ISOLATED_HOME="$TEST_ROOT/home"
 INSTALL_DIR="$TEST_ROOT/install"
+STATE_DIR="$TEST_ROOT/state"
 TARGET_DIR="$TEST_ROOT/target"
 if [ -x /usr/bin/true ]; then
     NATIVE_TRUE=/usr/bin/true
@@ -43,7 +46,10 @@ else
     NATIVE_TRUE=/bin/true
 fi
 
-mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR"
+mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR" "$STATE_DIR"
+export AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1
+export AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$TEST_ROOT"
+export AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR"
 git init -q --bare "$REMOTE"
 git init -q -b master "$SEED"
 git -C "$SEED" config user.name deploy-race-test

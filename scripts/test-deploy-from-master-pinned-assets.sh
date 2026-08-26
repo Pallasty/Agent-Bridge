@@ -6,10 +6,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ab-deploy-pinned-assets.XXXXXX")"
+TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
+TEST_TEMP_BASE="$(cd -P "${TMPDIR:-/tmp}" && pwd -P)"
 
 cleanup() {
     case "$TEST_ROOT" in
-        "${TMPDIR:-/tmp}"/ab-deploy-pinned-assets.*)
+        "$TEST_TEMP_BASE"/ab-deploy-pinned-assets.*)
             find "$TEST_ROOT" -mindepth 1 -depth -delete 2>/dev/null || true
             rmdir "$TEST_ROOT" 2>/dev/null || true
             ;;
@@ -28,6 +30,7 @@ REPO="$TEST_ROOT/repo"
 FAKE_BIN="$TEST_ROOT/fake-bin"
 ISOLATED_HOME="$TEST_ROOT/home"
 INSTALL_DIR="$TEST_ROOT/install"
+STATE_DIR="$TEST_ROOT/state"
 ADAPTER_PATH="$TEST_ROOT/share/audio_embody.py"
 RUNTIME_ASSET_DIR="$TEST_ROOT/lib/agent-bridge/scripts"
 TARGET_ROOT="$TEST_ROOT/target"
@@ -35,7 +38,10 @@ LAUNCHCTL_LOG="$TEST_ROOT/launchctl.log"
 LSOF_COUNT="$TEST_ROOT/lsof.count"
 CURL_COUNT="$TEST_ROOT/curl.count"
 
-mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR"
+mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR" "$STATE_DIR"
+CANONICAL_REAL_PATH="$(cd "$INSTALL_DIR" && pwd -P)/agent-bridge.real"
+export AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1
+export AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$TEST_ROOT"
 git init -q --bare "$REMOTE"
 git init -q -b master "$SEED"
 git -C "$SEED" config user.name deploy-pinned-assets-test
@@ -164,11 +170,12 @@ HOME="$ISOLATED_HOME" \
 PATH="$FAKE_BIN:$PATH" \
 CARGO_TARGET_DIR="$TARGET_ROOT" \
 AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
 AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
 AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
 AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
 AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
-AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
+AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
 AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
 AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
 AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
@@ -227,15 +234,18 @@ HOME="$ISOLATED_HOME" \
 PATH="$FAKE_BIN:$PATH" \
 CARGO_TARGET_DIR="$TARGET_ROOT" \
 AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
 AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
 AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
 AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
 AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
-AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
+AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
 AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
 AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
 AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
 AB_DEPLOY_SERVICE_TEST_CASE=unrelated \
+AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 \
+AGENT_BRIDGE_DEPLOY_FORCE_REASON=pinned-assets-unrelated-service-regression \
     "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
 [ ! -s "$LAUNCHCTL_LOG" ] || fail "unrelated launchd program was restarted"
 
@@ -248,15 +258,18 @@ malformed_output="$({
     PATH="$FAKE_BIN:$PATH" \
     CARGO_TARGET_DIR="$TARGET_ROOT" \
     AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+    AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
     AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
     AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
     AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
     AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
-    AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
+    AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
     AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
     AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
     AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
     AB_DEPLOY_SERVICE_TEST_CASE=malformed_second \
+    AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 \
+    AGENT_BRIDGE_DEPLOY_FORCE_REASON=pinned-assets-malformed-service-regression \
         "$REPO/scripts/deploy_from_master.sh" --yes
 } 2>&1)"
 malformed_status=$?
@@ -267,7 +280,6 @@ case "$malformed_output" in
     *"launchd service argument program mismatch"*) ;;
     *) fail "malformed launchd failure reason missing" ;;
 esac
-
 # A process with the deployed inode but no healthy HTTP endpoint must fail
 # closed. Keep the test timeout short via the deployment's testable poll cap.
 : > "$LAUNCHCTL_LOG"
@@ -278,16 +290,19 @@ unhealthy_output="$({
     PATH="$FAKE_BIN:$PATH" \
     CARGO_TARGET_DIR="$TARGET_ROOT" \
     AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+    AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
     AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
     AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
     AGENT_BRIDGE_SERVICE_VERIFY_ATTEMPTS=3 \
     AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
     AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
-    AB_DEPLOY_SERVICE_TEST_REAL="$INSTALL_DIR/agent-bridge.real" \
+    AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
     AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
     AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
     AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
     AB_DEPLOY_SERVICE_TEST_CASE=never_healthy \
+    AGENT_BRIDGE_DEPLOY_RECOVERY=roll_forward \
+    AGENT_BRIDGE_DEPLOY_RECOVERY_REASON=pinned-assets-continue-after-malformed-receipt \
         "$REPO/scripts/deploy_from_master.sh" --yes
 } 2>&1)"
 unhealthy_status=$?
@@ -298,17 +313,38 @@ case "$unhealthy_output" in
     *) fail "unhealthy daemon-http failure reason missing" ;;
 esac
 
+# Reconcile the retained recovery_required lease through the governed
+# roll-forward path. Recovery must finish an authoritative install so the
+# durable handoff cannot be mistaken for a completed repair.
+HOME="$ISOLATED_HOME" \
+PATH="$FAKE_BIN:$PATH" \
+CARGO_TARGET_DIR="$TARGET_ROOT" \
+AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
+AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
+AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
+AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
+AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
+AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
+AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
+AGENT_BRIDGE_DEPLOY_RECOVERY=roll_forward \
+AGENT_BRIDGE_DEPLOY_RECOVERY_REASON=pinned-assets-post-health-recovery \
+    "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
+
 # A live deploy owner must block a second invocation before any launchd job is
 # mutated. This is the shared install-state serialization boundary.
 : > "$LAUNCHCTL_LOG"
-mkdir -p "$INSTALL_DIR/.agent-bridge-deploy.lock"
-printf '%s\n' "$$" > "$INSTALL_DIR/.agent-bridge-deploy.lock/pid"
+mkdir -p "$STATE_DIR/active.lock"
+printf '%s\n' "$$" > "$STATE_DIR/active.lock/pid"
 set +e
 locked_output="$({
     HOME="$ISOLATED_HOME" \
     PATH="$FAKE_BIN:$PATH" \
     CARGO_TARGET_DIR="$TARGET_ROOT" \
     AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+    AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
     AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
     AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
     AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
@@ -316,12 +352,11 @@ locked_output="$({
 } 2>&1)"
 locked_status=$?
 set -e
-rm -rf "$INSTALL_DIR/.agent-bridge-deploy.lock"
 [ "$locked_status" -ne 0 ] || fail "concurrent deploy lock was ignored"
 [ ! -s "$LAUNCHCTL_LOG" ] || fail "launchd mutated while deploy lock was held"
 case "$locked_output" in
-    *"another agent-bridge deploy is running"*) ;;
-    *) fail "concurrent deploy failure reason missing" ;;
+    *"publisher lease metadata is missing, unknown, or corrupt"*) ;;
+    *) fail "legacy/unknown deploy lock failure reason missing" ;;
 esac
 
 printf '%s\n' "pinned-master-runtime-assets-ok"

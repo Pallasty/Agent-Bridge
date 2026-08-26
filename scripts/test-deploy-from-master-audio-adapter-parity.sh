@@ -4,19 +4,36 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(mktemp -d /tmp/ab-deploy-audio-parity.XXXXXX)"
+ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ab-deploy-audio-parity.XXXXXX")"
+ROOT="$(cd -P "$ROOT" && pwd -P)"
+TEMP_BASE="$(cd -P "${TMPDIR:-/tmp}" && pwd -P)"
 cleanup() {
-    rm -rf "$ROOT"
+    case "$ROOT" in
+        "$TEMP_BASE"/ab-deploy-audio-parity.*)
+            find "$ROOT" -mindepth 1 -depth -delete 2>/dev/null || true
+            rmdir "$ROOT" 2>/dev/null || true
+            ;;
+    esac
 }
 trap cleanup EXIT
 
 INSTALL_DIR="$ROOT/bin"
 ADAPTER_PATH="$ROOT/share/audio_embody.py"
 RUNTIME_ASSET_DIR="$ROOT/lib/agent-bridge/scripts"
-mkdir -p "$INSTALL_DIR"
-cp "$(type -P true)" "$ROOT/new-agent-bridge"
-printf '\nagent_bridge.app_control.operation_preflight.v0\nagent_bridge.app_control.track_settlement.v0\nagent_bridge.app_control.wrapper_contract.v1\n' \
-    >> "$ROOT/new-agent-bridge"
+ISOLATED_HOME="$ROOT/home"
+STATE_DIR="$ROOT/state"
+mkdir -p "$INSTALL_DIR" "$ISOLATED_HOME" "$STATE_DIR"
+export AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1
+export AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$ROOT"
+export AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR"
+cat > "$ROOT/new-agent-bridge.c" <<'FAKE_BINARY'
+#include <stdio.h>
+int main(void) {
+    puts("agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0 agent_bridge.app_control.wrapper_contract.v1 agent_bridge.avatar.native_linux.v1 present_voice");
+    return 0;
+}
+FAKE_BINARY
+"$(command -v cc)" "$ROOT/new-agent-bridge.c" -o "$ROOT/new-agent-bridge"
 
 # A --use-binary caller can provide a new binary from one source snapshot and
 # runtime assets from another. The wrapper handshake marker must reject that mismatch
@@ -28,8 +45,9 @@ cp -a "$SCRIPT_DIR" "$STALE_ROOT/scripts"
 cp "$SCRIPT_DIR/../config/omnivoice-canary.json" "$STALE_ROOT/config/"
 cp "$SCRIPT_DIR/../docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json" \
     "$STALE_ROOT/docs/reports/tts-comparison/"
-sed -i '/agent_bridge\.app_control\.wrapper_contract\.v1/d' \
-    "$STALE_ROOT/scripts/app_control.py"
+sed '/agent_bridge\.app_control\.wrapper_contract\.v1/d' \
+    "$STALE_ROOT/scripts/app_control.py" > "$STALE_ROOT/scripts/app_control.py.next"
+mv -f "$STALE_ROOT/scripts/app_control.py.next" "$STALE_ROOT/scripts/app_control.py"
 NEGATIVE_INSTALL="$ROOT/negative/bin"
 NEGATIVE_ADAPTER="$ROOT/negative/share/audio_embody.py"
 NEGATIVE_RUNTIME="$ROOT/negative/lib/agent-bridge/scripts"
@@ -40,7 +58,8 @@ printf '%s\n' 'existing-runtime' > "$NEGATIVE_RUNTIME/app_control.py"
 cp "$NEGATIVE_INSTALL/agent-bridge.real" "$ROOT/negative-real.before"
 cp "$NEGATIVE_ADAPTER" "$ROOT/negative-adapter.before"
 cp "$NEGATIVE_RUNTIME/app_control.py" "$ROOT/negative-runtime.before"
-if AGENT_BRIDGE_INSTALL_DIR="$NEGATIVE_INSTALL" \
+if HOME="$ISOLATED_HOME" \
+    AGENT_BRIDGE_INSTALL_DIR="$NEGATIVE_INSTALL" \
     AGENT_BRIDGE_AUDIO_EMBODY_PATH="$NEGATIVE_ADAPTER" \
     AGENT_BRIDGE_RUNTIME_ASSET_DIR="$NEGATIVE_RUNTIME" \
         "$STALE_ROOT/scripts/deploy_from_master.sh" \
@@ -52,10 +71,17 @@ cmp -s "$ROOT/negative-real.before" "$NEGATIVE_INSTALL/agent-bridge.real"
 cmp -s "$ROOT/negative-adapter.before" "$NEGATIVE_ADAPTER"
 cmp -s "$ROOT/negative-runtime.before" "$NEGATIVE_RUNTIME/app_control.py"
 
+SOURCE_ROOT="$ROOT/source"
+mkdir -p "$SOURCE_ROOT/config" "$SOURCE_ROOT/docs/reports/tts-comparison"
+cp -a "$SCRIPT_DIR" "$SOURCE_ROOT/scripts"
+cp "$SCRIPT_DIR/../config/omnivoice-canary.json" "$SOURCE_ROOT/config/"
+cp "$SCRIPT_DIR/../docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json" \
+    "$SOURCE_ROOT/docs/reports/tts-comparison/"
+HOME="$ISOLATED_HOME" \
 AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
 AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
 AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
-    "$SCRIPT_DIR/deploy_from_master.sh" --use-binary "$ROOT/new-agent-bridge" --yes >/dev/null
+    "$SOURCE_ROOT/scripts/deploy_from_master.sh" --use-binary "$ROOT/new-agent-bridge" --yes >/dev/null
 
 test -f "$ADAPTER_PATH"
 cmp -s "$SCRIPT_DIR/audio_embody.py" "$ADAPTER_PATH"
