@@ -151,13 +151,16 @@ A passing packet says only
 action, runtime, or memory authority. The command acquires no writer lease and
 does not create, rewrite, relabel, or touch report files.
 
-Source tests and one current-state report prove mechanics, not unattended-wake
-value. The current report must be classified as mechanics evidence, leaving
-zero natural reports. The next gate requires the natural real-task evidence
-above, owner review of its counterfactual decisions, and a separate decision
-on candidate-source, frequency, quiet-hour, cost, and stop controls. Until
-then, adding discovery, a timer, a scheduler, or any real provider invocation
-is prohibited.
+Source tests and mechanics reports prove mechanics, not unattended-wake value.
+The first genuine natural report now records a real worktree-continuity
+recovery that was correctly suppressed because the owner session was active.
+The complete ledger has one natural and two mechanics reports: natural
+suppression evidence exists, while the minimum report count, second trigger
+kind, and natural `would_wake=true` criteria remain unmet. The next gate still
+requires the remaining natural real-task evidence above, owner review of its
+counterfactual decisions, and a separate decision on candidate-source,
+frequency, quiet-hour, cost, and stop controls. Until then, adding discovery,
+a timer, a scheduler, or any real provider invocation is prohibited.
 
 Two increments without observed use-value refreeze the lane. Any stop label,
 raw-content persistence, unexpected provider/tool event, wake creation,
