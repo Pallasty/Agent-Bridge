@@ -1,0 +1,12 @@
+{
+  "schema": "agent_bridge.ag_ui_readonly_projection_request.v0",
+  "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
+  "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
+  "events": [
+    {"type": "RUN_STARTED", "threadId": "thread-text", "runId": "run-text"},
+    {"type": "TEXT_MESSAGE_START", "messageId": "message-text", "role": "assistant"},
+    {"type": "TEXT_MESSAGE_CONTENT", "messageId": "message-text", "delta": "hello"},
+    {"type": "TEXT_MESSAGE_END", "messageId": "message-text"},
+    {"type": "RUN_FINISHED", "threadId": "thread-text", "runId": "run-text", "outcome": {"type": "success"}}
+  ]
+}

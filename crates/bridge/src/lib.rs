@@ -7,6 +7,9 @@
 pub mod agent_task_contract;
 pub mod agent_task_outcome;
 pub mod agent_world_trajectory;
+/// Pure AG-UI 0.0.57 projection. This module has no MCP registration, I/O,
+/// persistence, lease, policy, or execution authority.
+pub mod ag_ui_readonly_projection;
 pub mod a2ui;
 pub mod operator_request;
 pub mod anthropic_api;

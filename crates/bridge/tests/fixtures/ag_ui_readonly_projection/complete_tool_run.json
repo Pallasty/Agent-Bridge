@@ -1,0 +1,14 @@
+{
+  "schema": "agent_bridge.ag_ui_readonly_projection_request.v0",
+  "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
+  "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
+  "events": [
+    {"type": "RUN_STARTED", "threadId": "thread-tool", "runId": "run-tool"},
+    {"type": "TOOL_CALL_START", "toolCallId": "call-tool", "toolCallName": "demo_tool", "parentMessageId": "message-parent"},
+    {"type": "TOOL_CALL_ARGS", "toolCallId": "call-tool", "delta": "{\"query\":"},
+    {"type": "TOOL_CALL_ARGS", "toolCallId": "call-tool", "delta": "\"value\"}"},
+    {"type": "TOOL_CALL_END", "toolCallId": "call-tool"},
+    {"type": "TOOL_CALL_RESULT", "messageId": "message-result", "toolCallId": "call-tool", "content": "{\"ok\":true,\"success\":true}"},
+    {"type": "RUN_FINISHED", "threadId": "thread-tool", "runId": "run-tool", "result": {"looksSuccessful": true}, "outcome": {"type": "success"}}
+  ]
+}

@@ -1164,6 +1164,7 @@ fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
             | ToolSet::CodexEssentialMobileProjection
             | ToolSet::CodexLean
             | ToolSet::CodexA2ui
+            | ToolSet::CodexAgUiReadonly
             | ToolSet::ChatGptRead
             | ToolSet::ChatGptCollab
     ) || matches!(policy.profile(), ToolProfile::Compact)
@@ -14262,6 +14263,9 @@ mod audio;
 pub use audio::*;
 mod a2ui;
 pub use a2ui::*;
+// D3 source gate: registered only for the explicit codex-ag-ui-readonly
+// toolset and all-dev. It remains absent from normal/default profiles.
+mod ag_ui_readonly;
 // ===========================================================================
 //                       forum (v18) — shared whiteboard
 // ===========================================================================
@@ -50362,6 +50366,10 @@ enum ToolSet {
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
     CodexA2ui,
+    /// An opt-in Codex toolset that adds the pure read-only AG-UI projector to
+    /// the existing codex-lean surface. Only the projector is read-only; the
+    /// codex-lean tools retain their normal per-tool authority.
+    CodexAgUiReadonly,
     ChatGptRead,
     ChatGptCollab,
     ClaudeStandard,
@@ -50381,6 +50389,7 @@ impl ToolSet {
             Self::CodexModelScopeAbot => "codex-modelscope-abot",
             Self::CodexLean => "codex-lean",
             Self::CodexA2ui => "codex-a2ui",
+            Self::CodexAgUiReadonly => "codex-ag-ui-readonly",
             Self::ChatGptRead => "chatgpt-read",
             Self::ChatGptCollab => "chatgpt-collab",
             Self::ClaudeStandard => "claude-standard",
@@ -50406,6 +50415,7 @@ impl ToolSet {
             }
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
+            Some("codex-ag-ui-readonly") => Some(Self::CodexAgUiReadonly),
             Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
             Some("chatgpt-collab") | Some("openai-collab") => Some(Self::ChatGptCollab),
             Some("claude-standard") | Some("claude-code") | Some("claude") => {
@@ -50443,6 +50453,7 @@ impl ToolSet {
                 .collect(),
             Self::CodexModelScopeAbot => CODEX_MODELSCOPE_ABOT_EXTRAS.to_vec(),
             Self::CodexA2ui => vec!["a2ui_preview"],
+            Self::CodexAgUiReadonly => vec![ag_ui_readonly::TOOL_NAME],
             _ => Vec::new(),
         }
     }
@@ -50486,6 +50497,7 @@ impl ToolPolicy {
             ToolSet::CodexLean
             | ToolSet::CodexModelScopeAbot
             | ToolSet::CodexA2ui
+            | ToolSet::CodexAgUiReadonly
             | ToolSet::ChatGptRead
             | ToolSet::ChatGptCollab
             | ToolSet::GeminiLean => ToolProfile::Essential,
@@ -50544,6 +50556,9 @@ impl ToolPolicy {
             }
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
+            ToolSet::CodexAgUiReadonly => {
+                codex_lean_tool(tool_name) || tool_name == ag_ui_readonly::TOOL_NAME
+            }
             ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
             ToolSet::ChatGptCollab => chatgpt_collab_tool(tool_name),
             ToolSet::GeminiLean => gemini_lean_tool(tool_name),
@@ -55769,6 +55784,19 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(A2uiPreviewTool::new()),
+    );
+    // Pure AG-UI projection is deliberately stricter than a normal Niche
+    // tool: generic profile=all must not expose it. Only the dedicated named
+    // toolset and the already-explicit all-dev surface may register it.
+    reg_if_available(
+        &mut reg,
+        policy,
+        matches!(
+            policy.set,
+            ToolSet::CodexAgUiReadonly | ToolSet::AllDev
+        ),
+        Tier::Niche,
+        Arc::new(ag_ui_readonly::AgUiReadonlyProjectTool::new()),
     );
     reg_if(
         &mut reg,

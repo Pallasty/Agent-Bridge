@@ -1,0 +1,21 @@
+{
+  "schema": "agent_bridge.ag_ui_readonly_projection_request.v0",
+  "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
+  "source": {"adapter_id": "fixture", "agent_id_hash": "sha256:fixture-agent"},
+  "events": [
+    {"type": "RUN_STARTED", "threadId": "thread-a", "runId": "run-a"},
+    {"type": "TOOL_CALL_ARGS", "toolCallId": "call-before-start", "delta": "secret args"},
+    {"type": "TOOL_CALL_END", "toolCallId": "end-before-start"},
+    {"type": "TOOL_CALL_RESULT", "messageId": "orphan-result", "toolCallId": "result-before-start", "content": "private orphan result"},
+    {"type": "TOOL_CALL_START", "toolCallId": "shared-call", "toolCallName": "tool-a"},
+    {"type": "TOOL_CALL_START", "toolCallId": "shared-call", "toolCallName": "tool-a-duplicate"},
+    {"type": "TOOL_CALL_RESULT", "messageId": "result-a", "toolCallId": "shared-call", "content": "success-looking"},
+    {"type": "RUN_FINISHED", "threadId": "thread-a", "runId": "run-a"},
+    {"type": "TEXT_MESSAGE_CHUNK", "messageId": "late-message", "delta": "late private content"},
+    {"type": "RUN_STARTED", "threadId": "thread-b", "runId": "run-b"},
+    {"type": "TOOL_CALL_START", "toolCallId": "shared-call", "toolCallName": "tool-b"},
+    {"type": "TOOL_CALL_START", "toolCallId": "open-b", "toolCallName": "tool-open"},
+    {"type": "RUN_FINISHED", "threadId": "thread-b-conflict", "runId": "run-b"},
+    {"type": "RUN_FINISHED", "threadId": "thread-c", "runId": "run-c"}
+  ]
+}
