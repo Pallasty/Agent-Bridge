@@ -22,7 +22,9 @@
 #   5. install repository-matched Python runtime assets at a stable path (the
 #      release build worktree is disposable and cannot be a runtime dependency);
 #   6. never touch the wrapper (only .real);
-#   7. remind to /mcp reconnect (a running MCP server keeps the old binary).
+#   7. refresh canonical persistent launchd jobs onto the installed binary and
+#      verify their declared health endpoints;
+#   8. remind to /mcp reconnect (a running MCP server keeps the old binary).
 #
 # Companion to scripts/wrapper/install.sh (which installs the WRAPPER; this
 # installs the BINARY). Honors the same env vars.
@@ -556,6 +558,8 @@ validate_lease_test_environment() {
 
 preflight_macos_launchagent() {
     local label="$1" expected_mode="$2" domain="gui/$(id -u)" target dump program arguments arg_program arg_mode
+    local expected_count observed_count expected_index expected_arg observed_arg
+    shift 2
     target="$domain/$label"
     if ! dump="$(launchctl print "$target" 2>&1)"; then
         case "$dump" in
@@ -589,12 +593,32 @@ preflight_macos_launchagent() {
         die "launchd service argument program mismatch: $label"
     [ "$arg_mode" = "$expected_mode" ] ||
         die "launchd service mode mismatch: $label (expected $expected_mode, observed ${arg_mode:-none})"
+    if [ "$#" -gt 0 ]; then
+        observed_count="$(printf '%s\n' "$arguments" | awk 'END { print NR + 0 }')"
+        expected_count=$((2 + $#))
+        [ "$observed_count" -eq "$expected_count" ] ||
+            die "launchd service argument count mismatch: $label (expected $expected_count, observed $observed_count)"
+        expected_index=3
+        for expected_arg in "$@"; do
+            observed_arg="$(printf '%s\n' "$arguments" | sed -n "${expected_index}p")"
+            [ "$observed_arg" = "$expected_arg" ] ||
+                die "launchd service argument mismatch: $label (position $expected_index, expected $expected_arg, observed ${observed_arg:-none})"
+            expected_index=$((expected_index + 1))
+        done
+    fi
     return 0
 }
 
 refresh_macos_launchagent() {
-    local label="$1" expected_inode="$2" health_url="${3:-}" domain="gui/$(id -u)" target
+    local label="$1" expected_inode="$2" health_url="${3:-}" health_port="${4:-}" domain="gui/$(id -u)" target
     local dump pid loaded_inode attempt stable_pid stable_count health_ok
+    if [ -n "$health_url" ]; then
+        case "$health_port" in ''|*[!0-9]*) die "launchd service health port is invalid: $label" ;; esac
+        [ "$health_port" -ge 1 ] && [ "$health_port" -le 65535 ] ||
+            die "launchd service health port is out of range: $label ($health_port)"
+    else
+        [ -z "$health_port" ] || die "launchd service health port requires a URL: $label"
+    fi
     target="$domain/$label"
     say ">> refreshing launchd service -> $label"
     launchctl kickstart -k "$target" || die "failed to restart launchd service: $label"
@@ -615,7 +639,7 @@ refresh_macos_launchagent() {
                 ')"
             if [ -z "$health_url" ]; then
                 health_ok=1
-            elif lsof -nP -a -p "$pid" -iTCP:7878 -sTCP:LISTEN -F p 2>/dev/null |
+            elif lsof -nP -a -p "$pid" -iTCP:"$health_port" -sTCP:LISTEN -F p 2>/dev/null |
                     grep -qx "p$pid" &&
                     curl -fsS --max-time 0.2 "$health_url" 2>/dev/null | grep -qx 'ok'; then
                 health_ok=1
@@ -2992,18 +3016,23 @@ lease_phase_update services_verifying
 if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
     refresh_daemon=0
     refresh_daemon_http=0
+    refresh_palace=0
     if preflight_macos_launchagent "com.pallasting.agent-bridge.daemon" "daemon"; then
         refresh_daemon=1
     fi
     if preflight_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "daemon-http"; then
         refresh_daemon_http=1
     fi
-    if [ "$refresh_daemon" -eq 1 ] || [ "$refresh_daemon_http" -eq 1 ]; then
+    if preflight_macos_launchagent "com.pallasting.agent-bridge.palace" "palace" \
+        "serve" "--host" "127.0.0.1" "--port" "7979"; then
+        refresh_palace=1
+    fi
+    if [ "$refresh_daemon" -eq 1 ] || [ "$refresh_daemon_http" -eq 1 ] || [ "$refresh_palace" -eq 1 ]; then
         command -v lsof >/dev/null 2>&1 ||
             die "lsof is required to verify refreshed launchd service inodes"
-        if [ "$refresh_daemon_http" -eq 1 ]; then
+        if [ "$refresh_daemon_http" -eq 1 ] || [ "$refresh_palace" -eq 1 ]; then
             command -v curl >/dev/null 2>&1 ||
-                die "curl is required to verify daemon-http health"
+                die "curl is required to verify launchd service health"
         fi
         deployed_inode="$(file_inode "$REAL_PATH")" ||
             die "cannot read deployed binary inode for launchd verification: $REAL_PATH"
@@ -3011,7 +3040,10 @@ if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
             refresh_macos_launchagent "com.pallasting.agent-bridge.daemon" "$deployed_inode"
         [ "$refresh_daemon_http" -eq 0 ] ||
             refresh_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "$deployed_inode" \
-                "http://127.0.0.1:7878/healthz"
+                "http://127.0.0.1:7878/healthz" "7878"
+        [ "$refresh_palace" -eq 0 ] ||
+            refresh_macos_launchagent "com.pallasting.agent-bridge.palace" "$deployed_inode" \
+                "http://127.0.0.1:7979/healthz" "7979"
     fi
     say "launchd service refresh: $SERVICE_REFRESHED service(s) adopted the deployed binary"
 fi
