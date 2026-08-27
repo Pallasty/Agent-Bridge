@@ -1,6 +1,6 @@
 # macOS Native Semantic Observation v1
 
-Status: implementation candidate
+Status: deployed and live read-only acceptance passed
 
 Date: 2026-08-26
 
@@ -64,6 +64,13 @@ whether a window exposes an identity safe to reuse in a later action.
   returning a mixed app/window sample.
 - Deployment tests prove the native sampler is installed beside the Python
   runtime assets. Fresh-MCP acceptance is a later deployment gate.
+
+Live acceptance passed on 2026-08-26 at commit `8c913594d0bf`. The frontmost
+Codex/ChatGPT application produced one complete native AX window sample without
+an `AXIdentifier`; the window remained sample-local and action-ineligible while
+the app and window-presence verifiers returned `verified`. No screenshot, OCR,
+Apple Events, coordinate input, or desktop mutation channel was used. See
+`docs/reports/goal-c-u/2026-08-26-r8-native-macos-live-acceptance.md`.
 
 ## Benefit measure
 
