@@ -2532,6 +2532,132 @@ fn installed_runtime_script_path(file_name: &str) -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
+struct VerifiedMacosAxObservationAssets {
+    directory: PathBuf,
+    probe: PathBuf,
+    watch: PathBuf,
+    verify: PathBuf,
+    native_probe: PathBuf,
+}
+
+fn macos_ax_observation_asset_directory() -> PathBuf {
+    let build_directory =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts");
+    if build_directory.join("macos_ax_probe.py").is_file() {
+        return build_directory;
+    }
+    installed_runtime_script_path("macos_ax_probe.py")
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .unwrap_or(build_directory)
+}
+
+fn macos_ax_verified_observation_asset(
+    directory: &Path,
+    file_name: &str,
+    expected_bytes: &[u8],
+) -> std::result::Result<PathBuf, Value> {
+    let canonical_directory = std::fs::canonicalize(directory).map_err(|error| {
+        json!({
+            "code": "runtime_asset_directory_unavailable",
+            "asset": file_name,
+            "message": error.to_string()
+        })
+    })?;
+    let requested_path = canonical_directory.join(file_name);
+    let canonical_path = std::fs::canonicalize(&requested_path).map_err(|error| {
+        json!({
+            "code": "runtime_asset_unavailable",
+            "asset": file_name,
+            "message": error.to_string()
+        })
+    })?;
+    if canonical_path.parent() != Some(canonical_directory.as_path()) {
+        return Err(json!({
+            "code": "runtime_asset_outside_pinned_directory",
+            "asset": file_name
+        }));
+    }
+    let actual_bytes = std::fs::read(&canonical_path).map_err(|error| {
+        json!({
+            "code": "runtime_asset_unreadable",
+            "asset": file_name,
+            "message": error.to_string()
+        })
+    })?;
+    let expected_sha256 = macos_ax_bytes_sha256(expected_bytes);
+    let actual_sha256 = macos_ax_bytes_sha256(&actual_bytes);
+    if actual_sha256 != expected_sha256 {
+        return Err(json!({
+            "code": "runtime_asset_integrity_mismatch",
+            "asset": file_name,
+            "expected_sha256": expected_sha256,
+            "actual_sha256": actual_sha256
+        }));
+    }
+    Ok(canonical_path)
+}
+
+fn macos_ax_verified_observation_assets(
+) -> std::result::Result<VerifiedMacosAxObservationAssets, Value> {
+    let directory = macos_ax_observation_asset_directory();
+    let canonical_directory = std::fs::canonicalize(&directory).map_err(|error| {
+        json!({
+            "code": "runtime_asset_directory_unavailable",
+            "message": error.to_string()
+        })
+    })?;
+    Ok(VerifiedMacosAxObservationAssets {
+        probe: macos_ax_verified_observation_asset(
+            &canonical_directory,
+            "macos_ax_probe.py",
+            include_bytes!("../../../scripts/macos_ax_probe.py"),
+        )?,
+        watch: macos_ax_verified_observation_asset(
+            &canonical_directory,
+            "macos_ax_watch.py",
+            include_bytes!("../../../scripts/macos_ax_watch.py"),
+        )?,
+        verify: macos_ax_verified_observation_asset(
+            &canonical_directory,
+            "macos_ax_verify.py",
+            include_bytes!("../../../scripts/macos_ax_verify.py"),
+        )?,
+        native_probe: macos_ax_verified_observation_asset(
+            &canonical_directory,
+            "macos_ax_native_probe.swift",
+            include_bytes!("../../../scripts/macos_ax_native_probe.swift"),
+        )?,
+        directory: canonical_directory,
+    })
+}
+
+fn macos_ax_closed_request_error(args: &Value, allowed_fields: &[&str]) -> Option<Value> {
+    let Some(object) = args.as_object() else {
+        return Some(json!({
+            "code": "invalid_request_object",
+            "message": "macOS semantic observation arguments must be an object"
+        }));
+    };
+    if object
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return Some(json!({
+            "code": "unexpected_request_field",
+            "message": "macOS semantic observation request contains an unsupported field"
+        }));
+    }
+    None
+}
+
+fn macos_ax_nested_object_has_unexpected_field(value: &Value, allowed_fields: &[&str]) -> bool {
+    value.as_object().is_some_and(|object| {
+        object
+            .keys()
+            .any(|key| !allowed_fields.contains(&key.as_str()))
+    })
+}
+
 fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);
@@ -3061,11 +3187,23 @@ const MACOS_AX_PROBE_SOURCE_SCHEMA: &str = "macos_ax_probe/v0";
 
 pub struct MacosAxProbeTool {
     _hub: Hub,
+    script_path: Option<PathBuf>,
 }
 
 impl MacosAxProbeTool {
     pub fn new(hub: Hub) -> Self {
-        Self { _hub: hub }
+        Self {
+            _hub: hub,
+            script_path: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_script(hub: Hub, script_path: PathBuf) -> Self {
+        Self {
+            _hub: hub,
+            script_path: Some(script_path),
+        }
     }
 }
 
@@ -3096,6 +3234,10 @@ impl McpTool for MacosAxProbeTool {
         "macos_ax_probe"
     }
 
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
@@ -3109,14 +3251,6 @@ impl McpTool for MacosAxProbeTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "cwd": {
-                        "type": "string",
-                        "description": "Workspace/repo root used to resolve scripts/macos_ax_probe.py. Defaults to the MCP process cwd, then the build-time repo root."
-                    },
-                    "script_path": {
-                        "type": "string",
-                        "description": "Optional explicit macos_ax_probe.py path. Use mainly for tests or alternate checkouts."
-                    },
                     "include_windows": {
                         "type": "boolean",
                         "default": true,
@@ -3153,12 +3287,26 @@ impl McpTool for MacosAxProbeTool {
                         "default": 8000,
                         "description": "Requested milliseconds before the probe process is killed. For window reads, the effective outer timeout is raised when necessary to cover jxa_timeout_secs plus three seconds of process/preflight overhead."
                     }
-                }
+                },
+                "additionalProperties": false
             }),
         }
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Some(error) = macos_ax_closed_request_error(
+            &args,
+            &[
+                "include_windows",
+                "max_windows",
+                "jxa_timeout_secs",
+                "semantic_bus",
+                "semantic_include_raw",
+                "timeout_ms",
+            ],
+        ) {
+            return Ok(macos_ax_probe_error(error));
+        }
         let include_windows = args
             .get("include_windows")
             .and_then(Value::as_bool)
@@ -3184,22 +3332,40 @@ impl McpTool for MacosAxProbeTool {
             .and_then(Value::as_bool)
             .unwrap_or(false);
 
-        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
-        let script = macos_ax_probe_script_path(&args, cwd.as_ref());
+        let (script, runtime_directory, pinned_runtime) =
+            if let Some(script_path) = self.script_path.as_ref() {
+                (script_path.clone(), None, false)
+            } else {
+                let assets = match macos_ax_verified_observation_assets() {
+                    Ok(assets) => assets,
+                    Err(error) => return Ok(macos_ax_probe_error(error)),
+                };
+                (assets.probe, Some((assets.directory, assets.native_probe)), true)
+            };
         if !script.exists() {
             return Ok(macos_ax_probe_error(json!({
                 "code": "script_missing",
-                "message": format!("macos_ax_probe.py not found at {}", script.display()),
-                "hint": "pass script_path or run from the Agent-Bridge repo root"
+                "message": "binary-bound macos_ax_probe.py is unavailable"
             })));
         }
 
-        let mut cmd = killable_command(
-            std::env::var("PYTHON")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| "python3".to_string()),
-        );
+        let mut cmd = if pinned_runtime {
+            killable_command("/usr/bin/python3")
+        } else {
+            killable_command(
+                std::env::var("PYTHON")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "python3".to_string()),
+            )
+        };
+        if let Some((directory, native_probe)) = runtime_directory.as_ref() {
+            macos_ax_clean_runtime_command(&mut cmd);
+            cmd.env("AGENT_BRIDGE_MACOS_AX_SWIFT", "/usr/bin/swift")
+                .env("AGENT_BRIDGE_MACOS_AX_NATIVE_PROBE", native_probe)
+                .current_dir(directory)
+                .args(["-E", "-s", "-B"]);
+        }
         cmd.arg(&script)
             .arg("--compact")
             .arg("--max-windows")
@@ -3211,9 +3377,6 @@ impl McpTool for MacosAxProbeTool {
         }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
-        if let Some(cwd) = cwd {
-            cmd.current_dir(cwd);
-        }
 
         let started = Instant::now();
         let output =
@@ -3257,6 +3420,8 @@ impl McpTool for MacosAxProbeTool {
                         json!({
                             "tool": self.name(),
                             "read_only": true,
+                            "pinned_runtime": pinned_runtime,
+                            "caller_runtime_override": false,
                             "include_windows": include_windows,
                             "max_windows": max_windows,
                             "duration_ms": duration_ms,
@@ -3823,33 +3988,6 @@ fn macos_ax_window_object_id(probe: &Value, window: &Value, idx: usize) -> Strin
     format!("desktop:macos:window:{pid}:sample-local:{sample_key}:{source_index}")
 }
 
-fn macos_ax_probe_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
-    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
-        return PathBuf::from(path);
-    }
-    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_PROBE_SCRIPT") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
-    }
-    if let Some(cwd) = cwd {
-        let path = cwd.join("scripts/macos_ax_probe.py");
-        if path.exists() {
-            return path;
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let path = cwd.join("scripts/macos_ax_probe.py");
-        if path.exists() {
-            return path;
-        }
-    }
-    if let Some(path) = installed_runtime_script_path("macos_ax_probe.py") {
-        return path;
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_probe.py")
-}
-
 fn macos_ax_probe_error(error: Value) -> ToolResult {
     let mut result = ToolResult::json_text(&json!({
         "schema": "macos_ax_probe_mcp_error.v0",
@@ -3866,11 +4004,23 @@ fn macos_ax_probe_error(error: Value) -> ToolResult {
 
 pub struct MacosAxWatchTool {
     _hub: Hub,
+    script_path: Option<PathBuf>,
 }
 
 impl MacosAxWatchTool {
     pub fn new(hub: Hub) -> Self {
-        Self { _hub: hub }
+        Self {
+            _hub: hub,
+            script_path: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_script(hub: Hub, script_path: PathBuf) -> Self {
+        Self {
+            _hub: hub,
+            script_path: Some(script_path),
+        }
     }
 }
 
@@ -3880,6 +4030,10 @@ impl McpTool for MacosAxWatchTool {
         "macos_ax_watch"
     }
 
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
@@ -3887,8 +4041,6 @@ impl McpTool for MacosAxWatchTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "cwd": {"type": "string", "description": "Workspace/repo root used to resolve scripts/macos_ax_watch.py."},
-                    "script_path": {"type": "string", "description": "Optional explicit macos_ax_watch.py path for tests or alternate checkouts."},
                     "samples": {"type": "integer", "minimum": 2, "maximum": 6, "default": 3},
                     "interval_secs": {"type": "number", "minimum": 0.05, "maximum": 2.0, "default": 0.3},
                     "max_windows": {"type": "integer", "minimum": 0, "maximum": 50, "default": 8},
@@ -3917,12 +4069,49 @@ impl McpTool for MacosAxWatchTool {
                     },
                     "max_token_age_ms": {"type": "integer", "minimum": 1000, "maximum": 300000, "default": 30000, "description": "Maximum accepted age for before_state_token; the stricter of this and the token's own max_age_ms wins."},
                     "timeout_ms": {"type": "integer", "minimum": 3000, "maximum": 60000, "default": 20000}
-                }
+                },
+                "additionalProperties": false
             }),
         }
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Some(error) = macos_ax_closed_request_error(
+            &args,
+            &[
+                "samples",
+                "interval_secs",
+                "max_windows",
+                "max_events",
+                "jxa_timeout_secs",
+                "include_samples",
+                "before_state_token",
+                "max_token_age_ms",
+                "timeout_ms",
+            ],
+        ) {
+            return Ok(macos_ax_watch_error(error));
+        }
+        if args.get("before_state_token").is_some_and(|token| {
+            macos_ax_nested_object_has_unexpected_field(
+                token,
+                &[
+                    "schema",
+                    "captured_at_unix_ms",
+                    "max_age_ms",
+                    "coverage_complete",
+                    "scope_projection",
+                    "state_projection",
+                    "scope_sha256",
+                    "state_sha256",
+                ],
+            )
+        }) {
+            return Ok(macos_ax_watch_error(json!({
+                "code": "unexpected_request_field",
+                "message": "macOS semantic observation request contains an unsupported field"
+            })));
+        }
         let samples = args.get("samples").and_then(Value::as_u64).unwrap_or(3).clamp(2, 6);
         let interval_secs = args.get("interval_secs").and_then(Value::as_f64).unwrap_or(0.3).clamp(0.05, 2.0);
         let max_windows = args.get("max_windows").and_then(Value::as_u64).unwrap_or(8).min(50);
@@ -3938,18 +4127,40 @@ impl McpTool for MacosAxWatchTool {
             + 3.0)
             * 1000.0) as u64;
         let timeout_ms = args.get("timeout_ms").and_then(Value::as_u64).unwrap_or(20_000).clamp(3_000, 60_000).max(minimum_timeout).min(60_000);
-        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
-        let script = macos_ax_watch_script_path(&args, cwd.as_ref());
+        let (script, runtime_directory, pinned_runtime) =
+            if let Some(script_path) = self.script_path.as_ref() {
+                (script_path.clone(), None, false)
+            } else {
+                let assets = match macos_ax_verified_observation_assets() {
+                    Ok(assets) => assets,
+                    Err(error) => return Ok(macos_ax_watch_error(error)),
+                };
+                (assets.watch, Some((assets.directory, assets.native_probe)), true)
+            };
         if !script.exists() {
             return Ok(macos_ax_watch_error(json!({
                 "code": "script_missing",
-                "message": format!("macos_ax_watch.py not found at {}", script.display())
+                "message": "binary-bound macos_ax_watch.py is unavailable"
             })));
         }
 
-        let mut cmd = killable_command(
-            std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
-        );
+        let mut cmd = if pinned_runtime {
+            killable_command("/usr/bin/python3")
+        } else {
+            killable_command(
+                std::env::var("PYTHON")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "python3".to_string()),
+            )
+        };
+        if let Some((directory, native_probe)) = runtime_directory.as_ref() {
+            macos_ax_clean_runtime_command(&mut cmd);
+            cmd.env("AGENT_BRIDGE_MACOS_AX_SWIFT", "/usr/bin/swift")
+                .env("AGENT_BRIDGE_MACOS_AX_NATIVE_PROBE", native_probe)
+                .current_dir(directory)
+                .args(["-E", "-s", "-B"]);
+        }
         cmd.arg(&script)
             .arg("--compact")
             .arg("--samples").arg(samples.to_string())
@@ -3966,9 +4177,6 @@ impl McpTool for MacosAxWatchTool {
         }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
-        if let Some(cwd) = cwd {
-            cmd.current_dir(cwd);
-        }
         let started = Instant::now();
         let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
             Err(_) => return Ok(macos_ax_watch_error(json!({"code": "timeout", "duration_ms": started.elapsed().as_millis() as u64}))),
@@ -3982,7 +4190,10 @@ impl McpTool for MacosAxWatchTool {
             Ok(mut payload) => {
                 if let Some(obj) = payload.as_object_mut() {
                     obj.insert("mcp_wrapper".into(), json!({
-                        "tool": self.name(), "read_only": true, "duration_ms": duration_ms,
+                        "tool": self.name(), "read_only": true,
+                        "pinned_runtime": pinned_runtime,
+                        "caller_runtime_override": false,
+                        "duration_ms": duration_ms,
                         "exit_code": output.status.code().unwrap_or(-1), "stderr": stderr,
                         "truncated": stdout_truncated || stderr_truncated,
                         "before_state_token_supplied": before_state_token.is_some(),
@@ -3994,29 +4205,6 @@ impl McpTool for MacosAxWatchTool {
             Err(e) => Ok(macos_ax_watch_error(json!({"code": "invalid_json", "message": e.to_string(), "stdout": stdout, "stderr": stderr}))),
         }
     }
-}
-
-fn macos_ax_watch_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
-    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
-        return PathBuf::from(path);
-    }
-    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_WATCH_SCRIPT") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
-    }
-    if let Some(cwd) = cwd {
-        let path = cwd.join("scripts/macos_ax_watch.py");
-        if path.exists() { return path; }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let path = cwd.join("scripts/macos_ax_watch.py");
-        if path.exists() { return path; }
-    }
-    if let Some(path) = installed_runtime_script_path("macos_ax_watch.py") {
-        return path;
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_watch.py")
 }
 
 fn macos_ax_watch_error(error: Value) -> ToolResult {
@@ -6289,7 +6477,6 @@ impl McpTool for MacosAxFocusTransactionTool {
         });
         let independent_verify = if source_verified {
             let mut verify_args = json!({
-                "script_path": pinned_verify_assets.verify_path,
                 "expect": "window_focused",
                 "bundle_id": bundle_id,
                 "pid": pid,
@@ -6308,6 +6495,7 @@ impl McpTool for MacosAxFocusTransactionTool {
             }
             let verify_tool = MacosAxVerifyTool::new_with_interpreter(
                 hub.clone(),
+                pinned_verify_assets.verify_path.clone(),
                 toolchain.python3.launch_path.clone(),
                 toolchain.swift.launch_path.clone(),
                 pinned_verify_assets.native_probe_path.clone(),
@@ -6523,6 +6711,7 @@ const MACOS_AX_VERIFY_SOURCE_SCHEMA: &str = "macos_ax_verify/v0";
 
 pub struct MacosAxVerifyTool {
     _hub: Hub,
+    script_path: Option<PathBuf>,
     interpreter: Option<PathBuf>,
     native_swift: Option<PathBuf>,
     native_probe: Option<PathBuf>,
@@ -6533,6 +6722,7 @@ impl MacosAxVerifyTool {
     pub fn new(hub: Hub) -> Self {
         Self {
             _hub: hub,
+            script_path: None,
             interpreter: None,
             native_swift: None,
             native_probe: None,
@@ -6542,6 +6732,7 @@ impl MacosAxVerifyTool {
 
     fn new_with_interpreter(
         hub: Hub,
+        script_path: PathBuf,
         interpreter: PathBuf,
         native_swift: PathBuf,
         native_probe: PathBuf,
@@ -6549,10 +6740,23 @@ impl MacosAxVerifyTool {
     ) -> Self {
         Self {
             _hub: hub,
+            script_path: Some(script_path),
             interpreter: Some(interpreter),
             native_swift: Some(native_swift),
             native_probe: Some(native_probe),
             developer_dir: Some(developer_dir),
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_script(hub: Hub, script_path: PathBuf) -> Self {
+        Self {
+            _hub: hub,
+            script_path: Some(script_path),
+            interpreter: None,
+            native_swift: None,
+            native_probe: None,
+            developer_dir: None,
         }
     }
 }
@@ -6561,6 +6765,10 @@ impl MacosAxVerifyTool {
 impl McpTool for MacosAxVerifyTool {
     fn name(&self) -> &'static str {
         "macos_ax_verify"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
     }
 
     fn schema(&self) -> ToolSchema {
@@ -6579,14 +6787,6 @@ impl McpTool for MacosAxVerifyTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "cwd": {
-                        "type": "string",
-                        "description": "Workspace/repo root used to resolve scripts/macos_ax_verify.py. Defaults to the MCP process cwd, then the build-time repo root."
-                    },
-                    "script_path": {
-                        "type": "string",
-                        "description": "Optional explicit macos_ax_verify.py path. Use mainly for tests or alternate checkouts."
-                    },
                     "expect": {
                         "type": "string",
                         "enum": ["ax_trusted_is", "frontmost_app_is", "window_appeared", "window_gone", "window_focused"],
@@ -6679,12 +6879,37 @@ impl McpTool for MacosAxVerifyTool {
                         "description": "Milliseconds before the verifier process is killed (kept above poll_timeout_secs)."
                     }
                 },
-                "required": ["expect"]
+                "required": ["expect"],
+                "additionalProperties": false
             }),
         }
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Some(error) = macos_ax_closed_request_error(
+            &args,
+            &[
+                "expect",
+                "app",
+                "bundle_id",
+                "pid",
+                "title",
+                "role",
+                "index",
+                "ax_identifier",
+                "state",
+                "max_windows",
+                "jxa_timeout_secs",
+                "poll_timeout_secs",
+                "poll_interval_secs",
+                "settle_secs",
+                "semantic_bus",
+                "semantic_include_raw",
+                "timeout_ms",
+            ],
+        ) {
+            return Ok(macos_ax_verify_error(error));
+        }
         let expect = match required_str_arg(&args, "expect") {
             Ok(v) => v,
             Err(e) => return Ok(ToolResult::error(e)),
@@ -6736,47 +6961,76 @@ impl McpTool for MacosAxVerifyTool {
             .and_then(Value::as_bool)
             .unwrap_or(false);
 
-        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
-        let script = macos_ax_verify_script_path(&args, cwd.as_ref());
+        let (
+            script,
+            pinned_runtime,
+            interpreter,
+            native_swift,
+            native_probe,
+            developer_dir_path,
+            runtime_directory,
+        ) = if let Some(script_path) = self.script_path.as_ref() {
+            let pinned_runtime = self.interpreter.is_some();
+            let interpreter = self.interpreter.clone().unwrap_or_else(|| {
+                PathBuf::from(
+                    std::env::var("PYTHON")
+                        .ok()
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or_else(|| "python3".to_string()),
+                )
+            });
+            (
+                script_path.clone(),
+                pinned_runtime,
+                interpreter,
+                self.native_swift.clone(),
+                self.native_probe.clone(),
+                self.developer_dir.clone(),
+                pinned_runtime
+                    .then(|| script_path.parent().map(Path::to_path_buf))
+                    .flatten(),
+            )
+        } else {
+            let assets = match macos_ax_verified_observation_assets() {
+                Ok(assets) => assets,
+                Err(error) => return Ok(macos_ax_verify_error(error)),
+            };
+            (
+                assets.verify,
+                true,
+                PathBuf::from("/usr/bin/python3"),
+                Some(PathBuf::from("/usr/bin/swift")),
+                Some(assets.native_probe),
+                None,
+                Some(assets.directory),
+            )
+        };
         if !script.exists() {
             return Ok(macos_ax_verify_error(json!({
                 "code": "script_missing",
-                "message": format!("macos_ax_verify.py not found at {}", script.display()),
-                "hint": "pass script_path or run from the Agent-Bridge repo root"
+                "message": "binary-bound macos_ax_verify.py is unavailable"
             })));
         }
 
-        let pinned_runtime = self.interpreter.is_some();
-        let native_swift_invocation_path = self
-            .native_swift
+        let native_swift_invocation_path = native_swift
             .as_ref()
             .map(|path| path.display().to_string());
-        let native_probe_path = self
-            .native_probe
+        let native_probe_path = native_probe
             .as_ref()
             .map(|path| path.display().to_string());
-        let developer_dir = self
-            .developer_dir
+        let developer_dir = developer_dir_path
             .as_ref()
             .map(|path| path.display().to_string());
-        let interpreter = self.interpreter.clone().unwrap_or_else(|| {
-            PathBuf::from(
-                std::env::var("PYTHON")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or_else(|| "python3".to_string()),
-            )
-        });
         let mut cmd = killable_command(interpreter);
         if pinned_runtime {
             macos_ax_clean_runtime_command(&mut cmd);
-            if let Some(native_swift) = self.native_swift.as_ref() {
+            if let Some(native_swift) = native_swift.as_ref() {
                 cmd.env("AGENT_BRIDGE_MACOS_AX_SWIFT", native_swift);
             }
-            if let Some(native_probe) = self.native_probe.as_ref() {
+            if let Some(native_probe) = native_probe.as_ref() {
                 cmd.env("AGENT_BRIDGE_MACOS_AX_NATIVE_PROBE", native_probe);
             }
-            if let Some(developer_dir) = self.developer_dir.as_ref() {
+            if let Some(developer_dir) = developer_dir_path.as_ref() {
                 cmd.env("DEVELOPER_DIR", developer_dir);
             }
             cmd.arg("-E").arg("-s").arg("-B");
@@ -6810,8 +7064,8 @@ impl McpTool for MacosAxVerifyTool {
         }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
-        if let Some(cwd) = cwd {
-            cmd.current_dir(cwd);
+        if let Some(runtime_directory) = runtime_directory.as_ref() {
+            cmd.current_dir(runtime_directory);
         }
 
         let started = Instant::now();
@@ -6853,6 +7107,7 @@ impl McpTool for MacosAxVerifyTool {
                             "tool": self.name(),
                             "read_only": true,
                             "pinned_runtime": pinned_runtime,
+                            "caller_runtime_override": false,
                             "native_swift_invocation_path": native_swift_invocation_path,
                             "native_probe_path": native_probe_path,
                             "developer_dir": developer_dir,
@@ -7565,33 +7820,6 @@ fn macos_ax_verify_selector_summary(selector: &Value) -> String {
     } else {
         parts.join(" ")
     }
-}
-
-fn macos_ax_verify_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
-    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
-        return PathBuf::from(path);
-    }
-    if let Ok(path) = std::env::var("AGENT_BRIDGE_MACOS_AX_VERIFY_SCRIPT") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
-    }
-    if let Some(cwd) = cwd {
-        let path = cwd.join("scripts/macos_ax_verify.py");
-        if path.exists() {
-            return path;
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let path = cwd.join("scripts/macos_ax_verify.py");
-        if path.exists() {
-            return path;
-        }
-    }
-    if let Some(path) = installed_runtime_script_path("macos_ax_verify.py") {
-        return path;
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/macos_ax_verify.py")
 }
 
 fn macos_ax_verify_error(error: Value) -> ToolResult {
@@ -50690,9 +50918,11 @@ enum ToolSet {
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
     CodexA2ui,
-    /// An opt-in Codex toolset that adds the pure read-only AG-UI projector to
-    /// the existing codex-lean surface. Only the projector is read-only; the
-    /// codex-lean tools retain their normal per-tool authority.
+    /// An opt-in Codex toolset that adds the pure read-only AG-UI projector and
+    /// the native macOS read-only semantic observation triad to the existing
+    /// codex-lean surface. The codex-lean tools retain their normal per-tool
+    /// authority; macOS action admission, leases, and focus transactions stay
+    /// outside this toolset.
     CodexAgUiReadonly,
     ChatGptRead,
     ChatGptCollab,
@@ -50777,7 +51007,7 @@ impl ToolSet {
                 .collect(),
             Self::CodexModelScopeAbot => CODEX_MODELSCOPE_ABOT_EXTRAS.to_vec(),
             Self::CodexA2ui => vec!["a2ui_preview"],
-            Self::CodexAgUiReadonly => vec![ag_ui_readonly::TOOL_NAME],
+            Self::CodexAgUiReadonly => CODEX_AG_UI_READONLY_EXTRAS.to_vec(),
             _ => Vec::new(),
         }
     }
@@ -50881,7 +51111,7 @@ impl ToolPolicy {
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
             ToolSet::CodexAgUiReadonly => {
-                codex_lean_tool(tool_name) || tool_name == ag_ui_readonly::TOOL_NAME
+                codex_lean_tool(tool_name) || CODEX_AG_UI_READONLY_EXTRAS.contains(&tool_name)
             }
             ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
             ToolSet::ChatGptCollab => chatgpt_collab_tool(tool_name),
@@ -50953,6 +51183,17 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
     capgroups::FORUM_MANAGE,
     capgroups::PRESENCE_ANNOUNCE,
     capgroups::PRESENCE_LIST,
+];
+
+/// Extra semantic observation surfaces carried by the current Codex
+/// read-mostly toolset. Keep this list observation-only: it intentionally
+/// excludes macos_ax_action_admission, embodiment_lease, and
+/// macos_ax_focus_transaction.
+const CODEX_AG_UI_READONLY_EXTRAS: &[&str] = &[
+    ag_ui_readonly::TOOL_NAME,
+    "macos_ax_probe",
+    "macos_ax_verify",
+    "macos_ax_watch",
 ];
 
 /// Codex-essential extras that are intentionally not in the cross-client

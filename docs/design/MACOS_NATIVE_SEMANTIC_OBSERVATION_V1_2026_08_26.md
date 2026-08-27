@@ -1,6 +1,6 @@
 # macOS Native Semantic Observation v1
 
-Status: deployed and live read-only acceptance passed
+Status: deployed at `8c913594d0bff02b341f526db089803e542c2093` with live read-only acceptance PASS; read-only profile extension source admission PASS, publication pending
 
 Date: 2026-08-26
 
@@ -79,3 +79,26 @@ verified semantic sample and usable next-step decision without screenshots,
 Apple Events permission state, or owner restatement. If the native path cannot
 do that within this increment, stop rather than opening another observation
 framework.
+
+## Deployed acceptance and bounded follow-up
+
+The exact installed `8c913594d0bf` build passed a fresh `codex-essential` MCP
+probe/verify/watch acceptance on the frontmost ChatGPT window. The sample was
+native AX and complete, verification returned `verified/proceed`, and the watch
+returned two complete samples without claiming sample-local continuity.
+
+The next bounded increment makes those same three observation tools directly
+available in the owner's current `codex-ag-ui-readonly` profile. It changes no
+AX implementation or action authority: `macos_ax_action_admission`,
+`embodiment_lease`, and `macos_ax_focus_transaction` remain outside that
+profile.
+
+Source admission also closes the observation runtime itself. Public MCP requests
+have no `script_path` or `cwd`, reject every unknown top-level field and every
+unknown nested `before_state_token` field without echoing caller content, and
+can execute only a canonical same-directory asset set whose bytes match the
+binary's embedded SHA-256 values. Production execution uses a cleared
+environment and fixed system Python/Swift launch paths; fixture script injection
+exists only through private test constructors. Probe, verify, and watch each
+publish `ToolAnnotations::read_only()`. Publication, deployment, and
+fresh-process verification remain later gates.

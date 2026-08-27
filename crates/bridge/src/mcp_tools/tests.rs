@@ -10664,7 +10664,14 @@ fn registry_exposes_macos_ax_probe_to_codex_essential() {
     assert!(tool.input_schema["properties"]
         .get("semantic_include_raw")
         .is_some());
+    assert!(tool.input_schema["properties"].get("cwd").is_none());
+    assert!(tool.input_schema["properties"].get("script_path").is_none());
+    assert_eq!(tool.input_schema["additionalProperties"], false);
     assert!(tool.input_schema["properties"].get("prompt").is_none());
+    assert_eq!(
+        MacosAxProbeTool::new(Hub::builder().build()).annotations(),
+        Some(ToolAnnotations::read_only())
+    );
 }
 
 #[test]
@@ -10695,9 +10702,16 @@ fn registry_exposes_macos_ax_verify_to_codex_essential() {
     assert!(tool.input_schema["properties"]
         .get("semantic_include_raw")
         .is_some());
+    assert!(tool.input_schema["properties"].get("cwd").is_none());
+    assert!(tool.input_schema["properties"].get("script_path").is_none());
+    assert_eq!(tool.input_schema["additionalProperties"], false);
     assert!(tool.input_schema["properties"].get("click").is_none());
     assert_eq!(tool.input_schema["properties"]["pid"]["minimum"], 1);
     assert_eq!(tool.input_schema["properties"]["index"]["minimum"], 0);
+    assert_eq!(
+        MacosAxVerifyTool::new(Hub::builder().build()).annotations(),
+        Some(ToolAnnotations::read_only())
+    );
 }
 
 #[test]
@@ -10705,7 +10719,12 @@ fn registry_exposes_macos_ax_watch_to_codex_essential() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     assert!(p.includes(Tier::Standard, "macos_ax_watch"));
 
-    let tool = MacosAxWatchTool::new(Hub::builder().build()).schema();
+    let implementation = MacosAxWatchTool::new(Hub::builder().build());
+    assert_eq!(
+        implementation.annotations(),
+        Some(ToolAnnotations::read_only())
+    );
+    let tool = implementation.schema();
     assert!(tool.description.contains("read-only"));
     assert!(tool.description.contains("AXIdentifier"));
     assert!(tool.description.contains("unchanged/proceed"));
@@ -10718,6 +10737,9 @@ fn registry_exposes_macos_ax_watch_to_codex_essential() {
     assert!(tool.input_schema["properties"]
         .get("max_token_age_ms")
         .is_some());
+    assert!(tool.input_schema["properties"].get("cwd").is_none());
+    assert!(tool.input_schema["properties"].get("script_path").is_none());
+    assert_eq!(tool.input_schema["additionalProperties"], false);
     let token = &tool.input_schema["properties"]["before_state_token"];
     assert_eq!(token["additionalProperties"], false);
     assert_eq!(
@@ -12893,6 +12915,119 @@ print(json.dumps(payload))
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
+#[test]
+fn macos_ax_observation_assets_are_canonical_and_binary_bound() {
+    let assets = macos_ax_verified_observation_assets().expect("verified observation assets");
+    for (path, expected) in [
+        (
+            &assets.probe,
+            include_bytes!("../../../../scripts/macos_ax_probe.py").as_slice(),
+        ),
+        (
+            &assets.watch,
+            include_bytes!("../../../../scripts/macos_ax_watch.py").as_slice(),
+        ),
+        (
+            &assets.verify,
+            include_bytes!("../../../../scripts/macos_ax_verify.py").as_slice(),
+        ),
+        (
+            &assets.native_probe,
+            include_bytes!("../../../../scripts/macos_ax_native_probe.swift").as_slice(),
+        ),
+    ] {
+        assert_eq!(path.parent(), Some(assets.directory.as_path()));
+        assert_eq!(std::fs::read(path).expect("asset bytes"), expected);
+    }
+}
+
+#[tokio::test]
+async fn macos_ax_observation_rejects_caller_runtime_overrides_without_execution_or_echo() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-macos-ax-override-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let scripts_dir = temp_dir.join("scripts");
+    tokio::fs::create_dir_all(&scripts_dir).await.expect("mkdir");
+    let marker = temp_dir.join("runtime-override-executed");
+    let canary = "AB_RUNTIME_OVERRIDE_CANARY_DO_NOT_ECHO";
+    let malicious = format!(
+        "from pathlib import Path\nPath({marker:?}).write_text({canary:?})\n"
+    );
+    let script = temp_dir.join("caller.py");
+    tokio::fs::write(&script, &malicious)
+        .await
+        .expect("write caller script");
+    tokio::fs::write(scripts_dir.join("macos_ax_watch.py"), &malicious)
+        .await
+        .expect("write cwd script");
+
+    let probe = MacosAxProbeTool::new(Hub::builder().build())
+        .execute(
+            json!({"script_path": script.to_string_lossy()}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("probe rejection");
+    let watch = MacosAxWatchTool::new(Hub::builder().build())
+        .execute(
+            json!({"cwd": temp_dir.to_string_lossy()}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("watch rejection");
+    let nested_watch = MacosAxWatchTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "before_state_token": {
+                    "schema": "agent_bridge.desktop_state_token.v0",
+                    "captured_at_unix_ms": 1_787_100_000_000_u64,
+                    "max_age_ms": 30_000,
+                    "coverage_complete": true,
+                    "scope_projection": "agent_bridge.desktop_scope_projection.v1",
+                    "state_projection": "agent_bridge.desktop_state_projection.v1",
+                    "scope_sha256": format!("sha256:{}", "a".repeat(64)),
+                    "state_sha256": format!("sha256:{}", "b".repeat(64)),
+                    "unexpected": {
+                        "canary": canary,
+                        "marker": marker.to_string_lossy()
+                    }
+                }
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("nested watch rejection");
+    let verify = MacosAxVerifyTool::new(Hub::builder().build())
+        .execute(
+            json!({
+                "expect": "ax_trusted_is",
+                "state": "true",
+                "script_path": script.to_string_lossy()
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("verify rejection");
+
+    for result in [&probe, &watch, &nested_watch, &verify] {
+        assert!(result.is_error);
+        let payload = result_text_as_json(result);
+        assert_eq!(payload["error"]["code"], "unexpected_request_field");
+        let rendered = payload.to_string();
+        assert!(!rendered.contains(canary));
+        assert!(!rendered.contains(&script.to_string_lossy().to_string()));
+        assert!(!rendered.contains(&temp_dir.to_string_lossy().to_string()));
+    }
+    assert!(!marker.exists(), "caller-selected code must never execute");
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
 #[tokio::test]
 async fn macos_ax_probe_wrapper_defaults_to_no_prompt_and_bounded_windows() {
     let temp_dir = std::env::temp_dir().join(format!(
@@ -12916,11 +13051,10 @@ print(json.dumps({"schema": "macos_ax_probe/v0", "argv": sys.argv[1:]}))
     .await
     .expect("write script");
 
-    let tool = MacosAxProbeTool::new(Hub::builder().build());
+    let tool = MacosAxProbeTool::new_with_script(Hub::builder().build(), script.clone());
     let out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "include_windows": false,
                 "max_windows": 3,
                 "jxa_timeout_secs": 1.5,
@@ -13007,11 +13141,10 @@ print(json.dumps({"schema": "macos_ax_probe/v0", "status": "ready"}))
     .await
     .expect("write script");
 
-    let tool = MacosAxProbeTool::new(Hub::builder().build());
+    let tool = MacosAxProbeTool::new_with_script(Hub::builder().build(), script.clone());
     let out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "include_windows": true,
                 "jxa_timeout_secs": 0.25,
                 "timeout_ms": 1_000
@@ -13051,11 +13184,10 @@ print(json.dumps({"schema": "macos_ax_watch/v0", "status": "ready", "argv": sys.
     .await
     .expect("write script");
 
-    let tool = MacosAxWatchTool::new(Hub::builder().build());
+    let tool = MacosAxWatchTool::new_with_script(Hub::builder().build(), script.clone());
     let out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "samples": 4,
                 "interval_secs": 0.2,
                 "max_windows": 5,
@@ -13162,11 +13294,10 @@ print(json.dumps(payload))
         .await
         .expect("write script");
 
-    let tool = MacosAxProbeTool::new(Hub::builder().build());
+    let tool = MacosAxProbeTool::new_with_script(Hub::builder().build(), script.clone());
     let default_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "timeout_ms": 5000
             }),
             &ToolContext::default(),
@@ -13181,7 +13312,6 @@ print(json.dumps(payload))
     let semantic_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "semantic_bus": true,
                 "semantic_include_raw": false,
                 "timeout_ms": 5000
@@ -13234,7 +13364,6 @@ print(json.dumps(payload))
     let raw_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "semantic_bus": true,
                 "semantic_include_raw": true,
                 "timeout_ms": 5000
@@ -13626,11 +13755,10 @@ raise SystemExit(2)
     .await
     .expect("write script");
 
-    let tool = MacosAxVerifyTool::new(Hub::builder().build());
+    let tool = MacosAxVerifyTool::new_with_script(Hub::builder().build(), script.clone());
     let out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "window_gone",
                 "title": "Missing",
                 "bundle_id": "com.openai.codex",
@@ -13694,10 +13822,9 @@ async fn macos_ax_verify_wrapper_preserves_timeout_error_code() {
     .await
     .expect("write script");
 
-    let output = MacosAxVerifyTool::new(Hub::builder().build())
+    let output = MacosAxVerifyTool::new_with_script(Hub::builder().build(), script.clone())
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
                 "poll_timeout_secs": 0.0,
@@ -13755,10 +13882,9 @@ raise SystemExit(3)
     .await
     .expect("write script");
 
-    let out = MacosAxVerifyTool::new(Hub::builder().build())
+    let out = MacosAxVerifyTool::new_with_script(Hub::builder().build(), script.clone())
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "window_gone",
                 "bundle_id": "com.openai.codex",
                 "title": "Missing",
@@ -13827,10 +13953,9 @@ raise SystemExit(3)
     .await
     .expect("write script");
 
-    let out = MacosAxVerifyTool::new(Hub::builder().build())
+    let out = MacosAxVerifyTool::new_with_script(Hub::builder().build(), script.clone())
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
                 "poll_timeout_secs": 0.0,
@@ -13883,10 +14008,9 @@ print(json.dumps({
     .await
     .expect("write script");
 
-    let out = MacosAxVerifyTool::new(Hub::builder().build())
+    let out = MacosAxVerifyTool::new_with_script(Hub::builder().build(), script.clone())
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
                 "poll_timeout_secs": 0.0,
@@ -13963,11 +14087,10 @@ print(json.dumps(payload))
         .await
         .expect("write script");
 
-    let tool = MacosAxVerifyTool::new(Hub::builder().build());
+    let tool = MacosAxVerifyTool::new_with_script(Hub::builder().build(), script.clone());
     let default_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
                 "bundle_id": "com.openai.codex",
@@ -13986,7 +14109,6 @@ print(json.dumps(payload))
     let semantic_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
                 "bundle_id": "com.openai.codex",
@@ -14041,7 +14163,6 @@ print(json.dumps(payload))
     let wrong_raw_binding_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Other",
                 "bundle_id": "com.openai.codex",
@@ -14070,7 +14191,6 @@ print(json.dumps(payload))
     let wrong_binding_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Other",
                 "bundle_id": "com.openai.codex",
@@ -14100,7 +14220,6 @@ print(json.dumps(payload))
     let raw_out = tool
         .execute(
             json!({
-                "script_path": script.to_string_lossy(),
                 "expect": "frontmost_app_is",
                 "app": "Codex",
                 "bundle_id": "com.openai.codex",

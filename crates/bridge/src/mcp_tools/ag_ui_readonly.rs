@@ -851,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn dedicated_toolset_is_exactly_codex_lean_plus_the_projector() {
+    fn dedicated_toolset_adds_only_the_projector_and_macos_readonly_observation() {
         let names = |toolset| {
             super::super::exposed_tool_names_for(Some(toolset), None, None)
                 .into_iter()
@@ -860,8 +860,26 @@ mod tests {
         let lean = names("codex-lean");
         let opted_in = names("codex-ag-ui-readonly");
         let mut expected = lean;
-        expected.insert(TOOL_NAME.to_string());
+        for tool_name in [
+            TOOL_NAME,
+            "macos_ax_probe",
+            "macos_ax_verify",
+            "macos_ax_watch",
+        ] {
+            expected.insert(tool_name.to_string());
+        }
         assert_eq!(opted_in, expected);
+
+        for tool_name in [
+            "macos_ax_action_admission",
+            "embodiment_lease",
+            "macos_ax_focus_transaction",
+        ] {
+            assert!(
+                !opted_in.contains(tool_name),
+                "{tool_name} must stay outside the read-only observation toolset"
+            );
+        }
 
         let policy = super::super::ToolPolicy::from_values(
             Some("codex-ag-ui-readonly"),
@@ -871,6 +889,40 @@ mod tests {
         );
         assert_eq!(policy.label(), "codex-ag-ui-readonly");
         assert_eq!(policy.profile().label(), "essential");
-        assert_eq!(policy.extras(), vec![TOOL_NAME]);
+        assert_eq!(
+            policy.extras(),
+            vec![
+                TOOL_NAME,
+                "macos_ax_probe",
+                "macos_ax_verify",
+                "macos_ax_watch",
+            ]
+        );
+    }
+
+    #[test]
+    fn dedicated_toolset_keeps_macos_observation_host_gated() {
+        let policy =
+            super::super::ToolPolicy::from_values(Some("codex-ag-ui-readonly"), None, None, None);
+        let mut surface = super::super::HostSurface::all_available();
+        surface.apple_host = false;
+        let names = super::super::build_registry_with_policy_surface(
+            crate::Hub::builder().build(),
+            policy,
+            surface,
+            false,
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(names.contains(TOOL_NAME));
+        for tool_name in ["macos_ax_probe", "macos_ax_verify", "macos_ax_watch"] {
+            assert!(
+                !names.contains(tool_name),
+                "{tool_name} must stay hidden off Apple hosts"
+            );
+        }
     }
 }
