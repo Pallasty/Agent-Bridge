@@ -22,6 +22,8 @@ use uuid::Uuid;
 
 pub const RESIDENT_M2_SHADOW_SCHEMA_V0: &str = "agent_bridge.resident_m2_shadow.v0";
 pub const RESIDENT_M2_SHADOW_REVIEW_SCHEMA_V0: &str = "agent_bridge.resident_m2_shadow_review.v0";
+const RESIDENT_M2_SHADOW_ANCHOR_SCHEMA_V0: &str = "agent_bridge.resident_m2_shadow_anchor.v0";
+const RESIDENT_M2_SHADOW_LEDGER_SCHEMA_V0: &str = "agent_bridge.resident_m2_shadow_ledger.v0";
 const POLICY_REVISION: u64 = 1;
 const MIN_NATURAL_REPORTS_FOR_OWNER_REVIEW: usize = 3;
 const MIN_NATURAL_TRIGGER_KINDS_FOR_OWNER_REVIEW: usize = 2;
@@ -211,6 +213,22 @@ pub struct ResidentM2ShadowReport {
     pub boundary: ResidentM2ShadowBoundary,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResidentM2ShadowAnchor {
+    schema_version: String,
+    ledger_id: String,
+    report_id: String,
+    report_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResidentM2ShadowLedger {
+    schema_version: String,
+    ledger_id: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShadowWriteStatus {
     Recorded,
@@ -372,8 +390,20 @@ fn shadow_directory(root: &Path) -> PathBuf {
     root.join("m2-shadow-reports")
 }
 
+fn anchor_directory(root: &Path) -> PathBuf {
+    root.join("m2-shadow-report-anchors")
+}
+
 fn report_path(root: &Path, report_id: &str) -> PathBuf {
     shadow_directory(root).join(format!("{report_id}.json"))
+}
+
+fn anchor_path(root: &Path, report_id: &str) -> PathBuf {
+    anchor_directory(root).join(format!("{report_id}.json"))
+}
+
+fn ledger_path(root: &Path) -> PathBuf {
+    root.join("m2-shadow-ledger.json")
 }
 
 fn ensure_private_directory(path: &Path) -> Result<(), ResidentM2ShadowError> {
@@ -469,6 +499,183 @@ fn load_report(path: &Path) -> Result<ResidentM2ShadowReport, ResidentM2ShadowEr
     Ok(report)
 }
 
+fn load_private_bytes(path: &Path) -> Result<Vec<u8>, ResidentM2ShadowError> {
+    let file = open_private_report(path)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_REPORT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ResidentM2ShadowError::Io)?;
+    if bytes.len() as u64 > MAX_REPORT_BYTES {
+        return Err(ResidentM2ShadowError::Corrupt);
+    }
+    Ok(bytes)
+}
+
+fn validate_anchor(anchor: &ResidentM2ShadowAnchor) -> Result<(), ResidentM2ShadowError> {
+    if anchor.schema_version != RESIDENT_M2_SHADOW_ANCHOR_SCHEMA_V0
+        || !anchor.ledger_id.starts_with("shadow-ledger-")
+        || !validate_identifier(&anchor.ledger_id)
+        || !anchor.report_id.starts_with("shadow-")
+        || !validate_identifier(&anchor.report_id)
+        || !is_sha256_hex(&anchor.report_sha256)
+    {
+        return Err(ResidentM2ShadowError::Corrupt);
+    }
+    Ok(())
+}
+
+fn validate_ledger(ledger: &ResidentM2ShadowLedger) -> Result<(), ResidentM2ShadowError> {
+    if ledger.schema_version != RESIDENT_M2_SHADOW_LEDGER_SCHEMA_V0
+        || !ledger.ledger_id.starts_with("shadow-ledger-")
+        || !validate_identifier(&ledger.ledger_id)
+    {
+        return Err(ResidentM2ShadowError::Corrupt);
+    }
+    Ok(())
+}
+
+fn load_ledger(root: &Path) -> Result<ResidentM2ShadowLedger, ResidentM2ShadowError> {
+    let path = ledger_path(root);
+    match std::fs::symlink_metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(ResidentM2ShadowError::Corrupt);
+        }
+        Err(_) => return Err(ResidentM2ShadowError::Io),
+    }
+    let bytes = load_private_bytes(&path)?;
+    let ledger = serde_json::from_slice(&bytes).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+    validate_ledger(&ledger)?;
+    Ok(ledger)
+}
+
+fn ensure_ledger(root: &Path) -> Result<ResidentM2ShadowLedger, ResidentM2ShadowError> {
+    let path = ledger_path(root);
+    match std::fs::symlink_metadata(&path) {
+        Ok(_) => return load_ledger(root),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err(ResidentM2ShadowError::Io),
+    }
+    let ledger = ResidentM2ShadowLedger {
+        schema_version: RESIDENT_M2_SHADOW_LEDGER_SCHEMA_V0.to_string(),
+        ledger_id: format!("shadow-ledger-{}", Uuid::new_v4().simple()),
+    };
+    let bytes = serde_json::to_vec(&ledger).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+    let temporary = root.join(format!(".m2-shadow-ledger.{}.tmp", Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&temporary)
+        .map_err(|_| ResidentM2ShadowError::Io)?;
+    if file
+        .write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(ResidentM2ShadowError::Io);
+    }
+    drop(file);
+    match std::fs::hard_link(&temporary, &path) {
+        Ok(()) => {
+            std::fs::remove_file(&temporary).map_err(|_| ResidentM2ShadowError::Io)?;
+            sync_directory(root)?;
+            Ok(ledger)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = std::fs::remove_file(&temporary);
+            load_ledger(root)
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(&temporary);
+            Err(ResidentM2ShadowError::Io)
+        }
+    }
+}
+
+fn load_anchor(path: &Path) -> Result<ResidentM2ShadowAnchor, ResidentM2ShadowError> {
+    let bytes = load_private_bytes(path)?;
+    let anchor = serde_json::from_slice(&bytes).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+    validate_anchor(&anchor)?;
+    Ok(anchor)
+}
+
+fn persist_anchor(
+    root: &Path,
+    ledger_id: &str,
+    report_id: &str,
+    report_sha256: &str,
+) -> Result<(), ResidentM2ShadowError> {
+    let directory = anchor_directory(root);
+    ensure_private_directory(&directory)?;
+    let path = anchor_path(root, report_id);
+    let anchor = ResidentM2ShadowAnchor {
+        schema_version: RESIDENT_M2_SHADOW_ANCHOR_SCHEMA_V0.to_string(),
+        ledger_id: ledger_id.to_string(),
+        report_id: report_id.to_string(),
+        report_sha256: report_sha256.to_string(),
+    };
+    validate_anchor(&anchor)?;
+    let bytes = serde_json::to_vec(&anchor).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+    let temporary = directory.join(format!(".{report_id}.{}.tmp", Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&temporary)
+        .map_err(|_| ResidentM2ShadowError::Io)?;
+    if file
+        .write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(ResidentM2ShadowError::Io);
+    }
+    drop(file);
+    match std::fs::hard_link(&temporary, &path) {
+        Ok(()) => {
+            std::fs::remove_file(&temporary).map_err(|_| ResidentM2ShadowError::Io)?;
+            sync_directory(&directory)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = std::fs::remove_file(&temporary);
+            if load_anchor(&path)? != anchor {
+                return Err(ResidentM2ShadowError::Conflict);
+            }
+            Ok(())
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(&temporary);
+            Err(ResidentM2ShadowError::Io)
+        }
+    }
+}
+
+fn repair_target_anchor_if_needed(
+    root: &Path,
+    report_id: &str,
+) -> Result<(), ResidentM2ShadowError> {
+    let path = report_path(root, report_id);
+    match std::fs::symlink_metadata(&path) {
+        Ok(_) => {
+            let ledger = ensure_ledger(root)?;
+            let report = load_report(&path)?;
+            if report.report_id != report_id {
+                return Err(ResidentM2ShadowError::Corrupt);
+            }
+            validate_report_basis_binding(root, &report)?;
+            let bytes = load_private_bytes(&path)?;
+            persist_anchor(root, &ledger.ledger_id, report_id, &sha256_hex(bytes))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(ResidentM2ShadowError::Io),
+    }
+}
+
 fn validate_report_basis_binding(
     root: &Path,
     report: &ResidentM2ShadowReport,
@@ -491,13 +698,45 @@ fn validate_report_basis_binding(
 
 fn load_history(root: &Path) -> Result<Vec<ResidentM2ShadowReport>, ResidentM2ShadowError> {
     let directory = shadow_directory(root);
+    let anchors = anchor_directory(root);
     let metadata = match std::fs::symlink_metadata(&directory) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return match std::fs::symlink_metadata(&anchors) {
+                Err(anchor_error) if anchor_error.kind() == io::ErrorKind::NotFound => {
+                    Ok(Vec::new())
+                }
+                _ => Err(ResidentM2ShadowError::Corrupt),
+            };
+        }
         Err(_) => return Err(ResidentM2ShadowError::Io),
     };
     if !metadata.file_type().is_dir() || metadata.mode() & 0o777 != 0o700 {
         return Err(ResidentM2ShadowError::Corrupt);
+    }
+    let ledger = load_ledger(root)?;
+    let anchor_metadata =
+        std::fs::symlink_metadata(&anchors).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+    if !anchor_metadata.file_type().is_dir() || anchor_metadata.mode() & 0o777 != 0o700 {
+        return Err(ResidentM2ShadowError::Corrupt);
+    }
+    let mut anchor_map = BTreeMap::new();
+    for entry in std::fs::read_dir(&anchors).map_err(|_| ResidentM2ShadowError::Io)? {
+        let entry = entry.map_err(|_| ResidentM2ShadowError::Io)?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_str().ok_or(ResidentM2ShadowError::Corrupt)?;
+        if !file_name.starts_with("shadow-") || !file_name.ends_with(".json") {
+            return Err(ResidentM2ShadowError::Corrupt);
+        }
+        let anchor = load_anchor(&entry.path())?;
+        if anchor.ledger_id != ledger.ledger_id
+            || file_name != format!("{}.json", anchor.report_id)
+            || anchor_map
+                .insert(anchor.report_id.clone(), anchor)
+                .is_some()
+        {
+            return Err(ResidentM2ShadowError::Corrupt);
+        }
     }
     let mut reports = Vec::new();
     for entry in std::fs::read_dir(&directory).map_err(|_| ResidentM2ShadowError::Io)? {
@@ -507,12 +746,24 @@ fn load_history(root: &Path) -> Result<Vec<ResidentM2ShadowReport>, ResidentM2Sh
         if !file_name.starts_with("shadow-") || !file_name.ends_with(".json") {
             return Err(ResidentM2ShadowError::Corrupt);
         }
-        let report = load_report(&entry.path())?;
+        let bytes = load_private_bytes(&entry.path())?;
+        let report: ResidentM2ShadowReport =
+            serde_json::from_slice(&bytes).map_err(|_| ResidentM2ShadowError::Corrupt)?;
+        validate_report(&report)?;
         if file_name != format!("{}.json", report.report_id) {
+            return Err(ResidentM2ShadowError::Corrupt);
+        }
+        let anchor = anchor_map
+            .remove(&report.report_id)
+            .ok_or(ResidentM2ShadowError::Corrupt)?;
+        if anchor.report_sha256 != sha256_hex(&bytes) {
             return Err(ResidentM2ShadowError::Corrupt);
         }
         validate_report_basis_binding(root, &report)?;
         reports.push(report);
+    }
+    if !anchor_map.is_empty() {
+        return Err(ResidentM2ShadowError::Corrupt);
     }
     Ok(reports)
 }
@@ -657,6 +908,7 @@ fn persist_report(
     root: &Path,
     report: &ResidentM2ShadowReport,
 ) -> Result<ShadowWriteStatus, ResidentM2ShadowError> {
+    let ledger = ensure_ledger(root)?;
     let directory = shadow_directory(root);
     ensure_private_directory(&directory)?;
     let path = report_path(root, &report.report_id);
@@ -678,11 +930,11 @@ fn persist_report(
         return Err(ResidentM2ShadowError::Io);
     }
     drop(file);
-    match std::fs::hard_link(&temporary, &path) {
+    let status = match std::fs::hard_link(&temporary, &path) {
         Ok(()) => {
             std::fs::remove_file(&temporary).map_err(|_| ResidentM2ShadowError::Io)?;
             sync_directory(&directory)?;
-            Ok(ShadowWriteStatus::Recorded)
+            ShadowWriteStatus::Recorded
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             let _ = std::fs::remove_file(&temporary);
@@ -690,13 +942,21 @@ fn persist_report(
             if existing != *report {
                 return Err(ResidentM2ShadowError::Conflict);
             }
-            Ok(ShadowWriteStatus::AlreadyRecorded)
+            ShadowWriteStatus::AlreadyRecorded
         }
         Err(_) => {
             let _ = std::fs::remove_file(&temporary);
-            Err(ResidentM2ShadowError::Io)
+            return Err(ResidentM2ShadowError::Io);
         }
-    }
+    };
+    let persisted_bytes = load_private_bytes(&path)?;
+    persist_anchor(
+        root,
+        &ledger.ledger_id,
+        &report.report_id,
+        &sha256_hex(persisted_bytes),
+    )?;
+    Ok(status)
 }
 
 /// Evaluate one content-hashed trigger under the frozen M2 shadow policy.
@@ -745,6 +1005,10 @@ pub fn evaluate_resident_m2_shadow(options: ResidentM2ShadowOptions) -> Result<V
         serde_json::to_vec(&basis).map_err(|_| anyhow!(ResidentM2ShadowError::Corrupt))?;
     let basis_evaluation_sha256 = sha256_hex(&basis_bytes);
     let report_id = report_id(&basis.evaluation_id, &candidate)?;
+    if options.record {
+        repair_target_anchor_if_needed(&options.journal_root, &report_id)
+            .map_err(|error| anyhow!(error))?;
+    }
     let history = load_history(&options.journal_root)
         .map_err(|error| anyhow!(error))?
         .into_iter()
@@ -806,6 +1070,15 @@ pub fn review_resident_m2_shadow(options: ResidentM2ShadowReviewOptions) -> Resu
     }
 
     let mut reports = load_history(&options.journal_root).map_err(|error| anyhow!(error))?;
+    let ledger_id = if reports.is_empty() {
+        None
+    } else {
+        Some(
+            load_ledger(&options.journal_root)
+                .map_err(|error| anyhow!(error))?
+                .ledger_id,
+        )
+    };
     reports.sort_by(|left, right| {
         left.candidate
             .evaluated_at_unix_ms
@@ -948,6 +1221,7 @@ pub fn review_resident_m2_shadow(options: ResidentM2ShadowReviewOptions) -> Resu
         "schema": RESIDENT_M2_SHADOW_REVIEW_SCHEMA_V0,
         "status": status,
         "evidence": {
+            "ledger_id": ledger_id,
             "report_count": reports.len(),
             "natural_report_count": natural_reports.len(),
             "mechanics_report_count": mechanics_ids.len(),
@@ -1300,6 +1574,9 @@ mod tests {
         let packet =
             review_resident_m2_shadow(review_options(&root, Vec::new(), vec![report_id])).unwrap();
         assert_eq!(packet["status"], "collecting");
+        assert!(packet["evidence"]["ledger_id"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("shadow-ledger-")));
         assert_eq!(packet["evidence"]["report_count"], 1);
         assert_eq!(packet["evidence"]["natural_report_count"], 0);
         assert_eq!(packet["evidence"]["mechanics_report_count"], 1);
@@ -1311,6 +1588,116 @@ mod tests {
         assert_eq!(packet["boundary"]["provider_invoked"], false);
         assert_eq!(packet["boundary"]["creates_cognitive_wake"], false);
         assert_eq!(fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn recorded_report_has_separate_hash_anchor() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let report_id = record_report(options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            '0',
+            daytime(day_after(basis_at), 12),
+        ));
+        let report_bytes = fs::read(report_path(&root, &report_id)).unwrap();
+        let ledger = load_ledger(&root).unwrap();
+        let anchor = load_anchor(&anchor_path(&root, &report_id)).unwrap();
+        assert_eq!(anchor.ledger_id, ledger.ledger_id);
+        assert_eq!(anchor.report_id, report_id);
+        assert_eq!(anchor.report_sha256, sha256_hex(report_bytes));
+        assert_eq!(
+            fs::metadata(anchor_directory(&root))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(anchor_path(&root, &report_id))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(ledger_path(&root))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn review_fails_closed_when_report_or_anchor_is_missing_or_mismatched() {
+        for damage in ["report", "anchor", "anchor_hash", "ledger", "ledger_id"] {
+            let root = tempfile::tempdir().unwrap();
+            let root = root.path().canonicalize().unwrap();
+            let basis_at = useful_basis(&root, "wake-shadow-basis");
+            let report_id = record_report(options(
+                &root,
+                ResidentM2ShadowTriggerKind::Recovery,
+                '1',
+                daytime(day_after(basis_at), 12),
+            ));
+            match damage {
+                "report" => fs::remove_file(report_path(&root, &report_id)).unwrap(),
+                "anchor" => fs::remove_file(anchor_path(&root, &report_id)).unwrap(),
+                "anchor_hash" => {
+                    let path = anchor_path(&root, &report_id);
+                    let mut anchor = load_anchor(&path).unwrap();
+                    anchor.report_sha256 = "0".repeat(64);
+                    fs::write(&path, serde_json::to_vec(&anchor).unwrap()).unwrap();
+                }
+                "ledger" => fs::remove_file(ledger_path(&root)).unwrap(),
+                "ledger_id" => {
+                    let path = ledger_path(&root);
+                    let mut ledger = load_ledger(&root).unwrap();
+                    ledger.ledger_id = "shadow-ledger-00000000000000000000000000000000".into();
+                    fs::write(&path, serde_json::to_vec(&ledger).unwrap()).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let error =
+                review_resident_m2_shadow(review_options(&root, Vec::new(), vec![report_id]))
+                    .unwrap_err();
+            assert!(
+                error.to_string().contains("resident_m2_shadow_corrupt"),
+                "damage={damage}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn exact_record_replay_backfills_legacy_anchor_without_rewriting_report() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let basis_at = useful_basis(&root, "wake-shadow-basis");
+        let mut replay = options(
+            &root,
+            ResidentM2ShadowTriggerKind::Recovery,
+            '2',
+            daytime(day_after(basis_at), 12),
+        );
+        replay.record = true;
+        let first = evaluate_resident_m2_shadow(replay.clone()).unwrap();
+        let report_id = first["report"]["report_id"].as_str().unwrap().to_string();
+        let report_path = report_path(&root, &report_id);
+        let before = fs::read(&report_path).unwrap();
+        fs::remove_file(anchor_path(&root, &report_id)).unwrap();
+        fs::remove_dir(anchor_directory(&root)).unwrap();
+
+        let second = evaluate_resident_m2_shadow(replay).unwrap();
+        assert_eq!(second["status"], "already_recorded");
+        assert_eq!(fs::read(&report_path).unwrap(), before);
+        let anchor = load_anchor(&anchor_path(&root, &report_id)).unwrap();
+        assert_eq!(anchor.ledger_id, load_ledger(&root).unwrap().ledger_id);
+        assert_eq!(anchor.report_sha256, sha256_hex(before));
     }
 
     #[test]
