@@ -246,8 +246,28 @@ impl AgentRuntime for CodexRuntime {
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
+        let terminal_custody = process_custody.clone();
         tokio::spawn(async move {
-            let out = child.wait_with_output().await;
+            let out = match terminal_custody.as_ref() {
+                Some(custody) => {
+                    let custody_on_wait = custody.clone();
+                    let children_on_wait = children_bg.clone();
+                    let sid_on_wait = sid_bg.clone();
+                    crate::terminal_rusage::wait_with_output_notify_reaped(
+                        child,
+                        custody.initial_wait_observation(),
+                        move || {
+                            custody_on_wait.seal_terminal_resources();
+                            children_on_wait.remove(sid_on_wait.as_str());
+                        },
+                    )
+                    .await
+                }
+                None => child.wait_with_output().await,
+            };
+            if let Some(custody) = &terminal_custody {
+                custody.seal_terminal_resources();
+            }
             children_bg.remove(sid_bg.as_str());
             let ended_at = now_secs();
             match out {

@@ -250,6 +250,7 @@ pub async fn spawn_interactive(
                     pid as i64,
                     pid as i64,
                     process_custody
+                        .as_ref()
                         .and_then(|custody| custody.start_ticks())
                         .and_then(|ticks| i64::try_from(ticks).ok()),
                     owner_pid as i64,

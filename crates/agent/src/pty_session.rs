@@ -115,6 +115,7 @@ impl PtySession {
             Some(pid),
             crate::SpawnedProcessScope::LocalWorkloadRoot,
         );
+        let terminal_custody = process_custody.clone();
         let killer = child.clone_killer();
 
         let writer = pair
@@ -159,7 +160,13 @@ impl PtySession {
                     }
                 }
                 // Reap for the exit code now that the master is at EOF.
+                if let Some(custody) = &terminal_custody {
+                    custody.initial_wait_observation().observe_blocking();
+                }
                 let exit_code = child.wait().ok().map(|s| s.exit_code() as i32);
+                if let Some(custody) = &terminal_custody {
+                    custody.seal_terminal_resources();
+                }
                 reaped_for_thread.store(true, Ordering::SeqCst);
                 let final_output = output_for_thread
                     .lock()
@@ -192,7 +199,7 @@ impl PtySession {
 
     /// Process identity captured before the PTY reader/reaper thread started.
     pub(crate) fn process_custody(&self) -> Option<crate::SpawnedProcessCustody> {
-        self.process_custody
+        self.process_custody.clone()
     }
 
     /// Snapshot the merged output captured so far. Used for observability and
@@ -411,6 +418,13 @@ mod tests {
             Some(7),
             "shell `exit 7` should surface code 7"
         );
+        #[cfg(target_os = "linux")]
+        {
+            let resources = custody.terminal_resources();
+            assert_eq!(resources.status(), crate::TerminalResourceStatus::Complete);
+            assert_eq!(resources.spawned_attempts(), 1);
+            assert_eq!(resources.observed_attempts(), 1);
+        }
         // Keep the handle alive until after we read the exit, then drop it.
         drop(sess);
     }

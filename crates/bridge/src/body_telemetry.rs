@@ -23,6 +23,9 @@ pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
 pub const BODY_STATUS_SCHEMA_V1: &str = "agent_bridge.body_status.v1";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V1: &str = "agent_bridge.task_resource_span.v1";
+pub const TASK_RESOURCE_SPAN_SCHEMA_V2: &str = "agent_bridge.task_resource_span.v2";
+pub const TASK_TERMINAL_RESOURCES_SCHEMA_V0: &str =
+    "agent_bridge.task_terminal_resources.v0";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
 pub const BODY_SCHEDULING_REPORT_SCHEMA_V0: &str = "agent_bridge.body_scheduling_report.v0";
@@ -930,12 +933,19 @@ pub struct TaskResourceSpan {
     pub after: Option<Value>,
     pub task_process_before: Option<TaskProcessTreeSample>,
     pub task_process_after: Option<TaskProcessTreeSample>,
+    /// Whether a procfs baseline was actually attached or a post-spawn
+    /// attempt failed before a safe process scope could be established.
+    pub task_process_binding_status: Option<String>,
+    pub task_process_binding_reason: Option<String>,
     /// Whether the process baseline was captured at span start or only after
     /// the runtime had successfully spawned its child.
     pub task_process_baseline_phase: Option<String>,
     /// A post-spawn attach cannot account for the short prefix between the
     /// host-body baseline and the child becoming observable.
     pub task_process_whole_task_prefix_covered: bool,
+    /// PID-free lifetime aggregates observed immediately before the runtime's
+    /// sole child reaper ran. This is independent of procfs endpoint samples.
+    pub task_terminal_resources: Option<TaskTerminalResourceUsage>,
     #[serde(skip)]
     process_scope: Option<TaskProcessScopeBinding>,
     pub sampling_gaps: u32,
@@ -966,11 +976,36 @@ pub struct TaskResourceSpanReceipt {
     pub task_process_count_after: Option<u32>,
     pub task_process_resident_delta_bytes: Option<i64>,
     pub task_process_sampling_gaps: u32,
+    pub task_process_binding_status: Option<String>,
+    pub task_process_binding_reason: Option<String>,
     pub task_process_baseline_phase: Option<String>,
     pub task_process_whole_task_prefix_covered: bool,
     pub task_process_terminal_status: Option<String>,
     pub task_process_endpoint_semantics: Option<String>,
+    pub task_terminal_resources: Option<TaskTerminalResourceUsage>,
     pub abandonment_reason: Option<String>,
+}
+
+/// Bounded terminal accounting safe for durable receipts. The `known_*`
+/// prefix is intentional: when one child generation was missed, these values
+/// are a trustworthy subtotal rather than a fabricated session total.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskTerminalResourceUsage {
+    pub schema_version: String,
+    pub accounting_status: String,
+    pub source: String,
+    pub scope: String,
+    pub descendant_coverage: String,
+    pub workload_lifetime_covered: bool,
+    pub spawned_attempt_count: u32,
+    pub captured_attempt_count: u32,
+    pub known_user_cpu_us: Option<u64>,
+    pub known_system_cpu_us: Option<u64>,
+    pub known_peak_resident_bytes: Option<u64>,
+    pub complete_for_spawned_attempts: bool,
+    pub complete_for_workload_tree: bool,
+    pub terminal_condition: String,
+    pub peak_resident_semantics: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1009,7 +1044,7 @@ impl TaskResourceSpan {
         task_process_before: Option<TaskProcessTreeSample>,
     ) -> Self {
         Self {
-            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V1.to_string(),
+            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V2.to_string(),
             span_id,
             task_kind,
             task_ref,
@@ -1021,8 +1056,11 @@ impl TaskResourceSpan {
             after: None,
             task_process_before,
             task_process_after: None,
+            task_process_binding_status: None,
+            task_process_binding_reason: None,
             task_process_baseline_phase: None,
             task_process_whole_task_prefix_covered: false,
+            task_terminal_resources: None,
             process_scope,
             sampling_gaps: 0,
             abandonment_reason: None,
@@ -1056,6 +1094,10 @@ impl TaskResourceSpan {
             && self.before.pointer("/identity/body_instance_id")
                 == after.pointer("/identity/body_instance_id")
             && self.before.pointer("/sample/sequence") != after.pointer("/sample/sequence")
+            && self
+                .task_terminal_resources
+                .as_ref()
+                .is_none_or(|usage| usage.complete_for_workload_tree)
             && (self.process_scope.is_none()
                 || (self.task_process_whole_task_prefix_covered
                     && self
@@ -1129,25 +1171,68 @@ impl TaskResourceSpan {
                         .as_ref()
                         .map_or(0, |sample| sample.sampling_gaps),
                 ),
+            task_process_binding_status: self.task_process_binding_status.clone(),
+            task_process_binding_reason: self.task_process_binding_reason.clone(),
             task_process_baseline_phase: self.task_process_baseline_phase.clone(),
             task_process_whole_task_prefix_covered: self.task_process_whole_task_prefix_covered,
             task_process_terminal_status: self
                 .task_process_after
                 .as_ref()
                 .map(|sample| sample.status.clone()),
-            task_process_endpoint_semantics: self
-                .process_scope
-                .as_ref()
-                .map(|_| {
+            task_process_endpoint_semantics: if self.process_scope.is_some() {
+                Some(
                     if self.task_process_after.is_some() {
                         "procfs_sample_attempt_at_finish"
                     } else {
                         "not_attempted_without_body_after_observation"
                     }
                     .to_string()
-                }),
+                )
+            } else if self.task_process_binding_status.as_deref() == Some("unavailable") {
+                Some("post_spawn_baseline_attempt_failed_before_scope_binding".to_string())
+            } else {
+                None
+            },
+            task_terminal_resources: self.task_terminal_resources.clone(),
             abandonment_reason: self.abandonment_reason.clone(),
         }
+    }
+}
+
+fn terminal_resource_usage(
+    snapshot: ab_agent::TerminalResourceSnapshot,
+) -> TaskTerminalResourceUsage {
+    let accounting_status = match snapshot.status() {
+        ab_agent::TerminalResourceStatus::Pending => "pending",
+        ab_agent::TerminalResourceStatus::Complete => "complete",
+        ab_agent::TerminalResourceStatus::Partial => "partial",
+        ab_agent::TerminalResourceStatus::Unsupported => "unsupported",
+        ab_agent::TerminalResourceStatus::Unavailable => "unavailable",
+    };
+    let terminal_condition = match snapshot.status() {
+        ab_agent::TerminalResourceStatus::Pending => "child_generations_pending",
+        ab_agent::TerminalResourceStatus::Complete => "all_spawned_children_observed_before_reap",
+        ab_agent::TerminalResourceStatus::Partial => "some_spawned_children_not_observed",
+        ab_agent::TerminalResourceStatus::Unsupported => "platform_not_supported",
+        ab_agent::TerminalResourceStatus::Unavailable => "wait_observation_unavailable",
+    };
+    TaskTerminalResourceUsage {
+        schema_version: TASK_TERMINAL_RESOURCES_SCHEMA_V0.to_string(),
+        accounting_status: accounting_status.to_string(),
+        source: snapshot.source().to_string(),
+        scope: snapshot.scope().to_string(),
+        descendant_coverage: "not_proven".to_string(),
+        workload_lifetime_covered: false,
+        spawned_attempt_count: snapshot.spawned_attempts(),
+        captured_attempt_count: snapshot.observed_attempts(),
+        known_user_cpu_us: snapshot.known_user_cpu_micros(),
+        known_system_cpu_us: snapshot.known_system_cpu_micros(),
+        known_peak_resident_bytes: snapshot.known_max_rss_bytes(),
+        complete_for_spawned_attempts: snapshot.complete_for_spawned_attempts(),
+        complete_for_workload_tree: snapshot.complete_for_workload_tree(),
+        terminal_condition: terminal_condition.to_string(),
+        peak_resident_semantics:
+            "max_ru_maxrss_across_attempts_not_concurrent_tree_peak".to_string(),
     }
 }
 
@@ -1220,6 +1305,10 @@ fn snapshot_delta(before: &Value, after: &Value, pointer: &str) -> Option<i64> {
 #[derive(Debug, Default)]
 struct TaskResourceSpanTracker {
     active: BTreeMap<String, TaskResourceSpan>,
+    /// Runtime-minted, non-serializable handles. They are held only until the
+    /// corresponding span terminalizes, then projected into the PID-free
+    /// aggregate stored on the span.
+    terminal_resource_handles: BTreeMap<String, ab_agent::SpawnedProcessCustody>,
     session_spans: BTreeMap<String, String>,
     /// Terminal receipts completed by the background session observer and not
     /// yet collected by `agent_session_wait`.
@@ -1284,6 +1373,7 @@ pub fn start_task_resource_span_scoped(
         task_process_before,
     );
     if span.process_scope.is_some() {
+        span.task_process_binding_status = Some("attached".to_string());
         span.task_process_baseline_phase = Some("span_start".to_string());
         span.task_process_whole_task_prefix_covered = true;
     }
@@ -1348,9 +1438,77 @@ pub fn attach_task_resource_span_process_tree(
     }
     span.process_scope = Some(binding);
     span.task_process_before = Some(baseline);
+    span.task_process_binding_status = Some("attached".to_string());
+    span.task_process_binding_reason = None;
     span.task_process_baseline_phase = Some("post_spawn".to_string());
     span.task_process_whole_task_prefix_covered = false;
     Ok(span.clone())
+}
+
+/// Persist a normalized, PID-free reason when the runtime supplied custody
+/// but procfs could not establish a trustworthy post-spawn baseline.
+pub fn mark_task_resource_span_process_binding_unavailable(
+    span_id: &str,
+) -> std::result::Result<TaskResourceSpan, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    let span = tracker
+        .active
+        .get_mut(span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    if span.process_scope.is_some() {
+        return Err(format!(
+            "task span '{span_id}' already has an attached process scope"
+        ));
+    }
+    span.task_process_binding_status = Some("unavailable".to_string());
+    span.task_process_binding_reason =
+        Some("post_spawn_procfs_baseline_unavailable".to_string());
+    Ok(span.clone())
+}
+
+/// Attach the runtime's private terminal-accounting handle independently of
+/// procfs endpoint sampling. A child may exit too quickly for a post-spawn
+/// `/proc` baseline while its waitable rusage remains available to the sole
+/// runtime reaper.
+pub fn attach_task_resource_span_process_custody(
+    span_id: &str,
+    custody: ab_agent::SpawnedProcessCustody,
+) -> std::result::Result<TaskResourceSpan, String> {
+    if !custody.is_local_workload_root() {
+        return Err("terminal accounting custody is not a local workload root".to_string());
+    }
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    if let Some(existing) = tracker.terminal_resource_handles.get(span_id) {
+        if existing.pid() != custody.pid()
+            || existing.start_ticks() != custody.start_ticks()
+            || existing.scope() != custody.scope()
+        {
+            return Err(format!(
+                "task span '{span_id}' is already attached to another terminal accounting handle"
+            ));
+        }
+        return tracker
+            .active
+            .get(span_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown active task span '{span_id}'"));
+    }
+    let span = tracker
+        .active
+        .get_mut(span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+    let result = span.clone();
+    tracker
+        .terminal_resource_handles
+        .insert(span_id.to_string(), custody);
+    Ok(result)
 }
 
 /// Capture an in-flight checkpoint. A failed capture becomes an explicit gap;
@@ -1392,10 +1550,13 @@ fn finish_active_task_resource_span(
     tracker: &mut TaskResourceSpanTracker,
     span_id: &str,
 ) -> std::result::Result<TaskResourceSpan, String> {
-    let span = tracker
+    let mut span = tracker
         .active
         .remove(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    if let Some(custody) = tracker.terminal_resource_handles.remove(span_id) {
+        span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+    }
     tracker.session_spans.retain(|_, id| id != span_id);
     let after = live_body_snapshot();
     let reason = after
@@ -1488,11 +1649,14 @@ pub fn abandon_task_resource_span_for_session(
     let Some(span_id) = tracker.session_spans.remove(session_id) else {
         return Ok(None);
     };
-    let span = tracker
+    let mut span = tracker
         .active
         .remove(&span_id)
-        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?
-        .finish(None, Some(reason));
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    if let Some(custody) = tracker.terminal_resource_handles.remove(&span_id) {
+        span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+    }
+    let span = span.finish(None, Some(reason));
     tracker.session_spans.retain(|_, id| id != &span_id);
     cache_terminal_session_span(&mut tracker, session_id, span.clone());
     Ok(Some(span))
@@ -1528,10 +1692,13 @@ pub fn abandon_task_resource_span(
     let mut tracker = tracker
         .lock()
         .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
-    let span = tracker
+    let mut span = tracker
         .active
         .remove(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    if let Some(custody) = tracker.terminal_resource_handles.remove(span_id) {
+        span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+    }
     tracker.session_spans.retain(|_, id| id != span_id);
     Ok(span.finish(None, Some(reason)))
 }
@@ -2032,6 +2199,73 @@ mod tests {
         assert_eq!(receipt["task_process_capture_complete"], true);
         assert_eq!(receipt["task_process_resident_delta_bytes"], 20);
         assert!(!receipt.to_string().contains("7777"));
+    }
+
+    #[test]
+    fn terminal_child_rusage_is_durable_but_never_proves_the_workload_tree() {
+        let body = |sequence| {
+            json!({
+                "status":"ok", "freshness":{"status":"fresh"},
+                "coverage":{"required_ratio":1.0},
+                "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                "sample":{"sequence":sequence}
+            })
+        };
+        let mut span = TaskResourceSpan::active(
+            "terminal-rusage".into(),
+            "agent_spawn".into(),
+            None,
+            body(1),
+            None,
+            None,
+        );
+        span.after = Some(body(2));
+        span.state = TaskResourceSpanState::Closed;
+        assert!(span.has_complete_capture());
+
+        span.task_process_binding_status = Some("unavailable".into());
+        span.task_process_binding_reason =
+            Some("post_spawn_procfs_baseline_unavailable".into());
+        span.task_terminal_resources = Some(TaskTerminalResourceUsage {
+            schema_version: TASK_TERMINAL_RESOURCES_SCHEMA_V0.into(),
+            accounting_status: "complete".into(),
+            source: "linux_raw_waitid_wnowait_rusage".into(),
+            scope: "waited_child_generations".into(),
+            descendant_coverage: "not_proven".into(),
+            workload_lifetime_covered: false,
+            spawned_attempt_count: 2,
+            captured_attempt_count: 2,
+            known_user_cpu_us: Some(11),
+            known_system_cpu_us: Some(7),
+            known_peak_resident_bytes: Some(4096),
+            complete_for_spawned_attempts: true,
+            complete_for_workload_tree: false,
+            terminal_condition: "all_spawned_children_observed_before_reap".into(),
+            peak_resident_semantics:
+                "max_ru_maxrss_across_attempts_not_concurrent_tree_peak".into(),
+        });
+
+        assert!(!span.has_complete_capture());
+        let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
+        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V2);
+        assert_eq!(receipt["task_process_binding_status"], "unavailable");
+        assert_eq!(
+            receipt["task_process_binding_reason"],
+            "post_spawn_procfs_baseline_unavailable"
+        );
+        assert_eq!(
+            receipt["task_process_endpoint_semantics"],
+            "post_spawn_baseline_attempt_failed_before_scope_binding"
+        );
+        assert_eq!(
+            receipt["task_terminal_resources"]["known_user_cpu_us"],
+            11
+        );
+        assert_eq!(
+            receipt["task_terminal_resources"]["complete_for_workload_tree"],
+            false
+        );
+        assert!(!receipt.to_string().contains("pid"));
     }
 
     #[test]

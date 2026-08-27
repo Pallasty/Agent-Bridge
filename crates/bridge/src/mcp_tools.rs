@@ -17046,21 +17046,53 @@ async fn spawn_agent_with_body_span(
             if let Some(span_id) = span_id {
                 match session.process_custody() {
                     Some(custody) if custody.is_local_workload_root() => {
-                        let attach = custody
-                            .start_ticks()
-                            .ok_or_else(|| {
-                                "runtime spawn custody has no supported process birth token"
-                                    .to_string()
-                            })
-                            .and_then(|start_ticks| {
-                                crate::body_telemetry::attach_task_resource_span_process_tree(
-                                    &span_id,
-                                    custody.pid(),
-                                    start_ticks,
-                                )
-                            });
-                        match attach {
-                            Ok(span) => {
+                        let terminal_attach =
+                            crate::body_telemetry::attach_task_resource_span_process_custody(
+                                &span_id,
+                                custody.clone(),
+                            );
+                        match terminal_attach {
+                            Ok(terminal_span) => {
+                                let process_attach = custody
+                                    .start_ticks()
+                                    .ok_or_else(|| {
+                                        "runtime spawn custody has no supported process birth token"
+                                            .to_string()
+                                    })
+                                    .and_then(|start_ticks| {
+                                        crate::body_telemetry::attach_task_resource_span_process_tree(
+                                            &span_id,
+                                            custody.pid(),
+                                            start_ticks,
+                                        )
+                                    });
+                                let (span, process_binding) = match process_attach {
+                                    Ok(span) => (
+                                        span,
+                                        json!({
+                                            "status": "attached",
+                                            "scope": "local_workload_root",
+                                            "baseline_phase": "post_spawn",
+                                            "whole_task_prefix_covered": false,
+                                        }),
+                                    ),
+                                    Err(error) => {
+                                        tracing::debug!(error = %error, "agent procfs process-tree binding unavailable");
+                                        let span = crate::body_telemetry::mark_task_resource_span_process_binding_unavailable(
+                                            &span_id,
+                                        )
+                                        .unwrap_or(terminal_span);
+                                        (
+                                            span,
+                                            json!({
+                                                "status": "unavailable",
+                                                "scope": "local_workload_root",
+                                                "reason": "post_spawn_procfs_baseline_unavailable",
+                                                "whole_task_prefix_covered": false,
+                                            }),
+                                        )
+                                    }
+                                };
                                 if let Err(error) =
                                     crate::body_telemetry::bind_task_resource_span_to_session(
                                         session.id.as_str().to_string(),
@@ -17100,21 +17132,18 @@ async fn spawn_agent_with_body_span(
                                         "state": "active",
                                         "completion": "agent_session_wait",
                                         "automatic_completion": "session_terminal_observer",
-                                        "process_binding": {
-                                            "status": "attached",
-                                            "scope": "local_workload_root",
-                                            "baseline_phase": "post_spawn",
-                                            "whole_task_prefix_covered": false,
-                                        },
+                                        "process_binding": process_binding,
+                                        "terminal_accounting": span.task_terminal_resources.clone(),
                                     }));
                                 }
                             }
                             Err(error) => {
-                                tracing::debug!(error = %error, "agent process custody binding failed");
+                                tracing::debug!(error = %error, "agent terminal accounting custody binding failed");
                                 if let Ok(span) =
                                     crate::body_telemetry::abandon_task_resource_span(
                                         &span_id,
-                                        "agent_process_custody_binding_failed".to_string(),
+                                        "agent_terminal_accounting_custody_binding_failed"
+                                            .to_string(),
                                     )
                                 {
                                     if let Some(store) = &hub.store {
@@ -17126,7 +17155,7 @@ async fn spawn_agent_with_body_span(
                                         "receipt": span.receipt(),
                                         "process_binding": {
                                             "status": "unavailable",
-                                            "reason": "custody_validation_failed",
+                                            "reason": "terminal_accounting_custody_validation_failed",
                                         },
                                     }));
                                 }
@@ -17187,17 +17216,17 @@ async fn observe_agent_body_span_terminal(
         let terminal = match &hub.store {
             Some(store) => match store.load_session(&session_id).await {
                 Ok(Some(row)) => row.ended_at.is_some(),
-                Ok(None) => agent.pid_for(&session_id).is_none(),
+                Ok(None) => !agent.session_is_active(&session_id),
                 Err(error) => {
                     tracing::debug!(
                         error = %error,
                         session_id = %session_id,
                         "agent body span observer could not load session"
                     );
-                    agent.pid_for(&session_id).is_none()
+                    !agent.session_is_active(&session_id)
                 }
             },
-            None => agent.pid_for(&session_id).is_none(),
+            None => !agent.session_is_active(&session_id),
         };
         if terminal {
             match crate::body_telemetry::complete_task_resource_span_for_session(
@@ -18312,20 +18341,28 @@ fn resolve_agent_for_session(
 }
 
 fn agent_session_liveness(hub: &Hub, session: &StoredSession) -> (Option<u32>, &'static str) {
-    let pid = hub
+    let agent = hub
         .agents
         .get(&session.runtime_id)
-        .and_then(|agent| agent.pid_for(&session.id))
+        .cloned()
         .or_else(|| {
             hub.agent
                 .as_ref()
                 .filter(|agent| agent.id() == session.runtime_id)
-                .and_then(|agent| agent.pid_for(&session.id))
+                .cloned()
         });
+    let Some(agent) = agent else {
+        return (None, "untracked");
+    };
+    if !agent.session_is_active(&session.id) {
+        return (None, "untracked");
+    }
+    let pid = agent.pid_for(&session.id);
     match pid {
         Some(pid) if process_pid_exists(pid) => (Some(pid), "alive"),
         Some(pid) => (Some(pid), "dead"),
-        None => (None, "untracked"),
+        // Retry backoff is an active lifecycle with no safely signalable PID.
+        None => (None, "alive"),
     }
 }
 
@@ -32860,7 +32897,21 @@ async fn record_body_task_span_event(
                 "before_present": true,
                 "after_present": span.after.is_some(),
                 "task_process_capture_complete": receipt.task_process_capture_complete,
+                "task_process_binding_status": receipt.task_process_binding_status,
+                "task_process_binding_reason": receipt.task_process_binding_reason,
                 "task_process_terminal_status": receipt.task_process_terminal_status,
+                "task_terminal_accounting_status": receipt
+                    .task_terminal_resources
+                    .as_ref()
+                    .map(|usage| usage.accounting_status.as_str()),
+                "terminal_complete_for_spawned_attempts": receipt
+                    .task_terminal_resources
+                    .as_ref()
+                    .map(|usage| usage.complete_for_spawned_attempts),
+                "terminal_complete_for_workload_tree": receipt
+                    .task_terminal_resources
+                    .as_ref()
+                    .map(|usage| usage.complete_for_workload_tree),
                 "abandonment_reason": span.abandonment_reason,
                 "sampling_gaps": span.sampling_gaps,
             }),

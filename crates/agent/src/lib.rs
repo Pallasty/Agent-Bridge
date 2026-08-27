@@ -28,6 +28,7 @@ pub mod pty_interactive;
 pub mod pty_session;
 pub mod resident_codex;
 pub mod sandbox;
+mod terminal_rusage;
 pub mod worktree;
 
 pub use acp::AcpRuntime;
@@ -42,6 +43,7 @@ pub use resident_codex::{
     ResidentCodexExecutionReceipt, ResidentCodexInvocationContract, ResidentCodexRequest,
     ResidentCodexRun,
 };
+pub use terminal_rusage::{TerminalResourceSnapshot, TerminalResourceStatus};
 pub use worktree::{GitWorktreeManager, Worktree};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -134,7 +136,7 @@ impl AgentSession {
     /// Return the non-serializable process identity captured by a built-in
     /// runtime at the successful spawn point, when one exists.
     pub fn process_custody(&self) -> Option<SpawnedProcessCustody> {
-        self.process_custody
+        self.process_custody.clone()
     }
 }
 
@@ -149,12 +151,14 @@ pub enum SpawnedProcessScope {
     CloudLauncher,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct SpawnedProcessCustody {
     pid: u32,
     pgid: Option<u32>,
     start_ticks: Option<u64>,
     scope: SpawnedProcessScope,
+    terminal_resources: std::sync::Arc<terminal_rusage::TerminalResourceAccumulator>,
+    initial_wait_observation: terminal_rusage::TerminalWaitObservation,
 }
 
 impl SpawnedProcessCustody {
@@ -166,33 +170,71 @@ impl SpawnedProcessCustody {
         pgid: Option<u32>,
         scope: SpawnedProcessScope,
     ) -> Option<Self> {
-        (pid != 0).then(|| Self {
+        if pid == 0 {
+            return None;
+        }
+        let terminal_resources = terminal_rusage::TerminalResourceAccumulator::new();
+        let initial_wait_observation = terminal_resources.begin_generation(pid)?;
+        Some(Self {
             pid,
             pgid,
             start_ticks: crate::pty_session::proc_start_ticks(pid)
                 .and_then(|ticks| u64::try_from(ticks).ok()),
             scope,
+            terminal_resources,
+            initial_wait_observation,
         })
     }
 
-    pub fn pid(self) -> u32 {
+    pub fn pid(&self) -> u32 {
         self.pid
     }
 
-    pub fn pgid(self) -> Option<u32> {
+    pub fn pgid(&self) -> Option<u32> {
         self.pgid
     }
 
-    pub fn start_ticks(self) -> Option<u64> {
+    pub fn start_ticks(&self) -> Option<u64> {
         self.start_ticks
     }
 
-    pub fn scope(self) -> SpawnedProcessScope {
+    pub fn scope(&self) -> SpawnedProcessScope {
         self.scope
     }
 
-    pub fn is_local_workload_root(self) -> bool {
+    pub fn is_local_workload_root(&self) -> bool {
         self.scope == SpawnedProcessScope::LocalWorkloadRoot
+    }
+
+    /// Snapshot terminal resources known for all child generations spawned by
+    /// this runtime session.  The snapshot never contains process identity.
+    pub fn terminal_resources(&self) -> TerminalResourceSnapshot {
+        self.terminal_resources.snapshot()
+    }
+
+    pub(crate) fn initial_wait_observation(&self) -> terminal_rusage::TerminalWaitObservation {
+        self.initial_wait_observation.clone()
+    }
+
+    pub(crate) fn begin_process_generation(
+        &self,
+        pid: u32,
+    ) -> Option<terminal_rusage::TerminalWaitObservation> {
+        self.terminal_resources.begin_generation(pid)
+    }
+
+    pub(crate) fn seal_terminal_resources(&self) {
+        self.terminal_resources.seal();
+    }
+}
+
+impl std::fmt::Debug for SpawnedProcessCustody {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SpawnedProcessCustody")
+            .field("scope", &self.scope)
+            .field("terminal_resources", &self.terminal_resources())
+            .finish_non_exhaustive()
     }
 }
 
@@ -343,6 +385,13 @@ pub trait AgentRuntime: Send + Sync {
         None
     }
 
+    /// Whether this runtime still owns an active lifecycle for `session`.
+    /// Unlike [`Self::pid_for`], this remains true during a retry backoff where
+    /// the prior child has been reaped and no new PID is safely addressable.
+    fn session_is_active(&self, session: &SessionId) -> bool {
+        self.pid_for(session).is_some()
+    }
+
     /// Snapshot the merged live PTY output of an interactive `session`, if this
     /// runtime is tracking one. Returns `None` for non-interactive runtimes,
     /// unknown sessions, or sessions that have already exited and been finalised
@@ -403,7 +452,13 @@ mod process_custody_tests {
 
     #[test]
     fn custody_is_not_serialized_or_deserializable() {
-        let serialized = serde_json::to_value(session_with_custody()).expect("serialize session");
+        let session = session_with_custody();
+        let debug = format!("{session:?}");
+        assert!(!debug.contains("pid:"));
+        assert!(!debug.contains("pgid:"));
+        assert!(!debug.contains("start_ticks:"));
+
+        let serialized = serde_json::to_value(session).expect("serialize session");
         assert!(serialized.get("process_custody").is_none());
 
         let mut forged = serialized;
@@ -417,7 +472,7 @@ mod process_custody_tests {
             }),
         );
         let decoded: AgentSession = serde_json::from_value(forged).expect("deserialize session");
-        assert_eq!(decoded.process_custody(), None);
+        assert!(decoded.process_custody().is_none());
     }
 
     #[test]
@@ -428,14 +483,14 @@ mod process_custody_tests {
             "/tmp",
             Some("workspace".into()),
         );
-        assert_eq!(session.process_custody(), None);
+        assert!(session.process_custody().is_none());
     }
 
     #[test]
     fn zero_pid_never_produces_custody() {
-        assert_eq!(
-            SpawnedProcessCustody::from_spawn(0, None, SpawnedProcessScope::LocalWorkloadRoot),
-            None
+        assert!(
+            SpawnedProcessCustody::from_spawn(0, None, SpawnedProcessScope::LocalWorkloadRoot)
+                .is_none()
         );
     }
 

@@ -22183,6 +22183,52 @@ impl Drop for AgentSpawnFallbackEnvGuard {
     }
 }
 
+struct DelayedReturnClaudeRuntime {
+    inner: ab_agent::ClaudeCodeRuntime,
+    delay: Duration,
+}
+
+#[async_trait]
+impl ab_agent::AgentRuntime for DelayedReturnClaudeRuntime {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+
+    fn workspace_contract(&self) -> ab_agent::WorkspaceRuntimeContract {
+        self.inner.workspace_contract()
+    }
+
+    async fn spawn(&self, cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+        let session = self.inner.spawn(cfg).await?;
+        tokio::time::sleep(self.delay).await;
+        Ok(session)
+    }
+
+    async fn send_input(
+        &self,
+        session: &ab_core::SessionId,
+        text: &str,
+    ) -> ab_core::Result<()> {
+        self.inner.send_input(session, text).await
+    }
+
+    async fn kill(&self, session: &ab_core::SessionId) -> ab_core::Result<()> {
+        self.inner.kill(session).await
+    }
+
+    fn pid_for(&self, session: &ab_core::SessionId) -> Option<u32> {
+        self.inner.pid_for(session)
+    }
+
+    fn session_is_active(&self, session: &ab_core::SessionId) -> bool {
+        self.inner.session_is_active(session)
+    }
+
+    async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+        self.inner.capabilities().await
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "mutates the process-wide body telemetry feature flag"]
@@ -22231,6 +22277,18 @@ async fn one_shot_spawn_auto_binds_custody_until_session_wait() {
     assert_eq!(
         active["process_binding"]["whole_task_prefix_covered"],
         false
+    );
+    assert_eq!(
+        active["terminal_accounting"]["accounting_status"],
+        "pending"
+    );
+    assert_eq!(
+        active["terminal_accounting"]["source"],
+        "linux_raw_waitid_wnowait_rusage"
+    );
+    assert_eq!(
+        active["terminal_accounting"]["spawned_attempt_count"],
+        1
     );
     let span_id = active["span_id"].as_str().expect("span id").to_string();
     let public_spawn = serde_json::to_value(&session).expect("serialize session");
@@ -22281,6 +22339,30 @@ async fn one_shot_spawn_auto_binds_custody_until_session_wait() {
         false
     );
     assert!(terminal["receipt"]["task_process_resident_delta_bytes"].is_null());
+    let terminal_resources = &terminal["receipt"]["task_terminal_resources"];
+    assert_eq!(terminal_resources["accounting_status"], "complete");
+    assert_eq!(
+        terminal_resources["source"],
+        "linux_raw_waitid_wnowait_rusage"
+    );
+    assert_eq!(terminal_resources["scope"], "waited_child_generations");
+    assert_eq!(terminal_resources["descendant_coverage"], "not_proven");
+    assert_eq!(terminal_resources["spawned_attempt_count"], 1);
+    assert_eq!(terminal_resources["captured_attempt_count"], 1);
+    assert!(terminal_resources["known_user_cpu_us"].is_number());
+    assert!(terminal_resources["known_system_cpu_us"].is_number());
+    assert!(terminal_resources["known_peak_resident_bytes"]
+        .as_u64()
+        .is_some_and(|bytes| bytes > 0));
+    assert_eq!(
+        terminal_resources["complete_for_spawned_attempts"],
+        true
+    );
+    assert_eq!(
+        terminal_resources["complete_for_workload_tree"],
+        false
+    );
+    assert_eq!(terminal_resources["workload_lifetime_covered"], false);
     for private_key in [
         "proc_pid",
         "proc_pgid",
@@ -22315,8 +22397,108 @@ async fn one_shot_spawn_auto_binds_custody_until_session_wait() {
     );
     let facts: Value = serde_json::from_str(&event.facts).expect("body receipt facts");
     assert_eq!(facts["task_process_terminal_status"], "root_unavailable");
+    assert_eq!(
+        facts["task_terminal_resources"]["accounting_status"],
+        "complete"
+    );
+    assert_eq!(
+        facts["task_terminal_resources"]["complete_for_workload_tree"],
+        false
+    );
     assert!(!event.facts.contains("proc_pid"));
     assert!(!event.facts.contains("task_process_before"));
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "mutates the process-wide body telemetry feature flag"]
+async fn fast_exit_keeps_terminal_rusage_and_persists_procfs_binding_failure() {
+    let _env_lock = BODY_CUSTODY_DOGFOOD_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let _env = AgentSpawnFallbackEnvGuard::set("AGENT_BRIDGE_BODY_TELEMETRY", "1");
+    let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = base_hub.store.as_ref().expect("store").clone();
+    let runtime = Arc::new(DelayedReturnClaudeRuntime {
+        inner: ab_agent::ClaudeCodeRuntime::with_binary("/bin/true")
+            .with_store(store.clone()),
+        delay: Duration::from_millis(150),
+    });
+    let hub = crate::Hub::builder()
+        .store(store.clone())
+        .agent(runtime.clone())
+        .build();
+
+    let (session, body_span) = spawn_agent_with_body_span(
+        &hub,
+        runtime,
+        SpawnConfig {
+            cwd: temp_dir.display().to_string(),
+            initial_prompt: Some("fast-exit-probe".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("spawn fast-exit stand-in");
+    let active = body_span.expect("body span");
+    assert_eq!(active["state"], "active");
+    assert_eq!(active["process_binding"]["status"], "unavailable");
+    assert_eq!(
+        active["process_binding"]["reason"],
+        "post_spawn_procfs_baseline_unavailable"
+    );
+    let span_id = active["span_id"].as_str().expect("span id").to_string();
+
+    let waited = AgentSessionWaitTool::new(hub)
+        .execute(
+            json!({"id": session.id.as_str(), "timeout_secs": 10}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("wait fast-exit stand-in");
+    assert!(!waited.is_error, "wait should succeed: {waited:?}");
+    let payload = result_text_as_json(&waited);
+    let receipt = &payload["body_task_span"]["receipt"];
+    assert_eq!(receipt["task_process_binding_status"], "unavailable");
+    assert_eq!(
+        receipt["task_process_binding_reason"],
+        "post_spawn_procfs_baseline_unavailable"
+    );
+    assert_eq!(
+        receipt["task_process_endpoint_semantics"],
+        "post_spawn_baseline_attempt_failed_before_scope_binding"
+    );
+    assert!(receipt["task_process_scope"].is_null());
+    assert_eq!(
+        receipt["task_terminal_resources"]["accounting_status"],
+        "complete"
+    );
+    assert_eq!(
+        receipt["task_terminal_resources"]["captured_attempt_count"],
+        1
+    );
+    assert_eq!(
+        receipt["task_terminal_resources"]["complete_for_workload_tree"],
+        false
+    );
+
+    let events = store
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("load fast-exit event");
+    let event = events
+        .iter()
+        .find(|event| event.target.as_deref() == Some(span_id.as_str()))
+        .expect("fast-exit terminal event");
+    assert_eq!(event.verdict_status, "unknown");
+    let facts: Value = serde_json::from_str(&event.facts).expect("receipt facts");
+    assert_eq!(facts["task_process_binding_status"], "unavailable");
+    assert_eq!(
+        facts["task_terminal_resources"]["accounting_status"],
+        "complete"
+    );
+    assert!(!event.facts.contains("proc_pid"));
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[test]

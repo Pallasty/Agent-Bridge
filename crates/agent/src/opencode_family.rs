@@ -31,15 +31,63 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
+use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use crate::pty_interactive::{self, InteractiveMap};
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
 const KILO_INTERACTIVE_READY_MARKERS: &[&str] = &["Ask anything"];
+const RETRY_BACKOFF: Duration = Duration::from_secs(4);
+/// Positive 143 is a synthetic Agent-Bridge lifecycle result (128 + SIGTERM),
+/// used only when cancellation happens with no child to supply a real status.
+/// A child actually terminated by SIGTERM continues to be stored as `-15`.
+const SYNTHETIC_CANCEL_EXIT_CODE: i32 = 143;
+const SYNTHETIC_CANCEL_MESSAGE: &str =
+    "[agent-bridge] cancelled during retry backoff; synthetic exit code 143 (no child was signalable)";
+
+#[derive(Default)]
+struct OneShotLifecycle {
+    cancelled: AtomicBool,
+    retry_waiting: AtomicBool,
+    wake: Notify,
+}
+
+impl OneShotLifecycle {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        // There is one retry loop per lifecycle. `notify_one` retains a permit
+        // if cancellation races just before the loop creates `notified()`.
+        self.wake.notify_one();
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    async fn wait_retry_backoff(&self, duration: Duration) -> bool {
+        self.retry_waiting.store(true, Ordering::SeqCst);
+        if self.is_cancelled() {
+            self.retry_waiting.store(false, Ordering::SeqCst);
+            return true;
+        }
+        let cancelled = tokio::select! {
+            _ = tokio::time::sleep(duration) => self.is_cancelled(),
+            _ = self.wake.notified() => true,
+        };
+        self.retry_waiting.store(false, Ordering::SeqCst);
+        cancelled
+    }
+
+    #[cfg(test)]
+    fn is_retry_waiting(&self) -> bool {
+        self.retry_waiting.load(Ordering::SeqCst)
+    }
+}
 
 #[derive(Clone)]
 pub struct OpenCodeFamilyRuntime {
@@ -47,8 +95,14 @@ pub struct OpenCodeFamilyRuntime {
     runtime_id: &'static str,
     default_model: Option<String>,
     auto_approve_flag: &'static str,
+    retry_attempts_override: Option<u32>,
+    retry_backoff_override: Option<Duration>,
     store: Option<Arc<dyn StateStore>>,
     children: Arc<DashMap<String, u32>>,
+    /// Explicit cancellable one-shot lifecycle. It remains addressable during
+    /// retry backoff when no PID is safely signalable, so kill can cancel and
+    /// wake the retry loop without inventing a process identity.
+    active_one_shot: Arc<DashMap<String, Arc<OneShotLifecycle>>>,
     /// Launch flags for the interactive PTY entry point (the bare TUI). Host-
     /// supplied; default empty = bare `<binary>`, which starts the kilo/opencode
     /// TUI. The one-shot `run` path is unaffected.
@@ -73,8 +127,11 @@ impl OpenCodeFamilyRuntime {
             runtime_id: "opencode",
             default_model: env_nonempty("AGENT_BRIDGE_OPENCODE_MODEL"),
             auto_approve_flag: "--dangerously-skip-permissions",
+            retry_attempts_override: None,
+            retry_backoff_override: None,
             store: None,
             children: Arc::new(DashMap::new()),
+            active_one_shot: Arc::new(DashMap::new()),
             interactive_args: Vec::new(),
             interactive: Arc::new(DashMap::new()),
             // VERIFIED against the real opencode TUI (2026-06-30, opencode-ai
@@ -109,8 +166,11 @@ impl OpenCodeFamilyRuntime {
             runtime_id: "kilo",
             default_model: env_nonempty("AGENT_BRIDGE_KILO_MODEL"),
             auto_approve_flag: "--auto",
+            retry_attempts_override: None,
+            retry_backoff_override: None,
             store: None,
             children: Arc::new(DashMap::new()),
+            active_one_shot: Arc::new(DashMap::new()),
             interactive_args: Vec::new(),
             interactive: Arc::new(DashMap::new()),
             // VERIFIED against the real kilo TUI (tests/kilo_real_interactive.rs):
@@ -143,6 +203,18 @@ impl OpenCodeFamilyRuntime {
         self
     }
 
+    #[cfg(test)]
+    fn with_retry_attempts_for_test(mut self, attempts: u32) -> Self {
+        self.retry_attempts_override = Some(attempts.max(1));
+        self
+    }
+
+    #[cfg(test)]
+    fn with_retry_backoff_for_test(mut self, duration: Duration) -> Self {
+        self.retry_backoff_override = Some(duration);
+        self
+    }
+
     /// Launch flags for the interactive PTY entry point (the bare TUI). Host-
     /// supplied; default empty = bare `<binary>`. The one-shot `run` path is
     /// unaffected (it always appends `run <auto_flag> <prompt>`).
@@ -154,9 +226,17 @@ impl OpenCodeFamilyRuntime {
         self
     }
 
-    /// Number of in-flight sessions (testing / observability).
+    /// Number of currently signalable one-shot child generations. A retrying
+    /// session has no safe PID during its backoff and is intentionally absent.
     pub fn live_count(&self) -> usize {
         self.children.len()
+    }
+
+    #[cfg(test)]
+    fn retry_backoff_active(&self, session: &SessionId) -> bool {
+        self.active_one_shot
+            .get(session.as_str())
+            .is_some_and(|lifecycle| lifecycle.is_retry_waiting())
     }
 
     /// Number of live interactive PTY sessions (testing / observability).
@@ -475,6 +555,29 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+async fn finalise_synthetic_retry_cancel(
+    store: &Option<Arc<dyn StateStore>>,
+    session: &SessionId,
+    stdout: Option<String>,
+    stderr: Option<String>,
+) {
+    let stderr = match stderr.filter(|text| !text.is_empty()) {
+        Some(text) => format!("{text}\n{SYNTHETIC_CANCEL_MESSAGE}"),
+        None => SYNTHETIC_CANCEL_MESSAGE.to_string(),
+    };
+    if let Some(store) = store {
+        let _ = store
+            .finalise_session(
+                session,
+                now_secs(),
+                Some(SYNTHETIC_CANCEL_EXIT_CODE),
+                stdout,
+                Some(stderr),
+            )
+            .await;
+    }
+}
+
 #[async_trait]
 impl AgentRuntime for OpenCodeFamilyRuntime {
     fn id(&self) -> &str {
@@ -610,10 +713,15 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         // returns ProviderModelNotFoundError with an empty pool; the same call
         // usually succeeds on retry. Mirrors scripts/ab-kilo-run.sh. Default 3
         // total attempts; override with AGENT_BRIDGE_KILO_RETRIES.
-        let max_attempts = env_nonempty("AGENT_BRIDGE_KILO_RETRIES")
-            .and_then(|s| s.parse::<u32>().ok())
-            .filter(|n| *n >= 1)
+        let max_attempts = self
+            .retry_attempts_override
+            .or_else(|| {
+                env_nonempty("AGENT_BRIDGE_KILO_RETRIES")
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .filter(|n| *n >= 1)
+            })
             .unwrap_or(3);
+        let retry_backoff = self.retry_backoff_override.unwrap_or(RETRY_BACKOFF);
 
         let child = match plan.spawn() {
             Ok(child) => child,
@@ -647,6 +755,9 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
         }
+        let lifecycle = Arc::new(OneShotLifecycle::default());
+        self.active_one_shot
+            .insert(session_id.as_str().to_string(), lifecycle.clone());
         info!(
             session = %session_id,
             pid,
@@ -660,11 +771,34 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
+        let active_bg = self.active_one_shot.clone();
+        let terminal_custody = process_custody.clone();
         tokio::spawn(async move {
             let mut child = child;
+            let mut wait_observation = terminal_custody
+                .as_ref()
+                .map(|custody| custody.initial_wait_observation());
             let mut attempt: u32 = 1;
             loop {
-                let out = child.wait_with_output().await;
+                let out = match wait_observation.take() {
+                    Some(observation) => {
+                        let children_reaped = children_bg.clone();
+                        let sid_reaped = sid_bg.clone();
+                        crate::terminal_rusage::wait_with_output_notify_reaped(
+                            child,
+                            observation,
+                            move || {
+                                children_reaped.remove(sid_reaped.as_str());
+                            },
+                        )
+                        .await
+                    }
+                    None => child.wait_with_output().await,
+                };
+                // Idempotent fallback for a wait error or a PID-less child. A
+                // successful observed reap already removed the PID through the
+                // callback, before inherited descendant pipes necessarily EOF.
+                children_bg.remove(sid_bg.as_str());
                 let ended_at = now_secs();
                 match out {
                     Ok(o) => {
@@ -675,6 +809,20 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                         if attempt < max_attempts
                             && (is_provider_miss(&stdout) || is_provider_miss(&stderr))
                         {
+                            if lifecycle.is_cancelled() {
+                                if let Some(custody) = &terminal_custody {
+                                    custody.seal_terminal_resources();
+                                }
+                                active_bg.remove(sid_bg.as_str());
+                                finalise_synthetic_retry_cancel(
+                                    &store_bg,
+                                    &sid_bg,
+                                    Some(stdout),
+                                    Some(stderr),
+                                )
+                                .await;
+                                break;
+                            }
                             warn!(
                                 session = %sid_bg,
                                 runtime = %runtime_id,
@@ -682,20 +830,81 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                 max_attempts,
                                 "free-pool miss (ProviderModelNotFoundError) — retrying"
                             );
-                            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                            if lifecycle.wait_retry_backoff(retry_backoff).await
+                                || lifecycle.is_cancelled()
+                            {
+                                if let Some(custody) = &terminal_custody {
+                                    custody.seal_terminal_resources();
+                                }
+                                active_bg.remove(sid_bg.as_str());
+                                finalise_synthetic_retry_cancel(
+                                    &store_bg,
+                                    &sid_bg,
+                                    Some(stdout),
+                                    Some(stderr),
+                                )
+                                .await;
+                                info!(
+                                    session = %sid_bg,
+                                    runtime = %runtime_id,
+                                    exit = SYNTHETIC_CANCEL_EXIT_CODE,
+                                    "retry lifecycle cancelled with no signalable child"
+                                );
+                                break;
+                            }
+
+                            // The synchronous spawn below can race a cancel.
+                            // Check immediately before it, then again after a
+                            // successful spawn while the owned Child handle can
+                            // still terminate/reap the new generation safely.
+                            if lifecycle.is_cancelled() {
+                                if let Some(custody) = &terminal_custody {
+                                    custody.seal_terminal_resources();
+                                }
+                                active_bg.remove(sid_bg.as_str());
+                                finalise_synthetic_retry_cancel(
+                                    &store_bg,
+                                    &sid_bg,
+                                    Some(stdout),
+                                    Some(stderr),
+                                )
+                                .await;
+                                break;
+                            }
                             match plan.spawn() {
-                                Ok(next) => {
+                                Ok(mut next) => {
                                     let npid = next.id().unwrap_or(0);
+                                    wait_observation = terminal_custody
+                                        .as_ref()
+                                        .and_then(|custody| custody.begin_process_generation(npid));
                                     if npid != 0 {
                                         children_bg.insert(sid_bg.as_str().to_string(), npid);
+                                    }
+                                    if lifecycle.is_cancelled() {
+                                        // `start_kill` signals but never reaps.
+                                        // The next loop iteration observes the
+                                        // generation's rusage and performs the
+                                        // sole Child::wait reap as usual.
+                                        let _ = next.start_kill();
                                     }
                                     child = next;
                                     attempt += 1;
                                     continue;
                                 }
                                 Err(e) => {
-                                    children_bg.remove(sid_bg.as_str());
-                                    if let Some(store) = store_bg.clone() {
+                                    if let Some(custody) = &terminal_custody {
+                                        custody.seal_terminal_resources();
+                                    }
+                                    active_bg.remove(sid_bg.as_str());
+                                    if lifecycle.is_cancelled() {
+                                        finalise_synthetic_retry_cancel(
+                                            &store_bg,
+                                            &sid_bg,
+                                            Some(stdout),
+                                            Some(stderr),
+                                        )
+                                        .await;
+                                    } else if let Some(store) = store_bg.clone() {
                                         let _ = store
                                             .finalise_session(
                                                 &sid_bg,
@@ -710,7 +919,10 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                 }
                             }
                         }
-                        children_bg.remove(sid_bg.as_str());
+                        if let Some(custody) = &terminal_custody {
+                            custody.seal_terminal_resources();
+                        }
+                        active_bg.remove(sid_bg.as_str());
                         info!(
                             session = %sid_bg,
                             runtime = %runtime_id,
@@ -757,7 +969,10 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                         break;
                     }
                     Err(e) => {
-                        children_bg.remove(sid_bg.as_str());
+                        if let Some(custody) = &terminal_custody {
+                            custody.seal_terminal_resources();
+                        }
+                        active_bg.remove(sid_bg.as_str());
                         warn!(
                             session = %sid_bg,
                             runtime = %runtime_id,
@@ -803,13 +1018,25 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             return result;
         }
 
-        let pid = match self.children.get(session.as_str()) {
-            Some(p) => *p,
-            None => {
-                return Err(Error::NotFound(format!(
-                    "no live child for session {session} (already finished or unknown)"
-                )));
-            }
+        let lifecycle = self
+            .active_one_shot
+            .get(session.as_str())
+            .map(|entry| entry.clone())
+            .ok_or_else(|| {
+                Error::NotFound(format!(
+                    "no active one-shot lifecycle for session {session} (already finished or unknown)"
+                ))
+            })?;
+        // Cancellation is durable for the in-memory lifecycle before any
+        // signal attempt. It also wakes a PID-less retry backoff immediately.
+        lifecycle.cancel();
+        let Some(pid) = self.children.get(session.as_str()).map(|entry| *entry) else {
+            info!(
+                session = %session,
+                runtime = %self.runtime_id,
+                "retry lifecycle cancellation recorded with no signalable child"
+            );
+            return Ok(());
         };
         let status = tokio::process::Command::new("/bin/kill")
             .arg("-TERM")
@@ -834,6 +1061,12 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             return Some(pid);
         }
         self.children.get(session.as_str()).map(|kv| *kv)
+    }
+
+    fn session_is_active(&self, session: &SessionId) -> bool {
+        pty_interactive::interactive_pid(&self.interactive, session).is_some()
+            || self.children.contains_key(session.as_str())
+            || self.active_one_shot.contains_key(session.as_str())
     }
 
     /// Trait-level exposure of the live interactive PTY buffer (bare-CR TUI)
@@ -994,6 +1227,184 @@ mod tests {
             custody.start_ticks().is_some(),
             "custody must be minted while the fast-exit child is still owned and unreaped"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn retry_generations_accumulate_rusage_and_clear_reaped_pid_before_backoff() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+
+        let root = unique_temp_dir("ab-opencode-rusage-retry");
+        fs::create_dir_all(&root).expect("mkdir root");
+        let binary = root.join("fake-opencode");
+        fs::write(
+            &binary,
+            r#"#!/bin/sh
+state="$(dirname "$0")/attempts"
+attempt=0
+if [ -f "$state" ]; then attempt="$(cat "$state")"; fi
+attempt=$((attempt + 1))
+printf '%s' "$attempt" > "$state"
+if [ "$attempt" -eq 1 ]; then
+  # The waited shell exits immediately while this descendant keeps both
+  # inherited capture pipes open. PID custody must clear at reap, not EOF.
+  sleep 3 &
+  printf '%s\n' 'ProviderModelNotFoundError'
+else
+  printf '%s\n' 'completed'
+fi
+"#,
+        )
+        .expect("write fake opencode");
+        let mut permissions = fs::metadata(&binary).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&binary, permissions).expect("chmod");
+        let store = Arc::new(
+            SqliteStore::open(&root.join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let runtime = OpenCodeFamilyRuntime::opencode()
+            .with_binary(binary.display().to_string())
+            .with_retry_attempts_for_test(2)
+            .with_store(store.clone());
+        let session = runtime
+            .spawn(SpawnConfig {
+                cwd: root.display().to_string(),
+                initial_prompt: Some("retry probe".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn retry probe");
+        let custody = session.process_custody().expect("custody");
+        assert_eq!(runtime.live_count(), 1);
+
+        // The retry delay is four seconds. The reaped generation must stop
+        // being kill-addressable well before the next generation is spawned.
+        let old_pid_cleared = wait_for(2_000, 20, || runtime.live_count() == 0).await;
+        assert!(
+            old_pid_cleared,
+            "reaped generation PID must be removed before retry backoff"
+        );
+        assert!(runtime.pid_for(&session.id).is_none());
+        assert!(
+            runtime.session_is_active(&session.id),
+            "retry backoff remains active without inventing a PID"
+        );
+
+        let filter = SessionFilter {
+            runtime_id: Some("opencode".into()),
+            cwd_prefix: Some(root.display().to_string()),
+            ..SessionFilter::default()
+        };
+        let mut ended = false;
+        for _ in 0..400 {
+            let rows = store.list_sessions(&filter, 10).await.expect("list");
+            if rows.first().is_some_and(|row| row.ended_at.is_some()) {
+                ended = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(ended, "retry session should finalise");
+        let snapshot = custody.terminal_resources();
+        assert_eq!(snapshot.status(), crate::TerminalResourceStatus::Complete);
+        assert_eq!(snapshot.spawned_attempts(), 2);
+        assert_eq!(snapshot.observed_attempts(), 2);
+        assert!(snapshot.known_user_cpu_micros().is_some());
+        assert!(snapshot.known_system_cpu_micros().is_some());
+        assert!(snapshot.known_max_rss_bytes().is_some());
+        assert_eq!(runtime.live_count(), 0);
+        assert!(!runtime.session_is_active(&session.id));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn kill_during_pidless_retry_backoff_cancels_without_respawn() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+
+        let root = unique_temp_dir("ab-opencode-cancel-backoff");
+        fs::create_dir_all(&root).expect("mkdir root");
+        let binary = root.join("fake-opencode");
+        fs::write(
+            &binary,
+            r#"#!/bin/sh
+state="$(dirname "$0")/attempts"
+attempt=0
+if [ -f "$state" ]; then attempt="$(cat "$state")"; fi
+attempt=$((attempt + 1))
+printf '%s' "$attempt" > "$state"
+printf '%s\n' 'ProviderModelNotFoundError'
+"#,
+        )
+        .expect("write fake opencode");
+        let mut permissions = fs::metadata(&binary).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&binary, permissions).expect("chmod");
+        let store = Arc::new(
+            SqliteStore::open(&root.join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let runtime = OpenCodeFamilyRuntime::opencode()
+            .with_binary(binary.display().to_string())
+            .with_retry_attempts_for_test(2)
+            .with_retry_backoff_for_test(Duration::from_millis(500))
+            .with_store(store.clone());
+        let session = runtime
+            .spawn(SpawnConfig {
+                cwd: root.display().to_string(),
+                initial_prompt: Some("cancel probe".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn cancel probe");
+        let custody = session.process_custody().expect("custody");
+        let in_backoff = wait_for(2_000, 10, || runtime.retry_backoff_active(&session.id)).await;
+        assert!(in_backoff, "session should enter PID-less retry backoff");
+        assert!(runtime.pid_for(&session.id).is_none());
+
+        runtime
+            .kill(&session.id)
+            .await
+            .expect("PID-less backoff cancellation is successful");
+
+        let filter = SessionFilter {
+            runtime_id: Some("opencode".into()),
+            cwd_prefix: Some(root.display().to_string()),
+            ..SessionFilter::default()
+        };
+        let mut finalised = None;
+        for _ in 0..100 {
+            let rows = store.list_sessions(&filter, 10).await.expect("list");
+            if rows.first().is_some_and(|row| row.ended_at.is_some()) {
+                finalised = rows.into_iter().next();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let finalised = finalised.expect("cancelled retry should finalise promptly");
+        assert_eq!(finalised.exit_code, Some(SYNTHETIC_CANCEL_EXIT_CODE));
+        assert!(finalised
+            .stderr
+            .as_deref()
+            .is_some_and(|text| text.contains("synthetic exit code 143")));
+        assert!(!runtime.session_is_active(&session.id));
+        let resources = custody.terminal_resources();
+        assert_eq!(resources.status(), crate::TerminalResourceStatus::Complete);
+        assert_eq!(resources.spawned_attempts(), 1);
+        assert_eq!(resources.observed_attempts(), 1);
+
+        // Wait beyond the configured backoff: cancellation must have broken
+        // the loop, not merely made the session look terminal early.
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert_eq!(
+            fs::read_to_string(root.join("attempts")).expect("attempt count"),
+            "1"
+        );
+        assert_eq!(runtime.live_count(), 0);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

@@ -273,6 +273,7 @@ impl AgentRuntime for GeminiRuntime {
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
+        let terminal_custody = process_custody.clone();
         let timeout_secs = self.timeout_secs;
         let timeout_fired = Arc::new(AtomicBool::new(false));
         let watchdog = match (timeout_secs, pid) {
@@ -300,9 +301,32 @@ impl AgentRuntime for GeminiRuntime {
         };
         let timeout_check = timeout_fired.clone();
         tokio::spawn(async move {
-            let out = child.wait_with_output().await;
+            let out = match terminal_custody.as_ref() {
+                Some(custody) => {
+                    let custody_on_wait = custody.clone();
+                    let children_on_wait = children_bg.clone();
+                    let sid_on_wait = sid_bg.clone();
+                    let watchdog_on_wait = watchdog.as_ref().map(|handle| handle.abort_handle());
+                    crate::terminal_rusage::wait_with_output_notify_reaped(
+                        child,
+                        custody.initial_wait_observation(),
+                        move || {
+                            custody_on_wait.seal_terminal_resources();
+                            if let Some(handle) = watchdog_on_wait {
+                                handle.abort();
+                            }
+                            children_on_wait.remove(sid_on_wait.as_str());
+                        },
+                    )
+                    .await
+                }
+                None => child.wait_with_output().await,
+            };
             if let Some(h) = watchdog {
                 h.abort();
+            }
+            if let Some(custody) = &terminal_custody {
+                custody.seal_terminal_resources();
             }
             children_bg.remove(sid_bg.as_str());
             let ended_at = now_secs();

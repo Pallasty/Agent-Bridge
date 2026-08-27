@@ -488,6 +488,7 @@ impl AgentRuntime for AcpRuntime {
                 proc_pid: Some(pid as i64),
                 proc_pgid: Some(pid as i64),
                 proc_start_ticks: process_custody
+                    .as_ref()
                     .and_then(|custody| custody.start_ticks())
                     .and_then(|ticks| i64::try_from(ticks).ok()),
                 owner_pid: Some(std::process::id() as i64),
@@ -511,9 +512,23 @@ impl AgentRuntime for AcpRuntime {
         let sid_bg = session_id.clone();
         let sessions_bg = self.sessions.clone();
         let store_bg = self.store.clone();
+        let terminal_custody = process_custody.clone();
         tokio::spawn(async move {
-            let status = child.wait().await;
+            let status = match terminal_custody.as_ref() {
+                Some(custody) => {
+                    custody.initial_wait_observation().observe().await;
+                    child.wait().await
+                }
+                None => child.wait().await,
+            };
             process_group.disarm();
+            if let Some(custody) = &terminal_custody {
+                custody.seal_terminal_resources();
+            }
+            // The leader wait has completed, so its PID/PGID must stop being
+            // signalable immediately. Reader tasks retain their own output
+            // Arcs and can finish draining before the Store finalisation.
+            sessions_bg.remove(sid_bg.as_str());
             let _ = reader_task.await;
             let _ = stderr_task.await;
             let stdout = output.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -551,7 +566,6 @@ impl AgentRuntime for AcpRuntime {
                     }
                 }
             }
-            sessions_bg.remove(sid_bg.as_str());
         });
         if let Some(prompt) = cfg.initial_prompt.filter(|p| !p.is_empty()) {
             let live_bg = live.clone();

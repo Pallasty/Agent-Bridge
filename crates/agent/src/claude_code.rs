@@ -210,8 +210,28 @@ impl AgentRuntime for ClaudeCodeRuntime {
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
+        let terminal_custody = process_custody.clone();
         tokio::spawn(async move {
-            let out = child.wait_with_output().await;
+            let out = match terminal_custody.as_ref() {
+                Some(custody) => {
+                    let custody_on_wait = custody.clone();
+                    let children_on_wait = children_bg.clone();
+                    let sid_on_wait = sid_bg.clone();
+                    crate::terminal_rusage::wait_with_output_notify_reaped(
+                        child,
+                        custody.initial_wait_observation(),
+                        move || {
+                            custody_on_wait.seal_terminal_resources();
+                            children_on_wait.remove(sid_on_wait.as_str());
+                        },
+                    )
+                    .await
+                }
+                None => child.wait_with_output().await,
+            };
+            if let Some(custody) = &terminal_custody {
+                custody.seal_terminal_resources();
+            }
             children_bg.remove(sid_bg.as_str());
             let ended_at = now_secs();
             match out {
@@ -522,6 +542,79 @@ mod tests {
         );
 
         rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn one_shot_reap_clears_pid_before_inherited_pipe_eof() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let binary = root.path().join("fake-claude");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nsleep 3 &\nprintf '%s\\n' 'leader-finished'\n",
+        )
+        .expect("write fake claude");
+        let mut permissions = std::fs::metadata(&binary).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).expect("chmod");
+        let store = Arc::new(
+            SqliteStore::open(&root.path().join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let runtime =
+            ClaudeCodeRuntime::with_binary(binary.display().to_string()).with_store(store.clone());
+        let session = runtime
+            .spawn(SpawnConfig {
+                cwd: root.path().display().to_string(),
+                initial_prompt: Some("pipe inheritance probe".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn fake claude");
+        let custody = session.process_custody().expect("custody");
+        assert_eq!(runtime.live_count(), 1);
+
+        let pid_cleared = wait_for(2_000, 10, || runtime.live_count() == 0).await;
+        assert!(
+            pid_cleared,
+            "leader PID must clear at reap, before descendant pipe EOF"
+        );
+        let terminal = custody.terminal_resources();
+        assert_eq!(terminal.status(), crate::TerminalResourceStatus::Complete);
+        assert_eq!(terminal.observed_attempts(), 1);
+
+        let filter = SessionFilter {
+            runtime_id: Some("claude-code".into()),
+            cwd_prefix: Some(root.path().display().to_string()),
+            ..SessionFilter::default()
+        };
+        let draining = store.list_sessions(&filter, 10).await.expect("list");
+        assert_eq!(draining.len(), 1);
+        assert!(
+            draining[0].ended_at.is_none(),
+            "Store finalisation should still await inherited pipe EOF"
+        );
+
+        let mut finalised = None;
+        for _ in 0..250 {
+            let rows = store.list_sessions(&filter, 10).await.expect("list");
+            if rows.first().is_some_and(|row| row.ended_at.is_some()) {
+                finalised = rows.into_iter().next();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let finalised = finalised.expect("output drain should eventually finalise");
+        assert_eq!(finalised.exit_code, Some(0));
+        assert!(finalised
+            .stdout
+            .as_deref()
+            .is_some_and(|output| output.contains("leader-finished")));
+        assert_eq!(runtime.live_count(), 0);
     }
 
     #[tokio::test]
