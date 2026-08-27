@@ -57,6 +57,11 @@ pub struct PtySession {
     output: Arc<Mutex<String>>,
     /// OS pid of the child, or 0 if the platform did not report one.
     pid: u32,
+    /// Process birth identity captured synchronously while the child is still
+    /// owned and unreaped. The reader/reaper thread starts only after this
+    /// value is minted, so a fast exit cannot turn PID reuse into false
+    /// custody.
+    process_custody: Option<crate::SpawnedProcessCustody>,
     /// Set by the reader thread once `child.wait()` has reaped the child.
     /// After the reap the OS may recycle the pid/pgid, so the SIGKILL paths
     /// ([`Self::kill_group`], `Drop`) must become no-ops rather than risk
@@ -105,6 +110,11 @@ impl PtySession {
             .spawn_command(cmd)
             .map_err(|e| Error::Backend(format!("spawn {binary}: {e}")))?;
         let pid = child.process_id().unwrap_or(0);
+        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+            pid,
+            Some(pid),
+            crate::SpawnedProcessScope::LocalWorkloadRoot,
+        );
         let killer = child.clone_killer();
 
         let writer = pair
@@ -168,6 +178,7 @@ impl PtySession {
                 killer: Mutex::new(killer),
                 output,
                 pid,
+                process_custody,
                 reaped,
             },
             rx,
@@ -177,6 +188,11 @@ impl PtySession {
     /// OS pid of the child (0 if the platform did not report one).
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// Process identity captured before the PTY reader/reaper thread started.
+    pub(crate) fn process_custody(&self) -> Option<crate::SpawnedProcessCustody> {
+        self.process_custody
     }
 
     /// Snapshot the merged output captured so far. Used for observability and
@@ -376,6 +392,16 @@ mod tests {
             false,
         )
         .expect("spawn sh");
+        let custody = sess
+            .process_custody()
+            .expect("fast-exit child custody was captured before reader/reaper start");
+        assert_eq!(custody.pid(), sess.pid());
+        assert_eq!(custody.pgid(), Some(sess.pid()));
+        #[cfg(target_os = "linux")]
+        assert!(
+            custody.start_ticks().is_some(),
+            "an unreaped fast-exit child must retain its /proc birth token at capture time"
+        );
         let exit = tokio::time::timeout(Duration::from_secs(5), rx)
             .await
             .expect("exit within timeout")

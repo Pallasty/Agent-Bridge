@@ -392,6 +392,11 @@ impl AgentRuntime for AcpRuntime {
         let pid = child
             .id()
             .ok_or_else(|| Error::Backend("ACP child pid unavailable".into()))?;
+        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+            pid,
+            Some(pid),
+            crate::SpawnedProcessScope::LocalWorkloadRoot,
+        );
         let mut process_group = ProcessGroupGuard::new(pid);
         let writer = Arc::new(AsyncMutex::new(
             child
@@ -482,7 +487,9 @@ impl AgentRuntime for AcpRuntime {
                 cloud_session_link: None,
                 proc_pid: Some(pid as i64),
                 proc_pgid: Some(pid as i64),
-                proc_start_ticks: crate::pty_session::proc_start_ticks(pid),
+                proc_start_ticks: process_custody
+                    .and_then(|custody| custody.start_ticks())
+                    .and_then(|ticks| i64::try_from(ticks).ok()),
                 owner_pid: Some(std::process::id() as i64),
                 owner_start_ticks: crate::pty_session::proc_start_ticks(std::process::id()),
             };
@@ -560,6 +567,7 @@ impl AgentRuntime for AcpRuntime {
             runtime_id: self.id().into(),
             cwd: cfg.cwd,
             sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
+            process_custody,
         })
     }
 
@@ -701,6 +709,11 @@ sleep 5
             })
             .await
             .unwrap();
+        let custody = spawned.process_custody().expect("ACP spawn custody");
+        assert_eq!(custody.pid(), runtime.pid_for(&spawned.id).unwrap());
+        assert_eq!(custody.pgid(), Some(custody.pid()));
+        #[cfg(target_os = "linux")]
+        assert!(custody.start_ticks().is_some());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
             let output = runtime
@@ -748,6 +761,12 @@ sleep 5
         assert_eq!(finalised.exit_code, Some(-15));
         assert!(finalised.proc_pid.is_some_and(|pid| pid > 1));
         assert_eq!(finalised.proc_pgid, finalised.proc_pid);
+        assert_eq!(
+            finalised.proc_start_ticks,
+            custody
+                .start_ticks()
+                .and_then(|ticks| i64::try_from(ticks).ok())
+        );
         let transcript = finalised.stdout.unwrap_or_default();
         assert!(transcript.contains("follow-up from ACP"), "{transcript:?}");
         assert!(transcript.contains("tail-stderr"), "{transcript:?}");

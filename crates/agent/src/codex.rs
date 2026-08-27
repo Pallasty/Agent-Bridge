@@ -225,6 +225,11 @@ impl AgentRuntime for CodexRuntime {
             .spawn()
             .map_err(|e| Error::Backend(format!("spawn codex: {e}")))?;
         let pid = child.id().unwrap_or(0);
+        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+            pid,
+            None,
+            crate::SpawnedProcessScope::LocalWorkloadRoot,
+        );
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
         }
@@ -302,6 +307,7 @@ impl AgentRuntime for CodexRuntime {
             runtime_id: self.id().into(),
             cwd,
             sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
+            process_custody,
         })
     }
 

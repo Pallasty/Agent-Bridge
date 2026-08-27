@@ -21545,8 +21545,8 @@ async fn agent_send_input_routes_to_live_session_runtime() {
         .expect("interactive session in running list");
     assert_eq!(row["liveness"], json!("alive"));
     assert!(
-        row["pid"].as_u64().is_some(),
-        "running row should carry pid"
+        row.get("pid").is_none(),
+        "running row must not expose process custody"
     );
 
     rt.kill(&session.id).await.expect("kill interactive cat");
@@ -21693,6 +21693,43 @@ fn sandbox_attestation_parser_is_exact_and_strips_only_launcher_receipts() {
     let (output, attestation) = extract_sandbox_attestation(spoof.clone());
     assert_eq!(output, spoof);
     assert!(attestation.is_none());
+}
+
+#[test]
+fn public_agent_session_projection_excludes_process_custody() {
+    let session = ab_store::StoredSession {
+        id: ab_core::SessionId::from_raw("ses-private-custody".to_string()),
+        runtime_id: "acp".to_string(),
+        cwd: "/tmp/work".to_string(),
+        started_at: 1,
+        ended_at: None,
+        exit_code: None,
+        stdout: None,
+        stderr: None,
+        cloud_run_id: None,
+        cloud_run_state: None,
+        cloud_session_link: None,
+        proc_pid: Some(4_242),
+        proc_pgid: Some(4_242),
+        proc_start_ticks: Some(987_654),
+        owner_pid: Some(1_111),
+        owner_start_ticks: Some(123_456),
+    };
+
+    let public = public_agent_session_value(&session);
+    let encoded = public.to_string();
+    for private_key in [
+        "proc_pid",
+        "proc_pgid",
+        "proc_start_ticks",
+        "owner_pid",
+        "owner_start_ticks",
+    ] {
+        assert!(public.get(private_key).is_none(), "leaked {private_key}");
+    }
+    for private_value in ["4242", "987654", "1111", "123456"] {
+        assert!(!encoded.contains(private_value), "leaked {private_value}");
+    }
 }
 
 #[tokio::test]
@@ -21999,12 +22036,12 @@ impl ab_agent::AgentRuntime for MockRuntime {
                 self.id
             )))
         } else {
-            Ok(ab_agent::AgentSession {
-                id: ab_core::SessionId::new(),
-                runtime_id: self.id.clone(),
-                cwd: cfg.cwd,
-                sandbox_profile_requested: None,
-            })
+            Ok(ab_agent::AgentSession::new(
+                ab_core::SessionId::new(),
+                self.id.clone(),
+                cfg.cwd,
+                None,
+            ))
         }
     }
     async fn send_input(&self, _s: &ab_core::SessionId, _t: &str) -> ab_core::Result<()> {
@@ -22122,6 +22159,7 @@ fn mock(id: &str, fail: bool) -> Arc<dyn ab_agent::AgentRuntime> {
 }
 
 static AGENT_SPAWN_FALLBACK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static BODY_CUSTODY_DOGFOOD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct AgentSpawnFallbackEnvGuard {
     key: &'static str,
@@ -22143,6 +22181,142 @@ impl Drop for AgentSpawnFallbackEnvGuard {
             None => std::env::remove_var(self.key),
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "mutates the process-wide body telemetry feature flag"]
+async fn one_shot_spawn_auto_binds_custody_until_session_wait() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _env_lock = BODY_CUSTODY_DOGFOOD_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let _env = AgentSpawnFallbackEnvGuard::set("AGENT_BRIDGE_BODY_TELEMETRY", "1");
+    let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = base_hub.store.as_ref().expect("store").clone();
+    let script = temp_dir.join("custody-dogfood.sh");
+    std::fs::write(&script, "#!/bin/sh\nsleep 2\n").expect("write stand-in agent");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
+        .expect("make stand-in executable");
+
+    let runtime = Arc::new(
+        ab_agent::ClaudeCodeRuntime::with_binary("/bin/sh").with_store(store.clone()),
+    );
+    let hub = crate::Hub::builder()
+        .store(store.clone())
+        .agent(runtime.clone())
+        .build();
+    let (session, body_span) = spawn_agent_with_body_span(
+        &hub,
+        runtime,
+        SpawnConfig {
+            cwd: temp_dir.display().to_string(),
+            initial_prompt: Some(script.display().to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("spawn stand-in one-shot agent");
+
+    let active = body_span.expect("active body span");
+    assert_eq!(active["state"], "active");
+    assert_eq!(active["completion"], "agent_session_wait");
+    assert_eq!(
+        active["automatic_completion"],
+        "session_terminal_observer"
+    );
+    assert_eq!(active["process_binding"]["status"], "attached");
+    assert_eq!(active["process_binding"]["baseline_phase"], "post_spawn");
+    assert_eq!(
+        active["process_binding"]["whole_task_prefix_covered"],
+        false
+    );
+    let span_id = active["span_id"].as_str().expect("span id").to_string();
+    let public_spawn = serde_json::to_value(&session).expect("serialize session");
+    assert!(public_spawn.get("process_custody").is_none());
+
+    // Do not call wait until after the child is gone. The background observer
+    // must free the active slot and record the terminal event on its own.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let prewait_events = store
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("load pre-wait body event");
+    assert_eq!(
+        prewait_events
+            .iter()
+            .filter(|event| event.target.as_deref() == Some(span_id.as_str()))
+            .count(),
+        1,
+        "background observer should record one terminal event before wait"
+    );
+
+    let waited = AgentSessionWaitTool::new(hub)
+        .execute(
+            json!({"id": session.id.as_str(), "timeout_secs": 10}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("wait for stand-in agent");
+    assert!(!waited.is_error, "wait should succeed: {waited:?}");
+    let payload = result_text_as_json(&waited);
+    assert_eq!(payload["timed_out"], false);
+    let terminal = &payload["body_task_span"];
+    assert_eq!(terminal["state"], "closed");
+    assert_eq!(
+        terminal["receipt"]["task_process_baseline_phase"],
+        "post_spawn"
+    );
+    assert_eq!(
+        terminal["receipt"]["task_process_whole_task_prefix_covered"],
+        false
+    );
+    assert_eq!(
+        terminal["receipt"]["task_process_terminal_status"],
+        "root_unavailable"
+    );
+    assert_eq!(
+        terminal["receipt"]["task_process_capture_complete"],
+        false
+    );
+    assert!(terminal["receipt"]["task_process_resident_delta_bytes"].is_null());
+    for private_key in [
+        "proc_pid",
+        "proc_pgid",
+        "proc_start_ticks",
+        "owner_pid",
+        "owner_start_ticks",
+    ] {
+        assert!(payload["session"].get(private_key).is_none());
+    }
+
+    let events = store
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("load body event");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.target.as_deref() == Some(span_id.as_str()))
+            .count(),
+        1,
+        "wait must not duplicate the observer's terminal event"
+    );
+    let event = events
+        .iter()
+        .find(|event| event.target.as_deref() == Some(span_id.as_str()))
+        .expect("terminal body event");
+    assert_eq!(event.action, "task_span_closed");
+    assert_eq!(event.verdict_status, "unknown");
+    assert_eq!(
+        event.verdict_method,
+        "body_or_process_endpoint_incomplete"
+    );
+    let facts: Value = serde_json::from_str(&event.facts).expect("body receipt facts");
+    assert_eq!(facts["task_process_terminal_status"], "root_unavailable");
+    assert!(!event.facts.contains("proc_pid"));
+    assert!(!event.facts.contains("task_process_before"));
 }
 
 #[test]

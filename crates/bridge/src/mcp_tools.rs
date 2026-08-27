@@ -17012,16 +17012,16 @@ async fn record_body_scheduling_advice_event(
     }
 }
 
-/// Wrap agent launch with a bounded local body observation. One-shot sessions
-/// close here; interactive sessions remain active until `agent_session_wait`
-/// observes their terminal row.
+/// Wrap agent launch with a bounded local body observation. Every runtime that
+/// returns trustworthy local-workload custody remains active until the session
+/// terminal observer (or a racing `agent_session_wait`) claims its terminal
+/// row; one-shot describes the conversation shape, not process lifetime.
 async fn spawn_agent_with_body_span(
     hub: &Hub,
     agent: Arc<dyn AgentRuntime>,
     cfg: SpawnConfig,
 ) -> std::result::Result<(ab_agent::AgentSession, Option<Value>), String> {
     validate_workspace_runtime_request(agent.as_ref(), &cfg)?;
-    let interactive = cfg.interactive;
     let runtime_id = agent.id().to_string();
     let span_id = if crate::body_telemetry::body_telemetry_enabled() {
         let span_id = format!("agent-spawn-{}", uuid::Uuid::new_v4());
@@ -17044,33 +17044,121 @@ async fn spawn_agent_with_body_span(
         Ok(session) => {
             let mut body_span = None;
             if let Some(span_id) = span_id {
-                if interactive {
-                    if let Err(error) = crate::body_telemetry::bind_task_resource_span_to_session(
-                        session.id.as_str().to_string(),
-                        span_id.clone(),
-                    ) {
-                        tracing::debug!(error = %error, "agent session body span binding failed");
-                        let _ = crate::body_telemetry::abandon_task_resource_span(
-                            &span_id,
-                            "interactive_session_span_binding_failed".to_string(),
-                        );
-                    } else {
-                        body_span = Some(json!({
-                            "span_id": span_id,
-                            "state": "active",
-                            "completion": "agent_session_wait",
-                        }));
+                match session.process_custody() {
+                    Some(custody) if custody.is_local_workload_root() => {
+                        let attach = custody
+                            .start_ticks()
+                            .ok_or_else(|| {
+                                "runtime spawn custody has no supported process birth token"
+                                    .to_string()
+                            })
+                            .and_then(|start_ticks| {
+                                crate::body_telemetry::attach_task_resource_span_process_tree(
+                                    &span_id,
+                                    custody.pid(),
+                                    start_ticks,
+                                )
+                            });
+                        match attach {
+                            Ok(span) => {
+                                if let Err(error) =
+                                    crate::body_telemetry::bind_task_resource_span_to_session(
+                                        session.id.as_str().to_string(),
+                                        span_id.clone(),
+                                    )
+                                {
+                                    tracing::debug!(error = %error, "agent session body span binding failed");
+                                    if let Ok(span) =
+                                        crate::body_telemetry::abandon_task_resource_span(
+                                            &span_id,
+                                            "agent_session_span_binding_failed".to_string(),
+                                        )
+                                    {
+                                        if let Some(store) = &hub.store {
+                                            let _ = record_body_task_span_event(store, &span).await;
+                                        }
+                                        body_span = Some(json!({
+                                            "span_id": span.span_id,
+                                            "state": span.state,
+                                            "receipt": span.receipt(),
+                                        }));
+                                    }
+                                } else {
+                                    let monitor_hub = hub.clone();
+                                    let monitor_agent = agent.clone();
+                                    let monitor_session_id = session.id.clone();
+                                    tokio::spawn(async move {
+                                        observe_agent_body_span_terminal(
+                                            monitor_hub,
+                                            monitor_agent,
+                                            monitor_session_id,
+                                        )
+                                        .await;
+                                    });
+                                    body_span = Some(json!({
+                                        "span_id": span.span_id,
+                                        "state": "active",
+                                        "completion": "agent_session_wait",
+                                        "automatic_completion": "session_terminal_observer",
+                                        "process_binding": {
+                                            "status": "attached",
+                                            "scope": "local_workload_root",
+                                            "baseline_phase": "post_spawn",
+                                            "whole_task_prefix_covered": false,
+                                        },
+                                    }));
+                                }
+                            }
+                            Err(error) => {
+                                tracing::debug!(error = %error, "agent process custody binding failed");
+                                if let Ok(span) =
+                                    crate::body_telemetry::abandon_task_resource_span(
+                                        &span_id,
+                                        "agent_process_custody_binding_failed".to_string(),
+                                    )
+                                {
+                                    if let Some(store) = &hub.store {
+                                        let _ = record_body_task_span_event(store, &span).await;
+                                    }
+                                    body_span = Some(json!({
+                                        "span_id": span.span_id,
+                                        "state": span.state,
+                                        "receipt": span.receipt(),
+                                        "process_binding": {
+                                            "status": "unavailable",
+                                            "reason": "custody_validation_failed",
+                                        },
+                                    }));
+                                }
+                            }
+                        }
                     }
-                } else if let Ok(span) = crate::body_telemetry::finish_task_resource_span(&span_id)
-                {
-                    if let Some(store) = &hub.store {
-                        let _ = record_body_task_span_event(store, &span).await;
+                    custody => {
+                        if let Ok(span) = crate::body_telemetry::finish_task_resource_span(&span_id)
+                        {
+                            if let Some(store) = &hub.store {
+                                let _ = record_body_task_span_event(store, &span).await;
+                            }
+                            let scope = custody.map(|custody| match custody.scope() {
+                                ab_agent::SpawnedProcessScope::LocalWorkloadRoot => {
+                                    "local_workload_root"
+                                }
+                                ab_agent::SpawnedProcessScope::LocalTransport => "local_transport",
+                                ab_agent::SpawnedProcessScope::CloudLauncher => "cloud_launcher",
+                            });
+                            body_span = Some(json!({
+                                "span_id": span.span_id,
+                                "state": span.state,
+                                "completion": "agent_spawn",
+                                "receipt": span.receipt(),
+                                "process_binding": {
+                                    "status": "not_attached",
+                                    "scope": scope,
+                                    "reason": "no_local_workload_custody",
+                                },
+                            }));
+                        }
                     }
-                    body_span = Some(json!({
-                        "span_id": span.span_id,
-                        "state": span.state,
-                        "receipt": span.receipt(),
-                    }));
                 }
             }
             Ok((session, body_span))
@@ -17087,17 +17175,85 @@ async fn spawn_agent_with_body_span(
     }
 }
 
+const AGENT_BODY_SPAN_OBSERVER_MAX_SECS: u64 = 86_400;
+
+async fn observe_agent_body_span_terminal(
+    hub: Hub,
+    agent: Arc<dyn AgentRuntime>,
+    session_id: SessionId,
+) {
+    let deadline = Instant::now() + Duration::from_secs(AGENT_BODY_SPAN_OBSERVER_MAX_SECS);
+    loop {
+        let terminal = match &hub.store {
+            Some(store) => match store.load_session(&session_id).await {
+                Ok(Some(row)) => row.ended_at.is_some(),
+                Ok(None) => agent.pid_for(&session_id).is_none(),
+                Err(error) => {
+                    tracing::debug!(
+                        error = %error,
+                        session_id = %session_id,
+                        "agent body span observer could not load session"
+                    );
+                    agent.pid_for(&session_id).is_none()
+                }
+            },
+            None => agent.pid_for(&session_id).is_none(),
+        };
+        if terminal {
+            match crate::body_telemetry::complete_task_resource_span_for_session(
+                session_id.as_str(),
+            ) {
+                Ok(Some(span)) => {
+                    if let Some(store) = &hub.store {
+                        let _ = record_body_task_span_event(store, &span).await;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => tracing::debug!(
+                    error = %error,
+                    session_id = %session_id,
+                    "agent body span observer could not finish terminal span"
+                ),
+            }
+            return;
+        }
+        if Instant::now() >= deadline {
+            match crate::body_telemetry::abandon_task_resource_span_for_session(
+                session_id.as_str(),
+                "agent_session_observer_ttl_elapsed".to_string(),
+            ) {
+                Ok(Some(span)) => {
+                    if let Some(store) = &hub.store {
+                        let _ = record_body_task_span_event(store, &span).await;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => tracing::debug!(
+                    error = %error,
+                    session_id = %session_id,
+                    "agent body span observer could not abandon expired span"
+                ),
+            }
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 async fn finish_agent_body_span_for_session(hub: &Hub, session_id: &str) -> Option<Value> {
-    let span = match crate::body_telemetry::finish_task_resource_span_for_session(session_id) {
-        Ok(Some(span)) => span,
+    let (span, should_record_event) =
+        match crate::body_telemetry::finish_task_resource_span_for_session(session_id) {
+        Ok(Some(result)) => result,
         Ok(None) => return None,
         Err(error) => {
             tracing::debug!(error = %error, session_id, "agent session body span finish failed");
             return None;
         }
     };
-    if let Some(store) = &hub.store {
-        let _ = record_body_task_span_event(store, &span).await;
+    if should_record_event {
+        if let Some(store) = &hub.store {
+            let _ = record_body_task_span_event(store, &span).await;
+        }
     }
     Some(json!({
         "span_id": span.span_id,
@@ -17880,10 +18036,7 @@ impl McpTool for AgentSessionListTool {
                     "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
                 });
                 if running {
-                    let (pid, liveness) = agent_session_liveness(&self.hub, &s);
-                    if let Some(p) = pid {
-                        row["pid"] = json!(p);
-                    }
+                    let (_, liveness) = agent_session_liveness(&self.hub, &s);
                     row["liveness"] = json!(liveness);
                 }
                 row
@@ -18047,7 +18200,7 @@ impl McpTool for AgentSessionReconcileTool {
                 skipped_unsupported_runtime += 1;
                 continue;
             }
-            let (pid, liveness) = agent_session_liveness(&self.hub, &session);
+            let (_, liveness) = agent_session_liveness(&self.hub, &session);
             if liveness == "alive" {
                 skipped_alive += 1;
                 continue;
@@ -18058,7 +18211,6 @@ impl McpTool for AgentSessionReconcileTool {
                 "cwd": session.cwd.as_str(),
                 "started_at": session.started_at,
                 "age_secs": age_secs,
-                "pid": pid,
                 "liveness": liveness,
                 "exit_code_if_applied": -15,
             });
@@ -18196,6 +18348,34 @@ fn process_pid_exists(pid: u32) -> bool {
     }
 }
 
+/// Public session projection. Runtime custody used for orphan cleanup stays in
+/// the store and never crosses MCP, so callers cannot harvest or replay local
+/// process identities.
+fn public_agent_session_value(session: &StoredSession) -> Value {
+    let mut value = json!({
+        "id": session.id.as_str(),
+        "runtime_id": session.runtime_id,
+        "cwd": session.cwd,
+        "started_at": session.started_at,
+        "ended_at": session.ended_at,
+        "exit_code": session.exit_code,
+        "stdout": session.stdout,
+        "stderr": session.stderr,
+    });
+    if let Some(object) = value.as_object_mut() {
+        for (key, field) in [
+            ("cloud_run_id", session.cloud_run_id.as_ref()),
+            ("cloud_run_state", session.cloud_run_state.as_ref()),
+            ("cloud_session_link", session.cloud_session_link.as_ref()),
+        ] {
+            if let Some(field) = field {
+                object.insert(key.to_string(), json!(field));
+            }
+        }
+    }
+    value
+}
+
 pub struct AgentSessionGetTool {
     hub: Hub,
 }
@@ -18234,7 +18414,9 @@ impl McpTool for AgentSessionGetTool {
         };
         let row = store.load_session(&id).await?;
         Ok(ToolResult::json_text(
-            &serde_json::to_value(row).unwrap_or(Value::Null),
+            &row.as_ref()
+                .map(public_agent_session_value)
+                .unwrap_or(Value::Null),
         ))
     }
 }
@@ -18542,10 +18724,14 @@ impl McpTool for AgentSessionWaitTool {
                 }
             }
             if Instant::now() >= deadline {
+                let public_session = row
+                    .as_ref()
+                    .map(public_agent_session_value)
+                    .unwrap_or(Value::Null);
                 return Ok(ToolResult::json_text(&json!({
                     "timed_out": true,
                     "sandbox_attestation": row.as_ref().and_then(sandbox_attestation_from_session),
-                    "session": row,
+                    "session": public_session,
                 })));
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -18573,10 +18759,14 @@ impl McpTool for AgentSessionWaitTool {
                     loop {
                         if Instant::now() >= deadline {
                             let row = store.load_session(&id).await?;
+                            let public_session = row
+                                .as_ref()
+                                .map(public_agent_session_value)
+                                .unwrap_or(Value::Null);
                             return Ok(ToolResult::json_text(&json!({
                                 "timed_out": true,
                                 "sandbox_attestation": row.as_ref().and_then(sandbox_attestation_from_session),
-                                "session": row,
+                                "session": public_session,
                             })));
                         }
                         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -18600,11 +18790,15 @@ impl McpTool for AgentSessionWaitTool {
         let sandbox_attestation = final_row
             .as_ref()
             .and_then(sandbox_attestation_from_session);
+        let public_session = final_row
+            .as_ref()
+            .map(public_agent_session_value)
+            .unwrap_or(Value::Null);
         let body_span = finish_agent_body_span_for_session(&self.hub, id.as_str()).await;
         let mut response = json!({
             "timed_out": false,
             "sandbox_attestation": sandbox_attestation,
-            "session": final_row,
+            "session": public_session,
         });
         if let (Some(body_span), Some(object)) = (body_span, response.as_object_mut()) {
             object.insert("body_task_span".to_string(), body_span);
@@ -32635,6 +32829,7 @@ async fn record_body_task_span_event(
     span: &crate::body_telemetry::TaskResourceSpan,
 ) -> bool {
     let complete = span.has_complete_capture();
+    let receipt = span.receipt();
     let verdict = if complete {
         crate::semantic_event::Verdict {
             status: crate::semantic_event::VerdictStatus::Verified,
@@ -32649,10 +32844,23 @@ async fn record_body_task_span_event(
     } else {
         crate::semantic_event::Verdict {
             status: crate::semantic_event::VerdictStatus::Unknown,
-            method: "terminal_after_observation_unavailable".to_string(),
+            method: match span.state {
+                crate::body_telemetry::TaskResourceSpanState::Closed => {
+                    "body_or_process_endpoint_incomplete"
+                }
+                crate::body_telemetry::TaskResourceSpanState::Abandoned => {
+                    "terminal_after_observation_unavailable"
+                }
+                crate::body_telemetry::TaskResourceSpanState::Active => {
+                    "task_span_still_active"
+                }
+            }
+            .to_string(),
             evidence: json!({
                 "before_present": true,
-                "after_present": false,
+                "after_present": span.after.is_some(),
+                "task_process_capture_complete": receipt.task_process_capture_complete,
+                "task_process_terminal_status": receipt.task_process_terminal_status,
                 "abandonment_reason": span.abandonment_reason,
                 "sampling_gaps": span.sampling_gaps,
             }),
@@ -32662,11 +32870,12 @@ async fn record_body_task_span_event(
         ts: dispatch_now_secs(),
         actor: "mcp".to_string(),
         source: "body_telemetry".to_string(),
-        action: if complete {
-            "task_span_closed".to_string()
-        } else {
-            "task_span_abandoned".to_string()
-        },
+        action: match span.state {
+            crate::body_telemetry::TaskResourceSpanState::Active => "task_span_active",
+            crate::body_telemetry::TaskResourceSpanState::Closed => "task_span_closed",
+            crate::body_telemetry::TaskResourceSpanState::Abandoned => "task_span_abandoned",
+        }
+        .to_string(),
         target: Some(span.span_id.clone()),
         object: crate::semantic_event::SemanticObject {
             object_type: "task_resource_span".to_string(),
@@ -32681,7 +32890,7 @@ async fn record_body_task_span_event(
             expected_effect: Some("record a bounded task resource-span receipt".to_string()),
         },
         verdict,
-        facts: serde_json::to_value(span.receipt()).unwrap_or_else(|_| {
+        facts: serde_json::to_value(receipt).unwrap_or_else(|_| {
             json!({
                 "schema_version": crate::body_telemetry::TASK_RESOURCE_SPAN_SCHEMA_V0,
                 "serialization_error": true,

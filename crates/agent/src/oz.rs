@@ -229,6 +229,11 @@ impl AgentRuntime for OzAgentRuntime {
             .spawn()
             .map_err(|e| Error::Backend(format!("spawn oz: {e}")))?;
         let pid = child.id().unwrap_or(0);
+        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+            pid,
+            None,
+            crate::SpawnedProcessScope::CloudLauncher,
+        );
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
         }
@@ -365,6 +370,7 @@ impl AgentRuntime for OzAgentRuntime {
             runtime_id: self.id().into(),
             cwd,
             sandbox_profile_requested: None,
+            process_custody,
         })
     }
 
@@ -692,6 +698,23 @@ mod tests {
             .await
             .expect_err("unsupported interactive mode must fail before spawn");
         assert!(format!("{err}").contains("interactive sessions are not supported"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_oz_cli_is_classified_as_cloud_launcher_not_workload() {
+        let runtime = OzAgentRuntime::with_binary("/bin/true");
+        let session = runtime
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                initial_prompt: Some("custody probe".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn oz stand-in");
+        let custody = session.process_custody().expect("launcher custody");
+        assert_eq!(custody.scope(), crate::SpawnedProcessScope::CloudLauncher);
+        assert!(!custody.is_local_workload_root());
     }
 
     #[tokio::test]

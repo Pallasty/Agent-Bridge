@@ -930,6 +930,12 @@ pub struct TaskResourceSpan {
     pub after: Option<Value>,
     pub task_process_before: Option<TaskProcessTreeSample>,
     pub task_process_after: Option<TaskProcessTreeSample>,
+    /// Whether the process baseline was captured at span start or only after
+    /// the runtime had successfully spawned its child.
+    pub task_process_baseline_phase: Option<String>,
+    /// A post-spawn attach cannot account for the short prefix between the
+    /// host-body baseline and the child becoming observable.
+    pub task_process_whole_task_prefix_covered: bool,
     #[serde(skip)]
     process_scope: Option<TaskProcessScopeBinding>,
     pub sampling_gaps: u32,
@@ -960,6 +966,10 @@ pub struct TaskResourceSpanReceipt {
     pub task_process_count_after: Option<u32>,
     pub task_process_resident_delta_bytes: Option<i64>,
     pub task_process_sampling_gaps: u32,
+    pub task_process_baseline_phase: Option<String>,
+    pub task_process_whole_task_prefix_covered: bool,
+    pub task_process_terminal_status: Option<String>,
+    pub task_process_endpoint_semantics: Option<String>,
     pub abandonment_reason: Option<String>,
 }
 
@@ -982,7 +992,10 @@ pub struct TaskProcessTreeSample {
 
 impl TaskProcessTreeSample {
     fn is_complete(&self) -> bool {
-        self.status == "fresh" && self.process_count.is_some() && self.resident_bytes.is_some()
+        self.status == "fresh"
+            && self.process_count.is_some()
+            && self.resident_bytes.is_some()
+            && self.sampling_gaps == 0
     }
 }
 
@@ -1008,6 +1021,8 @@ impl TaskResourceSpan {
             after: None,
             task_process_before,
             task_process_after: None,
+            task_process_baseline_phase: None,
+            task_process_whole_task_prefix_covered: false,
             process_scope,
             sampling_gaps: 0,
             abandonment_reason: None,
@@ -1042,7 +1057,8 @@ impl TaskResourceSpan {
                 == after.pointer("/identity/body_instance_id")
             && self.before.pointer("/sample/sequence") != after.pointer("/sample/sequence")
             && (self.process_scope.is_none()
-                || (self
+                || (self.task_process_whole_task_prefix_covered
+                    && self
                     .task_process_before
                     .as_ref()
                     .is_some_and(TaskProcessTreeSample::is_complete)
@@ -1082,7 +1098,7 @@ impl TaskResourceSpan {
             task_process_scope: self
                 .process_scope
                 .as_ref()
-                .map(|_| "linux_same_user_process_tree".into()),
+                .map(|_| "best_effort_linux_same_user_process_tree".into()),
             task_process_capture_complete: self.process_scope.is_some()
                 && self
                     .task_process_before
@@ -1113,6 +1129,23 @@ impl TaskResourceSpan {
                         .as_ref()
                         .map_or(0, |sample| sample.sampling_gaps),
                 ),
+            task_process_baseline_phase: self.task_process_baseline_phase.clone(),
+            task_process_whole_task_prefix_covered: self.task_process_whole_task_prefix_covered,
+            task_process_terminal_status: self
+                .task_process_after
+                .as_ref()
+                .map(|sample| sample.status.clone()),
+            task_process_endpoint_semantics: self
+                .process_scope
+                .as_ref()
+                .map(|_| {
+                    if self.task_process_after.is_some() {
+                        "procfs_sample_attempt_at_finish"
+                    } else {
+                        "not_attempted_without_body_after_observation"
+                    }
+                    .to_string()
+                }),
             abandonment_reason: self.abandonment_reason.clone(),
         }
     }
@@ -1132,8 +1165,24 @@ fn bind_task_process_tree(root_pid: u32) -> Result<TaskProcessScopeBinding, Stri
     linux::bind_process_tree(root_pid)
 }
 
+#[cfg(target_os = "linux")]
+fn bind_task_process_tree_expected(
+    root_pid: u32,
+    expected_start_ticks: u64,
+) -> Result<TaskProcessScopeBinding, String> {
+    linux::bind_process_tree_expected(root_pid, expected_start_ticks)
+}
+
 #[cfg(not(target_os = "linux"))]
 fn bind_task_process_tree(_root_pid: u32) -> Result<TaskProcessScopeBinding, String> {
+    Err("process-tree task scope is only supported on Linux".into())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn bind_task_process_tree_expected(
+    _root_pid: u32,
+    _expected_start_ticks: u64,
+) -> Result<TaskProcessScopeBinding, String> {
     Err("process-tree task scope is only supported on Linux".into())
 }
 
@@ -1172,10 +1221,14 @@ fn snapshot_delta(before: &Value, after: &Value, pointer: &str) -> Option<i64> {
 struct TaskResourceSpanTracker {
     active: BTreeMap<String, TaskResourceSpan>,
     session_spans: BTreeMap<String, String>,
+    /// Terminal receipts completed by the background session observer and not
+    /// yet collected by `agent_session_wait`.
+    terminal_session_spans: BTreeMap<String, TaskResourceSpan>,
 }
 
 const TASK_SPAN_CHECKPOINT_CAP: usize = 8;
 const TASK_SPAN_ACTIVE_CAP: usize = 128;
+const TASK_SPAN_TERMINAL_CACHE_CAP: usize = 128;
 static TASK_SPANS: OnceLock<Mutex<TaskResourceSpanTracker>> = OnceLock::new();
 
 /// Start a task span from one grounded before-observation. Starting is refused
@@ -1222,7 +1275,7 @@ pub fn start_task_resource_span_scoped(
             "active task span capacity {TASK_SPAN_ACTIVE_CAP} reached"
         ));
     }
-    let span = TaskResourceSpan::active(
+    let mut span = TaskResourceSpan::active(
         span_id.clone(),
         task_kind,
         task_ref,
@@ -1230,8 +1283,74 @@ pub fn start_task_resource_span_scoped(
         process_scope,
         task_process_before,
     );
+    if span.process_scope.is_some() {
+        span.task_process_baseline_phase = Some("span_start".to_string());
+        span.task_process_whole_task_prefix_covered = true;
+    }
     tracker.active.insert(span_id, span.clone());
     Ok(span)
+}
+
+/// Attach a runtime-minted process identity to an already-active body span.
+///
+/// This is intentionally stricter than accepting a PID: the Linux procfs
+/// birth token captured at the actual spawn point must still match, and the
+/// root must belong to the bridge's effective uid. The first process sample is
+/// therefore a trustworthy post-spawn baseline, not a claim that the short
+/// pre-attach prefix was observed.
+pub fn attach_task_resource_span_process_tree(
+    span_id: &str,
+    root_pid: u32,
+    expected_start_ticks: u64,
+) -> std::result::Result<TaskResourceSpan, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    {
+        let tracker = tracker
+            .lock()
+            .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+        let span = tracker
+            .active
+            .get(span_id)
+            .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+        if let Some(existing) = &span.process_scope {
+            if existing.root_pid == root_pid && existing.root_start_ticks == expected_start_ticks {
+                return Ok(span.clone());
+            }
+            return Err(format!(
+                "task span '{span_id}' is already attached to another process identity"
+            ));
+        }
+    }
+
+    let binding = bind_task_process_tree_expected(root_pid, expected_start_ticks)?;
+    let baseline = sample_task_process_tree(&binding);
+    if !baseline.is_complete() {
+        return Err(format!(
+            "post-spawn process-tree baseline is incomplete: {}",
+            baseline.status
+        ));
+    }
+
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    let span = tracker
+        .active
+        .get_mut(span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    if let Some(existing) = &span.process_scope {
+        if existing == &binding {
+            return Ok(span.clone());
+        }
+        return Err(format!(
+            "task span '{span_id}' was concurrently attached to another process identity"
+        ));
+    }
+    span.process_scope = Some(binding);
+    span.task_process_before = Some(baseline);
+    span.task_process_baseline_phase = Some("post_spawn".to_string());
+    span.task_process_whole_task_prefix_covered = false;
+    Ok(span.clone())
 }
 
 /// Capture an in-flight checkpoint. A failed capture becomes an explicit gap;
@@ -1266,6 +1385,13 @@ pub fn finish_task_resource_span(span_id: &str) -> std::result::Result<TaskResou
     let mut tracker = tracker
         .lock()
         .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    finish_active_task_resource_span(&mut tracker, span_id)
+}
+
+fn finish_active_task_resource_span(
+    tracker: &mut TaskResourceSpanTracker,
+    span_id: &str,
+) -> std::result::Result<TaskResourceSpan, String> {
     let span = tracker
         .active
         .remove(span_id)
@@ -1278,8 +1404,9 @@ pub fn finish_task_resource_span(span_id: &str) -> std::result::Result<TaskResou
     Ok(span.finish(after, reason))
 }
 
-/// Associate an interactive agent session with an already-started body span.
-/// The session id is opaque and contains no prompt or transcript data.
+/// Associate an agent session with an already-started body span. One-shot and
+/// interactive runtimes both outlive `spawn()`, so terminalization is driven
+/// by the stored session lifecycle. The id is opaque and contains no content.
 pub fn bind_task_resource_span_to_session(
     session_id: String,
     span_id: String,
@@ -1303,18 +1430,92 @@ pub fn bind_task_resource_span_to_session(
     Ok(())
 }
 
-/// Finish the body span bound to an interactive session, if one exists.
-pub fn finish_task_resource_span_for_session(
+/// Automatically finish an agent session's active span and retain one bounded
+/// terminal receipt for a later `agent_session_wait`. Returning `Some` claims
+/// responsibility for recording the terminal event; repeated observers get
+/// `None` and cannot duplicate it.
+pub fn complete_task_resource_span_for_session(
     session_id: &str,
 ) -> std::result::Result<Option<TaskResourceSpan>, String> {
     let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
-    let span_id = {
-        let mut tracker = tracker
-            .lock()
-            .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
-        tracker.session_spans.remove(session_id)
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    if tracker.terminal_session_spans.contains_key(session_id) {
+        return Ok(None);
+    }
+    let Some(span_id) = tracker.session_spans.remove(session_id) else {
+        return Ok(None);
     };
-    span_id.map(|id| finish_task_resource_span(&id)).transpose()
+    let span = finish_active_task_resource_span(&mut tracker, &span_id)?;
+    cache_terminal_session_span(&mut tracker, session_id, span.clone());
+    Ok(Some(span))
+}
+
+fn cache_terminal_session_span(
+    tracker: &mut TaskResourceSpanTracker,
+    session_id: &str,
+    span: TaskResourceSpan,
+) {
+    if tracker.terminal_session_spans.len() >= TASK_SPAN_TERMINAL_CACHE_CAP {
+        let oldest = tracker
+            .terminal_session_spans
+            .iter()
+            .min_by_key(|(_, span)| span.ended_at_unix_ms.unwrap_or(i64::MAX))
+            .map(|(session_id, _)| session_id.clone());
+        if let Some(oldest) = oldest {
+            tracker.terminal_session_spans.remove(&oldest);
+        }
+    }
+    tracker
+        .terminal_session_spans
+        .insert(session_id.to_string(), span);
+}
+
+/// Abandon and cache a session span after the bounded observer lifetime. This
+/// frees active capacity without inventing a terminal observation.
+pub fn abandon_task_resource_span_for_session(
+    session_id: &str,
+    reason: String,
+) -> std::result::Result<Option<TaskResourceSpan>, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    if tracker.terminal_session_spans.contains_key(session_id) {
+        return Ok(None);
+    }
+    let Some(span_id) = tracker.session_spans.remove(session_id) else {
+        return Ok(None);
+    };
+    let span = tracker
+        .active
+        .remove(&span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?
+        .finish(None, Some(reason));
+    tracker.session_spans.retain(|_, id| id != &span_id);
+    cache_terminal_session_span(&mut tracker, session_id, span.clone());
+    Ok(Some(span))
+}
+
+/// Collect the terminal span bound to an agent session. The boolean is true
+/// only when this call performed the finish itself and must record the event;
+/// a cached span was already recorded by the background observer.
+pub fn finish_task_resource_span_for_session(
+    session_id: &str,
+) -> std::result::Result<Option<(TaskResourceSpan, bool)>, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    if let Some(span) = tracker.terminal_session_spans.remove(session_id) {
+        return Ok(Some((span, false)));
+    }
+    let Some(span_id) = tracker.session_spans.remove(session_id) else {
+        return Ok(None);
+    };
+    finish_active_task_resource_span(&mut tracker, &span_id)
+        .map(|span| Some((span, true)))
 }
 
 /// Explicitly abandon a task span, e.g. when a child is lost during a daemon
@@ -1770,6 +1971,7 @@ mod tests {
         );
         span.after = Some(body(2));
         span.task_process_after = Some(tree(140));
+        span.task_process_whole_task_prefix_covered = true;
         span.state = TaskResourceSpanState::Closed;
         assert!(span.has_complete_capture());
         let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
@@ -1777,5 +1979,121 @@ mod tests {
         assert_eq!(receipt["task_process_capture_complete"], true);
         assert!(!receipt.to_string().contains("4242"));
         assert!(receipt.get("task_process_before").is_none());
+    }
+
+    #[test]
+    fn post_spawn_baseline_never_claims_whole_task_even_with_fresh_endpoints() {
+        let body = |sequence| {
+            json!({
+                "status":"ok", "freshness":{"status":"fresh"},
+                "coverage":{"required_ratio":1.0},
+                "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                "sample":{"sequence":sequence}
+            })
+        };
+        let mut span = TaskResourceSpan::active(
+            "post-spawn".into(),
+            "agent_spawn".into(),
+            None,
+            body(1),
+            Some(TaskProcessScopeBinding {
+                root_pid: 7_777,
+                root_start_ticks: 123,
+                owner_uid: 1_000,
+            }),
+            Some(TaskProcessTreeSample {
+                scope: "same_user_process_tree".into(),
+                status: "fresh".into(),
+                process_count: Some(1),
+                resident_bytes: Some(100),
+                sampling_gaps: 0,
+                source: "test".into(),
+            }),
+        );
+        span.task_process_baseline_phase = Some("post_spawn".into());
+        span.task_process_whole_task_prefix_covered = false;
+        span.after = Some(body(2));
+        span.task_process_after = Some(TaskProcessTreeSample {
+            scope: "same_user_process_tree".into(),
+            status: "fresh".into(),
+            process_count: Some(1),
+            resident_bytes: Some(120),
+            sampling_gaps: 0,
+            source: "test".into(),
+        });
+        span.state = TaskResourceSpanState::Closed;
+
+        assert!(!span.has_complete_capture());
+        let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
+        assert_eq!(receipt["state"], "closed");
+        assert_eq!(receipt["task_process_baseline_phase"], "post_spawn");
+        assert_eq!(receipt["task_process_whole_task_prefix_covered"], false);
+        assert_eq!(receipt["task_process_terminal_status"], "fresh");
+        assert_eq!(receipt["task_process_capture_complete"], true);
+        assert_eq!(receipt["task_process_resident_delta_bytes"], 20);
+        assert!(!receipt.to_string().contains("7777"));
+    }
+
+    #[test]
+    fn abandoned_process_span_does_not_claim_a_terminal_procfs_attempt() {
+        let mut span = TaskResourceSpan::active(
+            "abandoned-process".into(),
+            "test".into(),
+            None,
+            json!({}),
+            Some(TaskProcessScopeBinding {
+                root_pid: 7_778,
+                root_start_ticks: 124,
+                owner_uid: 1_000,
+            }),
+            None,
+        );
+        span = span.finish(None, Some("observer_ttl_elapsed".into()));
+
+        let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
+        assert_eq!(
+            receipt["task_process_endpoint_semantics"],
+            "not_attempted_without_body_after_observation"
+        );
+        assert!(receipt["task_process_terminal_status"].is_null());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_tree_expected_birth_token_fails_closed_on_mismatch() {
+        let pid = std::process::id();
+        let binding = linux::bind_process_tree(pid).expect("bind current process");
+        linux::bind_process_tree_expected(pid, binding.root_start_ticks)
+            .expect("matching birth token");
+        let mismatch = binding.root_start_ticks.wrapping_add(1);
+        let error = linux::bind_process_tree_expected(pid, mismatch)
+            .expect_err("mismatched birth token must fail closed");
+        assert!(error.contains("birth token mismatch"));
+    }
+
+    #[test]
+    fn terminal_session_span_cache_is_bounded_and_evicts_oldest() {
+        let mut tracker = TaskResourceSpanTracker::default();
+        for index in 0..=TASK_SPAN_TERMINAL_CACHE_CAP {
+            let mut span = TaskResourceSpan::active(
+                format!("span-{index}"),
+                "test".into(),
+                None,
+                json!({}),
+                None,
+                None,
+            );
+            span.state = TaskResourceSpanState::Closed;
+            span.ended_at_unix_ms = Some(index as i64);
+            cache_terminal_session_span(&mut tracker, &format!("session-{index}"), span);
+        }
+        assert_eq!(
+            tracker.terminal_session_spans.len(),
+            TASK_SPAN_TERMINAL_CACHE_CAP
+        );
+        assert!(!tracker.terminal_session_spans.contains_key("session-0"));
+        assert!(tracker
+            .terminal_session_spans
+            .contains_key(&format!("session-{TASK_SPAN_TERMINAL_CACHE_CAP}")));
     }
 }

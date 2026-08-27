@@ -102,6 +102,98 @@ pub struct AgentSession {
     /// exit before the underlying executor starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_profile_requested: Option<String>,
+    /// Runtime-internal identity captured at the actual spawn point. It is
+    /// deliberately omitted from public session serialization; bridge layers
+    /// may use it to bind read-only process accounting without guessing a PID.
+    #[serde(skip)]
+    process_custody: Option<SpawnedProcessCustody>,
+}
+
+impl AgentSession {
+    /// Construct a session descriptor without process custody.
+    ///
+    /// Runtime implementations outside this crate can implement
+    /// [`AgentRuntime`] without gaining a way to mint a trusted local-process
+    /// identity. Built-in runtimes attach custody only at their actual spawn
+    /// point.
+    pub fn new(
+        id: SessionId,
+        runtime_id: impl Into<String>,
+        cwd: impl Into<String>,
+        sandbox_profile_requested: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            runtime_id: runtime_id.into(),
+            cwd: cwd.into(),
+            sandbox_profile_requested,
+            process_custody: None,
+        }
+    }
+
+    /// Return the non-serializable process identity captured by a built-in
+    /// runtime at the successful spawn point, when one exists.
+    pub fn process_custody(&self) -> Option<SpawnedProcessCustody> {
+        self.process_custody
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnedProcessScope {
+    /// The local child (possibly a sandbox launcher) is the root of the agent
+    /// workload whose descendants belong to this node's task body.
+    LocalWorkloadRoot,
+    /// The child is only a local transport for work executing on another node.
+    LocalTransport,
+    /// The child only submits or observes a cloud run.
+    CloudLauncher,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnedProcessCustody {
+    pid: u32,
+    pgid: Option<u32>,
+    start_ticks: Option<u64>,
+    scope: SpawnedProcessScope,
+}
+
+impl SpawnedProcessCustody {
+    /// Construct from the PID returned by the successful spawn itself. On
+    /// Linux, absence of a start token remains explicit and later binding must
+    /// fail closed rather than trusting PID alone.
+    pub(crate) fn from_spawn(
+        pid: u32,
+        pgid: Option<u32>,
+        scope: SpawnedProcessScope,
+    ) -> Option<Self> {
+        (pid != 0).then(|| Self {
+            pid,
+            pgid,
+            start_ticks: crate::pty_session::proc_start_ticks(pid)
+                .and_then(|ticks| u64::try_from(ticks).ok()),
+            scope,
+        })
+    }
+
+    pub fn pid(self) -> u32 {
+        self.pid
+    }
+
+    pub fn pgid(self) -> Option<u32> {
+        self.pgid
+    }
+
+    pub fn start_ticks(self) -> Option<u64> {
+        self.start_ticks
+    }
+
+    pub fn scope(self) -> SpawnedProcessScope {
+        self.scope
+    }
+
+    pub fn is_local_workload_root(self) -> bool {
+        self.scope == SpawnedProcessScope::LocalWorkloadRoot
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -286,5 +378,93 @@ mod workspace_contract_tests {
         assert_eq!(contract.workspace_sandbox, CapabilitySupport::Supported);
         assert_eq!(contract.remote_sandbox, CapabilitySupport::Unsupported);
         assert_eq!(contract.network_isolation, CapabilitySupport::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod process_custody_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn session_with_custody() -> AgentSession {
+        let mut session = AgentSession::new(
+            SessionId::from_raw("ses-custody-test"),
+            "test-runtime",
+            "/tmp",
+            None,
+        );
+        session.process_custody = SpawnedProcessCustody::from_spawn(
+            std::process::id(),
+            Some(std::process::id()),
+            SpawnedProcessScope::LocalWorkloadRoot,
+        );
+        session
+    }
+
+    #[test]
+    fn custody_is_not_serialized_or_deserializable() {
+        let serialized = serde_json::to_value(session_with_custody()).expect("serialize session");
+        assert!(serialized.get("process_custody").is_none());
+
+        let mut forged = serialized;
+        forged.as_object_mut().expect("session object").insert(
+            "process_custody".into(),
+            json!({
+                "pid": std::process::id(),
+                "pgid": std::process::id(),
+                "start_ticks": 1,
+                "scope": "LocalWorkloadRoot"
+            }),
+        );
+        let decoded: AgentSession = serde_json::from_value(forged).expect("deserialize session");
+        assert_eq!(decoded.process_custody(), None);
+    }
+
+    #[test]
+    fn public_constructor_cannot_claim_process_custody() {
+        let session = AgentSession::new(
+            SessionId::from_raw("ses-no-custody"),
+            "external-runtime",
+            "/tmp",
+            Some("workspace".into()),
+        );
+        assert_eq!(session.process_custody(), None);
+    }
+
+    #[test]
+    fn zero_pid_never_produces_custody() {
+        assert_eq!(
+            SpawnedProcessCustody::from_spawn(0, None, SpawnedProcessScope::LocalWorkloadRoot),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawned_child_custody_captures_pid_and_birth_token() {
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 5"])
+            .spawn()
+            .expect("spawn child");
+        let pid = child.id();
+        let custody = SpawnedProcessCustody::from_spawn(
+            pid,
+            Some(pid),
+            SpawnedProcessScope::LocalWorkloadRoot,
+        )
+        .expect("non-zero child pid");
+
+        assert_eq!(custody.pid(), pid);
+        assert_eq!(custody.pgid(), Some(pid));
+        assert_eq!(custody.scope(), SpawnedProcessScope::LocalWorkloadRoot);
+        assert!(custody.is_local_workload_root());
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            custody.start_ticks(),
+            crate::pty_session::proc_start_ticks(pid).map(|ticks| ticks as u64)
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }

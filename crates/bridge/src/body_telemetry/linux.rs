@@ -62,8 +62,8 @@ fn proc_identity(pid: u32) -> Option<ProcIdentity> {
 }
 
 pub(super) fn bind_process_tree(root_pid: u32) -> Result<TaskProcessScopeBinding, String> {
-    if root_pid == 0 {
-        return Err("process-tree root_pid must be non-zero".into());
+    if root_pid <= 1 || root_pid > libc::pid_t::MAX as u32 {
+        return Err("process-tree root_pid must be a non-system pid representable by pid_t".into());
     }
     let identity = proc_identity(root_pid)
         .ok_or_else(|| format!("process-tree root pid {root_pid} is unavailable"))?;
@@ -77,6 +77,22 @@ pub(super) fn bind_process_tree(root_pid: u32) -> Result<TaskProcessScopeBinding
         root_start_ticks: identity.start_ticks,
         owner_uid: identity.owner_uid,
     })
+}
+
+pub(super) fn bind_process_tree_expected(
+    root_pid: u32,
+    expected_start_ticks: u64,
+) -> Result<TaskProcessScopeBinding, String> {
+    if expected_start_ticks == 0 {
+        return Err("process-tree root birth token must be non-zero".into());
+    }
+    let binding = bind_process_tree(root_pid)?;
+    if binding.root_start_ticks != expected_start_ticks {
+        return Err(format!(
+            "process-tree root birth token mismatch for pid {root_pid}"
+        ));
+    }
+    Ok(binding)
 }
 
 pub(super) fn sample_process_tree(binding: &TaskProcessScopeBinding) -> TaskProcessTreeSample {
@@ -782,8 +798,11 @@ mod tests {
     }
 
     #[test]
-    fn process_tree_rejects_zero_pid() {
+    fn process_tree_rejects_unsafe_pid_and_birth_token_values() {
         assert!(bind_process_tree(0).is_err());
+        assert!(bind_process_tree(1).is_err());
+        assert!(bind_process_tree(u32::MAX).is_err());
+        assert!(bind_process_tree_expected(std::process::id(), 0).is_err());
     }
 
     fn read_memory_bytes_from(content: &str) -> Option<(u64, u64)> {

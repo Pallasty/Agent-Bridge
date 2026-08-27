@@ -232,6 +232,7 @@ pub async fn spawn_interactive(
     )?;
     let session = Arc::new(session);
     let pid = session.pid();
+    let process_custody = session.process_custody();
     interactive.insert(session_id.as_str().to_string(), session.clone());
     info!(session = %session_id, runtime = %runtime_id, pid, cwd = %cwd, sandboxed = launch.sandboxed, "interactive (PTY) session started");
 
@@ -248,7 +249,9 @@ pub async fn spawn_interactive(
                     &session_id,
                     pid as i64,
                     pid as i64,
-                    crate::pty_session::proc_start_ticks(pid),
+                    process_custody
+                        .and_then(|custody| custody.start_ticks())
+                        .and_then(|ticks| i64::try_from(ticks).ok()),
                     owner_pid as i64,
                     crate::pty_session::proc_start_ticks(owner_pid),
                 )
@@ -314,6 +317,7 @@ pub async fn spawn_interactive(
         runtime_id: runtime_id.into(),
         cwd,
         sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
+        process_custody,
     })
 }
 

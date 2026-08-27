@@ -382,6 +382,14 @@ impl SpawnPlan {
     }
 }
 
+fn process_scope_for_plan(plan: &SpawnPlan) -> crate::SpawnedProcessScope {
+    if plan.remote {
+        crate::SpawnedProcessScope::LocalTransport
+    } else {
+        crate::SpawnedProcessScope::LocalWorkloadRoot
+    }
+}
+
 fn resolve_kilo_binary_from(home: &Path, path_env: &str, env_override: Option<String>) -> String {
     if let Some(binary) = env_override {
         return binary;
@@ -478,7 +486,14 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
+        let remote = is_remote_node(cfg.node.as_deref());
         if cfg.interactive {
+            if remote {
+                return Err(Error::InvalidArgument(format!(
+                    "{}: remote interactive sessions are not implemented; refusing to run the requested remote session locally",
+                    self.runtime_id
+                )));
+            }
             return self.spawn_interactive(cfg).await;
         }
 
@@ -490,7 +505,6 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             )));
         }
         let model = cfg.model.clone().or_else(|| self.default_model.clone());
-        let remote = is_remote_node(cfg.node.as_deref());
         let sandbox_profile_requested = (crate::sandbox::effective_mode(&cfg.env)?
             == crate::sandbox::AgentSandboxMode::Workspace)
             .then(|| "workspace".to_string());
@@ -628,6 +642,8 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             }
         };
         let pid = child.id().unwrap_or(0);
+        let process_scope = process_scope_for_plan(&plan);
+        let process_custody = crate::SpawnedProcessCustody::from_spawn(pid, None, process_scope);
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
         }
@@ -770,6 +786,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             runtime_id: self.runtime_id.into(),
             cwd,
             sandbox_profile_requested,
+            process_custody,
         })
     }
 
@@ -908,6 +925,75 @@ mod tests {
         assert!(!is_remote_node(Some("LOCALHOST")));
         assert!(is_remote_node(Some("100.93.4.56")));
         assert!(is_remote_node(Some("aio2")));
+    }
+
+    #[test]
+    fn custody_scope_distinguishes_local_workload_from_remote_transport() {
+        let mut plan = SpawnPlan {
+            runtime_id: "kilo",
+            remote: false,
+            ssh_dest: String::new(),
+            ssh_key: None,
+            remote_cmd: String::new(),
+            binary: "/bin/true".into(),
+            auto_flag: "--auto",
+            model: None,
+            prompt: "test".into(),
+            cwd: "/tmp".into(),
+            env: HashMap::new(),
+        };
+        assert_eq!(
+            process_scope_for_plan(&plan),
+            crate::SpawnedProcessScope::LocalWorkloadRoot
+        );
+
+        plan.remote = true;
+        assert_eq!(
+            process_scope_for_plan(&plan),
+            crate::SpawnedProcessScope::LocalTransport
+        );
+    }
+
+    #[tokio::test]
+    async fn remote_interactive_request_fails_before_local_spawn() {
+        let runtime = OpenCodeFamilyRuntime::kilo().with_binary("/definitely/missing/kilo");
+        let error = runtime
+            .spawn(SpawnConfig {
+                cwd: "/remote/work".into(),
+                node: Some("remote-node".into()),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect_err("remote interactive must fail closed");
+        let message = error.to_string();
+        assert!(message.contains("remote interactive sessions are not implemented"));
+        assert!(!message.contains("No such file"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_spawn_returns_workload_root_custody() {
+        let runtime = OpenCodeFamilyRuntime::kilo().with_binary("/bin/true");
+        let session = runtime
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                initial_prompt: Some("custody probe".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn local stand-in");
+        let custody = session.process_custody().expect("spawn custody");
+        assert_eq!(
+            custody.scope(),
+            crate::SpawnedProcessScope::LocalWorkloadRoot
+        );
+        assert!(custody.is_local_workload_root());
+        #[cfg(target_os = "linux")]
+        assert!(
+            custody.start_ticks().is_some(),
+            "custody must be minted while the fast-exit child is still owned and unreaped"
+        );
     }
 
     #[test]
