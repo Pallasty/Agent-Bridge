@@ -5,9 +5,9 @@
 //! metrics unavailable until an equally reliable, documented source exists.
 
 use super::{
-    BodySample, BodySensorAdapter, BodyTelemetryCore, MemoryArchitecture, MemorySample,
-    MetricStatus, MetricValue, PressurePolicy, ProcessFootprint, StorageSample,
-    BODY_STATUS_SCHEMA_V0,
+    BodySample, BodySensorAdapter, BodyTelemetryCore, KernelPressureSample, MemoryArchitecture,
+    MemorySample, MetricStatus, MetricValue, PressurePolicy, ProcessFootprint, StorageMountSample,
+    StorageSample, BODY_STATUS_SCHEMA_V0,
 };
 use serde_json::{json, Value};
 use std::ffi::CString;
@@ -272,13 +272,24 @@ impl BodySensorAdapter for MacOsBodySensor {
                 architecture,
                 total_bytes,
                 available_bytes,
+                swap_total_bytes: unknown_bytes("no_darwin_swap_adapter_v1"),
+                swap_available_bytes: unknown_bytes("no_darwin_swap_adapter_v1"),
                 vram_total_bytes,
             },
             storage: StorageSample {
-                total_bytes: storage_total,
-                available_bytes: storage_available,
+                total_bytes: storage_total.clone(),
+                available_bytes: storage_available.clone(),
+                critical_mounts: vec![StorageMountSample {
+                    path: "/".into(),
+                    total_bytes: storage_total,
+                    available_bytes: storage_available,
+                }],
             },
-            process: ProcessFootprint { resident_bytes },
+            process: ProcessFootprint {
+                resident_bytes,
+                scope: "collector_process".into(),
+            },
+            kernel_pressure: KernelPressureSample::unsupported("no_darwin_psi_adapter_v1"),
         }
     }
 }

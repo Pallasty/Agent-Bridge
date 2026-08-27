@@ -8,7 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
+use std::fs;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,6 +20,7 @@ pub mod linux;
 pub mod macos;
 
 pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
+pub const BODY_STATUS_SCHEMA_V1: &str = "agent_bridge.body_status.v1";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
@@ -102,6 +105,10 @@ pub struct MemorySample {
     pub architecture: MemoryArchitecture,
     pub total_bytes: MetricValue<u64>,
     pub available_bytes: MetricValue<u64>,
+    /// Swap is a separate pressure surface. A healthy `MemAvailable` value does
+    /// not make heavy swap use disappear.
+    pub swap_total_bytes: MetricValue<u64>,
+    pub swap_available_bytes: MetricValue<u64>,
     /// Separate VRAM is intentionally `not_applicable` on unified-memory hosts.
     pub vram_total_bytes: MetricValue<u64>,
 }
@@ -109,6 +116,19 @@ pub struct MemorySample {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageSample {
+    /// Compatibility projection for the root mount.
+    pub total_bytes: MetricValue<u64>,
+    pub available_bytes: MetricValue<u64>,
+    /// Explicit critical mounts. Pressure uses the most constrained live mount
+    /// rather than silently treating `/` as the whole body.
+    #[serde(default)]
+    pub critical_mounts: Vec<StorageMountSample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StorageMountSample {
+    pub path: String,
     pub total_bytes: MetricValue<u64>,
     pub available_bytes: MetricValue<u64>,
 }
@@ -116,7 +136,46 @@ pub struct StorageSample {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessFootprint {
+    /// `collector_process` in v1. Task/cgroup footprint must use a separately
+    /// bound process-tree adapter and must never be inferred from this value.
+    pub scope: String,
     pub resident_bytes: MetricValue<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KernelPressureSample {
+    pub cpu_some_avg10_ratio: MetricValue<f64>,
+    pub memory_some_avg10_ratio: MetricValue<f64>,
+    pub memory_full_avg10_ratio: MetricValue<f64>,
+    pub io_some_avg10_ratio: MetricValue<f64>,
+    pub io_full_avg10_ratio: MetricValue<f64>,
+}
+
+impl KernelPressureSample {
+    pub fn unsupported(source: &str) -> Self {
+        Self {
+            cpu_some_avg10_ratio: MetricValue::unavailable(MetricStatus::Unsupported, source),
+            memory_some_avg10_ratio: MetricValue::unavailable(MetricStatus::Unsupported, source),
+            memory_full_avg10_ratio: MetricValue::unavailable(MetricStatus::Unsupported, source),
+            io_some_avg10_ratio: MetricValue::unavailable(MetricStatus::Unsupported, source),
+            io_full_avg10_ratio: MetricValue::unavailable(MetricStatus::Unsupported, source),
+        }
+    }
+
+    fn peak_live_ratio(&self) -> Option<f64> {
+        [
+            self.cpu_some_avg10_ratio.live().copied(),
+            self.memory_some_avg10_ratio.live().copied(),
+            self.memory_full_avg10_ratio.live().copied(),
+            self.io_some_avg10_ratio.live().copied(),
+            self.io_full_avg10_ratio.live().copied(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(finite_ratio)
+        .max_by(f64::total_cmp)
+    }
 }
 
 /// One point-in-time host observation. `observed_at_mono_ms` is monotonic and
@@ -127,11 +186,12 @@ pub struct BodySample {
     pub sequence: u64,
     pub observed_at_mono_ms: u64,
     pub observed_at_unix_ms: i64,
-    /// Normalized [0, 1] process-wide CPU pressure, never a raw counter.
+    /// Normalized [0, 1] host-aggregate CPU utilization, never a raw counter.
     pub cpu_utilization_ratio: MetricValue<f64>,
     pub memory: MemorySample,
     pub storage: StorageSample,
     pub process: ProcessFootprint,
+    pub kernel_pressure: KernelPressureSample,
 }
 
 impl BodySample {
@@ -145,16 +205,157 @@ impl BodySample {
                 architecture: MemoryArchitecture::Unknown,
                 total_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
                 available_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
+                swap_total_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
+                swap_available_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
                 vram_total_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
             },
             storage: StorageSample {
                 total_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
                 available_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
+                critical_mounts: Vec::new(),
             },
             process: ProcessFootprint {
+                scope: "collector_process".into(),
                 resident_bytes: unavailable_metric(MetricStatus::Unknown, "no_sample"),
             },
+            kernel_pressure: KernelPressureSample::unsupported("no_sample"),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BodyIdentity {
+    pub body_id: String,
+    pub body_instance_id: String,
+    pub platform: String,
+    pub identity_source: String,
+    pub lifecycle_epoch_source: String,
+}
+
+fn short_digest(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{:x}", digest)[..16].to_string()
+}
+
+/// Stable body identity plus a boot/process lifecycle epoch. Raw machine-id and
+/// boot-id values never leave the adapter.
+pub fn local_body_identity() -> BodyIdentity {
+    static IDENTITY: OnceLock<BodyIdentity> = OnceLock::new();
+    IDENTITY
+        .get_or_init(|| {
+            let platform = std::env::consts::OS.to_string();
+            let configured = std::env::var("AGENT_BRIDGE_BODY_ID")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            #[cfg(target_os = "linux")]
+            let machine_seed = fs::read_to_string("/etc/machine-id")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            #[cfg(not(target_os = "linux"))]
+            let machine_seed: Option<String> = None;
+            let (body_id, identity_source) = if let Some(configured) = configured {
+                (configured, "configured_env".to_string())
+            } else if let Some(seed) = machine_seed {
+                (
+                    format!("body-{platform}-{}", short_digest(&seed)),
+                    "hashed_machine_id".to_string(),
+                )
+            } else {
+                (
+                    format!("body-{platform}-local"),
+                    "platform_local_fallback".to_string(),
+                )
+            };
+            #[cfg(target_os = "linux")]
+            let lifecycle_seed = fs::read_to_string("/proc/sys/kernel/random/boot_id")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            #[cfg(not(target_os = "linux"))]
+            let lifecycle_seed: Option<String> = None;
+            let (epoch, lifecycle_epoch_source) = lifecycle_seed.map_or_else(
+                || {
+                    (
+                        format!("process-{}", process_monotonic_epoch()),
+                        "process_epoch".to_string(),
+                    )
+                },
+                |seed| (short_digest(&seed), "hashed_boot_id".to_string()),
+            );
+            BodyIdentity {
+                body_instance_id: format!("{body_id}@{epoch}"),
+                body_id,
+                platform,
+                identity_source,
+                lifecycle_epoch_source,
+            }
+        })
+        .clone()
+}
+
+fn process_monotonic_epoch() -> u64 {
+    static EPOCH: OnceLock<u64> = OnceLock::new();
+    *EPOCH.get_or_init(|| {
+        let unix_nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let seed = format!("{}:{unix_nanos}", std::process::id());
+        let digest = Sha256::digest(seed.as_bytes());
+        u64::from_be_bytes(
+            digest[..8]
+                .try_into()
+                .expect("sha256 prefix is eight bytes"),
+        )
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SampleCoverage {
+    pub status: &'static str,
+    pub required_fresh: usize,
+    pub required_total: usize,
+    pub required_ratio: f64,
+    pub unknown_required: Vec<&'static str>,
+}
+
+pub fn sample_coverage(sample: &BodySample) -> SampleCoverage {
+    let required = [
+        ("host_cpu", sample.cpu_utilization_ratio.status),
+        ("memory_total", sample.memory.total_bytes.status),
+        ("memory_available", sample.memory.available_bytes.status),
+        ("root_storage_total", sample.storage.total_bytes.status),
+        (
+            "root_storage_available",
+            sample.storage.available_bytes.status,
+        ),
+        ("collector_rss", sample.process.resident_bytes.status),
+    ];
+    let required_fresh = required
+        .iter()
+        .filter(|(_, status)| status.is_live())
+        .count();
+    let unknown_required = required
+        .iter()
+        .filter(|(_, status)| !status.is_live())
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>();
+    let status = if required_fresh == required.len() {
+        "ok"
+    } else if required_fresh == 0 {
+        "unavailable"
+    } else {
+        "partial"
+    };
+    SampleCoverage {
+        status,
+        required_fresh,
+        required_total: required.len(),
+        required_ratio: required_fresh as f64 / required.len() as f64,
+        unknown_required,
     }
 }
 
@@ -302,11 +503,13 @@ impl PressurePolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PressureInput {
     pub cpu_ratio: Option<f64>,
     pub memory_ratio: Option<f64>,
+    pub swap_ratio: Option<f64>,
     pub storage_ratio: Option<f64>,
+    pub kernel_stall_ratio: Option<f64>,
 }
 
 impl PressureInput {
@@ -314,16 +517,36 @@ impl PressureInput {
         Self {
             cpu_ratio: sample.cpu_utilization_ratio.live().copied(),
             memory_ratio: used_ratio(&sample.memory.total_bytes, &sample.memory.available_bytes),
-            storage_ratio: used_ratio(&sample.storage.total_bytes, &sample.storage.available_bytes),
+            swap_ratio: used_ratio(
+                &sample.memory.swap_total_bytes,
+                &sample.memory.swap_available_bytes,
+            ),
+            storage_ratio: sample
+                .storage
+                .critical_mounts
+                .iter()
+                .filter_map(|mount| used_ratio(&mount.total_bytes, &mount.available_bytes))
+                .chain(used_ratio(
+                    &sample.storage.total_bytes,
+                    &sample.storage.available_bytes,
+                ))
+                .max_by(f64::total_cmp),
+            kernel_stall_ratio: sample.kernel_pressure.peak_live_ratio(),
         }
     }
 
     fn peak(self) -> Option<f64> {
-        [self.cpu_ratio, self.memory_ratio, self.storage_ratio]
-            .into_iter()
-            .flatten()
-            .filter_map(finite_ratio)
-            .max_by(f64::total_cmp)
+        [
+            self.cpu_ratio,
+            self.memory_ratio,
+            self.swap_ratio,
+            self.storage_ratio,
+            self.kernel_stall_ratio,
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(finite_ratio)
+        .max_by(f64::total_cmp)
     }
 }
 
@@ -475,7 +698,8 @@ pub fn body_status_snapshot() -> Value {
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         json!({
-            "schema_version": BODY_STATUS_SCHEMA_V0,
+            "schema_version": BODY_STATUS_SCHEMA_V1,
+            "compatible_with": [BODY_STATUS_SCHEMA_V0],
             "mode": "shadow_only",
             "enabled": true,
             "status": "unsupported",
@@ -667,7 +891,8 @@ pub(crate) fn body_scheduling_advice_from_status(
 
 fn disabled_body_status() -> Value {
     json!({
-        "schema_version": BODY_STATUS_SCHEMA_V0,
+        "schema_version": BODY_STATUS_SCHEMA_V1,
+        "compatible_with": [BODY_STATUS_SCHEMA_V0],
         "mode": "shadow_only",
         "enabled": false,
         "status": "disabled",
@@ -758,7 +983,16 @@ impl TaskResourceSpan {
     }
 
     pub fn has_complete_capture(&self) -> bool {
-        self.state == TaskResourceSpanState::Closed && self.after.is_some()
+        let Some(after) = self.after.as_ref() else {
+            return false;
+        };
+        self.state == TaskResourceSpanState::Closed
+            && snapshot_is_verified(&self.before)
+            && snapshot_is_verified(after)
+            && self.before.pointer("/identity/body_id") == after.pointer("/identity/body_id")
+            && self.before.pointer("/identity/body_instance_id")
+                == after.pointer("/identity/body_instance_id")
+            && self.before.pointer("/sample/sequence") != after.pointer("/sample/sequence")
     }
 
     /// Produce the only form of a span that may enter durable event history.
@@ -814,6 +1048,7 @@ struct TaskResourceSpanTracker {
 }
 
 const TASK_SPAN_CHECKPOINT_CAP: usize = 8;
+const TASK_SPAN_ACTIVE_CAP: usize = 128;
 static TASK_SPANS: OnceLock<Mutex<TaskResourceSpanTracker>> = OnceLock::new();
 
 /// Start a task span from one grounded before-observation. Starting is refused
@@ -834,6 +1069,11 @@ pub fn start_task_resource_span(
         .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
     if tracker.active.contains_key(&span_id) {
         return Err(format!("task span '{span_id}' is already active"));
+    }
+    if tracker.active.len() >= TASK_SPAN_ACTIVE_CAP {
+        return Err(format!(
+            "active task span capacity {TASK_SPAN_ACTIVE_CAP} reached"
+        ));
     }
     let span = TaskResourceSpan::active(span_id.clone(), task_kind, task_ref, before);
     tracker.active.insert(span_id, span.clone());
@@ -876,6 +1116,7 @@ pub fn finish_task_resource_span(span_id: &str) -> std::result::Result<TaskResou
         .active
         .remove(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    tracker.session_spans.retain(|_, id| id != span_id);
     let after = live_body_snapshot();
     let reason = after
         .is_none()
@@ -895,6 +1136,14 @@ pub fn bind_task_resource_span_to_session(
         .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
     if !tracker.active.contains_key(&span_id) {
         return Err(format!("unknown active task span '{span_id}'"));
+    }
+    if let Some(existing) = tracker.session_spans.get(&session_id) {
+        if existing != &span_id {
+            return Err(format!(
+                "session '{session_id}' is already bound to another task span"
+            ));
+        }
+        return Ok(());
     }
     tracker.session_spans.insert(session_id, span_id);
     Ok(())
@@ -934,7 +1183,26 @@ pub fn abandon_task_resource_span(
 
 fn live_body_snapshot() -> Option<Value> {
     let snapshot = body_status_snapshot();
-    (snapshot.get("status").and_then(Value::as_str) == Some("ok")).then_some(snapshot)
+    (matches!(
+        snapshot.get("status").and_then(Value::as_str),
+        Some("ok" | "partial")
+    ) && snapshot
+        .pointer("/freshness/status")
+        .and_then(Value::as_str)
+        == Some("fresh"))
+    .then_some(snapshot)
+}
+
+fn snapshot_is_verified(snapshot: &Value) -> bool {
+    snapshot.get("status").and_then(Value::as_str) == Some("ok")
+        && snapshot
+            .pointer("/freshness/status")
+            .and_then(Value::as_str)
+            == Some("fresh")
+        && snapshot
+            .pointer("/coverage/required_ratio")
+            .and_then(Value::as_f64)
+            == Some(1.0)
 }
 
 fn unix_now_ms() -> i64 {
@@ -979,6 +1247,8 @@ mod tests {
                 architecture: MemoryArchitecture::Unified,
                 total_bytes: bytes_metric(Some(100)),
                 available_bytes: bytes_metric(memory_free),
+                swap_total_bytes: bytes_metric(Some(0)),
+                swap_available_bytes: bytes_metric(Some(0)),
                 vram_total_bytes: MetricValue::unavailable(
                     MetricStatus::NotApplicable,
                     "unified_memory",
@@ -987,10 +1257,17 @@ mod tests {
             storage: StorageSample {
                 total_bytes: bytes_metric(Some(100)),
                 available_bytes: bytes_metric(Some(80)),
+                critical_mounts: vec![StorageMountSample {
+                    path: "/".to_string(),
+                    total_bytes: bytes_metric(Some(100)),
+                    available_bytes: bytes_metric(Some(80)),
+                }],
             },
             process: ProcessFootprint {
                 resident_bytes: bytes_metric(Some(10)),
+                scope: "collector_process".to_string(),
             },
+            kernel_pressure: KernelPressureSample::unsupported("fake"),
         }
     }
 
@@ -1042,7 +1319,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.10),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::Nominal
         );
@@ -1050,7 +1328,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.90),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::Nominal
         );
@@ -1058,7 +1337,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.90),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::High
         );
@@ -1067,7 +1347,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.82),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::High
         );
@@ -1076,7 +1357,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.70),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::High
         );
@@ -1084,7 +1366,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.70),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::High
         );
@@ -1092,7 +1375,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(0.70),
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::Elevated
         );
@@ -1105,7 +1389,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: Some(f64::NAN),
                 memory_ratio: Some(-0.1),
-                storage_ratio: Some(1.1)
+                storage_ratio: Some(1.1),
+                ..PressureInput::default()
             }),
             PressureLevel::Unknown
         );
@@ -1113,7 +1398,8 @@ mod tests {
             reducer.update(PressureInput {
                 cpu_ratio: None,
                 memory_ratio: None,
-                storage_ratio: None
+                storage_ratio: None,
+                ..PressureInput::default()
             }),
             PressureLevel::Unknown
         );
@@ -1129,6 +1415,43 @@ mod tests {
             PressureReducer::new(PressurePolicy::default()).update(input),
             PressureLevel::Nominal
         );
+    }
+
+    #[test]
+    fn coverage_never_calls_an_all_unknown_sample_ok() {
+        let coverage = sample_coverage(&BodySample::unknown(1, 1, 1));
+        assert_eq!(coverage.status, "unavailable");
+        assert_eq!(coverage.required_ratio, 0.0);
+    }
+
+    #[test]
+    fn verified_span_requires_fresh_full_distinct_samples_from_one_body_epoch() {
+        let snapshot = |sequence| {
+            json!({
+                "status": "ok",
+                "freshness": {"status":"fresh"},
+                "coverage": {"required_ratio":1.0},
+                "identity": {"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                "sample": {"sequence":sequence}
+            })
+        };
+        let reused = TaskResourceSpan::active("a".into(), "test".into(), None, snapshot(1))
+            .finish(Some(snapshot(1)), None);
+        assert!(!reused.has_complete_capture());
+        let distinct = TaskResourceSpan::active("b".into(), "test".into(), None, snapshot(1))
+            .finish(Some(snapshot(2)), None);
+        assert!(distinct.has_complete_capture());
+        let partial = TaskResourceSpan::active("c".into(), "test".into(), None, snapshot(1))
+            .finish(
+                Some(json!({
+                    "status":"partial", "freshness":{"status":"fresh"},
+                    "coverage":{"required_ratio":0.8},
+                    "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                    "sample":{"sequence":2}
+                })),
+                None,
+            );
+        assert!(!partial.has_complete_capture());
     }
 
     #[test]
@@ -1157,7 +1480,7 @@ mod tests {
     #[test]
     fn disabled_projection_has_no_live_sample() {
         let value = disabled_body_status();
-        assert_eq!(value["schema_version"], BODY_STATUS_SCHEMA_V0);
+        assert_eq!(value["schema_version"], BODY_STATUS_SCHEMA_V1);
         assert_eq!(value["status"], "disabled");
         assert_eq!(value["enabled"], false);
         assert!(value.get("sample").is_none());

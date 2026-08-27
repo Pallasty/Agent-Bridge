@@ -388,34 +388,44 @@ pub fn project_embodiment_snapshot(
     source_event_limit: usize,
 ) -> Value {
     let mut projection = project_embodiment_events(events);
-    let status = body_status
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let observed_at_unix_ms = body_status
-        .pointer("/sample/observed_at_unix_ms")
-        .and_then(Value::as_i64);
-    let body_id = "body-mac";
-    let online = status == "ok";
-
     projection["schema"] = Value::String(EMBODIMENT_SNAPSHOT_SCHEMA_V0.to_string());
-    projection["body"] = json!({
-        "body_id": body_id,
-        "kind": "mac",
-        "label": "current mac",
-        "authority_scope": "local",
-        "online": online,
-        "read_only": true,
-    });
-    projection["observations"] = json!([{
-        "schema": "agent_bridge.observation.v0",
-        "body_id": body_id,
-        "source": "body_status",
-        "observed_at_unix_ms": observed_at_unix_ms,
-        "freshness": if online { "on_demand" } else { "unavailable" },
-        "confidence": if online { 1.0 } else { 0.0 },
-        "payload": body_status,
-    }]);
+    let now_unix_ms = body_status
+        .pointer("/freshness/received_at_unix_ms")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            body_status
+                .pointer("/sample/observed_at_unix_ms")
+                .and_then(Value::as_u64)
+        })
+        .unwrap_or_default();
+    let max_age_ms = body_status
+        .pointer("/collector/sample_ttl_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(5_000);
+    match crate::body_observation::assemble_body_world(body_status, 1, now_unix_ms, max_age_ms) {
+        Ok(world) => {
+            projection["bodies"] =
+                serde_json::to_value(&world.bodies).unwrap_or_else(|_| json!([]));
+            projection["observations"] =
+                serde_json::to_value(&world.observations).unwrap_or_else(|_| json!([]));
+            projection["observed_world"] = serde_json::to_value(&world).unwrap_or(Value::Null);
+            if let Some(body) = world.bodies.first() {
+                projection["shadow_attention"] =
+                    crate::body_observation::attend_body(&world, &body.body_id)
+                        .ok()
+                        .and_then(|decision| serde_json::to_value(decision).ok())
+                        .unwrap_or(Value::Null);
+            }
+            projection["body_observation_error"] = Value::Null;
+        }
+        Err(error) => {
+            projection["bodies"] = json!([]);
+            projection["observations"] = json!([]);
+            projection["observed_world"] = Value::Null;
+            projection["shadow_attention"] = Value::Null;
+            projection["body_observation_error"] = Value::String(error);
+        }
+    }
     let open_intents = project_open_intents(events);
     projection["open_intents"] = Value::Array(open_intents.clone());
     projection["open_intents_complete"] = Value::Bool(false);
@@ -468,15 +478,22 @@ mod tests {
         let snapshot = project_embodiment_snapshot(
             &[],
             &json!({
+                "enabled": true,
                 "status": "ok",
+                "identity": {"body_id":"body-linux-test", "body_instance_id":"boot-test"},
+                "organ_id": "interoception",
+                "collector": {"adapter_id":"test", "sample_ttl_ms":5000},
+                "freshness": {"status":"fresh", "age_ms":0, "received_at_unix_ms":1234},
+                "coverage": {"required_ratio":1.0},
                 "sample": { "observed_at_unix_ms": 1234 }
             }),
             500,
         );
         assert_eq!(snapshot["schema"], EMBODIMENT_SNAPSHOT_SCHEMA_V0);
-        assert_eq!(snapshot["body"]["body_id"], "body-mac");
-        assert_eq!(snapshot["body"]["online"], true);
+        assert_eq!(snapshot["bodies"][0]["body_id"], "body-linux-test");
+        assert_eq!(snapshot["bodies"][0]["online"], true);
         assert_eq!(snapshot["observations"][0]["source"], "body_status");
+        assert_eq!(snapshot["shadow_attention"]["mode"], "shadow");
         assert_eq!(snapshot["open_intents"].as_array().unwrap().len(), 0);
         assert_eq!(snapshot["open_intents_complete"], false);
         assert_eq!(snapshot["resumes_actions"], false);
@@ -581,7 +598,9 @@ mod tests {
         assert_eq!(audit["counts"]["missing_intent_link"], 0);
         assert_eq!(audit["counts"]["matched_prior_intent"], 1);
         let snapshot = project_embodiment_snapshot(&events, &json!({"status":"ok"}), 500);
-        assert!(snapshot["open_intents"].as_array().is_some_and(Vec::is_empty));
+        assert!(snapshot["open_intents"]
+            .as_array()
+            .is_some_and(Vec::is_empty));
     }
 
     #[test]
