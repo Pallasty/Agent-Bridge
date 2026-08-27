@@ -22,6 +22,7 @@ pub mod macos;
 pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
 pub const BODY_STATUS_SCHEMA_V1: &str = "agent_bridge.body_status.v1";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
+pub const TASK_RESOURCE_SPAN_SCHEMA_V1: &str = "agent_bridge.task_resource_span.v1";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
 pub const BODY_SCHEDULING_REPORT_SCHEMA_V0: &str = "agent_bridge.body_scheduling_report.v0";
@@ -927,6 +928,10 @@ pub struct TaskResourceSpan {
     pub before: Value,
     pub checkpoints: Vec<Value>,
     pub after: Option<Value>,
+    pub task_process_before: Option<TaskProcessTreeSample>,
+    pub task_process_after: Option<TaskProcessTreeSample>,
+    #[serde(skip)]
+    process_scope: Option<TaskProcessScopeBinding>,
     pub sampling_gaps: u32,
     pub abandonment_reason: Option<String>,
 }
@@ -949,13 +954,49 @@ pub struct TaskResourceSpanReceipt {
     pub memory_available_delta_bytes: Option<i64>,
     pub storage_available_delta_bytes: Option<i64>,
     pub process_resident_delta_bytes: Option<i64>,
+    pub task_process_scope: Option<String>,
+    pub task_process_capture_complete: bool,
+    pub task_process_count_before: Option<u32>,
+    pub task_process_count_after: Option<u32>,
+    pub task_process_resident_delta_bytes: Option<i64>,
+    pub task_process_sampling_gaps: u32,
     pub abandonment_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskProcessScopeBinding {
+    root_pid: u32,
+    root_start_ticks: u64,
+    owner_uid: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskProcessTreeSample {
+    pub scope: String,
+    pub status: String,
+    pub process_count: Option<u32>,
+    pub resident_bytes: Option<u64>,
+    pub sampling_gaps: u32,
+    pub source: String,
+}
+
+impl TaskProcessTreeSample {
+    fn is_complete(&self) -> bool {
+        self.status == "fresh" && self.process_count.is_some() && self.resident_bytes.is_some()
+    }
+}
+
 impl TaskResourceSpan {
-    fn active(span_id: String, task_kind: String, task_ref: Option<String>, before: Value) -> Self {
+    fn active(
+        span_id: String,
+        task_kind: String,
+        task_ref: Option<String>,
+        before: Value,
+        process_scope: Option<TaskProcessScopeBinding>,
+        task_process_before: Option<TaskProcessTreeSample>,
+    ) -> Self {
         Self {
-            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V0.to_string(),
+            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V1.to_string(),
             span_id,
             task_kind,
             task_ref,
@@ -965,6 +1006,9 @@ impl TaskResourceSpan {
             before,
             checkpoints: Vec::new(),
             after: None,
+            task_process_before,
+            task_process_after: None,
+            process_scope,
             sampling_gaps: 0,
             abandonment_reason: None,
         }
@@ -973,6 +1017,10 @@ impl TaskResourceSpan {
     fn finish(mut self, after: Option<Value>, reason: Option<String>) -> Self {
         self.ended_at_unix_ms = Some(unix_now_ms());
         self.after = after;
+        self.task_process_after = self
+            .after
+            .as_ref()
+            .and_then(|_| self.process_scope.as_ref().map(sample_task_process_tree));
         self.abandonment_reason = reason;
         self.state = if self.after.is_some() {
             TaskResourceSpanState::Closed
@@ -993,6 +1041,15 @@ impl TaskResourceSpan {
             && self.before.pointer("/identity/body_instance_id")
                 == after.pointer("/identity/body_instance_id")
             && self.before.pointer("/sample/sequence") != after.pointer("/sample/sequence")
+            && (self.process_scope.is_none()
+                || (self
+                    .task_process_before
+                    .as_ref()
+                    .is_some_and(TaskProcessTreeSample::is_complete)
+                    && self
+                        .task_process_after
+                        .as_ref()
+                        .is_some_and(TaskProcessTreeSample::is_complete)))
     }
 
     /// Produce the only form of a span that may enter durable event history.
@@ -1022,8 +1079,78 @@ impl TaskResourceSpan {
             process_resident_delta_bytes: after.and_then(|after| {
                 snapshot_delta(&self.before, after, "/sample/process/resident_bytes/value")
             }),
+            task_process_scope: self
+                .process_scope
+                .as_ref()
+                .map(|_| "linux_same_user_process_tree".into()),
+            task_process_capture_complete: self.process_scope.is_some()
+                && self
+                    .task_process_before
+                    .as_ref()
+                    .is_some_and(TaskProcessTreeSample::is_complete)
+                && self
+                    .task_process_after
+                    .as_ref()
+                    .is_some_and(TaskProcessTreeSample::is_complete),
+            task_process_count_before: self
+                .task_process_before
+                .as_ref()
+                .and_then(|sample| sample.process_count),
+            task_process_count_after: self
+                .task_process_after
+                .as_ref()
+                .and_then(|sample| sample.process_count),
+            task_process_resident_delta_bytes: process_tree_delta(
+                self.task_process_before.as_ref(),
+                self.task_process_after.as_ref(),
+            ),
+            task_process_sampling_gaps: self
+                .task_process_before
+                .as_ref()
+                .map_or(0, |sample| sample.sampling_gaps)
+                .saturating_add(
+                    self.task_process_after
+                        .as_ref()
+                        .map_or(0, |sample| sample.sampling_gaps),
+                ),
             abandonment_reason: self.abandonment_reason.clone(),
         }
+    }
+}
+
+fn process_tree_delta(
+    before: Option<&TaskProcessTreeSample>,
+    after: Option<&TaskProcessTreeSample>,
+) -> Option<i64> {
+    let before = before?.resident_bytes?;
+    let after = after?.resident_bytes?;
+    i64::try_from(i128::from(after) - i128::from(before)).ok()
+}
+
+#[cfg(target_os = "linux")]
+fn bind_task_process_tree(root_pid: u32) -> Result<TaskProcessScopeBinding, String> {
+    linux::bind_process_tree(root_pid)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn bind_task_process_tree(_root_pid: u32) -> Result<TaskProcessScopeBinding, String> {
+    Err("process-tree task scope is only supported on Linux".into())
+}
+
+#[cfg(target_os = "linux")]
+fn sample_task_process_tree(binding: &TaskProcessScopeBinding) -> TaskProcessTreeSample {
+    linux::sample_process_tree(binding)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sample_task_process_tree(_binding: &TaskProcessScopeBinding) -> TaskProcessTreeSample {
+    TaskProcessTreeSample {
+        scope: "process_tree".into(),
+        status: "unsupported".into(),
+        process_count: None,
+        resident_bytes: None,
+        sampling_gaps: 0,
+        source: "unsupported_platform".into(),
     }
 }
 
@@ -1059,10 +1186,30 @@ pub fn start_task_resource_span(
     task_kind: String,
     task_ref: Option<String>,
 ) -> std::result::Result<TaskResourceSpan, String> {
+    start_task_resource_span_scoped(span_id, task_kind, task_ref, None)
+}
+
+/// Start a span with an optional explicit same-user process-tree scope. The
+/// PID is used only to establish a start-time/uid-bound procfs identity; no
+/// command line, environment, file descriptor, or content is collected.
+pub fn start_task_resource_span_scoped(
+    span_id: String,
+    task_kind: String,
+    task_ref: Option<String>,
+    root_pid: Option<u32>,
+) -> std::result::Result<TaskResourceSpan, String> {
     let before = live_body_snapshot().ok_or_else(|| {
         "body telemetry is not live; set AGENT_BRIDGE_BODY_TELEMETRY=1 on a supported host"
             .to_string()
     })?;
+    let process_scope = root_pid.map(bind_task_process_tree).transpose()?;
+    let task_process_before = process_scope.as_ref().map(sample_task_process_tree);
+    if task_process_before
+        .as_ref()
+        .is_some_and(|sample| !sample.is_complete())
+    {
+        return Err("initial process-tree sample is incomplete".into());
+    }
     let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
     let mut tracker = tracker
         .lock()
@@ -1075,7 +1222,14 @@ pub fn start_task_resource_span(
             "active task span capacity {TASK_SPAN_ACTIVE_CAP} reached"
         ));
     }
-    let span = TaskResourceSpan::active(span_id.clone(), task_kind, task_ref, before);
+    let span = TaskResourceSpan::active(
+        span_id.clone(),
+        task_kind,
+        task_ref,
+        before,
+        process_scope,
+        task_process_before,
+    );
     tracker.active.insert(span_id, span.clone());
     Ok(span)
 }
@@ -1435,22 +1589,25 @@ mod tests {
                 "sample": {"sequence":sequence}
             })
         };
-        let reused = TaskResourceSpan::active("a".into(), "test".into(), None, snapshot(1))
-            .finish(Some(snapshot(1)), None);
+        let reused =
+            TaskResourceSpan::active("a".into(), "test".into(), None, snapshot(1), None, None)
+                .finish(Some(snapshot(1)), None);
         assert!(!reused.has_complete_capture());
-        let distinct = TaskResourceSpan::active("b".into(), "test".into(), None, snapshot(1))
-            .finish(Some(snapshot(2)), None);
+        let distinct =
+            TaskResourceSpan::active("b".into(), "test".into(), None, snapshot(1), None, None)
+                .finish(Some(snapshot(2)), None);
         assert!(distinct.has_complete_capture());
-        let partial = TaskResourceSpan::active("c".into(), "test".into(), None, snapshot(1))
-            .finish(
-                Some(json!({
-                    "status":"partial", "freshness":{"status":"fresh"},
-                    "coverage":{"required_ratio":0.8},
-                    "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
-                    "sample":{"sequence":2}
-                })),
-                None,
-            );
+        let partial =
+            TaskResourceSpan::active("c".into(), "test".into(), None, snapshot(1), None, None)
+                .finish(
+                    Some(json!({
+                        "status":"partial", "freshness":{"status":"fresh"},
+                        "coverage":{"required_ratio":0.8},
+                        "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                        "sample":{"sequence":2}
+                    })),
+                    None,
+                );
         assert!(!partial.has_complete_capture());
     }
 
@@ -1566,6 +1723,8 @@ mod tests {
             "test".to_string(),
             Some("opaque-ref".to_string()),
             before,
+            None,
+            None,
         )
         .finish(Some(after), None);
 
@@ -1577,5 +1736,46 @@ mod tests {
         assert_eq!(value["memory_available_delta_bytes"], -20);
         assert_eq!(value["storage_available_delta_bytes"], -5);
         assert_eq!(value["process_resident_delta_bytes"], 5);
+    }
+
+    #[test]
+    fn scoped_receipt_excludes_root_pid_and_keeps_only_aggregate_deltas() {
+        let body = |sequence| {
+            json!({
+                "status":"ok", "freshness":{"status":"fresh"},
+                "coverage":{"required_ratio":1.0},
+                "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                "sample":{"sequence":sequence}
+            })
+        };
+        let tree = |resident_bytes| TaskProcessTreeSample {
+            scope: "same_user_process_tree".into(),
+            status: "fresh".into(),
+            process_count: Some(2),
+            resident_bytes: Some(resident_bytes),
+            sampling_gaps: 0,
+            source: "test".into(),
+        };
+        let mut span = TaskResourceSpan::active(
+            "scoped".into(),
+            "test".into(),
+            None,
+            body(1),
+            Some(TaskProcessScopeBinding {
+                root_pid: 4_242,
+                root_start_ticks: 99,
+                owner_uid: 1_000,
+            }),
+            Some(tree(100)),
+        );
+        span.after = Some(body(2));
+        span.task_process_after = Some(tree(140));
+        span.state = TaskResourceSpanState::Closed;
+        assert!(span.has_complete_capture());
+        let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
+        assert_eq!(receipt["task_process_resident_delta_bytes"], 40);
+        assert_eq!(receipt["task_process_capture_complete"], true);
+        assert!(!receipt.to_string().contains("4242"));
+        assert!(receipt.get("task_process_before").is_none());
     }
 }

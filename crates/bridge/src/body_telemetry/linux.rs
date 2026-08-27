@@ -7,12 +7,12 @@
 use super::{
     local_body_identity, sample_coverage, BodySample, BodySensorAdapter, BodyTelemetryCore,
     KernelPressureSample, MemoryArchitecture, MemorySample, MetricStatus, MetricValue,
-    PressurePolicy, ProcessFootprint, StorageMountSample, StorageSample, BODY_STATUS_SCHEMA_V0,
-    BODY_STATUS_SCHEMA_V1,
+    PressurePolicy, ProcessFootprint, StorageMountSample, StorageSample, TaskProcessScopeBinding,
+    TaskProcessTreeSample, BODY_STATUS_SCHEMA_V0, BODY_STATUS_SCHEMA_V1,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CString;
 use std::fs;
 use std::mem::MaybeUninit;
@@ -23,6 +23,137 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 const ADAPTER_ID: &str = "linux_procfs_v1";
 const DEFAULT_MIN_SAMPLE_INTERVAL_MS: u64 = 1_000;
 const DEFAULT_SAMPLE_TTL_MS: u64 = 5_000;
+const PROCESS_TREE_MEMBER_CAP: usize = 4_096;
+
+#[derive(Debug, Clone, Copy)]
+struct ProcIdentity {
+    ppid: u32,
+    start_ticks: u64,
+    owner_uid: u32,
+    resident_bytes: u64,
+}
+
+fn proc_identity(pid: u32) -> Option<ProcIdentity> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let owner_uid = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let tail = stat.get(stat.rfind(')')? + 1..)?;
+    let fields = tail.split_whitespace().collect::<Vec<_>>();
+    let ppid = fields.get(1)?.parse().ok()?;
+    let start_ticks = fields.get(19)?.parse().ok()?;
+    let statm = fs::read_to_string(format!("/proc/{pid}/statm")).ok()?;
+    let resident_pages = statm.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    // SAFETY: sysconf with _SC_PAGESIZE has no memory-safety preconditions.
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    let resident_bytes =
+        (page_size > 0).then(|| resident_pages.checked_mul(page_size as u64))??;
+    Some(ProcIdentity {
+        ppid,
+        start_ticks,
+        owner_uid,
+        resident_bytes,
+    })
+}
+
+pub(super) fn bind_process_tree(root_pid: u32) -> Result<TaskProcessScopeBinding, String> {
+    if root_pid == 0 {
+        return Err("process-tree root_pid must be non-zero".into());
+    }
+    let identity = proc_identity(root_pid)
+        .ok_or_else(|| format!("process-tree root pid {root_pid} is unavailable"))?;
+    // SAFETY: geteuid has no preconditions and does not mutate process state.
+    let effective_uid = unsafe { libc::geteuid() };
+    if identity.owner_uid != effective_uid {
+        return Err("process-tree root must be owned by the current effective user".into());
+    }
+    Ok(TaskProcessScopeBinding {
+        root_pid,
+        root_start_ticks: identity.start_ticks,
+        owner_uid: identity.owner_uid,
+    })
+}
+
+pub(super) fn sample_process_tree(binding: &TaskProcessScopeBinding) -> TaskProcessTreeSample {
+    let source = "linux_proc_same_user_process_tree";
+    let Some(root) = proc_identity(binding.root_pid) else {
+        return unavailable_process_tree("root_unavailable", source);
+    };
+    if root.start_ticks != binding.root_start_ticks || root.owner_uid != binding.owner_uid {
+        return unavailable_process_tree("root_identity_changed", source);
+    }
+
+    let mut rows = BTreeMap::new();
+    let gaps = 0u32;
+    let entries = match fs::read_dir("/proc") {
+        Ok(entries) => entries,
+        Err(_) => return unavailable_process_tree("procfs_unavailable", source),
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        match proc_identity(pid) {
+            Some(identity) if identity.owner_uid == binding.owner_uid => {
+                rows.insert(pid, identity);
+            }
+            Some(_) => {}
+            None => {}
+        }
+    }
+    rows.insert(binding.root_pid, root);
+    let mut members = BTreeSet::from([binding.root_pid]);
+    loop {
+        let before = members.len();
+        for (&pid, identity) in &rows {
+            if members.contains(&identity.ppid) {
+                members.insert(pid);
+                if members.len() >= PROCESS_TREE_MEMBER_CAP {
+                    break;
+                }
+            }
+        }
+        if members.len() == before || members.len() >= PROCESS_TREE_MEMBER_CAP {
+            break;
+        }
+    }
+    let resident_bytes = members.iter().fold(0u64, |total, pid| {
+        total.saturating_add(rows.get(pid).map_or(0, |row| row.resident_bytes))
+    });
+    TaskProcessTreeSample {
+        scope: "same_user_process_tree".into(),
+        status: if members.len() >= PROCESS_TREE_MEMBER_CAP {
+            "partial"
+        } else {
+            "fresh"
+        }
+        .into(),
+        process_count: Some(members.len().try_into().unwrap_or(u32::MAX)),
+        resident_bytes: Some(resident_bytes),
+        sampling_gaps: gaps,
+        source: source.into(),
+    }
+}
+
+fn unavailable_process_tree(reason: &str, source: &str) -> TaskProcessTreeSample {
+    TaskProcessTreeSample {
+        scope: "same_user_process_tree".into(),
+        status: reason.into(),
+        process_count: None,
+        resident_bytes: None,
+        sampling_gaps: 1,
+        source: source.into(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CpuTicks {
@@ -594,6 +725,7 @@ pub fn body_status_snapshot() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn cpu_ticks_use_only_the_aggregate_cpu_line() {
@@ -634,6 +766,24 @@ mod tests {
         assert_eq!(parse_psi_ratio(psi, "some"), Some(0.125));
         assert_eq!(parse_psi_ratio(psi, "full"), Some(0.0));
         assert_eq!(parse_psi_ratio("some avg10=101.0", "some"), None);
+    }
+
+    #[test]
+    fn process_tree_binding_is_same_user_and_includes_a_direct_child() {
+        let binding = bind_process_tree(std::process::id()).expect("bind current process");
+        let mut child = Command::new("sleep").arg("2").spawn().expect("spawn child");
+        let sample = sample_process_tree(&binding);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(sample.status, "fresh");
+        assert!(sample.process_count.is_some_and(|count| count >= 2));
+        assert!(sample.resident_bytes.is_some_and(|bytes| bytes > 0));
+        assert_eq!(sample.scope, "same_user_process_tree");
+    }
+
+    #[test]
+    fn process_tree_rejects_zero_pid() {
+        assert!(bind_process_tree(0).is_err());
     }
 
     fn read_memory_bytes_from(content: &str) -> Option<(u64, u64)> {

@@ -32512,6 +32512,12 @@ impl McpTool for BodyTaskSpanTool {
                         "maxLength": 256,
                         "description": "Optional opaque identifier such as an agent session id. Do not supply prompt or transcript content."
                     },
+                    "root_pid": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4294967295_u64,
+                        "description": "Optional Linux same-user process-tree root for start. Only aggregate process count and RSS are sampled; command lines, environment, file descriptors, and content are never read."
+                    },
                     "reason": {
                         "type": "string",
                         "maxLength": 256,
@@ -32564,8 +32570,16 @@ impl McpTool for BodyTaskSpanTool {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(str::to_string);
-                match crate::body_telemetry::start_task_resource_span(span_id, task_kind, task_ref)
-                {
+                let root_pid = match args.get("root_pid") {
+                    Some(value) => match value.as_u64().and_then(|pid| u32::try_from(pid).ok()) {
+                        Some(pid) if pid > 0 => Some(pid),
+                        _ => return Ok(ToolResult::error("invalid 'root_pid'")),
+                    },
+                    None => None,
+                };
+                match crate::body_telemetry::start_task_resource_span_scoped(
+                    span_id, task_kind, task_ref, root_pid,
+                ) {
                     Ok(span) => Ok(ToolResult::json_text(&json!({
                         "event_recorded": false,
                         "span": span,
