@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""macOS AX read-only feasibility probe.
+"""macOS AX read-only semantic probe.
 
-This probe is intentionally narrow: it checks whether the current process is
-trusted for Accessibility, then, only when already trusted, asks System Events
-for frontmost-application/window metadata. It never clicks, types, focuses,
-activates apps, changes permissions, or calls AXIsProcessTrustedWithOptions
-with a prompt flag. Before invoking System Events, a no-ask Apple Events
-permission preflight gates the subprocess. This is a best-effort prompt guard;
-the effective sender identity and UI behavior still require validation on the
-target Mac.
+On Darwin the default observation backend is the sibling native Swift probe,
+which reads NSWorkspace and Accessibility attributes directly. It never uses
+System Events or Apple Events, clicks, types, focuses, activates apps, changes
+permissions, or requests an Accessibility prompt. The older JXA helper remains
+available only for compatibility with callers/tests that import it directly;
+``main`` never selects it.
 """
 from __future__ import annotations
 
 import argparse
 import ctypes
 import json
+import os
 import platform
 import subprocess
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = "macos_ax_probe/v0"
@@ -65,26 +66,85 @@ def _frontmost_app_identity_valid(app: Any) -> bool:
     )
 
 
-def _window_identity(window: dict[str, Any]) -> dict[str, Any]:
-    """Describe whether a window identity can survive a later AX sample."""
-    ax_identifier = window.get("ax_identifier")
-    if isinstance(ax_identifier, str) and ax_identifier.strip():
-        return {
-            "kind": "ax_identifier",
-            "value": ax_identifier.strip(),
-            "stable_across_samples": True,
-        }
-    return {
-        "kind": "sample_index",
-        "value": str(window.get("index", "unknown")),
-        "stable_across_samples": False,
-    }
-
-
 def _annotate_window_identities(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add sample-scoped identity/action facts without inventing continuity.
+
+    AXIdentifier is useful for cross-sample identity only when it is non-empty
+    and unique inside this sample. Missing and duplicate identifiers still
+    leave the window's current semantic fields fully observable; they merely
+    remain ineligible for an identity-bound action.
+    """
+    identifier_counts: dict[str, int] = {}
     for window in windows:
-        window["identity"] = _window_identity(window)
+        identifier = window.get("ax_identifier")
+        if isinstance(identifier, str) and identifier.strip():
+            normalized = identifier.strip()
+            identifier_counts[normalized] = identifier_counts.get(normalized, 0) + 1
+
+    for window in windows:
+        identifier = window.get("ax_identifier")
+        normalized = (
+            identifier.strip()
+            if isinstance(identifier, str) and identifier.strip()
+            else None
+        )
+        if normalized is None:
+            identity = {
+                "kind": "sample_index",
+                "value": str(window.get("index", "unknown")),
+                "unique_in_sample": False,
+                "stable_across_samples": False,
+            }
+            stable = False
+        elif identifier_counts[normalized] == 1:
+            identity = {
+                "kind": "ax_identifier",
+                "value": normalized,
+                "unique_in_sample": True,
+                "stable_across_samples": True,
+            }
+            stable = True
+        else:
+            identity = {
+                "kind": "ambiguous_ax_identifier",
+                "value": normalized,
+                "unique_in_sample": False,
+                "stable_across_samples": False,
+            }
+            stable = False
+        window["identity"] = identity
+        window["stable_identity_available"] = stable
+        window["action_eligible"] = stable
     return windows
+
+
+def _identity_coverage(windows: list[dict[str, Any]]) -> dict[str, Any]:
+    stable = sum(
+        1
+        for window in windows
+        if (window.get("identity") or {}).get("stable_across_samples") is True
+    )
+    ambiguous = sum(
+        1
+        for window in windows
+        if (window.get("identity") or {}).get("kind")
+        == "ambiguous_ax_identifier"
+    )
+    sample_local = sum(
+        1
+        for window in windows
+        if (window.get("identity") or {}).get("kind") == "sample_index"
+    )
+    action_eligible = sum(
+        1 for window in windows if window.get("action_eligible") is True
+    )
+    return {
+        "stable_ax_identifier_count": stable,
+        "ambiguous_ax_identifier_count": ambiguous,
+        "sample_local_index_count": sample_local,
+        "stable_identity_available": stable > 0,
+        "action_eligible_window_count": action_eligible,
+    }
 
 
 def _ax_is_trusted() -> tuple[bool | None, str | None]:
@@ -290,92 +350,197 @@ if (!app) {{
         return None, f"osascript returned invalid JSON: {exc}"
 
 
+def native_probe_sample(
+    max_windows: int,
+    timeout_secs: float,
+    *,
+    include_windows: bool = True,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run one complete read-only native AX sample.
+
+    The returned object is the complete ``macos_ax_probe/v0`` payload. This is
+    intentionally shared so watch/verify callers can use the same native
+    sampler without reconstructing a JXA-shaped intermediate representation.
+    """
+    if platform.system() != "Darwin":
+        return None, "native_ax_unsupported_platform"
+    configured_script = os.environ.get("AGENT_BRIDGE_MACOS_AX_NATIVE_PROBE", "").strip()
+    script = (
+        Path(configured_script)
+        if configured_script
+        else Path(__file__).resolve().with_name("macos_ax_native_probe.swift")
+    )
+    if not script.is_file():
+        return None, f"native_ax_probe_not_found: {script}"
+    swift = os.environ.get("AGENT_BRIDGE_MACOS_AX_SWIFT", "").strip() or "swift"
+    command = [
+        swift,
+        str(script),
+        "--compact",
+        "--max-windows",
+        str(max(0, min(max_windows, 50))),
+    ]
+    if not include_windows:
+        command.append("--no-windows")
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=max(0.1, timeout_secs),
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, "swift not found"
+    except subprocess.TimeoutExpired:
+        return None, "native AX probe timed out"
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        return None, f"native AX probe rc={proc.returncode}: {err}"
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"native AX probe returned invalid JSON: {exc}"
+    if not isinstance(payload, dict):
+        return None, "native AX probe returned non-object JSON"
+    if payload.get("schema") != SCHEMA_VERSION:
+        return None, "native AX probe schema mismatch"
+    return payload, None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compact", action="store_true", help="Accepted for MCP wrapper parity.")
     parser.add_argument(
         "--no-windows",
         action="store_true",
-        help="Skip System Events window read.",
+        help="Skip native AX window read.",
     )
     parser.add_argument("--max-windows", type=int, default=8)
-    parser.add_argument("--jxa-timeout-secs", type=float, default=4.0)
+    parser.add_argument(
+        "--jxa-timeout-secs",
+        type=float,
+        default=4.0,
+        help="Native helper timeout; legacy option name retained for CLI compatibility.",
+    )
     args = parser.parse_args(argv)
 
     started = time.time()
     max_windows = max(0, min(args.max_windows, 50))
     system = platform.system()
     errors: list[dict[str, Any]] = []
-    ax_trusted, ax_error = _ax_is_trusted()
-    if ax_error:
-        errors.append({"stage": "ax_trust", "message": ax_error})
-
+    sample_id = str(uuid.uuid4())
+    ax_trusted: bool | None = None
     frontmost: dict[str, Any] | None = None
     windows: list[dict[str, Any]] = []
     source_window_count: int | None = None
     windows_read_ok: bool | None = None
     truncated = False
+    source: dict[str, Any] = {
+        "adapter": "native_ax" if system == "Darwin" else "platform_guard",
+        "uses_system_events": False,
+        "uses_apple_events": False,
+    }
 
     if system != "Darwin":
         status = "unsupported_platform"
-    elif ax_trusted is not True:
-        if ax_trusted is None and not ax_error:
-            errors.append({"stage": "ax_trust", "message": "AX trust status unavailable"})
-        status = "degraded"
-    elif args.no_windows:
-        status = "ready"
     else:
-        jxa_payload, jxa_error = _frontmost_jxa(max_windows, args.jxa_timeout_secs)
-        if jxa_error:
-            errors.append({"stage": "system_events", "message": jxa_error})
+        native_payload, native_error = native_probe_sample(
+            max_windows,
+            args.jxa_timeout_secs,
+            include_windows=not args.no_windows,
+        )
+        if native_error:
+            errors.append({"stage": "native_ax", "message": native_error})
+            # This diagnostic is still a prompt-free native call. It does not
+            # restore observation coverage when the Swift sampler failed.
+            ax_trusted, ax_error = _ax_is_trusted()
+            if ax_error:
+                errors.append({"stage": "ax_trust", "message": ax_error})
             status = "degraded"
-        elif not isinstance(jxa_payload, dict):
-            errors.append({"stage": "system_events", "message": "invalid JXA payload"})
+        elif not isinstance(native_payload, dict):
+            errors.append(
+                {"stage": "native_ax", "message": "invalid native probe payload"}
+            )
             status = "degraded"
         else:
-            frontmost = jxa_payload.get("frontmost_app")
-            raw_windows = jxa_payload.get("windows")
-            source_window_count = jxa_payload.get("window_count")
-            windows_read_ok = jxa_payload.get("windows_read_ok")
-            if isinstance(raw_windows, list) and all(
-                isinstance(window, dict) for window in raw_windows
-            ):
-                windows = _annotate_window_identities(raw_windows)
+            native_sample_id = native_payload.get("sample_id")
+            if isinstance(native_sample_id, str) and native_sample_id.strip():
+                sample_id = native_sample_id.strip()
+            native_source = native_payload.get("source")
+            if isinstance(native_source, dict):
+                source = native_source
+            native_permission = native_payload.get("permission")
+            native_trusted = (
+                native_permission.get("ax_trusted")
+                if isinstance(native_permission, dict)
+                else None
+            )
+            if isinstance(native_trusted, bool):
+                ax_trusted = native_trusted
             else:
                 errors.append(
-                    {"stage": "system_events_windows", "message": "invalid windows payload"}
+                    {"stage": "ax_trust", "message": "AX trust status unavailable"}
                 )
-            if windows_read_ok is not True:
+            native_errors = native_payload.get("errors")
+            if isinstance(native_errors, list) and all(
+                isinstance(error, dict) for error in native_errors
+            ):
+                errors.extend(native_errors)
+            else:
                 errors.append(
-                    {"stage": "system_events_windows", "message": "window enumeration failed"}
+                    {"stage": "native_ax", "message": "invalid native errors payload"}
                 )
-            if not _strict_nonnegative_int(source_window_count):
-                errors.append(
-                    {
-                        "stage": "system_events_window_count",
-                        "message": "invalid source window count",
-                    }
+            if args.no_windows:
+                status = "ready" if ax_trusted is True and not errors else "degraded"
+            else:
+                frontmost = native_payload.get("frontmost_app")
+                raw_windows = native_payload.get("windows")
+                source_window_count = native_payload.get("source_window_count")
+                windows_read_ok = native_payload.get("windows_read_ok")
+                if isinstance(raw_windows, list) and all(
+                    isinstance(window, dict) for window in raw_windows
+                ):
+                    windows = _annotate_window_identities(raw_windows)
+                else:
+                    errors.append(
+                        {"stage": "native_ax_windows", "message": "invalid windows payload"}
+                    )
+                if windows_read_ok is not True:
+                    errors.append(
+                        {
+                            "stage": "native_ax_windows",
+                            "message": "window enumeration failed",
+                        }
+                    )
+                if not _strict_nonnegative_int(source_window_count):
+                    errors.append(
+                        {
+                            "stage": "native_ax_window_count",
+                            "message": "invalid source window count",
+                        }
+                    )
+                elif source_window_count < len(windows):
+                    errors.append(
+                        {
+                            "stage": "native_ax_window_count",
+                            "message": "source window count is smaller than returned windows",
+                        }
+                    )
+                truncated = bool(
+                    _strict_nonnegative_int(source_window_count)
+                    and source_window_count > len(windows)
                 )
-            elif source_window_count < len(windows):
-                errors.append(
-                    {
-                        "stage": "system_events_window_count",
-                        "message": "source window count is smaller than returned windows",
-                    }
+                status = (
+                    "ready"
+                    if ax_trusted is True
+                    and _frontmost_app_identity_valid(frontmost)
+                    and windows_read_ok is True
+                    and _strict_nonnegative_int(source_window_count)
+                    and source_window_count >= len(windows)
+                    and not errors
+                    else "degraded"
                 )
-            truncated = bool(
-                _strict_nonnegative_int(source_window_count)
-                and source_window_count > len(windows)
-            )
-            status = (
-                "ready"
-                if _frontmost_app_identity_valid(frontmost)
-                and windows_read_ok is True
-                and _strict_nonnegative_int(source_window_count)
-                and source_window_count >= len(windows)
-                and not errors
-                else "degraded"
-            )
 
     elapsed_ms = int((time.time() - started) * 1000)
     app_identity_valid = _frontmost_app_identity_valid(frontmost)
@@ -403,8 +568,19 @@ def main(argv: list[str] | None = None) -> int:
         incomplete_reasons = list(dict.fromkeys(incomplete_reasons))
         coverage_complete = not incomplete_reasons
 
+    for window in windows:
+        window["action_eligible"] = bool(
+            coverage_complete and window.get("stable_identity_available") is True
+        )
+    identity_coverage = _identity_coverage(windows)
+    action_eligible = bool(
+        coverage_complete
+        and ax_trusted is True
+        and identity_coverage["stable_identity_available"]
+    )
     payload = {
         "schema": SCHEMA_VERSION,
+        "sample_id": sample_id,
         "captured_at": int(time.time()),
         "platform": {
             "system": system,
@@ -426,7 +602,11 @@ def main(argv: list[str] | None = None) -> int:
         "app_identity_valid": app_identity_valid,
         "counts_consistent": counts_consistent,
         "coverage_complete": coverage_complete,
+        "sample_observation_complete": coverage_complete,
         "incomplete_reasons": incomplete_reasons,
+        "identity_coverage": identity_coverage,
+        "stable_identity_available": identity_coverage["stable_identity_available"],
+        "action_eligible": action_eligible,
         "limits": {
             "max_windows": max_windows,
             "truncated": truncated,
@@ -434,6 +614,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "errors": errors,
         "elapsed_ms": elapsed_ms,
+        "source": source,
     }
     print(json.dumps(payload, ensure_ascii=False))
     return 0

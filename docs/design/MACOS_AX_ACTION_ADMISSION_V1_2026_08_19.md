@@ -1,5 +1,12 @@
 # macOS AX Action Admission v1
 
+> Update (2026-08-26): the sample-local preview exception described below is
+> superseded by `MACOS_NATIVE_SEMANTIC_OBSERVATION_V1_2026_08_26.md`.
+> `macos_ax_action_admission` now requires `bundle_id + pid +` one unique,
+> non-empty `AXIdentifier`; index/title/role and coordinate fallbacks are
+> rejected. Sample-local identity remains valid only for current-sample
+> observation.
+
 ## Outcome
 
 Agent-Bridge treats ordinary desktop navigation as part of the owner's standing
@@ -29,9 +36,10 @@ The unmerged v0 candidate accepted caller-provided `surface_fresh` and
 - observation age; and
 - a SHA-256 digest of the evidence.
 
-A stable target uses `bundle_id + pid + ax_identifier`. A sample-local index is
-accepted only for preview when it is corroborated in the same receipt by exact
-title and role. The first real executor does not accept a sample-local index.
+A stable target uses `bundle_id + pid + ax_identifier`. The original v1 design
+accepted a sample-local index only for preview when corroborated by exact title
+and role; that exception is now withdrawn. Preview and execution both reject a
+sample-local action target.
 
 ## Consequence classes
 

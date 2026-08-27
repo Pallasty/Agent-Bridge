@@ -2,6 +2,7 @@ import argparse
 import copy
 import io
 import json
+import os
 import sys
 import unittest
 from contextlib import redirect_stdout
@@ -68,6 +69,43 @@ def _jxa_payload(*, app=None, windows=None, source_count=None, windows_read_ok=T
     }
 
 
+def _native_payload(
+    *,
+    app=None,
+    windows=None,
+    source_count=None,
+    windows_read_ok=True,
+    errors=None,
+    sample_id="11111111-1111-4111-8111-111111111111",
+):
+    observed = _jxa_payload(
+        app=app,
+        windows=windows,
+        source_count=source_count,
+        windows_read_ok=windows_read_ok,
+    )
+    return {
+        "schema": "macos_ax_probe/v0",
+        "sample_id": sample_id,
+        "status": "ready",
+        "permission": {
+            "ax_trusted": True,
+            "method": "AXIsProcessTrusted",
+            "prompted": False,
+        },
+        "frontmost_app": observed["frontmost_app"],
+        "windows_read_ok": observed["windows_read_ok"],
+        "source_window_count": observed["window_count"],
+        "windows": observed["windows"],
+        "errors": [] if errors is None else errors,
+        "source": {
+            "adapter": "native_ax",
+            "uses_system_events": False,
+            "uses_apple_events": False,
+        },
+    }
+
+
 def _automation_framework(
     *,
     create_status=0,
@@ -110,9 +148,12 @@ class MacosAxIdentityTests(unittest.TestCase):
             {
                 "kind": "ax_identifier",
                 "value": "window-main",
+                "unique_in_sample": True,
                 "stable_across_samples": True,
             },
         )
+        self.assertTrue(windows[0]["stable_identity_available"])
+        self.assertTrue(windows[0]["action_eligible"])
 
     def test_missing_ax_identifier_is_explicitly_sample_local(self):
         windows = _annotate_window_identities([{"index": 3, "ax_identifier": None}])
@@ -121,9 +162,32 @@ class MacosAxIdentityTests(unittest.TestCase):
             {
                 "kind": "sample_index",
                 "value": "3",
+                "unique_in_sample": False,
                 "stable_across_samples": False,
             },
         )
+        self.assertFalse(windows[0]["stable_identity_available"])
+        self.assertFalse(windows[0]["action_eligible"])
+
+    def test_duplicate_ax_identifier_is_ambiguous_and_not_actionable(self):
+        windows = _annotate_window_identities(
+            [
+                {"index": 0, "ax_identifier": "shared"},
+                {"index": 1, "ax_identifier": "shared"},
+            ]
+        )
+        for window in windows:
+            self.assertEqual(
+                window["identity"],
+                {
+                    "kind": "ambiguous_ax_identifier",
+                    "value": "shared",
+                    "unique_in_sample": False,
+                    "stable_across_samples": False,
+                },
+            )
+            self.assertFalse(window["stable_identity_available"])
+            self.assertFalse(window["action_eligible"])
 
     def test_verify_matches_ax_identifier_exactly(self):
         window = {
@@ -156,8 +220,19 @@ class MacosAxIdentityTests(unittest.TestCase):
             mock.patch.object(macos_ax_probe.platform, "system", return_value="Darwin"),
             mock.patch.object(macos_ax_probe.platform, "release", return_value="test"),
             mock.patch.object(macos_ax_probe.platform, "machine", return_value="arm64"),
-            mock.patch.object(macos_ax_probe, "_ax_is_trusted", return_value=(True, None)),
-            mock.patch.object(macos_ax_probe, "_frontmost_jxa", return_value=(payload, None)),
+            mock.patch.object(
+                macos_ax_probe,
+                "native_probe_sample",
+                return_value=(
+                    _native_payload(
+                        app=payload["frontmost_app"],
+                        windows=payload["windows"],
+                        source_count=payload["window_count"],
+                        windows_read_ok=payload["windows_read_ok"],
+                    ),
+                    None,
+                ),
+            ),
             redirect_stdout(stdout),
         ):
             self.assertEqual(macos_ax_probe.main(["--compact"]), 0)
@@ -166,7 +241,171 @@ class MacosAxIdentityTests(unittest.TestCase):
         self.assertFalse(result["windows_read_ok"])
         self.assertFalse(result["coverage_complete"])
         self.assertIn("window_enumeration_unconfirmed", result["incomplete_reasons"])
-        self.assertEqual(result["errors"][0]["stage"], "system_events_windows")
+        self.assertEqual(result["errors"][0]["stage"], "native_ax_windows")
+
+
+class MacosAxNativeBackendTests(unittest.TestCase):
+    def _run_main(self, payload, argv=None):
+        native = mock.Mock(return_value=(copy.deepcopy(payload), None))
+        jxa = mock.Mock(side_effect=AssertionError("JXA must not be selected"))
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(macos_ax_probe.platform, "system", return_value="Darwin"),
+            mock.patch.object(macos_ax_probe.platform, "release", return_value="test"),
+            mock.patch.object(macos_ax_probe.platform, "machine", return_value="arm64"),
+            mock.patch.object(macos_ax_probe, "native_probe_sample", native),
+            mock.patch.object(macos_ax_probe, "_frontmost_jxa", jxa),
+            redirect_stdout(stdout),
+        ):
+            self.assertEqual(macos_ax_probe.main(argv or ["--compact"]), 0)
+        return json.loads(stdout.getvalue()), native, jxa
+
+    def test_darwin_main_uses_native_and_missing_identifier_keeps_sample_complete(self):
+        sample_id = "22222222-2222-4222-8222-222222222222"
+        result, native, jxa = self._run_main(
+            _native_payload(
+                windows=[_window(ax_identifier=None)],
+                sample_id=sample_id,
+            )
+        )
+
+        native.assert_called_once_with(8, 4.0, include_windows=True)
+        jxa.assert_not_called()
+        self.assertEqual(result["sample_id"], sample_id)
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["coverage_complete"])
+        self.assertTrue(result["sample_observation_complete"])
+        self.assertEqual(result["errors"], [])
+        self.assertFalse(result["stable_identity_available"])
+        self.assertFalse(result["action_eligible"])
+        self.assertFalse(result["windows"][0]["stable_identity_available"])
+        self.assertFalse(result["windows"][0]["action_eligible"])
+        self.assertEqual(result["source"]["adapter"], "native_ax")
+        self.assertFalse(result["source"]["uses_system_events"])
+        self.assertFalse(result["source"]["uses_apple_events"])
+
+    def test_unique_identifier_needs_complete_sample_before_action_eligible(self):
+        complete, _, _ = self._run_main(
+            _native_payload(windows=[_window(ax_identifier="unique")])
+        )
+        self.assertTrue(complete["stable_identity_available"])
+        self.assertTrue(complete["action_eligible"])
+        self.assertTrue(complete["windows"][0]["action_eligible"])
+
+        truncated, _, _ = self._run_main(
+            _native_payload(
+                windows=[_window(ax_identifier="unique")],
+                source_count=2,
+            )
+        )
+        self.assertTrue(truncated["stable_identity_available"])
+        self.assertFalse(truncated["coverage_complete"])
+        self.assertFalse(truncated["action_eligible"])
+        self.assertEqual(
+            truncated["identity_coverage"]["action_eligible_window_count"],
+            0,
+        )
+        self.assertFalse(truncated["windows"][0]["action_eligible"])
+
+    def test_duplicate_identifiers_remain_observable_but_never_stable(self):
+        result, _, _ = self._run_main(
+            _native_payload(
+                windows=[
+                    _window(index=0, ax_identifier="duplicate"),
+                    _window(index=1, ax_identifier="duplicate"),
+                ]
+            )
+        )
+        self.assertTrue(result["sample_observation_complete"])
+        self.assertEqual(result["identity_coverage"]["ambiguous_ax_identifier_count"], 2)
+        self.assertEqual(result["identity_coverage"]["stable_ax_identifier_count"], 0)
+        self.assertTrue(
+            all(
+                window["identity"]["kind"] == "ambiguous_ax_identifier"
+                and window["action_eligible"] is False
+                for window in result["windows"]
+            )
+        )
+
+    def test_native_sample_runner_is_bounded_and_supports_no_windows(self):
+        run = mock.Mock(
+            return_value=mock.Mock(
+                returncode=0,
+                stdout=json.dumps(_native_payload()),
+                stderr="",
+            )
+        )
+        with (
+            mock.patch.object(macos_ax_probe.platform, "system", return_value="Darwin"),
+            mock.patch.object(macos_ax_probe.subprocess, "run", run),
+        ):
+            payload, error = macos_ax_probe.native_probe_sample(
+                6,
+                1.5,
+                include_windows=False,
+            )
+        self.assertIsNone(error)
+        self.assertEqual(payload["schema"], "macos_ax_probe/v0")
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "swift")
+        self.assertIn("macos_ax_native_probe.swift", command[1])
+        self.assertIn("--no-windows", command)
+        self.assertNotIn("osascript", command)
+        self.assertEqual(run.call_args.kwargs["timeout"], 1.5)
+
+    def test_native_sample_runner_honors_pinned_helper_and_swift(self):
+        run = mock.Mock(
+            return_value=mock.Mock(
+                returncode=0,
+                stdout=json.dumps(_native_payload()),
+                stderr="",
+            )
+        )
+        pinned_probe = Path("/private/tmp/pinned/macos_ax_native_probe.swift")
+        pinned_swift = "/Applications/Xcode.app/Contents/Developer/usr/bin/swift"
+        with (
+            mock.patch.object(macos_ax_probe.platform, "system", return_value="Darwin"),
+            mock.patch.object(macos_ax_probe.Path, "is_file", return_value=True),
+            mock.patch.object(macos_ax_probe.subprocess, "run", run),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "AGENT_BRIDGE_MACOS_AX_NATIVE_PROBE": str(pinned_probe),
+                    "AGENT_BRIDGE_MACOS_AX_SWIFT": pinned_swift,
+                    "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+                },
+            ),
+        ):
+            payload, error = macos_ax_probe.native_probe_sample(8, 1.0)
+        self.assertIsNone(error)
+        self.assertEqual(payload["schema"], "macos_ax_probe/v0")
+        self.assertEqual(run.call_args.args[0][0], pinned_swift)
+        self.assertEqual(run.call_args.args[0][1], str(pinned_probe))
+
+    def test_app_only_errors_ignore_native_window_attribute_failures(self):
+        probe = {
+            "errors": [
+                {
+                    "stage": "native_ax_window_attributes",
+                    "message": "one window attribute was unreadable",
+                }
+            ]
+        }
+        self.assertEqual(
+            macos_ax_verify._relevant_errors(probe, include_windows=False),
+            [],
+        )
+
+    def test_non_darwin_native_runner_does_not_spawn(self):
+        run = mock.Mock()
+        with (
+            mock.patch.object(macos_ax_probe.platform, "system", return_value="Linux"),
+            mock.patch.object(macos_ax_probe.subprocess, "run", run),
+        ):
+            payload, error = macos_ax_probe.native_probe_sample(8, 1.0)
+        self.assertIsNone(payload)
+        self.assertEqual(error, "native_ax_unsupported_platform")
+        run.assert_not_called()
 
 
 class MacosAxAutomationPreflightTests(unittest.TestCase):
@@ -312,11 +551,24 @@ class MacosAxAutomationPreflightTests(unittest.TestCase):
 
 class MacosAxVerifyCompletenessTests(unittest.TestCase):
     def _run(self, argv, payloads, *, trusted=True, ax_error=None):
+        def native_payload(payload):
+            result = _native_payload(
+                app=payload.get("frontmost_app"),
+                windows=payload.get("windows"),
+                windows_read_ok=payload.get("windows_read_ok"),
+            )
+            result["source_window_count"] = payload.get("window_count")
+            return result
+
         if isinstance(payloads, list):
-            side_effect = [(copy.deepcopy(payload), None) for payload in payloads]
-            jxa = mock.Mock(side_effect=side_effect)
+            side_effect = [
+                (native_payload(copy.deepcopy(payload)), None) for payload in payloads
+            ]
+            native = mock.Mock(side_effect=side_effect)
         else:
-            jxa = mock.Mock(return_value=(copy.deepcopy(payloads), None))
+            native = mock.Mock(
+                return_value=(native_payload(copy.deepcopy(payloads)), None)
+            )
         stdout = io.StringIO()
         with (
             mock.patch.object(macos_ax_verify.platform, "system", return_value="Darwin"),
@@ -327,11 +579,34 @@ class MacosAxVerifyCompletenessTests(unittest.TestCase):
                 "_ax_is_trusted",
                 return_value=(trusted, ax_error),
             ),
-            mock.patch.object(macos_ax_verify, "_frontmost_jxa", jxa),
+            mock.patch.object(macos_ax_verify, "native_probe_sample", native),
             redirect_stdout(stdout),
         ):
             rc = macos_ax_verify.main(argv)
-        return rc, json.loads(stdout.getvalue()), jxa
+        return rc, json.loads(stdout.getvalue()), native
+
+    def test_window_verification_uses_native_sender_trust_without_python_pre_gate(self):
+        payload = _native_payload(
+            windows=[_window(ax_identifier=None)],
+        )
+        with (
+            mock.patch.object(macos_ax_verify.platform, "system", return_value="Darwin"),
+            mock.patch.object(
+                macos_ax_verify,
+                "_ax_is_trusted",
+                side_effect=AssertionError("window path must trust the native sender"),
+            ),
+            mock.patch.object(
+                macos_ax_verify,
+                "native_probe_sample",
+                return_value=(payload, None),
+            ) as native,
+        ):
+            observed, error = macos_ax_verify._probe(8, 1.0, include_windows=True)
+        native.assert_called_once_with(8, 1.0, include_windows=True)
+        self.assertIsNone(error)
+        self.assertEqual(observed["status"], "ready")
+        self.assertEqual(observed["permission"]["ax_trusted"], True)
 
     def test_invalid_window_selector_fails_before_observation(self):
         rc, result, jxa = self._run(

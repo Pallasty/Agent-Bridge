@@ -434,6 +434,7 @@ class FocusContinuityEligibilityTests(unittest.TestCase):
         self.assertIn("NSWorkspace.shared.frontmostApplication", source)
         self.assertIn("AXUIElementCreateApplication", source)
         self.assertIn("kAXWindowsAttribute", source)
+        self.assertIn("native_ax_frontmost_changed_during_sample", source)
         self.assertIn('"uses_system_events": false', source)
         self.assertIn('"uses_apple_events": false', source)
         for forbidden in (

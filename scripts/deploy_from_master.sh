@@ -106,6 +106,7 @@ RUNTIME_ASSETS=(
     desktop_steer.py
     desktop_verify.py
     macos_ax_focus_window.swift
+    macos_ax_native_probe.swift
     macos_ax_probe.py
     macos_ax_verify.py
     macos_ax_watch.py

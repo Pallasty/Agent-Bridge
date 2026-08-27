@@ -4,6 +4,11 @@
 **Date:** 2026-06-07
 **Parent roadmap:** [Semantic System Bus Roadmap](SEMANTIC_SYSTEM_BUS_ROADMAP_2026_06_07.md)
 
+> Runtime update (2026-08-26): predicate and schema compatibility are retained,
+> while window re-observation now uses the sibling native Swift
+> `NSWorkspace + AXUIElement` sampler rather than System Events/JXA. See
+> [macOS Native Semantic Observation v1](MACOS_NATIVE_SEMANTIC_OBSERVATION_V1_2026_08_26.md).
+
 ## 0. Purpose
 
 SSB-10 adds the verify leg for the local macOS Accessibility feasibility path.
@@ -17,7 +22,7 @@ AX trust state + frontmost app + bounded frontmost-app windows
 SSB-10 turns that into a read-only postcondition checker:
 
 ```text
-observe macOS AX/System Events state -> check one predicate -> verdict/recover
+observe native macOS AX state -> check one predicate -> verdict/recover
 ```
 
 This is the macOS counterpart to `desktop_verify`, but intentionally narrower.

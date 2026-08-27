@@ -3,8 +3,8 @@
 
 Re-observes the same bounded surface as macos_ax_probe.py and checks one
 predicate. It never explicitly requests permission, activates apps, focuses
-windows, clicks, types, or mutates desktop state. System Events reads inherit
-the shared probe's best-effort no-ask Automation preflight.
+windows, clicks, types, or mutates desktop state. Window reads use the shared
+native NSWorkspace plus AXUIElement sampler and do not use Apple Events.
 """
 from __future__ import annotations
 
@@ -15,11 +15,10 @@ import time
 from typing import Any
 
 from macos_ax_probe import (
-    _annotate_window_identities,
     _ax_is_trusted,
     _frontmost_app_identity_valid,
-    _frontmost_jxa,
     _strict_nonnegative_int,
+    native_probe_sample,
 )
 
 SCHEMA_VERSION = "macos_ax_verify/v0"
@@ -118,9 +117,7 @@ def _probe(
     started = time.time()
     system = platform.system()
     errors: list[dict[str, Any]] = []
-    ax_trusted, ax_error = _ax_is_trusted()
-    if ax_error:
-        errors.append({"stage": "ax_trust", "message": ax_error})
+    ax_trusted: bool | None = None
 
     frontmost: dict[str, Any] | None = None
     windows: list[dict[str, Any]] = []
@@ -130,54 +127,71 @@ def _probe(
 
     if system != "Darwin":
         status = "unsupported_platform"
-    elif not include_windows and isinstance(ax_trusted, bool):
-        status = "ready"
-    elif ax_trusted is not True:
-        if ax_trusted is None and not ax_error:
+    elif not include_windows:
+        ax_trusted, ax_error = _ax_is_trusted()
+        if ax_error:
+            errors.append({"stage": "ax_trust", "message": ax_error})
+        if not isinstance(ax_trusted, bool) and not ax_error:
             errors.append({"stage": "ax_trust", "message": "AX trust status unavailable"})
-        status = "degraded"
+        status = "ready" if isinstance(ax_trusted, bool) and not errors else "degraded"
     else:
-        jxa_payload, jxa_error = _frontmost_jxa(max_windows, jxa_timeout_secs)
-        if jxa_error:
-            errors.append({"stage": "system_events", "message": jxa_error})
+        native_payload, native_error = native_probe_sample(
+            max_windows,
+            jxa_timeout_secs,
+            include_windows=True,
+        )
+        if native_error:
+            errors.append({"stage": "native_ax", "message": native_error})
             status = "degraded"
-        elif not isinstance(jxa_payload, dict):
-            errors.append({"stage": "system_events", "message": "invalid JXA payload"})
+        elif not isinstance(native_payload, dict):
+            errors.append({"stage": "native_ax", "message": "invalid native probe payload"})
             status = "degraded"
         else:
-            frontmost = jxa_payload.get("frontmost_app")
-            raw_windows = jxa_payload.get("windows")
-            source_window_count = jxa_payload.get("window_count")
-            windows_read_ok = jxa_payload.get("windows_read_ok")
+            native_permission = native_payload.get("permission")
+            native_trusted = (
+                native_permission.get("ax_trusted")
+                if isinstance(native_permission, dict)
+                else None
+            )
+            if isinstance(native_trusted, bool):
+                ax_trusted = native_trusted
+            else:
+                errors.append(
+                    {"stage": "ax_trust", "message": "native AX trust status unavailable"}
+                )
+            frontmost = native_payload.get("frontmost_app")
+            raw_windows = native_payload.get("windows")
+            source_window_count = native_payload.get("source_window_count")
+            windows_read_ok = native_payload.get("windows_read_ok")
             if isinstance(raw_windows, list) and all(
                 isinstance(window, dict) for window in raw_windows
             ):
-                windows = _annotate_window_identities(raw_windows)
+                windows = raw_windows
             else:
                 errors.append(
                     {
-                        "stage": "system_events_windows",
+                        "stage": "native_ax_windows",
                         "message": "invalid windows payload",
                     }
                 )
             if windows_read_ok is not True:
                 errors.append(
                     {
-                        "stage": "system_events_windows",
+                        "stage": "native_ax_windows",
                         "message": "window enumeration failed",
                     }
                 )
             if not _strict_nonnegative_int(source_window_count):
                 errors.append(
                     {
-                        "stage": "system_events_window_count",
+                        "stage": "native_ax_window_count",
                         "message": "invalid source window count",
                     }
                 )
             elif source_window_count < len(windows):
                 errors.append(
                     {
-                        "stage": "system_events_window_count",
+                        "stage": "native_ax_window_count",
                         "message": "source window count is smaller than returned windows",
                     }
                 )
@@ -185,9 +199,18 @@ def _probe(
                 _strict_nonnegative_int(source_window_count)
                 and source_window_count > len(windows)
             )
+            for native_probe_error in native_payload.get("errors") or []:
+                if isinstance(native_probe_error, dict):
+                    errors.append(native_probe_error)
+                else:
+                    errors.append(
+                        {"stage": "native_ax", "message": str(native_probe_error)}
+                    )
             status = (
                 "ready"
-                if _frontmost_app_identity_valid(frontmost)
+                if native_payload.get("status") == "ready"
+                and ax_trusted is True
+                and _frontmost_app_identity_valid(frontmost)
                 and windows_read_ok is True
                 and _strict_nonnegative_int(source_window_count)
                 and source_window_count >= len(windows)
@@ -224,6 +247,11 @@ def _probe(
         },
         "errors": errors,
         "elapsed_ms": int((time.time() - started) * 1000),
+        "source": {
+            "adapter": "native_ax" if include_windows else "ax_trust",
+            "uses_system_events": False,
+            "uses_apple_events": False,
+        },
     }
     incomplete_reasons = _window_coverage_incomplete_reasons(probe)
     probe["coverage_complete"] = not incomplete_reasons
@@ -251,7 +279,14 @@ def _relevant_errors(probe: dict[str, Any], *, include_windows: bool) -> list[di
     return [
         error
         for error in valid
-        if error.get("stage") not in {"system_events_windows", "system_events_window_count"}
+        if error.get("stage")
+        not in {
+            "system_events_windows",
+            "system_events_window_count",
+            "native_ax_windows",
+            "native_ax_window_count",
+            "native_ax_window_attributes",
+        }
     ]
 
 

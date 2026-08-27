@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "macos_accept"))
 
 from macos_ax_acceptance_receipt import (
     _payload_sha256,
+    _verify_evidence_admissible,
     build_receipt,
     validate_receipt,
 )
@@ -164,6 +165,31 @@ class MacosAxAcceptanceReceiptTests(unittest.TestCase):
         self.assertEqual(receipt["identity_coverage"]["stable_ax_identifier_count"], 1)
         self.assertEqual(receipt["identity_coverage"]["sample_local_index_count"], 1)
         self.assertEqual(validate_receipt(receipt), [])
+        native = receipt["source"]["scripts"]["native_probe"]
+        self.assertTrue(native["path"].endswith("macos_ax_native_probe.swift"))
+        self.assertRegex(native["sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn(
+            "native_ax_frontmost_application",
+            receipt["channels"]["selected"],
+        )
+
+    def test_missing_native_probe_dependency_is_rejected(self):
+        receipt = self._receipt()
+        receipt["source"]["scripts"]["native_probe"]["sha256"] = None
+        errors = validate_receipt(receipt)
+        self.assertIn("evidence_contract_invalid", errors)
+        self.assertIn("check_recomputation_mismatch", errors)
+
+    def test_app_identity_accepts_irrelevant_native_window_attribute_error(self):
+        app_verify = _verified("frontmost_app_is")
+        app_verify["observed"]["probe_status"] = "degraded"
+        app_verify["observed"]["errors"] = [
+            {
+                "stage": "native_ax_window_attributes",
+                "message": "one window attribute was unreadable",
+            }
+        ]
+        self.assertTrue(_verify_evidence_admissible(app_verify, "frontmost_app_is", 42))
 
     def test_failed_postcondition_is_rejected(self):
         receipt = self._receipt()
