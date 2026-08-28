@@ -890,7 +890,21 @@ fi
 case "$PUBLISHER_LOCK_HOLDER" in ''|*[!0-9]*) die "invalid publisher kernel lock-holder marker" ;; esac
 [ "$$" = "$PUBLISHER_LOCK_HOLDER" ] || die "publisher kernel lock-holder marker does not match this process"
 [ -e /dev/fd/9 ] || die "publisher process did not inherit kernel mutex fd 9"
-[ /dev/fd/9 -ef "$KERNEL_LOCK_FILE" ] ||
+/usr/bin/env -i PATH=/usr/bin:/bin PYTHONNOUSERSITE=1 \
+    /usr/bin/python3 -I - "$KERNEL_LOCK_FILE" 9 <<'PY' ||
+import os
+import stat
+import sys
+
+path = os.lstat(sys.argv[1])
+opened = os.fstat(int(sys.argv[2]))
+matches = (
+    stat.S_ISREG(path.st_mode)
+    and stat.S_ISREG(opened.st_mode)
+    and (path.st_dev, path.st_ino) == (opened.st_dev, opened.st_ino)
+)
+raise SystemExit(0 if matches else 1)
+PY
     die "publisher kernel mutex fd 9 does not identify the fixed lock file"
 set +e
 if [ "$HOST_KERNEL_OS" = Darwin ]; then
