@@ -1,21 +1,24 @@
 # R9 installed acceptance gate
 
 Date: 2026-08-28
-Status: source-side gate implemented; clean identity and execution evidence pending; authoritative publication and deployment blocked
+Status: clean source candidate and isolated restart exercise PASS; current installation FAIL_CLOSED; authoritative publication and deployment blocked
 
 ## Decision boundary
 
-The current shared worktree implements the source candidate needed to evaluate
-an installed R9 deployment. It does not establish that this candidate has been
-published, installed, adopted by the three long-running services, or admitted
-through live acceptance.
+The clean source candidate is
+`9bc924a2c1641983ac954ee9416e18ddb5fcdf77`. Its locally built exercise binary
+has SHA-256
+`f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c`
+and reports build identity `9bc924a2c164`. This establishes a reproducible
+source-candidate exercise identity only. It does not establish that the
+candidate was published, installed, adopted by the three long-running
+services, or admitted through installed live acceptance.
 
 The authoritative GitLab/publisher identity is still unavailable on this node.
 No deployment or production service restart was performed for this report, and
-there is no installed PASS claim. The existing installation is expected to
-fail the new read-only verifier closed until an authorized publication and
-exact installed build adoption occur. This is a preregistered expectation, not
-an observed verifier result.
+there is no installed PASS claim. The new read-only verifier was executed
+against the existing installation and returned `FAIL_CLOSED`. That observation
+confirms the preregistered stop rule; it is not positive admission evidence.
 
 ## Implemented source candidate gate
 
@@ -41,11 +44,52 @@ The candidate contains three bounded parts:
    exact-byte private binary copy plus a disposable isolated state root to test
    commit-before-ACK interruption, restart replay, Duplicate classification,
    unchanged committed row counts, exact transient-scope cleanup, and removal
-   of the owned receipt residue.
+   of the owned receipt residue. The private root is short enough for the real
+   `receipt-<id>/supervisor.sock` Unix-socket path, and the harness primes one
+   read-only Linux body sample before crossing two fixed sampling windows; an
+   `Unknown` body event is never accepted as success.
 
-Dedicated fake-fixture unit tests cover the verifier and harness. Their
-presence is source evidence only; the final clean-candidate test ledger and all
-live results remain release evidence to be filled below.
+The dedicated Python suite passed 62/62 tests: 24 installed-verifier cases and
+38 restart-harness cases, with warnings as errors. The final source regression
+also passed `ab-agent` 156/156, the six receipt-root Doctor cases, the startup
+Duplicate log case, the live-commit Duplicate case, both crates' all-target
+checks, the three deploy-marker shell suites, Python compilation, shell syntax,
+format checks on the touched Rust modules, and `git diff --check`. Existing
+unrelated compiler warnings remain unchanged.
+
+## Isolated source-candidate exercise
+
+The explicitly authorized exercise against the exact candidate binary returned
+`PASS` without touching a production service or production spool. At the
+observable crash point, SQLite had committed before any filesystem ACK could
+succeed and one receipt remained pending. MCP1 was then proven SIGKILLed; MCP2
+reported exactly one Duplicate and acknowledged the same receipt. The result
+retained one ledger row and two semantic events before and after restart,
+changed no row, emitted no `workload_receipt_reconciled` event, executed the
+stand-in exactly once, and left no receipt entry, private trial root, or exact
+transient scope. The body event remained hard-gated as `Verified` with complete
+delegated CPU/memory workload-tree evidence.
+
+This is deliberately a source-candidate exercise before publication. The
+frozen release sequence below still requires the authoritative installed build
+to repeat the gate; this result cannot substitute for it.
+
+## Current installed read-only observation
+
+The current installed binary still matches its pre-existing expected SHA-256
+`624d379f4a71eced931d68a42e3ee4009744c16639b88f64f21dde945c1bb9c0`.
+All three required services were active, both loopback health bodies were
+exactly `ok`, and all three service environments resolved the expected receipt
+root. The overall result nevertheless correctly returned `FAIL_CLOSED`:
+
+- the installed binary owner boundary failed;
+- the production receipt root was absent; and
+- daemon, daemon-http, and Palace each executed a deleted old inode in both the
+  initial observation and final two-round sweep.
+
+Version execution, receipt-root mode acceptance, and strict Doctor were
+therefore `NOT_RUN`. No service, installed file, or production state was
+changed by this observation.
 
 ## Frozen release and acceptance order
 
@@ -78,21 +122,27 @@ PASS.
 
 | Evidence | State on 2026-08-28 | Admission meaning |
 |---|---|---|
-| Source candidate gate implementation | `IMPLEMENTED_SOURCE_ONLY` | The checks and harness exist in the shared worktree. |
-| Clean candidate identity | `PENDING` | No final clean commit is recorded here. |
+| Source candidate gate implementation | `SOURCE_VERIFIED` | The checks, Doctor organ, and deploy marker are frozen in the clean candidate. |
+| Clean candidate identity | `9bc924a2c1641983ac954ee9416e18ddb5fcdf77` | Local source identity; not publication authority. |
+| Local exercise binary identity | `f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c` | Exact-byte source-candidate exercise only; not installed adoption. |
 | Authoritative GitLab publication | `BLOCKED` | Authenticated publisher identity/path is unavailable. |
 | Authoritative installed build adoption | `NOT_DONE` | No deployment or restart is claimed. |
-| Isolated live restart harness | `PENDING` | No final bounded live result is recorded. |
-| Independent installed verifier | `PENDING` | Expected current-node outcome is fail-closed; no final result is recorded. |
+| Isolated source-candidate restart harness | `PASS` | One execution, exact Duplicate replay, unchanged 1 ledger/2 event rows, zero recovery event and residue. Must repeat after authoritative install. |
+| Independent current-installed verifier | `FAIL_CLOSED` | Unsafe owner boundary, absent receipt root, and three deleted service executables block later checks. |
 | R9 deployed/live-admitted | `NO` | A PASS claim is prohibited. |
 
-## Release-owner fill-in fields
+## Remaining release-owner fields
 
-- **PENDING — clean source commit:** `<40 lowercase hex>`
-- **PENDING — candidate/installed binary SHA-256:** `<64 lowercase hex>`
-- **PENDING — isolated live harness result:** `<bounded result and evidence reference>`
-- **PENDING — final installed verifier result:** `<bounded result and evidence reference>`
+- **PENDING — authoritative publication receipt:** authenticated GitLab commit
+  and publisher evidence.
+- **PENDING — authoritative release binary SHA-256:** the exact installed
+  artifact produced by the authorized workflow.
+- **PENDING — post-install isolated harness result:** repeat against that exact
+  artifact.
+- **PENDING — post-restart installed verifier and fresh-MCP admission:** all
+  aggregate and per-service gates green in one installed observation.
 
 Until all required evidence is authoritative, exact-candidate-bound, and green,
-the only truthful product status is: source candidate gate implemented, R9 not
-deployed, installed acceptance not admitted.
+the only truthful product status is: source candidate and isolated exercise
+verified, current installation failed closed, R9 not deployed, installed
+acceptance not admitted.

@@ -1,36 +1,42 @@
 # R9 durable workload-receipt reconciliation
 
 Date: 2026-08-27
-Status: historical source verification retained; installed-acceptance source gate implemented locally; authoritative publication and installed acceptance blocked
+Status: historical source verification retained; clean source candidate and isolated exercise verified; current installation failed closed; authoritative publication and installed acceptance blocked
 
 ## 2026-08-28 installed-gate update
 
-The shared candidate now contains the source-side installed-acceptance gate:
+The clean source candidate
+`9bc924a2c1641983ac954ee9416e18ddb5fcdf77` now contains the source-side
+installed-acceptance gate:
 the Doctor has a dedicated `workload_receipt_root` check, an independent
 read-only verifier binds an explicit physical binary, commit, content hash,
 production receipt root, running service executables and environments, health
 endpoints, and strict Doctor output, and a separate restart harness defaults to
 read-only preflight before an explicitly authorized isolated live exercise.
-Dedicated fake-fixture tests accompany both scripts.
+Dedicated fake-fixture tests accompany both scripts. The exact locally built
+exercise binary has SHA-256
+`f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c`.
 
-This is source-gate implementation, not deployment evidence. No authenticated
-authoritative publication, production install, production service restart, or
-installed PASS is claimed here. Because the currently installed services have
-not been proven to contain this candidate, the read-only verifier is expected
-to fail closed on the current node. That expectation is not an executed result
-and cannot be used as either positive admission or publication evidence.
+The authorized, isolated source-candidate exercise returned `PASS`: the
+workload ran once; SQLite contained one ledger row and two semantic events
+before and after restart; MCP2 classified exactly one replay as Duplicate;
+no database row changed; no recovery event was fabricated; and no receipt,
+private trial root, or exact transient scope remained. This is bounded local
+source-candidate evidence, not publication or installed-adoption evidence.
 
-The evidence fields intentionally remain open for the release owner:
+The independent read-only verifier was also executed against the current
+installation and returned `FAIL_CLOSED`. All three services were active, both
+health bodies were exactly `ok`, and all three environments carried the
+expected root binding. Admission stopped because the installed binary owner
+boundary was unsafe, the production receipt root was absent, and all three
+services executed deleted old inodes in both observations. Version, root-mode,
+and strict-Doctor checks consequently remained `NOT_RUN`.
 
-- **PENDING — clean source commit:** replace with the final 40-hex candidate
-  commit after the candidate tree is clean.
-- **PENDING — candidate/installed binary SHA-256:** replace with the exact
-  64-hex digest bound to that clean commit and installed candidate.
-- **PENDING — isolated live harness result:** replace with the final bounded
-  result packet after authorized execution.
-- **PENDING — final installed verifier result:** replace with the bounded
-  read-only result after authoritative publication, install, and service
-  adoption.
+No authenticated authoritative publication, production install, production
+service restart, installed-file mutation, or installed PASS is claimed here.
+The release owner must still record the authenticated publication receipt,
+authorized release artifact digest, post-install isolated exercise, post-
+restart verifier result, and fresh-MCP admission.
 
 The frozen installed-gate packet and its stop rules are recorded in
 `2026-08-28-r9-installed-acceptance-gate.md`.
@@ -147,13 +153,16 @@ Bridge's startup scan waits for the next startup (or another peer startup).
 This does not lose or falsely ACK evidence, and adding a background reconciler
 would be a separate daemon/authority decision.
 
-Source verification does not satisfy the installed gate. Required live
+Source verification does not satisfy the installed gate. The isolated exercise
+above proves the candidate behavior under a disposable exact-byte copy, but it
+must be repeated against the authoritative installed artifact. Required live
 acceptance remains one authoritative build, explicit restart of daemon,
 daemon-http, and Palace, executable-hash alignment, both health endpoints,
 Doctor, fresh-MCP admission, a commit-before-ACK restart/replay exercise, and
-absence of residual spool entries or transient scopes. The new source-side
-verifier and isolated harness make those observations repeatable and
-fail-closed; their existence does not satisfy any observation by itself.
+absence of residual spool entries or transient scopes. The source-side
+verifier and isolated harness make those observations repeatable and fail
+closed; neither the local `PASS` nor the current installed `FAIL_CLOSED`
+substitutes for the post-publication observation.
 
 ## Current blocker
 
@@ -161,5 +170,5 @@ The candidate worktree is based on the readable GitLab authoritative master,
 but this node currently has no authenticated publisher identity or push path
 to the authoritative GitLab remote. The installed services therefore remain
 outside the proven candidate boundary, and R9 is not deployed or live-admitted.
-A local file remote, local commit, local build, copied binary, or expected
+A local file remote, local commit, local build, copied binary, or observed
 fail-closed verifier result is not equivalent publication authority.

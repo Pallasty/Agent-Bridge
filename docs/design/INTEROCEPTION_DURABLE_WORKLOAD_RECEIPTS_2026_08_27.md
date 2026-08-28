@@ -86,6 +86,10 @@ Required properties:
   ancestors are rejected. A root-owned sticky `/tmp` is accepted only as the
   ancestor of an already-created owner-bound child, never as the direct parent
   for recursive runtime initialization;
+- every owner-owned ancestor needed to reach a missing suffix has owner
+  read/write/execute access; new directories are created one component at a
+  time as `0700`, their parents are synced, and the trailing owner-owned suffix
+  is reverse-synced and revalidated, including after an interrupted retry;
 - bounded lowercase-hex receipt directory names;
 - root-directory serialization and capacity admission before allocating a new
   entry, so concurrent preparers cannot grow beyond the scan bound;
@@ -249,3 +253,30 @@ These gates still do not authorize publication, service restart, or a new
 installation location. The authoritative remote and the host path used for the
 installed wrapper/binary remain separate authority and replacement-trust
 decisions.
+
+## 2026-08-28 source-candidate acceptance evidence
+
+The clean source candidate is
+`9bc924a2c1641983ac954ee9416e18ddb5fcdf77`. The exact locally built exercise
+binary has SHA-256
+`f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c`.
+The dedicated Python suites passed 62/62 cases, and the Rust, deploy-marker,
+format, syntax, and diff checks were green.
+
+An explicitly authorized isolated exercise against that exact binary returned
+`PASS`: one stand-in execution reached committed SQLite state before any ACK
+could succeed; one receipt survived the MCP1 interruption; MCP2 reported one
+Duplicate; the one ledger row and two semantic events were unchanged; no
+recovery event was emitted; and the receipt, private trial root, and exact
+transient scope were absent at closure. The harness uses a socket-budgeted
+private root and requires a primed read-only Linux body sample followed by an
+exact `Verified` body event; `Unknown` cannot satisfy the gate.
+
+The independent verifier returned `FAIL_CLOSED` against the pre-existing
+installation. Service activity, health, and root bindings passed, while the
+installed binary owner boundary, absent production receipt root, and deleted
+executables for all three services blocked admission. No production service,
+installed file, or production spool was changed. This evidence verifies the
+source candidate and the fail-closed gate only: R9 remains undeployed, and the
+exercise plus verifier must be repeated after authenticated publication,
+authorized install, and explicit service adoption.
