@@ -1,6 +1,7 @@
 # AB interoception: durable workload receipts
 
-Status: R9 durable-v1 source candidate with installed-acceptance gates; not deployed
+Status: R9 durable-v1 plus trusted deployment-root framework source-ready;
+not published or deployed
 Scope: body-bound local Agent workloads on Linux cgroup v2
 Depends on: `INTEROCEPTION_CGROUP_WORKLOAD_CUSTODY_2026_08_27.md`
 
@@ -280,3 +281,80 @@ installed file, or production spool was changed. This evidence verifies the
 source candidate and the fail-closed gate only: R9 remains undeployed, and the
 exercise plus verifier must be repeated after authenticated publication,
 authorized install, and explicit service adoption.
+
+## 2026-08-28 trusted deployment-root closure
+
+Implementation `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` makes the
+receipt-root contract deployable without treating the replaceable HOME mount
+as part of the body. It remains a local source identity; an authoritative
+published descendant is still required.
+
+The closure has four linked organs:
+
+1. **Publisher custody.** One explicit physical exact-`0700` deployment root
+   owns a fixed GitLab safe clone, private Git configuration, toolchain, binary,
+   wrapper, assets, configuration, publisher metadata, and runtime state.
+   Production `--use-binary` is closed. A private `git archive` snapshot and
+   before/after candidate hashes bind each build to one fetched master commit.
+2. **Executable wrapper.** The wrapper derives identity from its physical
+   installed sibling tree, does not fall back to HOME credentials or CLI paths
+   on an alternate root, clears injection variables, and restores all
+   parent-supplied root/state/receipt/asset/HOME/XDG/tmp pins after the bounded
+   machine configuration is loaded.
+3. **Writable workload tissue.** Durable receipts live below
+   `$ROOT/runtime-state/workload-receipts`; non-durable supervisor allocations
+   live below `$ROOT/runtime-state/workload-tmp` through the reserved
+   `AGENT_BRIDGE_CGROUP_TRANSIENT_DIR` policy. The latter avoids trying to
+   allocate under a read-only user bus directory. Child spawn input may
+   override neither custody root.
+4. **Current-boot service adoption.** Three complete user-systemd units are
+   staged and activated as one transaction below the manager runtime control
+   directory. The binder validates the real `UnitPath`, foreign drop-ins and
+   its enumerated activation/reverse-relation allowlist, the preserved
+   pre-existing `WantedBy` set, publisher pending identity, safe-clone
+   candidate, asset bytes, and machine configuration before writing. After a
+   successful single daemon reload it verifies effective fragment bytes,
+   execution hooks, the same relation set, clean environment, and mount
+   hardening. It never restarts or enables a service.
+
+`$ROOT/publisher-state` and `$ROOT/runtime-state` are deliberately separate.
+Wrapper installation, binary publication, and service binding share the same
+physical mode-`0600` kernel mutex, so no one of those writers can validate one
+asset generation and activate another.
+
+The service machine file is data only at admission time: each non-comment line
+must be `export KEY=literal`, keys come from a small allowlist, values cannot
+contain quoting/expansion/commands, secrets and writable-state pins are
+forbidden, and model/voice paths must remain physical beneath the private root.
+This does not mean every legacy machine setting was silently retained. The
+unsafe HOME configuration must be inventoried by key and each non-secret value
+explicitly retained, replaced by a default, or retired. Secrets are provisioned
+through the separate private credentials path.
+
+The frozen production sequence is publication, private-root provisioning,
+clean-environment safe-clone advancement and mode normalization, trusted
+wrapper installation, publisher build/install, quiesced state migration,
+current-boot binding, ordered service adoption, isolated restart exercise,
+installed verifier, then fresh-MCP admission. Every clone operation and every
+production script entry (wrapper installer, publisher, and binder) must use an
+outer `env -i` with fixed system PATH and `/bin/bash --noprofile --norc`; an
+inner script cannot remove interpreter-start injection that already happened.
+State migration is a first-class gate: SQLite must use backup/checkpoint/
+integrity validation rather than a raw DB/WAL/SHM copy, and existing
+app-control/resident/Avatar leaves must be mapped into the one writable
+runtime-state subtree.
+
+Source proof now includes the Python 62-case gate, `ab-agent` 157-test suite,
+four wrapper environment tests, trusted wrapper installer suite, publisher
+lease/recovery suite, three deploy race/parity suites, and the adversarial
+systemd transaction suite. It does not include a real hardened systemd service
+smoke. External `Before`/`After` ordering edges are not part of the enumerated
+relation gate. On transaction failure, activated fragments are deleted and a
+compensating reload is attempted, but a failed compensation leaves manager
+state unknown and prohibits service start until explicit recovery verification.
+The current HOME `UnitPath`, two foreign model drop-ins, absent trusted-root
+layout, unpublished GitLab commit, unsafe legacy machine configuration,
+unmigrated SQLite/WAL, and limited `/Data` capacity therefore remain stop
+conditions. See
+`docs/reports/goal-c-u/2026-08-28-r9-installed-acceptance-gate.md` for the
+authoritative ordered ledger and current live truth.
