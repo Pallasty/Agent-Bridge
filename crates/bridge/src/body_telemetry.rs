@@ -24,8 +24,11 @@ pub const BODY_STATUS_SCHEMA_V1: &str = "agent_bridge.body_status.v1";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V1: &str = "agent_bridge.task_resource_span.v1";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V2: &str = "agent_bridge.task_resource_span.v2";
+pub const TASK_RESOURCE_SPAN_SCHEMA_V3: &str = "agent_bridge.task_resource_span.v3";
 pub const TASK_TERMINAL_RESOURCES_SCHEMA_V0: &str =
     "agent_bridge.task_terminal_resources.v0";
+pub const TASK_WORKLOAD_RESOURCES_SCHEMA_V0: &str =
+    "agent_bridge.task_workload_resources.v0";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
 pub const BODY_SCHEDULING_REPORT_SCHEMA_V0: &str = "agent_bridge.body_scheduling_report.v0";
@@ -946,6 +949,10 @@ pub struct TaskResourceSpan {
     /// PID-free lifetime aggregates observed immediately before the runtime's
     /// sole child reaper ran. This is independent of procfs endpoint samples.
     pub task_terminal_resources: Option<TaskTerminalResourceUsage>,
+    /// PID-free, terminal aggregates for the delegated workload cgroup. The
+    /// supervisor is outside this accounting cgroup and does not publish a
+    /// receipt until the recursively observed `populated` state reaches zero.
+    pub task_workload_resources: Option<TaskWorkloadResourceUsage>,
     #[serde(skip)]
     process_scope: Option<TaskProcessScopeBinding>,
     pub sampling_gaps: u32,
@@ -983,6 +990,7 @@ pub struct TaskResourceSpanReceipt {
     pub task_process_terminal_status: Option<String>,
     pub task_process_endpoint_semantics: Option<String>,
     pub task_terminal_resources: Option<TaskTerminalResourceUsage>,
+    pub task_workload_resources: Option<TaskWorkloadResourceUsage>,
     pub abandonment_reason: Option<String>,
 }
 
@@ -1008,11 +1016,75 @@ pub struct TaskTerminalResourceUsage {
     pub peak_resident_semantics: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Bounded terminal accounting for a delegated local workload tree. Unit
+/// names, cgroup paths, PIDs, pidfds, nonces, and control-channel details are
+/// deliberately absent from this durable projection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskWorkloadResourceUsage {
+    pub schema_version: String,
+    pub accounting_status: String,
+    pub source: String,
+    pub scope: String,
+    pub controllers: Vec<String>,
+    pub workload_lifetime_covered: bool,
+    pub generation_count: u32,
+    pub captured_generation_count: u32,
+    pub known_total_cpu_us: Option<u64>,
+    pub known_user_cpu_us: Option<u64>,
+    pub known_system_cpu_us: Option<u64>,
+    pub known_peak_memory_bytes: Option<u64>,
+    pub known_peak_pids: Option<u64>,
+    pub known_oom_event_count: Option<u64>,
+    pub known_oom_kill_count: Option<u64>,
+    pub start_before_exec: bool,
+    pub final_populated_zero: bool,
+    pub complete_for_cpu_memory_workload_tree: bool,
+    pub complete_for_pids_workload_tree: bool,
+    pub io_accounting_status: String,
+    pub terminal_condition: String,
+    pub failure_reason: Option<String>,
+    pub trust_boundary: String,
+}
+
+impl TaskWorkloadResourceUsage {
+    /// Redundant durable gate: no single deserialized boolean is sufficient to
+    /// turn a task event into Verified whole-tree CPU/memory evidence.
+    pub fn proves_complete_cpu_memory_workload_tree(&self) -> bool {
+        self.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V0
+            && self.accounting_status == "complete"
+            && self.source == "linux_cgroup_v2_systemd_delegated_scope"
+            && self.scope == "delegated_session_workload_tree"
+            && self.workload_lifetime_covered
+            && self.generation_count > 0
+            && self.captured_generation_count == self.generation_count
+            && self.known_total_cpu_us.is_some()
+            && self.known_user_cpu_us.is_some()
+            && self.known_system_cpu_us.is_some()
+            && self.known_peak_memory_bytes.is_some()
+            && self.start_before_exec
+            && self.final_populated_zero
+            && self.complete_for_cpu_memory_workload_tree
+            && self.controllers.iter().any(|value| value == "cpu")
+            && self.controllers.iter().any(|value| value == "memory")
+            && self.io_accounting_status == "unknown_not_delegated"
+            && self.trust_boundary == "same_uid_non_adversarial_cgroup_membership"
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 struct TaskProcessScopeBinding {
     root_pid: u32,
     root_start_ticks: u64,
     owner_uid: u32,
+}
+
+impl std::fmt::Debug for TaskProcessScopeBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TaskProcessScopeBinding")
+            .field("identity_bound", &true)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1044,7 +1116,7 @@ impl TaskResourceSpan {
         task_process_before: Option<TaskProcessTreeSample>,
     ) -> Self {
         Self {
-            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V2.to_string(),
+            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V3.to_string(),
             span_id,
             task_kind,
             task_ref,
@@ -1061,6 +1133,7 @@ impl TaskResourceSpan {
             task_process_baseline_phase: None,
             task_process_whole_task_prefix_covered: false,
             task_terminal_resources: None,
+            task_workload_resources: None,
             process_scope,
             sampling_gaps: 0,
             abandonment_reason: None,
@@ -1087,6 +1160,15 @@ impl TaskResourceSpan {
         let Some(after) = self.after.as_ref() else {
             return false;
         };
+        let delegated_workload_complete = self
+            .task_workload_resources
+            .as_ref()
+            .is_some_and(|usage| {
+                usage.proves_complete_cpu_memory_workload_tree()
+                    && self.task_terminal_resources.as_ref().is_some_and(|terminal| {
+                        terminal.spawned_attempt_count == usage.generation_count
+                    })
+            });
         self.state == TaskResourceSpanState::Closed
             && snapshot_is_verified(&self.before)
             && snapshot_is_verified(after)
@@ -1094,11 +1176,14 @@ impl TaskResourceSpan {
             && self.before.pointer("/identity/body_instance_id")
                 == after.pointer("/identity/body_instance_id")
             && self.before.pointer("/sample/sequence") != after.pointer("/sample/sequence")
-            && self
-                .task_terminal_resources
-                .as_ref()
-                .is_none_or(|usage| usage.complete_for_workload_tree)
-            && (self.process_scope.is_none()
+            && (delegated_workload_complete
+                || (self.task_workload_resources.is_none()
+                    && self
+                        .task_terminal_resources
+                        .as_ref()
+                        .is_none_or(|usage| usage.complete_for_workload_tree)))
+            && (delegated_workload_complete
+                || self.process_scope.is_none()
                 || (self.task_process_whole_task_prefix_covered
                     && self
                     .task_process_before
@@ -1194,6 +1279,7 @@ impl TaskResourceSpan {
                 None
             },
             task_terminal_resources: self.task_terminal_resources.clone(),
+            task_workload_resources: self.task_workload_resources.clone(),
             abandonment_reason: self.abandonment_reason.clone(),
         }
     }
@@ -1234,6 +1320,65 @@ fn terminal_resource_usage(
         peak_resident_semantics:
             "max_ru_maxrss_across_attempts_not_concurrent_tree_peak".to_string(),
     }
+}
+
+fn workload_resource_usage(
+    snapshot: ab_agent::WorkloadResourceSnapshot,
+) -> TaskWorkloadResourceUsage {
+    let accounting_status = match snapshot.status {
+        ab_agent::WorkloadResourceStatus::Pending => "pending",
+        ab_agent::WorkloadResourceStatus::Complete => "complete",
+        ab_agent::WorkloadResourceStatus::Partial => "partial",
+        ab_agent::WorkloadResourceStatus::Unavailable => "unavailable",
+        ab_agent::WorkloadResourceStatus::Unsupported => "unsupported",
+    };
+    let terminal_condition = match snapshot.status {
+        ab_agent::WorkloadResourceStatus::Pending => "workload_generations_pending",
+        ab_agent::WorkloadResourceStatus::Complete => "all_generations_populated_zero",
+        ab_agent::WorkloadResourceStatus::Partial => "one_or_more_generation_receipts_incomplete",
+        ab_agent::WorkloadResourceStatus::Unavailable => "terminal_cgroup_receipt_unavailable",
+        ab_agent::WorkloadResourceStatus::Unsupported => "delegated_cgroup_custody_not_active",
+    };
+    let failure_reason = (!snapshot.incomplete_reasons.is_empty())
+        .then(|| snapshot.incomplete_reasons.join("; "));
+    TaskWorkloadResourceUsage {
+        schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V0.to_string(),
+        accounting_status: accounting_status.to_string(),
+        source: snapshot
+            .source
+            .unwrap_or_else(|| "unsupported_or_unprepared_platform".to_string()),
+        scope: snapshot
+            .scope
+            .unwrap_or_else(|| "no_delegated_workload_scope".to_string()),
+        controllers: snapshot.controllers,
+        workload_lifetime_covered: snapshot.populated_zero_observed,
+        generation_count: snapshot.generation_count,
+        captured_generation_count: snapshot.captured_generation_count,
+        known_total_cpu_us: snapshot.cpu_usage_usec,
+        known_user_cpu_us: snapshot.cpu_user_usec,
+        known_system_cpu_us: snapshot.cpu_system_usec,
+        known_peak_memory_bytes: snapshot.memory_peak_bytes,
+        known_peak_pids: snapshot.pids_peak,
+        known_oom_event_count: snapshot.oom_events,
+        known_oom_kill_count: snapshot.oom_kill_events,
+        start_before_exec: snapshot.start_before_exec,
+        final_populated_zero: snapshot.populated_zero_observed,
+        complete_for_cpu_memory_workload_tree: snapshot
+            .complete_for_cpu_memory_workload_tree,
+        complete_for_pids_workload_tree: snapshot.complete_for_pids_workload_tree,
+        io_accounting_status: "unknown_not_delegated".to_string(),
+        terminal_condition: terminal_condition.to_string(),
+        failure_reason,
+        trust_boundary: "same_uid_non_adversarial_cgroup_membership".to_string(),
+    }
+}
+
+fn refresh_task_custody_resources(
+    span: &mut TaskResourceSpan,
+    custody: &ab_agent::SpawnedProcessCustody,
+) {
+    span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+    span.task_workload_resources = Some(workload_resource_usage(custody.workload_resources()));
 }
 
 fn process_tree_delta(
@@ -1503,7 +1648,7 @@ pub fn attach_task_resource_span_process_custody(
         .active
         .get_mut(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
-    span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+    refresh_task_custody_resources(span, &custody);
     let result = span.clone();
     tracker
         .terminal_resource_handles
@@ -1555,7 +1700,7 @@ fn finish_active_task_resource_span(
         .remove(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
     if let Some(custody) = tracker.terminal_resource_handles.remove(span_id) {
-        span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+        refresh_task_custody_resources(&mut span, &custody);
     }
     tracker.session_spans.retain(|_, id| id != span_id);
     let after = live_body_snapshot();
@@ -1654,7 +1799,7 @@ pub fn abandon_task_resource_span_for_session(
         .remove(&span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
     if let Some(custody) = tracker.terminal_resource_handles.remove(&span_id) {
-        span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+        refresh_task_custody_resources(&mut span, &custody);
     }
     let span = span.finish(None, Some(reason));
     tracker.session_spans.retain(|_, id| id != &span_id);
@@ -1697,7 +1842,7 @@ pub fn abandon_task_resource_span(
         .remove(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
     if let Some(custody) = tracker.terminal_resource_handles.remove(span_id) {
-        span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
+        refresh_task_custody_resources(&mut span, &custody);
     }
     tracker.session_spans.retain(|_, id| id != span_id);
     Ok(span.finish(None, Some(reason)))
@@ -2247,7 +2392,7 @@ mod tests {
 
         assert!(!span.has_complete_capture());
         let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
-        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V2);
+        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V3);
         assert_eq!(receipt["task_process_binding_status"], "unavailable");
         assert_eq!(
             receipt["task_process_binding_reason"],
@@ -2266,6 +2411,126 @@ mod tests {
             false
         );
         assert!(!receipt.to_string().contains("pid"));
+    }
+
+    #[test]
+    fn delegated_cgroup_receipt_supersedes_procfs_endpoints_for_cpu_memory_tree() {
+        let body = |sequence| {
+            json!({
+                "status":"ok", "freshness":{"status":"fresh"},
+                "coverage":{"required_ratio":1.0},
+                "identity":{"body_id":"body-test", "body_instance_id":"body-test@boot"},
+                "sample":{"sequence":sequence}
+            })
+        };
+        let mut span = TaskResourceSpan::active(
+            "delegated-tree".into(),
+            "agent_spawn".into(),
+            None,
+            body(1),
+            Some(TaskProcessScopeBinding {
+                root_pid: 8_888,
+                root_start_ticks: 456,
+                owner_uid: 1_000,
+            }),
+            None,
+        );
+        span.after = Some(body(2));
+        span.state = TaskResourceSpanState::Closed;
+        span.task_process_baseline_phase = Some("post_spawn".into());
+        span.task_process_whole_task_prefix_covered = false;
+        span.task_terminal_resources = Some(TaskTerminalResourceUsage {
+            schema_version: TASK_TERMINAL_RESOURCES_SCHEMA_V0.into(),
+            accounting_status: "complete".into(),
+            source: "linux_raw_waitid_wnowait_rusage".into(),
+            scope: "waited_child_generations".into(),
+            descendant_coverage: "not_proven".into(),
+            workload_lifetime_covered: false,
+            spawned_attempt_count: 1,
+            captured_attempt_count: 1,
+            known_user_cpu_us: Some(5),
+            known_system_cpu_us: Some(3),
+            known_peak_resident_bytes: Some(4096),
+            complete_for_spawned_attempts: true,
+            complete_for_workload_tree: false,
+            terminal_condition: "all_spawned_children_observed_before_reap".into(),
+            peak_resident_semantics:
+                "max_ru_maxrss_across_attempts_not_concurrent_tree_peak".into(),
+        });
+        span.task_workload_resources = Some(TaskWorkloadResourceUsage {
+            schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V0.into(),
+            accounting_status: "complete".into(),
+            source: "linux_cgroup_v2_systemd_delegated_scope".into(),
+            scope: "delegated_session_workload_tree".into(),
+            controllers: vec!["cpu".into(), "memory".into(), "pids".into()],
+            workload_lifetime_covered: true,
+            generation_count: 1,
+            captured_generation_count: 1,
+            known_total_cpu_us: Some(8),
+            known_user_cpu_us: Some(5),
+            known_system_cpu_us: Some(3),
+            known_peak_memory_bytes: Some(8192),
+            known_peak_pids: Some(2),
+            known_oom_event_count: Some(0),
+            known_oom_kill_count: Some(0),
+            start_before_exec: true,
+            final_populated_zero: true,
+            complete_for_cpu_memory_workload_tree: true,
+            complete_for_pids_workload_tree: true,
+            io_accounting_status: "unknown_not_delegated".into(),
+            terminal_condition: "all_generations_populated_zero".into(),
+            failure_reason: None,
+            trust_boundary: "same_uid_non_adversarial_cgroup_membership".into(),
+        });
+
+        let debug = format!("{span:?}");
+        assert!(!debug.contains("8888"));
+        assert!(!debug.contains("root_start_ticks"));
+        assert!(span.has_complete_capture());
+        let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
+        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V3);
+        assert_eq!(
+            receipt["task_workload_resources"]
+                ["complete_for_cpu_memory_workload_tree"],
+            true
+        );
+        assert_eq!(
+            receipt["task_workload_resources"]["io_accounting_status"],
+            "unknown_not_delegated"
+        );
+        for private_key in ["pid", "pidfd", "cgroup_path", "unit", "nonce"] {
+            assert!(receipt.get(private_key).is_none());
+            assert!(receipt["task_workload_resources"].get(private_key).is_none());
+        }
+
+        let baseline = span
+            .task_workload_resources
+            .clone()
+            .expect("workload receipt");
+        let mut tampered = baseline.clone();
+        tampered.captured_generation_count = 0;
+        assert!(!tampered.proves_complete_cpu_memory_workload_tree());
+        tampered = baseline.clone();
+        tampered.trust_boundary = "hostile_same_uid_containment".into();
+        assert!(!tampered.proves_complete_cpu_memory_workload_tree());
+        tampered = baseline.clone();
+        tampered.controllers.retain(|controller| controller != "memory");
+        assert!(!tampered.proves_complete_cpu_memory_workload_tree());
+
+        span.task_terminal_resources
+            .as_mut()
+            .expect("terminal receipt")
+            .spawned_attempt_count = 2;
+        assert!(!span.has_complete_capture());
+        span.task_terminal_resources
+            .as_mut()
+            .expect("terminal receipt")
+            .spawned_attempt_count = 1;
+        span.task_workload_resources
+            .as_mut()
+            .expect("workload receipt")
+            .complete_for_cpu_memory_workload_tree = false;
+        assert!(!span.has_complete_capture());
     }
 
     #[test]

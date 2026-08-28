@@ -13,9 +13,11 @@
 //! - [`GitWorktreeManager`]: thin wrapper around `git worktree {add,list,remove}`.
 
 use ab_core::{Error, Result, SessionId};
+use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub mod acp;
 pub mod auggie;
@@ -29,6 +31,7 @@ pub mod pty_session;
 pub mod resident_codex;
 pub mod sandbox;
 mod terminal_rusage;
+pub mod workload_cgroup;
 pub mod worktree;
 
 pub use acp::AcpRuntime;
@@ -44,7 +47,122 @@ pub use resident_codex::{
     ResidentCodexRun,
 };
 pub use terminal_rusage::{TerminalResourceSnapshot, TerminalResourceStatus};
+pub use workload_cgroup::{
+    WorkloadControl, WorkloadGeneration, WorkloadResourceSnapshot, WorkloadResourceStatus,
+};
 pub use worktree::{GitWorktreeManager, Worktree};
+
+/// Start the durable initial-row write in its own task and return both an
+/// acknowledgement and the task handle. Runtime owners can poll/reap their OS
+/// child concurrently, await the task before finalisation (preserving
+/// insert-before-update ordering), and await the acknowledgement before
+/// returning a newly spawned session to callers.
+pub(crate) fn spawn_initial_session_save(
+    store: Option<Arc<dyn StateStore>>,
+    initial: StoredSession,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::task::JoinHandle<()>,
+) {
+    let session_id = initial.id.clone();
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        if let Some(store) = store {
+            if let Err(error) = store.save_session(&initial).await {
+                tracing::warn!(session = %session_id, error = %error, "store: initial save_session failed");
+            }
+        }
+        let _ = ack_tx.send(());
+    });
+    (ack_rx, task)
+}
+
+/// Fail-safe for the interval after a detached owner has accepted the `Child`
+/// but before `spawn()` has actually delivered its `AgentSession` to the
+/// caller. If that future is cancelled, the otherwise-unaddressable workload
+/// is killed while the detached owner remains responsible for reaping and
+/// durable finalisation.
+pub(crate) struct SpawnReturnGuard {
+    custody: Option<SpawnedProcessCustody>,
+    armed: bool,
+}
+
+impl SpawnReturnGuard {
+    pub(crate) fn new(custody: Option<SpawnedProcessCustody>) -> Self {
+        Self {
+            custody,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SpawnReturnGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            if let Some(custody) = &self.custody {
+                let _ = custody.request_kill_now();
+            }
+        }
+    }
+}
+
+/// Covers the only cancellable gap between a successful OS spawn and the
+/// authenticated delegated-cgroup READY/START result. The handle is captured
+/// from the PID and `/proc` birth token returned by that exact spawn. A
+/// prepared scope receives SIGTERM so that, if START raced cancellation, the
+/// supervisor's handler drains the workload subtree; a direct child can be
+/// killed immediately.
+pub(crate) struct SpawnActivationGuard {
+    custody: Option<SpawnedProcessCustody>,
+    delegated: bool,
+    armed: bool,
+}
+
+impl SpawnActivationGuard {
+    pub(crate) fn capture(
+        pid: u32,
+        pgid: Option<u32>,
+        scope: SpawnedProcessScope,
+        delegated: bool,
+    ) -> Self {
+        Self {
+            custody: SpawnedProcessCustody::from_spawn(pid, pgid, scope),
+            delegated,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn from_custody(custody: Option<SpawnedProcessCustody>, delegated: bool) -> Self {
+        Self {
+            custody,
+            delegated,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SpawnActivationGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Some(custody) = &self.custody {
+            if self.delegated {
+                let _ = custody.request_terminate_now();
+            } else {
+                let _ = custody.request_kill_now();
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpawnConfig {
@@ -159,6 +277,7 @@ pub struct SpawnedProcessCustody {
     scope: SpawnedProcessScope,
     terminal_resources: std::sync::Arc<terminal_rusage::TerminalResourceAccumulator>,
     initial_wait_observation: terminal_rusage::TerminalWaitObservation,
+    workload: workload_cgroup::WorkloadCustody,
 }
 
 impl SpawnedProcessCustody {
@@ -175,14 +294,43 @@ impl SpawnedProcessCustody {
         }
         let terminal_resources = terminal_rusage::TerminalResourceAccumulator::new();
         let initial_wait_observation = terminal_resources.begin_generation(pid)?;
+        let start_ticks =
+            crate::pty_session::proc_start_ticks(pid).and_then(|ticks| u64::try_from(ticks).ok());
         Some(Self {
             pid,
             pgid,
-            start_ticks: crate::pty_session::proc_start_ticks(pid)
-                .and_then(|ticks| u64::try_from(ticks).ok()),
+            start_ticks,
             scope,
             terminal_resources,
             initial_wait_observation,
+            workload: workload_cgroup::WorkloadCustody::direct(pid, pgid, start_ticks),
+        })
+    }
+
+    /// Construct custody for a child whose launch was prepared through a
+    /// delegated workload scope. `generation` is `None` only when the planner
+    /// deliberately disabled cgroup custody before spawn.
+    pub(crate) fn from_spawn_with_workload(
+        pid: u32,
+        pgid: Option<u32>,
+        scope: SpawnedProcessScope,
+        generation: Option<WorkloadGeneration>,
+    ) -> Option<Self> {
+        if pid == 0 {
+            return None;
+        }
+        let terminal_resources = terminal_rusage::TerminalResourceAccumulator::new();
+        let initial_wait_observation = terminal_resources.begin_generation(pid)?;
+        let start_ticks =
+            crate::pty_session::proc_start_ticks(pid).and_then(|ticks| u64::try_from(ticks).ok());
+        Some(Self {
+            pid,
+            pgid,
+            start_ticks,
+            scope,
+            terminal_resources,
+            initial_wait_observation,
+            workload: workload_cgroup::WorkloadCustody::new(pid, pgid, start_ticks, generation),
         })
     }
 
@@ -212,19 +360,63 @@ impl SpawnedProcessCustody {
         self.terminal_resources.snapshot()
     }
 
+    /// PID-free whole-workload-tree resource evidence accumulated across all
+    /// local generations in this runtime session.
+    pub fn workload_resources(&self) -> WorkloadResourceSnapshot {
+        self.workload.snapshot()
+    }
+
+    /// Private control handle for the newest live workload generation.
+    pub fn workload_control(&self) -> Option<WorkloadControl> {
+        self.workload.control()
+    }
+
+    /// Request graceful termination using the delegated tree first and the
+    /// direct child's pidfd as the race-free fallback.
+    pub async fn request_terminate(&self) -> Result<()> {
+        self.request_terminate_now()
+    }
+
+    /// Request immediate termination using cgroup.kill or a pidfd fallback.
+    pub async fn request_kill(&self) -> Result<()> {
+        self.request_kill_now()
+    }
+
+    /// Synchronous variant for fail-safe `Drop` guards. It performs only a
+    /// bounded socket write or pidfd syscall and never waits for process exit.
+    pub fn request_terminate_now(&self) -> Result<()> {
+        self.workload.request_terminate_now()
+    }
+
+    /// Synchronous immediate-kill variant for fail-safe `Drop` guards.
+    pub fn request_kill_now(&self) -> Result<()> {
+        self.workload.request_kill_now()
+    }
+
     pub(crate) fn initial_wait_observation(&self) -> terminal_rusage::TerminalWaitObservation {
         self.initial_wait_observation.clone()
     }
 
-    pub(crate) fn begin_process_generation(
+    /// Begin another local executor generation (for bounded retry runtimes)
+    /// while retaining one session-level resource accumulator.
+    pub(crate) fn begin_workload_generation(
         &self,
         pid: u32,
+        generation: Option<WorkloadGeneration>,
     ) -> Option<terminal_rusage::TerminalWaitObservation> {
+        self.workload.begin_generation(pid, generation);
         self.terminal_resources.begin_generation(pid)
+    }
+
+    /// Attach delegated-tree custody to a generation whose terminal wait
+    /// observation was already created by a lower-level PTY/session helper.
+    pub(crate) fn attach_workload_generation(&self, generation: WorkloadGeneration) {
+        self.workload.attach_generation(generation);
     }
 
     pub(crate) fn seal_terminal_resources(&self) {
         self.terminal_resources.seal();
+        self.workload.seal();
     }
 }
 
@@ -521,5 +713,35 @@ mod process_custody_tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn delegated_activation_guard_uses_supervisor_term_drain_signal() {
+        use std::io::BufRead;
+
+        let mut child = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "trap 'exit 42' TERM; echo READY; while :; do sleep 0.1; done",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn supervisor stand-in");
+        let mut ready = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("stdout"))
+            .read_line(&mut ready)
+            .expect("read readiness");
+        assert_eq!(ready.trim(), "READY");
+
+        let guard = SpawnActivationGuard::capture(
+            child.id(),
+            None,
+            SpawnedProcessScope::LocalWorkloadRoot,
+            true,
+        );
+        drop(guard);
+        let status = child.wait().expect("reap supervisor stand-in");
+        assert_eq!(status.code(), Some(42));
     }
 }

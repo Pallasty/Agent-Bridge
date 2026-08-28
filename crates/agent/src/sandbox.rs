@@ -39,11 +39,26 @@ pub enum AgentSandboxMode {
     Workspace,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct LaunchSpec {
     pub program: String,
     pub args: Vec<String>,
     pub sandboxed: bool,
+    pub(crate) workload: Option<crate::workload_cgroup::PreparedWorkload>,
+}
+
+impl std::fmt::Debug for LaunchSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Delegated launches carry a private unit, nonce, socket, and receipt
+        // path in `args`; never expose those custody details through Debug.
+        formatter
+            .debug_struct("LaunchSpec")
+            .field("program_prepared", &!self.program.is_empty())
+            .field("argument_count", &self.args.len())
+            .field("sandboxed", &self.sandboxed)
+            .field("workload_custody_prepared", &self.workload.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,7 +146,7 @@ pub fn wrap_local_command(
     args: &[String],
 ) -> Result<LaunchSpec> {
     let mode = effective_mode(env)?;
-    wrap_local_command_from(
+    let launch = wrap_local_command_from(
         mode,
         std::env::current_exe().map_err(|e| {
             Error::Backend(format!("{runtime}: resolve agent-bridge executable: {e}"))
@@ -141,7 +156,8 @@ pub fn wrap_local_command(
         env,
         program,
         args,
-    )
+    )?;
+    crate::workload_cgroup::wrap_launch_spec(launch, runtime, env)
 }
 
 fn wrap_local_command_from(
@@ -163,6 +179,7 @@ fn wrap_local_command_from(
             program: program.to_string(),
             args: args.to_vec(),
             sandboxed: false,
+            workload: None,
         });
     }
     let launcher = current_exe.into_os_string().into_string().map_err(|_| {
@@ -184,6 +201,7 @@ fn wrap_local_command_from(
         program: launcher,
         args: wrapped,
         sandboxed: true,
+        workload: None,
     })
 }
 
@@ -283,7 +301,14 @@ fn macos_sandbox_ca_file(env: &HashMap<String, String>, sandboxed: bool) -> Opti
 }
 
 fn is_spawn_control_env(key: &str) -> bool {
-    matches!(key, POLICY_ENV | BWRAP_BIN_ENV | CREDS_FILE_ENV)
+    matches!(
+        key,
+        POLICY_ENV
+            | BWRAP_BIN_ENV
+            | CREDS_FILE_ENV
+            | crate::workload_cgroup::POLICY_ENV
+            | crate::workload_cgroup::RUNTIME_MAX_ENV
+    )
 }
 
 /// These values are consumed before the OS sandbox exists. A per-spawn value

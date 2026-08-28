@@ -4978,6 +4978,17 @@ fn restore_sigpipe_default() {
 }
 
 fn main() -> Result<()> {
+    // The delegated-cgroup supervisor must remain a single-threaded, raw
+    // process until it has moved itself out of the scope root, enabled the
+    // delegated controllers, and installed the workload pre-exec barrier.
+    // Dispatch it before SIGPIPE is restored as well as before Tokio, clap,
+    // credentials, logging, or any other AB subsystem: its private socket must
+    // observe parent loss as EOF/EPIPE instead of dying from SIGPIPE.
+    if let Some(result) = ab_agent::workload_cgroup::run_internal_supervisor_if_requested() {
+        result?;
+        return Ok(());
+    }
+
     #[cfg(unix)]
     restore_sigpipe_default();
 

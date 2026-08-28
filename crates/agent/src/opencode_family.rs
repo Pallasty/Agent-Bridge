@@ -57,6 +57,13 @@ struct OneShotLifecycle {
     wake: Notify,
 }
 
+#[derive(Clone)]
+struct LiveOneShotGeneration {
+    attempt: u32,
+    pid: u32,
+    custody: crate::SpawnedProcessCustody,
+}
+
 impl OneShotLifecycle {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
@@ -89,6 +96,38 @@ impl OneShotLifecycle {
     }
 }
 
+struct OneShotReturnGuard {
+    lifecycle: Arc<OneShotLifecycle>,
+    process: crate::SpawnReturnGuard,
+    armed: bool,
+}
+
+impl OneShotReturnGuard {
+    fn new(
+        lifecycle: Arc<OneShotLifecycle>,
+        custody: Option<crate::SpawnedProcessCustody>,
+    ) -> Self {
+        Self {
+            lifecycle,
+            process: crate::SpawnReturnGuard::new(custody),
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+        self.process.disarm();
+    }
+}
+
+impl Drop for OneShotReturnGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.lifecycle.cancel();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct OpenCodeFamilyRuntime {
     binary: String,
@@ -98,7 +137,7 @@ pub struct OpenCodeFamilyRuntime {
     retry_attempts_override: Option<u32>,
     retry_backoff_override: Option<Duration>,
     store: Option<Arc<dyn StateStore>>,
-    children: Arc<DashMap<String, u32>>,
+    children: Arc<DashMap<String, LiveOneShotGeneration>>,
     /// Explicit cancellable one-shot lifecycle. It remains addressable during
     /// retry backoff when no PID is safely signalable, so kill can cancel and
     /// wake the retry loop without inventing a process identity.
@@ -412,7 +451,7 @@ struct SpawnPlan {
 }
 
 impl SpawnPlan {
-    fn build(&self) -> Result<Command> {
+    fn build(&self) -> Result<(Command, Option<crate::sandbox::LaunchSpec>)> {
         if self.remote {
             let mut c = Command::new("ssh");
             c.arg("-o")
@@ -427,7 +466,7 @@ impl SpawnPlan {
             c.stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            Ok(c)
+            Ok((c, None))
         } else {
             let mut args = vec!["run".to_string(), self.auto_flag.to_string()];
             if let Some(m) = &self.model {
@@ -451,14 +490,37 @@ impl SpawnPlan {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             crate::sandbox::configure_command_env(&mut c, &self.env, launch.sandboxed)?;
-            Ok(c)
+            Ok((c, Some(launch)))
         }
     }
 
-    fn spawn(&self) -> Result<tokio::process::Child> {
-        self.build()?
+    async fn spawn(
+        &self,
+    ) -> Result<(
+        tokio::process::Child,
+        Option<crate::workload_cgroup::WorkloadGeneration>,
+    )> {
+        let (mut command, launch) = self.build()?;
+        let child = command
             .spawn()
-            .map_err(|e| Error::Backend(format!("spawn {}: {e}", self.runtime_id)))
+            .map_err(|e| Error::Backend(format!("spawn {}: {e}", self.runtime_id)))?;
+        let pid = child.id().unwrap_or(0);
+        let delegated = launch
+            .as_ref()
+            .is_some_and(|launch| launch.workload.is_some());
+        let scope = if self.remote {
+            crate::SpawnedProcessScope::LocalTransport
+        } else {
+            crate::SpawnedProcessScope::LocalWorkloadRoot
+        };
+        let mut activation_guard =
+            crate::SpawnActivationGuard::capture(pid, None, scope, delegated);
+        let generation = match launch {
+            Some(launch) => launch.activate_workload_cgroup(pid).await?,
+            None => None,
+        };
+        activation_guard.disarm();
+        Ok((child, generation))
     }
 }
 
@@ -555,6 +617,33 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+fn initial_session_row(session: &SessionId, runtime: &str, cwd: &str) -> StoredSession {
+    StoredSession {
+        id: session.clone(),
+        runtime_id: runtime.into(),
+        cwd: cwd.into(),
+        started_at: now_secs(),
+        ended_at: None,
+        exit_code: None,
+        stdout: None,
+        stderr: None,
+        cloud_run_id: None,
+        cloud_run_state: None,
+        cloud_session_link: None,
+        proc_pid: None,
+        proc_pgid: None,
+        proc_start_ticks: None,
+        owner_pid: None,
+        owner_start_ticks: None,
+    }
+}
+
+async fn await_initial_session_save(task: &mut Option<tokio::task::JoinHandle<()>>) {
+    if let Some(task) = task.take() {
+        let _ = task.await;
+    }
+}
+
 async fn finalise_synthetic_retry_cancel(
     store: &Option<Arc<dyn StateStore>>,
     session: &SessionId,
@@ -620,30 +709,6 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
 
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
-
-        if let Some(store) = &self.store {
-            let initial = StoredSession {
-                id: session_id.clone(),
-                runtime_id: self.runtime_id.into(),
-                cwd: cwd.clone(),
-                started_at: now_secs(),
-                ended_at: None,
-                exit_code: None,
-                stdout: None,
-                stderr: None,
-                cloud_run_id: None,
-                cloud_run_state: None,
-                cloud_session_link: None,
-                proc_pid: None,
-                proc_pgid: None,
-                proc_start_ticks: None,
-                owner_pid: None,
-                owner_start_ticks: None,
-            };
-            if let Err(e) = store.save_session(&initial).await {
-                warn!(session = %session_id, error = %e, "store: save_session failed");
-            }
-        }
 
         let plan = if remote {
             // Dispatch the one-shot run to a tailnet node via ssh. The local ssh
@@ -723,37 +788,63 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             .unwrap_or(3);
         let retry_backoff = self.retry_backoff_override.unwrap_or(RETRY_BACKOFF);
 
-        let child = match plan.spawn() {
-            Ok(child) => child,
+        let (child, workload_generation) = match plan.spawn().await {
+            Ok(spawned) => spawned,
             Err(e) => {
                 let message = format!("spawn {}: {e}", self.runtime_id);
-                if let Some(store) = &self.store {
-                    if let Err(store_err) = store
-                        .finalise_session(
-                            &session_id,
-                            now_secs(),
-                            Some(127),
-                            None,
-                            Some(message.clone()),
-                        )
-                        .await
-                    {
-                        warn!(
-                            session = %session_id,
-                            runtime = %self.runtime_id,
-                            error = %store_err,
-                            "store: finalise failed spawn session failed"
-                        );
-                    }
+                if let Some(store) = self.store.clone() {
+                    let initial = initial_session_row(&session_id, self.runtime_id, &cwd);
+                    let failed_session = session_id.clone();
+                    let failure_message = message.clone();
+                    let runtime_id = self.runtime_id;
+                    // Keep insert+terminal update in one detached owner. If the
+                    // caller cancels while persistence is in flight, it may
+                    // still get a terminal failure row but never an unfinished
+                    // ghost row.
+                    let persistence = tokio::spawn(async move {
+                        if let Err(error) = store.save_session(&initial).await {
+                            warn!(session = %failed_session, error = %error, "store: save failed spawn session failed");
+                        }
+                        if let Err(store_err) = store
+                            .finalise_session(
+                                &failed_session,
+                                now_secs(),
+                                Some(127),
+                                None,
+                                Some(failure_message),
+                            )
+                            .await
+                        {
+                            warn!(
+                                session = %failed_session,
+                                runtime = %runtime_id,
+                                error = %store_err,
+                                "store: finalise failed spawn session failed"
+                            );
+                        }
+                    });
+                    let _ = persistence.await;
                 }
                 return Err(Error::Backend(message));
             }
         };
         let pid = child.id().unwrap_or(0);
         let process_scope = process_scope_for_plan(&plan);
-        let process_custody = crate::SpawnedProcessCustody::from_spawn(pid, None, process_scope);
-        if pid != 0 {
-            self.children.insert(session_id.as_str().to_string(), pid);
+        let process_custody = crate::SpawnedProcessCustody::from_spawn_with_workload(
+            pid,
+            None,
+            process_scope,
+            workload_generation,
+        );
+        if let Some(custody) = process_custody.clone() {
+            self.children.insert(
+                session_id.as_str().to_string(),
+                LiveOneShotGeneration {
+                    attempt: 1,
+                    pid,
+                    custody,
+                },
+            );
         }
         let lifecycle = Arc::new(OneShotLifecycle::default());
         self.active_one_shot
@@ -773,8 +864,13 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         let children_bg = self.children.clone();
         let active_bg = self.active_one_shot.clone();
         let terminal_custody = process_custody.clone();
+        let initial = initial_session_row(&session_id, self.runtime_id, &cwd);
+        let mut return_guard = OneShotReturnGuard::new(lifecycle.clone(), process_custody.clone());
+        let (initial_saved, initial_save_task) =
+            crate::spawn_initial_session_save(store_bg.clone(), initial);
         tokio::spawn(async move {
             let mut child = child;
+            let mut initial_save_task = Some(initial_save_task);
             let mut wait_observation = terminal_custody
                 .as_ref()
                 .map(|custody| custody.initial_wait_observation());
@@ -784,11 +880,14 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                     Some(observation) => {
                         let children_reaped = children_bg.clone();
                         let sid_reaped = sid_bg.clone();
+                        let reaped_attempt = attempt;
                         crate::terminal_rusage::wait_with_output_notify_reaped(
                             child,
                             observation,
                             move || {
-                                children_reaped.remove(sid_reaped.as_str());
+                                children_reaped.remove_if(sid_reaped.as_str(), |_, live| {
+                                    live.attempt == reaped_attempt
+                                });
                             },
                         )
                         .await
@@ -798,7 +897,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                 // Idempotent fallback for a wait error or a PID-less child. A
                 // successful observed reap already removed the PID through the
                 // callback, before inherited descendant pipes necessarily EOF.
-                children_bg.remove(sid_bg.as_str());
+                children_bg.remove_if(sid_bg.as_str(), |_, live| live.attempt == attempt);
                 let ended_at = now_secs();
                 match out {
                     Ok(o) => {
@@ -814,6 +913,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                     custody.seal_terminal_resources();
                                 }
                                 active_bg.remove(sid_bg.as_str());
+                                await_initial_session_save(&mut initial_save_task).await;
                                 finalise_synthetic_retry_cancel(
                                     &store_bg,
                                     &sid_bg,
@@ -837,6 +937,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                     custody.seal_terminal_resources();
                                 }
                                 active_bg.remove(sid_bg.as_str());
+                                await_initial_session_save(&mut initial_save_task).await;
                                 finalise_synthetic_retry_cancel(
                                     &store_bg,
                                     &sid_bg,
@@ -862,6 +963,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                     custody.seal_terminal_resources();
                                 }
                                 active_bg.remove(sid_bg.as_str());
+                                await_initial_session_save(&mut initial_save_task).await;
                                 finalise_synthetic_retry_cancel(
                                     &store_bg,
                                     &sid_bg,
@@ -871,21 +973,32 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                 .await;
                                 break;
                             }
-                            match plan.spawn() {
-                                Ok(mut next) => {
+                            match plan.spawn().await {
+                                Ok((next, workload_generation)) => {
                                     let npid = next.id().unwrap_or(0);
-                                    wait_observation = terminal_custody
-                                        .as_ref()
-                                        .and_then(|custody| custody.begin_process_generation(npid));
+                                    wait_observation =
+                                        terminal_custody.as_ref().and_then(|custody| {
+                                            custody.begin_workload_generation(
+                                                npid,
+                                                workload_generation,
+                                            )
+                                        });
                                     if npid != 0 {
-                                        children_bg.insert(sid_bg.as_str().to_string(), npid);
+                                        if let Some(custody) = terminal_custody.clone() {
+                                            children_bg.insert(
+                                                sid_bg.as_str().to_string(),
+                                                LiveOneShotGeneration {
+                                                    attempt: attempt.saturating_add(1),
+                                                    pid: npid,
+                                                    custody,
+                                                },
+                                            );
+                                        }
                                     }
                                     if lifecycle.is_cancelled() {
-                                        // `start_kill` signals but never reaps.
-                                        // The next loop iteration observes the
-                                        // generation's rusage and performs the
-                                        // sole Child::wait reap as usual.
-                                        let _ = next.start_kill();
+                                        if let Some(custody) = &terminal_custody {
+                                            let _ = custody.request_terminate().await;
+                                        }
                                     }
                                     child = next;
                                     attempt += 1;
@@ -896,6 +1009,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                         custody.seal_terminal_resources();
                                     }
                                     active_bg.remove(sid_bg.as_str());
+                                    await_initial_session_save(&mut initial_save_task).await;
                                     if lifecycle.is_cancelled() {
                                         finalise_synthetic_retry_cancel(
                                             &store_bg,
@@ -923,6 +1037,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                             custody.seal_terminal_resources();
                         }
                         active_bg.remove(sid_bg.as_str());
+                        await_initial_session_save(&mut initial_save_task).await;
                         info!(
                             session = %sid_bg,
                             runtime = %runtime_id,
@@ -973,6 +1088,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                             custody.seal_terminal_resources();
                         }
                         active_bg.remove(sid_bg.as_str());
+                        await_initial_session_save(&mut initial_save_task).await;
                         warn!(
                             session = %sid_bg,
                             runtime = %runtime_id,
@@ -996,13 +1112,17 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             }
         });
 
-        Ok(AgentSession {
+        let _ = initial_saved.await;
+
+        let session = AgentSession {
             id: session_id,
             runtime_id: self.runtime_id.into(),
             cwd,
             sandbox_profile_requested,
             process_custody,
-        })
+        };
+        return_guard.disarm();
+        Ok(session)
     }
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
@@ -1030,7 +1150,11 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         // Cancellation is durable for the in-memory lifecycle before any
         // signal attempt. It also wakes a PID-less retry backoff immediately.
         lifecycle.cancel();
-        let Some(pid) = self.children.get(session.as_str()).map(|entry| *entry) else {
+        let Some(live) = self
+            .children
+            .get(session.as_str())
+            .map(|entry| entry.clone())
+        else {
             info!(
                 session = %session,
                 runtime = %self.runtime_id,
@@ -1038,15 +1162,8 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             );
             return Ok(());
         };
-        let status = tokio::process::Command::new("/bin/kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status()
-            .await
-            .map_err(|e| Error::Backend(format!("kill -TERM {pid}: {e}")))?;
-        if !status.success() {
-            return Err(Error::Backend(format!("/bin/kill exited with {status:?}")));
-        }
+        let pid = live.pid;
+        live.custody.request_terminate().await?;
         info!(
             session = %session,
             pid,
@@ -1060,7 +1177,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         if let Some(pid) = pty_interactive::interactive_pid(&self.interactive, session) {
             return Some(pid);
         }
-        self.children.get(session.as_str()).map(|kv| *kv)
+        self.children.get(session.as_str()).map(|live| live.pid)
     }
 
     fn session_is_active(&self, session: &SessionId) -> bool {

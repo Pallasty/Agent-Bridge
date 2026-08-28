@@ -28,16 +28,27 @@ const OUTPUT_CAP: usize = 2 * 1024 * 1024;
 
 type Pending = Arc<DashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>;
 
-/// Kills the isolated ACP process group if spawn initialization returns early
-/// or the owning Tokio task is dropped before it reaps the leader.
+/// Kills the ACP workload if spawn initialization returns early or the owning
+/// Tokio task is dropped before it reaps the leader. Linux uses the same
+/// generation-safe custody handle as explicit cancellation; other platforms
+/// retain the pre-existing process-group fallback.
 struct ProcessGroupGuard {
+    #[cfg(target_os = "linux")]
+    custody: crate::SpawnedProcessCustody,
+    #[cfg(not(target_os = "linux"))]
     pid: u32,
     armed: bool,
 }
 
 impl ProcessGroupGuard {
-    fn new(pid: u32) -> Self {
-        Self { pid, armed: true }
+    fn new(_pid: u32, custody: crate::SpawnedProcessCustody) -> Self {
+        Self {
+            #[cfg(target_os = "linux")]
+            custody,
+            #[cfg(not(target_os = "linux"))]
+            pid: _pid,
+            armed: true,
+        }
     }
 
     fn disarm(&mut self) {
@@ -48,11 +59,15 @@ impl ProcessGroupGuard {
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {
         if self.armed {
+            #[cfg(target_os = "linux")]
+            let _ = self.custody.request_kill_now();
+            #[cfg(not(target_os = "linux"))]
             let _ = signal_process_group(self.pid, libc::SIGKILL);
         }
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn signal_process_group(pid: u32, signal: libc::c_int) -> Result<()> {
     #[cfg(unix)]
     {
@@ -89,7 +104,7 @@ struct LiveAcpSession {
     next_id: AtomicU64,
     protocol_session_id: String,
     output: Arc<Mutex<String>>,
-    pid: u32,
+    custody: crate::SpawnedProcessCustody,
 }
 
 impl LiveAcpSession {
@@ -382,9 +397,11 @@ impl AgentRuntime for AcpRuntime {
             .stderr(Stdio::piped());
         #[cfg(unix)]
         cmd.process_group(0);
-        // `kill_on_drop` covers the leader; `ProcessGroupGuard` also covers
-        // descendants that inherited the dedicated pgid.
-        cmd.kill_on_drop(true);
+        // Once START can create a delegated workload, dropping `Child` must
+        // never SIGKILL the supervisor ahead of its cgroup drain handler.
+        // Direct mode retains the legacy leader backstop; both modes also use
+        // `ProcessGroupGuard` for descendant-aware custody.
+        cmd.kill_on_drop(launch.workload.is_none());
         crate::sandbox::configure_command_env(&mut cmd, &cfg.env, launch.sandboxed)?;
         let mut child = cmd
             .spawn()
@@ -392,26 +409,40 @@ impl AgentRuntime for AcpRuntime {
         let pid = child
             .id()
             .ok_or_else(|| Error::Backend("ACP child pid unavailable".into()))?;
-        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+        let mut activation_guard = crate::SpawnActivationGuard::capture(
             pid,
             Some(pid),
             crate::SpawnedProcessScope::LocalWorkloadRoot,
+            launch.workload.is_some(),
         );
-        let mut process_group = ProcessGroupGuard::new(pid);
-        let writer = Arc::new(AsyncMutex::new(
-            child
-                .stdin
-                .take()
-                .ok_or_else(|| Error::Backend("ACP stdin unavailable".into()))?,
-        ));
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| Error::Backend("ACP stdout unavailable".into()))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| Error::Backend("ACP stderr unavailable".into()))?;
+        let workload_generation = launch.activate_workload_cgroup(pid).await?;
+        activation_guard.disarm();
+        let process_custody = crate::SpawnedProcessCustody::from_spawn_with_workload(
+            pid,
+            Some(pid),
+            crate::SpawnedProcessScope::LocalWorkloadRoot,
+            workload_generation,
+        )
+        .ok_or_else(|| Error::Backend("ACP child custody unavailable".into()))?;
+        let mut spawn_guard = ProcessGroupGuard::new(pid, process_custody.clone());
+        let (stdin, stdout, stderr) =
+            match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
+                (Some(stdin), Some(stdout), Some(stderr)) => (stdin, stdout, stderr),
+                _ => {
+                    // Even an impossible pipe-configuration mismatch must not
+                    // leave a killed-but-unreaped supervisor behind.
+                    let cleanup_custody = process_custody.clone();
+                    tokio::spawn(async move {
+                        cleanup_custody.initial_wait_observation().observe().await;
+                        let _ = child.wait().await;
+                        cleanup_custody.seal_terminal_resources();
+                    });
+                    return Err(Error::Backend(
+                        "ACP configured child pipes are unavailable".into(),
+                    ));
+                }
+            };
+        let writer = Arc::new(AsyncMutex::new(stdin));
         let pending = Arc::new(DashMap::new());
         let output = Arc::new(Mutex::new(String::new()));
         let reader_task = tokio::spawn(reader_loop(
@@ -429,6 +460,21 @@ impl AgentRuntime for AcpRuntime {
             }
         });
         let next_id = AtomicU64::new(1);
+
+        // Transfer sole-reaper ownership before the first cancellable protocol
+        // await. Initialization failure or caller cancellation may decide that
+        // no logical ACP session exists, but can never leave the OS child
+        // without a waiter.
+        let (reaped_tx, reaped_rx) = oneshot::channel();
+        let reaper_custody = process_custody.clone();
+        let mut reaper_guard = ProcessGroupGuard::new(pid, process_custody.clone());
+        tokio::spawn(async move {
+            reaper_custody.initial_wait_observation().observe().await;
+            let status = child.wait().await;
+            reaper_guard.disarm();
+            reaper_custody.seal_terminal_resources();
+            let _ = reaped_tx.send(status);
+        });
 
         let init = request(&writer, &pending, &next_id, "initialize", json!({
             "protocolVersion":1,
@@ -470,41 +516,35 @@ impl AgentRuntime for AcpRuntime {
             .ok_or_else(|| Error::Backend(format!("ACP session/new missing sessionId: {created}")))?
             .to_string();
 
-        if let Some(store) = &self.store {
-            // Stamp the same pid==pgid invariant used by the existing orphan
-            // reaper, so a daemon crash cannot strand a proven ACP group.
-            let row = StoredSession {
-                id: session_id.clone(),
-                runtime_id: self.id().into(),
-                cwd: cfg.cwd.clone(),
-                started_at: now_secs(),
-                ended_at: None,
-                exit_code: None,
-                stdout: None,
-                stderr: None,
-                cloud_run_id: None,
-                cloud_run_state: None,
-                cloud_session_link: None,
-                proc_pid: Some(pid as i64),
-                proc_pgid: Some(pid as i64),
-                proc_start_ticks: process_custody
-                    .as_ref()
-                    .and_then(|custody| custody.start_ticks())
-                    .and_then(|ticks| i64::try_from(ticks).ok()),
-                owner_pid: Some(std::process::id() as i64),
-                owner_start_ticks: crate::pty_session::proc_start_ticks(std::process::id()),
-            };
-            if let Err(e) = store.save_session(&row).await {
-                warn!(session=%session_id,error=%e,"store: save ACP session failed");
-            }
-        }
+        // Stamp the same pid==pgid invariant used by the existing orphan
+        // reaper, so a daemon crash cannot strand a proven ACP group.
+        let initial = StoredSession {
+            id: session_id.clone(),
+            runtime_id: self.id().into(),
+            cwd: cfg.cwd.clone(),
+            started_at: now_secs(),
+            ended_at: None,
+            exit_code: None,
+            stdout: None,
+            stderr: None,
+            cloud_run_id: None,
+            cloud_run_state: None,
+            cloud_session_link: None,
+            proc_pid: Some(pid as i64),
+            proc_pgid: Some(pid as i64),
+            proc_start_ticks: process_custody
+                .start_ticks()
+                .and_then(|ticks| i64::try_from(ticks).ok()),
+            owner_pid: Some(std::process::id() as i64),
+            owner_start_ticks: crate::pty_session::proc_start_ticks(std::process::id()),
+        };
         let live = Arc::new(LiveAcpSession {
             writer,
             pending,
             next_id,
             protocol_session_id,
             output: output.clone(),
-            pid,
+            custody: process_custody.clone(),
         });
         self.sessions
             .insert(session_id.as_str().to_string(), live.clone());
@@ -512,25 +552,21 @@ impl AgentRuntime for AcpRuntime {
         let sid_bg = session_id.clone();
         let sessions_bg = self.sessions.clone();
         let store_bg = self.store.clone();
-        let terminal_custody = process_custody.clone();
+        let (initial_saved, initial_save_task) =
+            crate::spawn_initial_session_save(store_bg.clone(), initial);
         tokio::spawn(async move {
-            let status = match terminal_custody.as_ref() {
-                Some(custody) => {
-                    custody.initial_wait_observation().observe().await;
-                    child.wait().await
-                }
-                None => child.wait().await,
-            };
-            process_group.disarm();
-            if let Some(custody) = &terminal_custody {
-                custody.seal_terminal_resources();
-            }
+            let status = reaped_rx.await.unwrap_or_else(|_| {
+                Err(std::io::Error::other(
+                    "ACP sole-reaper ended without an exit status",
+                ))
+            });
             // The leader wait has completed, so its PID/PGID must stop being
             // signalable immediately. Reader tasks retain their own output
             // Arcs and can finish draining before the Store finalisation.
             sessions_bg.remove(sid_bg.as_str());
             let _ = reader_task.await;
             let _ = stderr_task.await;
+            let _ = initial_save_task.await;
             let stdout = output.lock().unwrap_or_else(|e| e.into_inner()).clone();
             match status {
                 Ok(status) => {
@@ -567,6 +603,7 @@ impl AgentRuntime for AcpRuntime {
                 }
             }
         });
+        let _ = initial_saved.await;
         if let Some(prompt) = cfg.initial_prompt.filter(|p| !p.is_empty()) {
             let live_bg = live.clone();
             tokio::spawn(async move {
@@ -576,13 +613,15 @@ impl AgentRuntime for AcpRuntime {
             });
         }
         info!(session=%session_id,pid,cwd=%cfg.cwd,"ACP session started");
-        Ok(AgentSession {
+        let session = AgentSession {
             id: session_id,
             runtime_id: self.id().into(),
             cwd: cfg.cwd,
             sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
-            process_custody,
-        })
+            process_custody: Some(process_custody),
+        };
+        spawn_guard.disarm();
+        Ok(session)
     }
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
@@ -614,11 +653,18 @@ impl AgentRuntime for AcpRuntime {
             &json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":live.protocol_session_id}}),
         )
         .await;
-        signal_process_group(live.pid, libc::SIGTERM)
+        #[cfg(target_os = "linux")]
+        {
+            live.custody.request_terminate().await
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            signal_process_group(live.custody.pid(), libc::SIGTERM)
+        }
     }
 
     fn pid_for(&self, session: &SessionId) -> Option<u32> {
-        self.sessions.get(session.as_str()).map(|v| v.pid)
+        self.sessions.get(session.as_str()).map(|v| v.custody.pid())
     }
     fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
         self.sessions

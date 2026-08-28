@@ -27,11 +27,37 @@ use crate::{AgentSession, SpawnConfig};
 /// the runtime keeps one clone in its struct and hands the helpers a borrow.
 pub type InteractiveMap = Arc<DashMap<String, Arc<PtySession>>>;
 
-/// Grace between the graceful SIGHUP sent by [`kill_interactive`] and the
-/// process-group SIGKILL escalation for children that catch and survive it.
-/// gemini's Ink TUI catches SIGHUP *and* SIGTERM and keeps running (observed
-/// live 2026-07-01); well-behaved CLIs exit on SIGHUP long before this fires.
+/// Grace between the graceful stop sent by [`kill_interactive`] and immediate
+/// workload-kill escalation for children that catch and survive it. Gemini's
+/// Ink TUI catches SIGHUP and SIGTERM and keeps running (observed live
+/// 2026-07-01); well-behaved CLIs exit long before this fires.
 const KILL_ESCALATION_GRACE: Duration = Duration::from_secs(3);
+
+struct InteractiveSpawnReturnGuard {
+    session: Arc<PtySession>,
+    armed: bool,
+}
+
+impl InteractiveSpawnReturnGuard {
+    fn new(session: Arc<PtySession>) -> Self {
+        Self {
+            session,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for InteractiveSpawnReturnGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.session.kill_group();
+        }
+    }
+}
 
 /// How a runtime's interactive TUI accepts a submitted turn. Simple line REPLs
 /// (claude-code, `/bin/cat`) submit on a bare CR written together with the text;
@@ -199,30 +225,6 @@ pub async fn spawn_interactive(
     let session_id = SessionId::new();
     let cwd = cfg.cwd.clone();
 
-    if let Some(store) = store {
-        let initial = StoredSession {
-            id: session_id.clone(),
-            runtime_id: runtime_id.into(),
-            cwd: cwd.clone(),
-            started_at: now_secs(),
-            ended_at: None,
-            exit_code: None,
-            stdout: None,
-            stderr: None,
-            cloud_run_id: None,
-            cloud_run_state: None,
-            cloud_session_link: None,
-            proc_pid: None,
-            proc_pgid: None,
-            proc_start_ticks: None,
-            owner_pid: None,
-            owner_start_ticks: None,
-        };
-        if let Err(e) = store.save_session(&initial).await {
-            warn!(session = %session_id, error = %e, "store: save_session failed");
-        }
-    }
-
     let (session, exit_rx) = PtySession::spawn(
         &launch.program,
         &launch.args,
@@ -233,59 +235,85 @@ pub async fn spawn_interactive(
     let session = Arc::new(session);
     let pid = session.pid();
     let process_custody = session.process_custody();
+    let process_start_ticks = process_custody
+        .as_ref()
+        .and_then(crate::SpawnedProcessCustody::start_ticks);
+    if launch.workload.is_some()
+        && (pid == 0 || process_custody.is_none() || process_start_ticks.is_none())
+    {
+        let _ = session.kill_group();
+        return Err(Error::Backend(
+            "interactive PTY workload has no complete spawn-time process identity".into(),
+        ));
+    }
+    if launch.workload.is_some() {
+        session.disarm_drop_kill();
+    }
+    let mut activation_guard = crate::SpawnActivationGuard::from_custody(
+        process_custody.clone(),
+        launch.workload.is_some(),
+    );
+    let workload_generation = launch
+        .activate_workload_cgroup_with_identity(pid, process_start_ticks)
+        .await;
+    let workload_generation = workload_generation?;
+    activation_guard.disarm();
+    match (&process_custody, workload_generation) {
+        (Some(custody), Some(generation)) => {
+            custody.attach_workload_generation(generation);
+        }
+        (None, Some(_)) => {
+            return Err(Error::Backend(
+                "interactive PTY workload activated without process custody".into(),
+            ));
+        }
+        (_, None) => {}
+    }
+    if launch.workload.is_some() {
+        session.arm_drop_kill();
+    }
+    let mut return_guard = InteractiveSpawnReturnGuard::new(session.clone());
     interactive.insert(session_id.as_str().to_string(), session.clone());
     info!(session = %session_id, runtime = %runtime_id, pid, cwd = %cwd, sandboxed = launch.sandboxed, "interactive (PTY) session started");
 
-    // v41: stamp the child's process identity onto the session row so the
-    // orphan reaper can later kill a proven-abandoned process group even
-    // after this owning process is SIGKILLed (no Drop ever fires then).
-    // pgid == pid: portable_pty setsids the child (see PtySession::kill_group).
-    // Fail-soft: an unstamped row just stays reaper-invisible (legacy rule).
-    if let Some(store) = store {
-        if pid != 0 {
-            let owner_pid = std::process::id();
-            if let Err(e) = store
-                .update_session_process(
-                    &session_id,
-                    pid as i64,
-                    pid as i64,
-                    process_custody
-                        .as_ref()
-                        .and_then(|custody| custody.start_ticks())
-                        .and_then(|ticks| i64::try_from(ticks).ok()),
-                    owner_pid as i64,
-                    crate::pty_session::proc_start_ticks(owner_pid),
-                )
-                .await
-            {
-                warn!(session = %session_id, error = %e, "store: update_session_process failed");
-            }
-        }
-    }
-
-    // Optional first turn: type the initial prompt and submit it.
-    if let Some(p) = cfg.initial_prompt.as_deref() {
-        if !p.is_empty() {
-            if !submit.initial_prompt_delay.is_zero() {
-                tokio::time::sleep(submit.initial_prompt_delay).await;
-            }
-            wait_for_initial_prompt_ready(&session, &session_id, runtime_id, submit).await;
-            if let Err(e) = submit_turn(&session, p, submit).await {
-                warn!(session = %session_id, runtime = %runtime_id, error = %e, "interactive: initial prompt write failed");
-            }
-        }
-    }
-
-    // Finalise on child exit (EOF on the PTY master). Mirrors the one-shot wait
-    // task: stdout carries the merged PTY stream; stderr is None (a PTY merges
-    // the two).
+    // Transfer both Store ordering and exit ownership before the first prompt
+    // await. If the caller cancels this spawn future during readiness/delay,
+    // this task still removes the map entry, reaps, and finalises the row.
+    let owner_pid = std::process::id();
+    let initial = StoredSession {
+        id: session_id.clone(),
+        runtime_id: runtime_id.into(),
+        cwd: cwd.clone(),
+        started_at: now_secs(),
+        ended_at: None,
+        exit_code: None,
+        stdout: None,
+        stderr: None,
+        cloud_run_id: None,
+        cloud_run_state: None,
+        cloud_session_link: None,
+        proc_pid: (pid != 0).then_some(pid as i64),
+        proc_pgid: (pid != 0).then_some(pid as i64),
+        proc_start_ticks: process_custody
+            .as_ref()
+            .and_then(|custody| custody.start_ticks())
+            .and_then(|ticks| i64::try_from(ticks).ok()),
+        owner_pid: Some(owner_pid as i64),
+        owner_start_ticks: crate::pty_session::proc_start_ticks(owner_pid),
+    };
     let sid_bg = session_id.clone();
     let store_bg = store.clone();
     let interactive_bg = interactive.clone();
     let rid = runtime_id.to_string();
+    let (initial_saved, initial_save_task) =
+        crate::spawn_initial_session_save(store_bg.clone(), initial);
     tokio::spawn(async move {
         let exit = exit_rx.await;
         interactive_bg.remove(sid_bg.as_str());
+        // The child wait is polled independently from a slow Store. Finalise
+        // only after the initial write attempt so update can never overtake
+        // insert.
+        let _ = initial_save_task.await;
         let ended_at = now_secs();
         match exit {
             Ok(PtyExit { exit_code, output }) => {
@@ -313,13 +341,34 @@ pub async fn spawn_interactive(
         }
     });
 
-    Ok(AgentSession {
+    // Preserve the public invariant that an immediately-following
+    // agent_session_get cannot race the initial durable row. Cancellation
+    // while waiting here is safe: the detached owner above still reaps,
+    // removes the live entry, and finalises.
+    let _ = initial_saved.await;
+
+    // Optional first turn: type the initial prompt and submit it.
+    if let Some(p) = cfg.initial_prompt.as_deref() {
+        if !p.is_empty() {
+            if !submit.initial_prompt_delay.is_zero() {
+                tokio::time::sleep(submit.initial_prompt_delay).await;
+            }
+            wait_for_initial_prompt_ready(&session, &session_id, runtime_id, submit).await;
+            if let Err(e) = submit_turn(&session, p, submit).await {
+                warn!(session = %session_id, runtime = %runtime_id, error = %e, "interactive: initial prompt write failed");
+            }
+        }
+    }
+
+    let spawned = AgentSession {
         id: session_id,
         runtime_id: runtime_id.into(),
         cwd,
         sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
         process_custody,
-    })
+    };
+    return_guard.disarm();
+    Ok(spawned)
 }
 
 /// Type one turn into a live interactive session and submit it (CR). Rejects
@@ -346,10 +395,11 @@ pub async fn send_input(
 /// `session` was an interactive PTY session (handled here); `None` to let the
 /// caller fall through to its one-shot kill path.
 ///
-/// The graceful kill (SIGHUP to the leader) is followed by a background
+/// The graceful kill (delegated tree SIGTERM on Linux, platform child signal
+/// elsewhere) is followed by a background
 /// escalation: if the child has not exited within [`KILL_ESCALATION_GRACE`]
 /// (its finalise task removes the map entry on PTY EOF, so a lingering entry
-/// means a live child), the whole process group gets an uncatchable SIGKILL.
+/// means a live child), custody requests an immediate whole-workload kill.
 /// Must be called from within a tokio runtime (all runtime `kill` paths are).
 pub fn kill_interactive(
     runtime_id: &str,
@@ -372,10 +422,10 @@ pub fn kill_interactive(
                     session = %key,
                     runtime = %rid,
                     pid = sess.pid(),
-                    "interactive child survived SIGHUP grace; escalating to process-group SIGKILL"
+                    "interactive child survived graceful-stop grace; escalating to immediate workload kill"
                 );
                 if let Err(e) = sess.kill_group() {
-                    warn!(session = %key, runtime = %rid, error = %e, "SIGKILL escalation failed");
+                    warn!(session = %key, runtime = %rid, error = %e, "immediate workload kill escalation failed");
                 }
             });
             Some(Ok(()))
@@ -461,6 +511,63 @@ mod tests {
         kill_interactive("test-runtime", &interactive, &sess.id)
             .expect("interactive session should be live")
             .expect("kill delayed-ready stand-in");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn cancelling_spawn_before_session_delivery_kills_invisible_pty_tree() {
+        let interactive: InteractiveMap = Arc::new(DashMap::new());
+        let store: Option<Arc<dyn StateStore>> = None;
+        let args = vec![
+            "-c".to_string(),
+            "trap '' HUP TERM; echo RETURN-GUARD-ARMED; while :; do sleep 0.1; done".to_string(),
+        ];
+        let submit = SubmitProfile {
+            initial_prompt_delay: Duration::from_secs(30),
+            ..SubmitProfile::ENTER
+        };
+        let map_for_spawn = interactive.clone();
+        let spawn = tokio::spawn(async move {
+            spawn_interactive(
+                "test-runtime",
+                "/bin/bash",
+                &args,
+                &store,
+                &map_for_spawn,
+                SpawnConfig {
+                    cwd: "/tmp".into(),
+                    initial_prompt: Some("never-delivered".into()),
+                    interactive: true,
+                    ..Default::default()
+                },
+                submit,
+            )
+            .await
+        });
+
+        let armed = wait_for(5_000, 25, || {
+            interactive
+                .iter()
+                .any(|entry| entry.output_snapshot().contains("RETURN-GUARD-ARMED"))
+        })
+        .await;
+        assert!(armed, "spawn must reach its pre-delivery prompt delay");
+        let pid = interactive
+            .iter()
+            .next()
+            .map(|entry| entry.pid() as i32)
+            .expect("tracked invisible PTY pid");
+
+        spawn.abort();
+        let _ = spawn.await;
+        let cleaned = wait_for(5_000, 25, || {
+            interactive.is_empty() && unsafe { libc::kill(pid, 0) } == -1
+        })
+        .await;
+        assert!(
+            cleaned,
+            "cancelling spawn before AgentSession delivery must kill and reap the PTY tree"
+        );
     }
 
     #[cfg(unix)]
@@ -571,6 +678,71 @@ mod tests {
         assert!(
             dead,
             "dropping the session must SIGKILL a signal-immune child's process group"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn direct_custody_kill_reaches_pty_descendants_when_cgroup_is_off() {
+        let interactive: InteractiveMap = Arc::new(DashMap::new());
+        let store: Option<Arc<dyn StateStore>> = None;
+        let args = vec![
+            "-c".to_string(),
+            "sleep 30 & child=$!; printf 'DESCENDANT:%s\\n' \"$child\"; wait".to_string(),
+        ];
+        let sess = spawn_interactive(
+            "test-runtime",
+            "/bin/sh",
+            &args,
+            &store,
+            &interactive,
+            SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            },
+            SubmitProfile::ENTER,
+        )
+        .await
+        .expect("spawn PTY with a live descendant");
+        let custody = sess.process_custody().expect("PTY custody");
+        assert!(
+            custody.workload_control().is_none(),
+            "the test must exercise the no-cgroup direct fallback"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let descendant = loop {
+            let pid = interactive_output(&interactive, &sess.id).and_then(|output| {
+                output
+                    .split("DESCENDANT:")
+                    .nth(1)
+                    .and_then(|tail| tail.split_whitespace().next())
+                    .and_then(|value| value.parse::<i32>().ok())
+            });
+            if let Some(pid) = pid {
+                break pid;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "stand-in did not report its descendant pid"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+
+        kill_interactive("test-runtime", &interactive, &sess.id)
+            .expect("interactive session should be live")
+            .expect("direct custody termination request");
+        let reaped = wait_for(5_000, 25, || !interactive.contains_key(sess.id.as_str())).await;
+        if !reaped {
+            // Keep a failed regression test from leaking its stand-in.
+            unsafe {
+                libc::kill(descendant, libc::SIGKILL);
+            }
+        }
+        assert!(
+            reaped,
+            "direct custody must signal PTY process-group members via pidfds"
         );
     }
 }

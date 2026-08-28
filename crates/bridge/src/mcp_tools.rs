@@ -17134,6 +17134,7 @@ async fn spawn_agent_with_body_span(
                                         "automatic_completion": "session_terminal_observer",
                                         "process_binding": process_binding,
                                         "terminal_accounting": span.task_terminal_resources.clone(),
+                                        "workload_accounting": span.task_workload_resources.clone(),
                                     }));
                                 }
                             }
@@ -32870,12 +32871,25 @@ async fn record_body_task_span_event(
     let verdict = if complete {
         crate::semantic_event::Verdict {
             status: crate::semantic_event::VerdictStatus::Verified,
-            method: "before_after_body_observation".to_string(),
+            method: if receipt
+                .task_workload_resources
+                .as_ref()
+                .is_some_and(|usage| usage.proves_complete_cpu_memory_workload_tree())
+            {
+                "before_after_body_observation_with_delegated_cpu_memory_workload_tree"
+            } else {
+                "before_after_body_observation"
+            }
+            .to_string(),
             evidence: json!({
                 "before_present": true,
                 "after_present": true,
                 "checkpoint_count": span.checkpoints.len(),
                 "sampling_gaps": span.sampling_gaps,
+                "workload_cpu_memory_tree_complete": receipt
+                    .task_workload_resources
+                    .as_ref()
+                    .map(|usage| usage.proves_complete_cpu_memory_workload_tree()),
             }),
         }
     } else {
@@ -32912,6 +32926,14 @@ async fn record_body_task_span_event(
                     .task_terminal_resources
                     .as_ref()
                     .map(|usage| usage.complete_for_workload_tree),
+                "task_workload_accounting_status": receipt
+                    .task_workload_resources
+                    .as_ref()
+                    .map(|usage| usage.accounting_status.as_str()),
+                "workload_complete_for_cpu_memory_tree": receipt
+                    .task_workload_resources
+                    .as_ref()
+                    .map(|usage| usage.proves_complete_cpu_memory_workload_tree()),
                 "abandonment_reason": span.abandonment_reason,
                 "sampling_gaps": span.sampling_gaps,
             }),

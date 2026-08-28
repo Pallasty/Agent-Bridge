@@ -10,9 +10,9 @@
 //! `agent_spawn` loop: callers can later query `agent_session_get(id)` to
 //! retrieve the actual output.
 //!
-//! v0.3 addition: a per-runtime PID registry lets [`Self::kill`] send SIGTERM
-//! to in-flight sessions. Shells out to `/bin/kill -TERM <pid>` to avoid
-//! pulling in `libc` / `nix` for one syscall.
+//! v0.3 addition: a per-runtime live-child registry lets [`Self::kill`] send a
+//! graceful stop to in-flight sessions. The registry now retains private
+//! process custody rather than a reusable numeric PID.
 //!
 //! Interactive PTY mode (live `send_input`): when spawned with
 //! [`SpawnConfig::interactive`], the runtime launches the agent CLI inside a
@@ -39,8 +39,8 @@ pub struct ClaudeCodeRuntime {
     binary: String,
     interactive_args: Vec<String>,
     store: Option<Arc<dyn StateStore>>,
-    /// SessionId → PID of the live one-shot child process.
-    children: Arc<DashMap<String, u32>>,
+    /// SessionId → private custody for the live one-shot child process.
+    children: Arc<DashMap<String, crate::SpawnedProcessCustody>>,
     /// SessionId → live interactive PTY session (live `send_input`).
     interactive: InteractiveMap,
 }
@@ -161,30 +161,6 @@ impl AgentRuntime for ClaudeCodeRuntime {
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
 
-        if let Some(store) = &self.store {
-            let initial = StoredSession {
-                id: session_id.clone(),
-                runtime_id: self.id().into(),
-                cwd: cwd.clone(),
-                started_at: now_secs(),
-                ended_at: None,
-                exit_code: None,
-                stdout: None,
-                stderr: None,
-                cloud_run_id: None,
-                cloud_run_state: None,
-                cloud_session_link: None,
-                proc_pid: None,
-                proc_pgid: None,
-                proc_start_ticks: None,
-                owner_pid: None,
-                owner_start_ticks: None,
-            };
-            if let Err(e) = store.save_session(&initial).await {
-                warn!(session = %session_id, error = %e, "store: save_session failed");
-            }
-        }
-
         let mut cmd = Command::new(&launch.program);
         cmd.args(&launch.args)
             .current_dir(&cwd)
@@ -197,13 +173,41 @@ impl AgentRuntime for ClaudeCodeRuntime {
             .spawn()
             .map_err(|e| Error::Backend(format!("spawn claude: {e}")))?;
         let pid = child.id().unwrap_or(0);
-        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+        let mut activation_guard = crate::SpawnActivationGuard::capture(
             pid,
             None,
             crate::SpawnedProcessScope::LocalWorkloadRoot,
+            launch.workload.is_some(),
         );
-        if pid != 0 {
-            self.children.insert(session_id.as_str().to_string(), pid);
+        let workload_generation = launch.activate_workload_cgroup(pid).await?;
+        activation_guard.disarm();
+        let initial = StoredSession {
+            id: session_id.clone(),
+            runtime_id: self.id().into(),
+            cwd: cwd.clone(),
+            started_at: now_secs(),
+            ended_at: None,
+            exit_code: None,
+            stdout: None,
+            stderr: None,
+            cloud_run_id: None,
+            cloud_run_state: None,
+            cloud_session_link: None,
+            proc_pid: None,
+            proc_pgid: None,
+            proc_start_ticks: None,
+            owner_pid: None,
+            owner_start_ticks: None,
+        };
+        let process_custody = crate::SpawnedProcessCustody::from_spawn_with_workload(
+            pid,
+            None,
+            crate::SpawnedProcessScope::LocalWorkloadRoot,
+            workload_generation,
+        );
+        if let Some(custody) = process_custody.clone() {
+            self.children
+                .insert(session_id.as_str().to_string(), custody);
         }
         info!(session = %session_id, pid, cwd = %cwd, sandboxed = launch.sandboxed, "claude-code session started");
 
@@ -211,6 +215,9 @@ impl AgentRuntime for ClaudeCodeRuntime {
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
         let terminal_custody = process_custody.clone();
+        let mut return_guard = crate::SpawnReturnGuard::new(process_custody.clone());
+        let (initial_saved, initial_save_task) =
+            crate::spawn_initial_session_save(store_bg.clone(), initial);
         tokio::spawn(async move {
             let out = match terminal_custody.as_ref() {
                 Some(custody) => {
@@ -233,6 +240,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
                 custody.seal_terminal_resources();
             }
             children_bg.remove(sid_bg.as_str());
+            let _ = initial_save_task.await;
             let ended_at = now_secs();
             match out {
                 Ok(o) => {
@@ -289,13 +297,17 @@ impl AgentRuntime for ClaudeCodeRuntime {
             }
         });
 
-        Ok(AgentSession {
+        let _ = initial_saved.await;
+
+        let session = AgentSession {
             id: session_id,
             runtime_id: self.id().into(),
             cwd,
             sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
             process_custody,
-        })
+        };
+        return_guard.disarm();
+        Ok(session)
     }
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
@@ -318,24 +330,16 @@ impl AgentRuntime for ClaudeCodeRuntime {
             return result;
         }
 
-        let pid = match self.children.get(session.as_str()) {
-            Some(p) => *p,
+        let custody = match self.children.get(session.as_str()) {
+            Some(custody) => custody.clone(),
             None => {
                 return Err(Error::NotFound(format!(
                     "no live child for session {session} (already finished or unknown)"
                 )));
             }
         };
-        // Shell out to /bin/kill so we don't pull in libc/nix for one syscall.
-        let status = tokio::process::Command::new("/bin/kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status()
-            .await
-            .map_err(|e| Error::Backend(format!("kill -TERM {pid}: {e}")))?;
-        if !status.success() {
-            return Err(Error::Backend(format!("/bin/kill exited with {status:?}")));
-        }
+        let pid = custody.pid();
+        custody.request_terminate().await?;
         // Background wait task will see the child die, clean up `children` map,
         // and finalise the session row with the SIGTERM exit code.
         info!(session = %session, pid, "SIGTERM sent");
@@ -346,7 +350,9 @@ impl AgentRuntime for ClaudeCodeRuntime {
         if let Some(pid) = pty_interactive::interactive_pid(&self.interactive, session) {
             return Some(pid);
         }
-        self.children.get(session.as_str()).map(|kv| *kv)
+        self.children
+            .get(session.as_str())
+            .map(|custody| custody.pid())
     }
 
     /// Trait-level exposure of the live interactive PTY buffer so

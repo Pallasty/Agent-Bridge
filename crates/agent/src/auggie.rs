@@ -55,8 +55,8 @@ pub const DEFAULT_AUGGIE_BIN: &str = "auggie";
 pub struct AuggieRuntime {
     binary: String,
     store: Option<Arc<dyn StateStore>>,
-    /// SessionId → PID of the live `auggie` child.
-    children: Arc<DashMap<String, u32>>,
+    /// SessionId → private custody for the live `auggie` child.
+    children: Arc<DashMap<String, crate::SpawnedProcessCustody>>,
 }
 
 impl Default for AuggieRuntime {
@@ -129,30 +129,6 @@ impl AgentRuntime for AuggieRuntime {
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
 
-        if let Some(store) = &self.store {
-            let initial = StoredSession {
-                id: session_id.clone(),
-                runtime_id: self.id().into(),
-                cwd: cwd.clone(),
-                started_at: now_secs(),
-                ended_at: None,
-                exit_code: None,
-                stdout: None,
-                stderr: None,
-                cloud_run_id: None,
-                cloud_run_state: None,
-                cloud_session_link: None,
-                proc_pid: None,
-                proc_pgid: None,
-                proc_start_ticks: None,
-                owner_pid: None,
-                owner_start_ticks: None,
-            };
-            if let Err(e) = store.save_session(&initial).await {
-                warn!(session = %session_id, error = %e, "store: save_session failed");
-            }
-        }
-
         let mut cmd = Command::new(&launch.program);
         cmd.args(&launch.args)
             .current_dir(&cwd)
@@ -165,13 +141,41 @@ impl AgentRuntime for AuggieRuntime {
             .spawn()
             .map_err(|e| Error::Backend(format!("spawn auggie: {e}")))?;
         let pid = child.id().unwrap_or(0);
-        let process_custody = crate::SpawnedProcessCustody::from_spawn(
+        let mut activation_guard = crate::SpawnActivationGuard::capture(
             pid,
             None,
             crate::SpawnedProcessScope::LocalWorkloadRoot,
+            launch.workload.is_some(),
         );
-        if pid != 0 {
-            self.children.insert(session_id.as_str().to_string(), pid);
+        let workload_generation = launch.activate_workload_cgroup(pid).await?;
+        activation_guard.disarm();
+        let initial = StoredSession {
+            id: session_id.clone(),
+            runtime_id: self.id().into(),
+            cwd: cwd.clone(),
+            started_at: now_secs(),
+            ended_at: None,
+            exit_code: None,
+            stdout: None,
+            stderr: None,
+            cloud_run_id: None,
+            cloud_run_state: None,
+            cloud_session_link: None,
+            proc_pid: None,
+            proc_pgid: None,
+            proc_start_ticks: None,
+            owner_pid: None,
+            owner_start_ticks: None,
+        };
+        let process_custody = crate::SpawnedProcessCustody::from_spawn_with_workload(
+            pid,
+            None,
+            crate::SpawnedProcessScope::LocalWorkloadRoot,
+            workload_generation,
+        );
+        if let Some(custody) = process_custody.clone() {
+            self.children
+                .insert(session_id.as_str().to_string(), custody);
         }
         info!(session = %session_id, pid, cwd = %cwd, sandboxed = launch.sandboxed, "auggie session started");
 
@@ -179,6 +183,9 @@ impl AgentRuntime for AuggieRuntime {
         let store_bg = self.store.clone();
         let children_bg = self.children.clone();
         let terminal_custody = process_custody.clone();
+        let mut return_guard = crate::SpawnReturnGuard::new(process_custody.clone());
+        let (initial_saved, initial_save_task) =
+            crate::spawn_initial_session_save(store_bg.clone(), initial);
         tokio::spawn(async move {
             let out = match terminal_custody.as_ref() {
                 Some(custody) => {
@@ -201,6 +208,7 @@ impl AgentRuntime for AuggieRuntime {
                 custody.seal_terminal_resources();
             }
             children_bg.remove(sid_bg.as_str());
+            let _ = initial_save_task.await;
             let ended_at = now_secs();
             match out {
                 Ok(o) => {
@@ -253,13 +261,17 @@ impl AgentRuntime for AuggieRuntime {
             }
         });
 
-        Ok(AgentSession {
+        let _ = initial_saved.await;
+
+        let session = AgentSession {
             id: session_id,
             runtime_id: self.id().into(),
             cwd,
             sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
             process_custody,
-        })
+        };
+        return_guard.disarm();
+        Ok(session)
     }
 
     async fn send_input(&self, _session: &SessionId, _text: &str) -> Result<()> {
@@ -271,29 +283,24 @@ impl AgentRuntime for AuggieRuntime {
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
-        let pid = match self.children.get(session.as_str()) {
-            Some(p) => *p,
+        let custody = match self.children.get(session.as_str()) {
+            Some(custody) => custody.clone(),
             None => {
                 return Err(Error::NotFound(format!(
                     "no live child for session {session} (already finished or unknown)"
                 )));
             }
         };
-        let status = tokio::process::Command::new("/bin/kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status()
-            .await
-            .map_err(|e| Error::Backend(format!("kill -TERM {pid}: {e}")))?;
-        if !status.success() {
-            return Err(Error::Backend(format!("/bin/kill exited with {status:?}")));
-        }
+        let pid = custody.pid();
+        custody.request_terminate().await?;
         info!(session = %session, pid, "SIGTERM sent");
         Ok(())
     }
 
     fn pid_for(&self, session: &SessionId) -> Option<u32> {
-        self.children.get(session.as_str()).map(|kv| *kv)
+        self.children
+            .get(session.as_str())
+            .map(|custody| custody.pid())
     }
 
     async fn capabilities(&self) -> AgentCapabilities {

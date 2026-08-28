@@ -67,6 +67,10 @@ pub struct PtySession {
     /// ([`Self::kill_group`], `Drop`) must become no-ops rather than risk
     /// signalling an unrelated recycled process group.
     reaped: Arc<AtomicBool>,
+    /// Activation failure is already owned by the delegated supervisor guard.
+    /// Disarming prevents `Drop` from SIGKILLing that supervisor before its
+    /// TERM handler can drain every descendant cgroup.
+    drop_kill_armed: AtomicBool,
 }
 
 impl PtySession {
@@ -187,6 +191,7 @@ impl PtySession {
                 pid,
                 process_custody,
                 reaped,
+                drop_kill_armed: AtomicBool::new(true),
             },
             rx,
         ))
@@ -200,6 +205,14 @@ impl PtySession {
     /// Process identity captured before the PTY reader/reaper thread started.
     pub(crate) fn process_custody(&self) -> Option<crate::SpawnedProcessCustody> {
         self.process_custody.clone()
+    }
+
+    pub(crate) fn disarm_drop_kill(&self) {
+        self.drop_kill_armed.store(false, Ordering::SeqCst);
+    }
+
+    pub(crate) fn arm_drop_kill(&self) {
+        self.drop_kill_armed.store(true, Ordering::SeqCst);
     }
 
     /// Snapshot the merged output captured so far. Used for observability and
@@ -223,14 +236,20 @@ impl PtySession {
         Ok(())
     }
 
-    /// Signal the child to terminate. Idempotent in practice: killing an
-    /// already-dead child surfaces a harmless error the caller may ignore.
-    ///
-    /// On unix this is portable_pty's graceful kill — `SIGHUP` to the child
-    /// pid only — which a TUI can catch and survive (gemini's Ink TUI catches
-    /// SIGHUP and SIGTERM). Callers that must guarantee teardown follow up
-    /// with [`Self::kill_group`] after a grace period.
+    /// Signal the child workload to terminate. Linux routes the request through
+    /// custody, which targets the delegated generation when present and its
+    /// pidfd otherwise. Other platforms retain portable_pty's child-killer
+    /// behavior. Callers that must guarantee teardown follow up with
+    /// [`Self::kill_group`] after a grace period.
     pub fn kill(&self) -> Result<()> {
+        if self.reaped.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(custody) = &self.process_custody {
+            return custody.request_terminate_now();
+        }
+
         let mut k = self
             .killer
             .lock()
@@ -239,23 +258,32 @@ impl PtySession {
             .map_err(|e| Error::Backend(format!("pty kill: {e}")))
     }
 
-    /// Forcibly terminate the child's entire process group with an
-    /// uncatchable `SIGKILL`. Escalation path for children that catch and
-    /// survive the graceful [`Self::kill`]. The child is spawned as a session
-    /// leader (portable_pty calls `setsid` pre-exec), so its pgid equals its
-    /// pid and the group kill also reaps grandchildren the leader would
-    /// otherwise orphan. A group that already exited (`ESRCH`) is success,
-    /// and a child the reader thread already reaped is a no-op — after the
-    /// reap the pid/pgid may be recycled and the SIGKILL could hit an
-    /// unrelated process group.
-    #[cfg(unix)]
+    /// Forcibly terminate the Linux workload through generation-safe custody.
+    /// An activated PTY generation uses `cgroup.kill`; a custody-only PTY uses
+    /// a leader-bounded pidfd scan of its process-group members. A child already
+    /// reaped is a no-op.
+    #[cfg(target_os = "linux")]
+    pub fn kill_group(&self) -> Result<()> {
+        if self.reaped.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        if let Some(custody) = &self.process_custody {
+            return custody.request_kill_now();
+        }
+        self.kill()
+    }
+
+    /// Non-Linux Unix fallback retains the pre-existing process-group kill.
+    /// The child is spawned as a session leader (portable_pty calls `setsid`),
+    /// so pgid equals pid. A group that already exited (`ESRCH`) is success;
+    /// after a confirmed reap it is not signalled because the pgid may have
+    /// been recycled.
+    #[cfg(all(unix, not(target_os = "linux")))]
     pub fn kill_group(&self) -> Result<()> {
         if self.reaped.load(Ordering::SeqCst) {
             return Ok(());
         }
         if self.pid == 0 {
-            // No pid reported: the group is unaddressable, fall back to the
-            // killer handle.
             return self.kill();
         }
         let rc = unsafe { libc::kill(-(self.pid as i32), libc::SIGKILL) };
@@ -270,7 +298,7 @@ impl PtySession {
         }
     }
 
-    /// Non-unix fallback: the platform killer is already a hard terminate
+    /// Non-Unix fallback: the platform killer is already a hard terminate
     /// (`TerminateProcess` on Windows).
     #[cfg(not(unix))]
     pub fn kill_group(&self) -> Result<()> {
@@ -328,15 +356,17 @@ fn append_capped_output(out: &mut String, chunk: &str) {
 }
 
 impl Drop for PtySession {
-    /// Group-SIGKILL so a dropped session never leaks a live child + its
+    /// Immediate workload kill so a dropped session never leaks a live child + its
     /// blocked reader thread — including TUIs that catch SIGHUP/SIGTERM
     /// (gemini) and even survive the PTY master closing. This is the backstop
     /// for the `kill_interactive` escalation task, which is cancelled if the
-    /// tokio runtime shuts down inside the grace window (e.g. a test that
+    /// Tokio runtime shuts down inside the grace window (e.g. a test that
     /// kills and returns, or daemon stop right after `agent_kill`). No-op
     /// once the reader thread has reaped the child (pid may be recycled).
     fn drop(&mut self) {
-        let _ = self.kill_group();
+        if self.drop_kill_armed.swap(false, Ordering::SeqCst) {
+            let _ = self.kill_group();
+        }
     }
 }
 
