@@ -700,6 +700,11 @@ fn proc_process_identity(pid: u32) -> Option<(u32, u64)> {
     Some((fields.get(2)?.parse().ok()?, fields.get(19)?.parse().ok()?))
 }
 
+#[cfg(not(target_os = "linux"))]
+fn proc_process_identity(_pid: u32) -> Option<(u32, u64)> {
+    None
+}
+
 #[derive(Serialize)]
 struct ControlMessage<'a> {
     command: &'a str,
@@ -2237,6 +2242,12 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn proc_identity_is_unavailable_without_linux_procfs() {
+        assert_eq!(proc_process_identity(std::process::id()), None);
+    }
+
     fn complete_snapshot(cpu: u64, memory: u64, pids: u64) -> WorkloadResourceSnapshot {
         WorkloadResourceSnapshot {
             status: WorkloadResourceStatus::Complete,
@@ -2390,6 +2401,7 @@ mod tests {
         assert!(read_bounded_protocol_line(&mut unterminated, "test").is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn receipt_requires_private_bounded_binding_and_consistent_resources() {
         let dir = tempfile::tempdir().expect("receipt dir");
@@ -2436,6 +2448,7 @@ mod tests {
         assert!(read_receipt(&inconsistent, &"b".repeat(32), unit).is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn late_generation_attachment_observes_prior_seal_latch() {
         let runtime_dir = Arc::new(tempfile::tempdir().expect("runtime dir"));
@@ -2480,6 +2493,7 @@ mod tests {
         assert!(snapshot.complete_for_cpu_memory_workload_tree);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn flat_counter_parser_rejects_duplicates_and_extra_fields() {
         let dir = tempfile::tempdir().expect("counter dir");
