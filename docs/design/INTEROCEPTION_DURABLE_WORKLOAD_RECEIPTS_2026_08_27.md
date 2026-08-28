@@ -1,6 +1,6 @@
 # AB interoception: durable workload receipts
 
-Status: R9 durable-v1 source-verified candidate; not deployed
+Status: R9 durable-v1 source candidate with installed-acceptance gates; not deployed
 Scope: body-bound local Agent workloads on Linux cgroup v2
 Depends on: `INTEROCEPTION_CGROUP_WORKLOAD_CUSTODY_2026_08_27.md`
 
@@ -69,13 +69,23 @@ span and session binding is a later organ, not an implicit claim here.
 
 ## Filesystem protocol
 
-Body-bound launches use a persistent private spool below the Agent-Bridge data
-root (or an explicitly configured private receipt root). Non-body launches keep
-the existing process-local receipt behavior.
+Body-bound launches use a persistent private spool. Resolution is deterministic
+and fail-closed, in this order: `AGENT_BRIDGE_CGROUP_RECEIPT_DIR`, the parent of
+an explicit `AGENT_BRIDGE_DB`, `AGENT_BRIDGE_STATE_DIR/workload-receipts`,
+`XDG_DATA_HOME/agent-bridge/workload-receipts`, then the HOME data fallback.
+An explicitly empty value is an error. The common state-directory step is
+important on hosts whose HOME mount cannot represent private POSIX ownership or
+modes. Non-body launches keep the existing process-local receipt behavior.
 
 Required properties:
 
-- absolute, non-root, owner-bound root and entry directories with mode `0700`;
+- absolute, normalized, non-root, owner-bound root and entry directories with
+  exact mode `0700`;
+- physical path components only: every existing component is inspected without
+  following symlinks, and replaceable foreign-owned or group/other-writable
+  ancestors are rejected. A root-owned sticky `/tmp` is accepted only as the
+  ancestor of an already-created owner-bound child, never as the direct parent
+  for recursive runtime initialization;
 - bounded lowercase-hex receipt directory names;
 - root-directory serialization and capacity admission before allocating a new
   entry, so concurrent preparers cannot grow beyond the scan bound;
@@ -203,5 +213,39 @@ material stays in the outbox and is removed after durable acknowledgement.
 11. Store rejects cross-span, cross-projection, event-target/facts, descriptor,
     evidence, and sensitive-field mismatches without a ledger or event write;
     and
-12. one installed-binary restart exercise proves commit-before-ACK, exact
-    replay, no false body-span reconstruction, and no residual spool/scope.
+12. one installed-binary restart exercise proves commit-before-any-successful-
+    ACK at the observable protocol boundary, exact replay, no false body-span
+    reconstruction, and no residual spool/scope.
+
+## Installed acceptance boundary
+
+Source tests do not upgrade an installation. R9 publication adds three separate
+gates:
+
+- the deployer requires the immutable-ledger schema marker in every selected
+  binary, including first installs and explicit binary selection;
+- `agent-bridge doctor` resolves the same receipt-root precedence without
+  creating anything. An absent root below a safe private parent is a pre-start
+  warning; an unsafe path, owner, mode, or ancestor is a failure; and
+- a read-only installed verifier binds an explicit expected commit and binary
+  digest, checks the physical binary and receipt-root replacement boundaries,
+  requires daemon, daemon-http, and Palace to execute that exact non-deleted
+  path and content, checks both loopback health endpoints, and requires a strict
+  zero-warning Doctor result bound to the verified receipt root.
+
+The destructive-looking restart proof never operates on the production spool.
+It copies the pinned installed binary byte-for-byte into a private disposable
+runtime directory, uses an isolated database and spool, then changes only that
+spool to mode `0500`. The workload supervisor can still seal inside its existing
+entry, while live ACK cleanup fails the exact-root-mode precondition after the
+SQLite transaction. The harness verifies the immutable live row/event, kills
+only its first MCP process group, restores the isolated root, starts the same
+copy, and requires Duplicate reconciliation, byte-for-byte unchanged database
+rows, one workload execution, no reconstructed recovery event, no pending or
+acknowledged receipt entries other than the persistent `.spool.lock`, and no
+remaining exact transient scope.
+
+These gates still do not authorize publication, service restart, or a new
+installation location. The authoritative remote and the host path used for the
+installed wrapper/binary remain separate authority and replacement-trust
+decisions.

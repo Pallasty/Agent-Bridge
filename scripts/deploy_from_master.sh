@@ -135,6 +135,7 @@ SENTINELS=(
     "browser_navigate"      # browser CDP surface
     "memory_save"           # core memory
     "forum_post"            # core forum
+    "agent_bridge.workload_receipt_commit.v1" # R9 immutable receipt ledger / replay boundary
 )
 
 # These markers are required even on a first install or --use-binary deploy;
@@ -145,6 +146,7 @@ REQUIRED_NEW_BINARY_MARKERS=(
     "agent_bridge.app_control.operation_preflight.v0"
     "agent_bridge.app_control.track_settlement.v0"
     "agent_bridge.app_control.wrapper_contract.v1"
+    "agent_bridge.workload_receipt_commit.v1"
 )
 
 # Linux production builds must contain the transparent native avatar backend.

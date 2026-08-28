@@ -1511,44 +1511,80 @@ fn validate_manifest(manifest: &DurableReceiptManifest) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn durable_receipt_root() -> Result<PathBuf> {
-    let root = if let Some(configured) = std::env::var_os(RECEIPT_DIR_ENV) {
-        if configured.is_empty() {
+    let root = durable_workload_receipt_root_path()?;
+    ensure_private_directory(&root, true)?;
+    Ok(root)
+}
+
+/// Resolve the configured durable workload receipt root without inspecting or
+/// creating anything on disk.
+///
+/// This is intentionally separated from the creating runtime path so read-only
+/// diagnostics can report whether the configured location is safe before the
+/// R9 runtime has created it.
+pub fn durable_workload_receipt_root_path() -> Result<PathBuf> {
+    let receipt_dir = std::env::var_os(RECEIPT_DIR_ENV);
+    let database = std::env::var_os("AGENT_BRIDGE_DB");
+    let state_dir = std::env::var_os("AGENT_BRIDGE_STATE_DIR");
+    let data_home = std::env::var_os("XDG_DATA_HOME");
+    let home = std::env::var_os("HOME");
+    resolve_durable_receipt_root(
+        receipt_dir.as_deref(),
+        database.as_deref(),
+        state_dir.as_deref(),
+        data_home.as_deref(),
+        home.as_deref(),
+    )
+}
+
+fn resolve_durable_receipt_root(
+    receipt_dir: Option<&std::ffi::OsStr>,
+    database: Option<&std::ffi::OsStr>,
+    state_dir: Option<&std::ffi::OsStr>,
+    data_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf> {
+    fn configured_path(value: &std::ffi::OsStr, variable: &str) -> Result<PathBuf> {
+        if value.is_empty() {
             return Err(Error::InvalidArgument(format!(
-                "ambient {RECEIPT_DIR_ENV} cannot be empty"
+                "ambient {variable} cannot be empty"
             )));
         }
-        PathBuf::from(configured)
-    } else if let Some(database) = std::env::var_os("AGENT_BRIDGE_DB") {
-        let database = PathBuf::from(database);
+        Ok(PathBuf::from(value))
+    }
+
+    let root = if let Some(configured) = receipt_dir {
+        configured_path(configured, RECEIPT_DIR_ENV)?
+    } else if let Some(database) = database {
+        let database = configured_path(database, "AGENT_BRIDGE_DB")?;
         let parent = database.parent().ok_or_else(|| {
             Error::InvalidArgument(
                 "ambient AGENT_BRIDGE_DB has no parent for durable workload receipts".into(),
             )
         })?;
         parent.join("workload-receipts")
-    } else if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(data_home)
+    } else if let Some(state_dir) = state_dir {
+        configured_path(state_dir, "AGENT_BRIDGE_STATE_DIR")?.join("workload-receipts")
+    } else if let Some(data_home) = data_home {
+        configured_path(data_home, "XDG_DATA_HOME")?
             .join("agent-bridge")
             .join("workload-receipts")
-    } else {
-        let home = std::env::var_os("HOME").ok_or_else(|| {
-            Error::Backend(
-                "durable workload receipts require AGENT_BRIDGE_CGROUP_RECEIPT_DIR, AGENT_BRIDGE_DB, XDG_DATA_HOME, or HOME"
-                    .into(),
-            )
-        })?;
-        PathBuf::from(home)
+    } else if let Some(home) = home {
+        configured_path(home, "HOME")?
             .join(".local")
             .join("share")
             .join("agent-bridge")
             .join("workload-receipts")
+    } else {
+        return Err(Error::Backend(
+            "durable workload receipts require AGENT_BRIDGE_CGROUP_RECEIPT_DIR, AGENT_BRIDGE_DB, AGENT_BRIDGE_STATE_DIR, XDG_DATA_HOME, or HOME"
+                .into(),
+        ));
     };
     validate_durable_root_path(&root)?;
-    ensure_private_directory(&root, true)?;
     Ok(root)
 }
 
-#[cfg(target_os = "linux")]
 fn validate_durable_root_path(path: &Path) -> Result<()> {
     if !path.is_absolute()
         || path == Path::new("/")
@@ -1569,47 +1605,182 @@ fn validate_durable_root_path(path: &Path) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn ensure_private_directory(path: &Path, create: bool) -> Result<()> {
+    let exists = validate_private_directory_chain(path, create)?;
+    if exists {
+        if create {
+            // A previous attempt may have created the full chain and then
+            // failed during a directory fsync. Retrying must repair that
+            // durability boundary instead of treating mere existence as an
+            // acknowledgement.
+            sync_euid_directory_suffix(path)?;
+            validate_private_directory_chain(path, false)?;
+        }
+        return Ok(());
+    }
+    if !create {
+        return Err(Error::Backend(
+            "durable workload receipt directory does not exist".into(),
+        ));
+    }
+
+    // Create one component at a time. Each new directory and its parent are
+    // durably synced before the next component is admitted, so a multi-level
+    // state path cannot acknowledge a durable root while an intermediate
+    // directory entry remains only in the page cache.
+    use std::os::unix::fs::DirBuilderExt;
+    let mut current = PathBuf::new();
+    let mut creating = false;
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if !creating {
+            match std::fs::symlink_metadata(&current) {
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => creating = true,
+                Err(error) => {
+                    return Err(Error::Backend(format!(
+                        "inspect durable workload receipt creation path '{}': {error}",
+                        current.display()
+                    )))
+                }
+            }
+        }
+
+        let parent = current.parent().ok_or_else(|| {
+            Error::Backend("durable workload receipt component has no parent".into())
+        })?;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder.create(&current).map_err(|error| {
+            Error::Backend(format!(
+                "create private durable workload receipt directory '{}': {error}",
+                current.display()
+            ))
+        })?;
+        set_mode(&current, 0o700)?;
+        validate_private_directory_chain(&current, false)?;
+        sync_directory(&current)?;
+        sync_directory(parent)?;
+    }
+    validate_private_directory_chain(path, false)?;
+    // Re-sync the complete euid-owned suffix. Besides closing the ordinary
+    // creation path, this repairs intermediate directories left by an earlier
+    // failed attempt before this retry created the remaining leaf components.
+    sync_euid_directory_suffix(path)?;
+    validate_private_directory_chain(path, false)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn sync_euid_directory_suffix(path: &Path) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
 
-    if create {
-        match std::fs::symlink_metadata(path) {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                use std::os::unix::fs::DirBuilderExt;
-                let mut builder = std::fs::DirBuilder::new();
-                builder.recursive(true).mode(0o700);
-                builder.create(path).map_err(|error| {
-                    Error::Backend(format!(
-                        "create private durable workload receipt directory: {error}"
-                    ))
-                })?;
-                set_mode(path, 0o700)?;
-                if let Some(parent) = path.parent() {
-                    sync_directory(parent)?;
+    let euid = unsafe { libc::geteuid() };
+    let mut current = PathBuf::new();
+    let mut suffix = Vec::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        let metadata = std::fs::symlink_metadata(&current).map_err(|error| {
+            Error::Backend(format!(
+                "inspect durable workload receipt sync path '{}': {error}",
+                current.display()
+            ))
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+            return Err(Error::Backend(format!(
+                "durable workload receipt sync path '{}' must be a physical directory",
+                current.display()
+            )));
+        }
+        if metadata.uid() == euid {
+            suffix.push(current.clone());
+        } else {
+            suffix.clear();
+        }
+    }
+    if suffix.last().map(PathBuf::as_path) != Some(path) {
+        return Err(Error::Backend(
+            "durable workload receipt sync path has no euid-owned suffix".into(),
+        ));
+    }
+    for directory in suffix.iter().rev() {
+        sync_directory(directory)?;
+    }
+    Ok(())
+}
+
+/// Validate every existing path component with `lstat` semantics. Ancestors
+/// must be owned by either root or the effective uid and must not be writable
+/// by group/other. The conventional root-owned sticky `/tmp` boundary is the
+/// sole writable exception; same-uid hostile replacement is outside the local
+/// workload-receipt threat boundary. The final root is stricter: euid-owned
+/// and exactly 0700.
+#[cfg(target_os = "linux")]
+fn validate_private_directory_chain(path: &Path, allow_missing: bool) -> Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+
+    validate_durable_root_path(path)?;
+    let euid = unsafe { libc::geteuid() };
+    let mut current = PathBuf::new();
+    let mut nearest_existing: Option<(PathBuf, u32, u32)> = None;
+    for component in path.components() {
+        current.push(component.as_os_str());
+        let metadata = match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if allow_missing && error.kind() == std::io::ErrorKind::NotFound => {
+                let Some((parent, parent_uid, parent_mode)) = nearest_existing else {
+                    return Err(Error::Backend(
+                        "durable workload receipt root has no inspectable physical parent".into(),
+                    ));
+                };
+                if parent_uid != euid || parent_mode & 0o700 != 0o700 || parent_mode & 0o022 != 0 {
+                    return Err(Error::Backend(format!(
+                        "nearest existing durable workload receipt parent '{}' must be euid-owned, owner-rwx, and not writable by group/other before creation",
+                        parent.display()
+                    )));
                 }
+                return Ok(false);
             }
             Err(error) => {
                 return Err(Error::Backend(format!(
-                    "inspect durable workload receipt directory before creation: {error}"
+                    "inspect durable workload receipt path component '{}': {error}",
+                    current.display()
                 )))
             }
+        };
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+            return Err(Error::Backend(format!(
+                "durable workload receipt path component '{}' must be a physical directory",
+                current.display()
+            )));
         }
+
+        let mode = metadata.mode();
+        if current == path {
+            if metadata.uid() != euid || mode & 0o7777 != 0o700 {
+                return Err(Error::Backend(
+                    "durable workload receipt directory must be a physical euid-owned 0700 directory"
+                        .into(),
+                ));
+            }
+            return Ok(true);
+        }
+
+        let root_owned_sticky_tmp =
+            current == Path::new("/tmp") && metadata.uid() == 0 && mode & 0o1000 != 0;
+        if (metadata.uid() != 0 && metadata.uid() != euid)
+            || (metadata.uid() == euid && mode & 0o700 != 0o700)
+            || (mode & 0o022 != 0 && !root_owned_sticky_tmp)
+        {
+            return Err(Error::Backend(format!(
+                "durable workload receipt ancestor '{}' must be root/euid-owned, every euid-owned ancestor must be owner-rwx, and no ancestor may be writable by group/other (except root-owned sticky /tmp)",
+                current.display()
+            )));
+        }
+        nearest_existing = Some((current.clone(), metadata.uid(), mode));
     }
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
-        Error::Backend(format!(
-            "inspect private durable workload receipt directory: {error}"
-        ))
-    })?;
-    if !metadata.file_type().is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.mode() & 0o777 != 0o700
-    {
-        return Err(Error::Backend(
-            "durable workload receipt directory must be a non-symlink owner-bound 0700 directory"
-                .into(),
-        ));
-    }
-    Ok(())
+    Err(Error::Backend(
+        "durable workload receipt path has no final component".into(),
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -4084,6 +4255,81 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn durable_receipt_root_resolution_is_isolated_and_fail_closed() {
+        use std::ffi::OsStr;
+
+        let receipt = OsStr::new("/private/explicit-receipts");
+        let database = OsStr::new("/private/database/state.db");
+        let state = OsStr::new("/private/common-state");
+        let data = OsStr::new("/private/xdg-data");
+        let home = OsStr::new("/private/home");
+
+        assert_eq!(
+            resolve_durable_receipt_root(
+                Some(receipt),
+                Some(database),
+                Some(state),
+                Some(data),
+                Some(home),
+            )
+            .unwrap(),
+            PathBuf::from("/private/explicit-receipts")
+        );
+        assert_eq!(
+            resolve_durable_receipt_root(
+                None,
+                Some(database),
+                Some(state),
+                Some(data),
+                Some(home),
+            )
+            .unwrap(),
+            PathBuf::from("/private/database/workload-receipts")
+        );
+        assert_eq!(
+            resolve_durable_receipt_root(None, None, Some(state), Some(data), Some(home)).unwrap(),
+            PathBuf::from("/private/common-state/workload-receipts")
+        );
+        assert_eq!(
+            resolve_durable_receipt_root(None, None, None, Some(data), Some(home)).unwrap(),
+            PathBuf::from("/private/xdg-data/agent-bridge/workload-receipts")
+        );
+        assert_eq!(
+            resolve_durable_receipt_root(None, None, None, None, Some(home)).unwrap(),
+            PathBuf::from("/private/home/.local/share/agent-bridge/workload-receipts")
+        );
+
+        let empty = OsStr::new("");
+        for result in [
+            resolve_durable_receipt_root(Some(empty), None, None, None, None),
+            resolve_durable_receipt_root(None, Some(empty), None, None, None),
+            resolve_durable_receipt_root(None, None, Some(empty), None, None),
+            resolve_durable_receipt_root(None, None, None, Some(empty), None),
+            resolve_durable_receipt_root(None, None, None, None, Some(empty)),
+        ] {
+            assert!(result.is_err(), "an explicitly empty path must fail closed");
+        }
+        assert!(resolve_durable_receipt_root(None, None, None, None, None).is_err());
+        assert!(resolve_durable_receipt_root(
+            None,
+            None,
+            Some(OsStr::new("/private/../escaped")),
+            None,
+            None,
+        )
+        .is_err());
+        assert!(resolve_durable_receipt_root(
+            None,
+            None,
+            Some(OsStr::new("relative-state")),
+            None,
+            None,
+        )
+        .is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn durable_directory_sync_and_root_security_fail_closed() {
         use std::os::unix::fs::{symlink, PermissionsExt};
 
@@ -4093,13 +4339,75 @@ mod tests {
 
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(ensure_private_directory(root.path(), false).is_err());
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o1700)).unwrap();
+        assert!(ensure_private_directory(root.path(), false).is_err());
         set_mode(root.path(), 0o700).unwrap();
+
+        let direct_tmp = Path::new("/tmp").join(format!(
+            ".agent-bridge-r9-missing-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        assert!(!direct_tmp.exists());
+        assert!(ensure_private_directory(&direct_tmp, true).is_err());
+        assert!(!direct_tmp.exists());
 
         let parent = tempfile::tempdir().expect("symlink parent");
         let link = parent.path().join("spool-link");
         symlink(root.path(), &link).unwrap();
         assert!(ensure_private_directory(&link, false).is_err());
+        let through_link = link.join("nested-receipts");
+        assert!(ensure_private_directory(&through_link, true).is_err());
+        assert!(!root.path().join("nested-receipts").exists());
         assert!(sync_directory(&link).is_err());
+
+        let unsafe_parent = tempfile::tempdir().expect("writable ancestor");
+        std::fs::set_permissions(unsafe_parent.path(), std::fs::Permissions::from_mode(0o777))
+            .unwrap();
+        let safe_intermediate = unsafe_parent.path().join("private-state");
+        std::fs::create_dir(&safe_intermediate).unwrap();
+        std::fs::set_permissions(&safe_intermediate, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let unsafe_root = safe_intermediate.join("workload-receipts");
+        std::fs::create_dir(&unsafe_root).unwrap();
+        std::fs::set_permissions(&unsafe_root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(ensure_private_directory(&unsafe_root, false).is_err());
+
+        let safe_parent = tempfile::tempdir().expect("safe creation parent");
+        set_mode(safe_parent.path(), 0o700).unwrap();
+        let created = safe_parent.path().join("nested/workload-receipts");
+        ensure_private_directory(&created, true).expect("create below safe parent");
+        assert_eq!(
+            std::fs::symlink_metadata(safe_parent.path().join("nested"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o700,
+            "each durably created intermediate must remain owner-private"
+        );
+        ensure_private_directory(&created, false).expect("revalidate physical chain");
+        ensure_private_directory(&created, true)
+            .expect("existing create retry must re-establish the durable sync boundary");
+
+        for unusable_mode in [0o500, 0o300, 0o111, 0o311] {
+            let unusable_parent = tempfile::tempdir().expect("unusable creation parent");
+            set_mode(unusable_parent.path(), unusable_mode).unwrap();
+            let absent = unusable_parent.path().join("workload-receipts");
+            assert!(
+                ensure_private_directory(&absent, true).is_err(),
+                "mode {unusable_mode:04o} must not be advertised as a durable creation parent"
+            );
+            assert!(!absent.exists());
+            set_mode(unusable_parent.path(), 0o700).unwrap();
+            std::fs::create_dir(&absent).unwrap();
+            set_mode(&absent, 0o700).unwrap();
+            set_mode(unusable_parent.path(), unusable_mode).unwrap();
+            assert!(
+                ensure_private_directory(&absent, false).is_err(),
+                "mode {unusable_mode:04o} must not pass as an existing sync ancestor"
+            );
+            set_mode(unusable_parent.path(), 0o700).unwrap();
+        }
     }
 
     #[test]

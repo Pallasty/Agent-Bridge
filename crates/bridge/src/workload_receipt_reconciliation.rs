@@ -688,6 +688,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn startup_duplicate_acks_unfinished_live_commit_without_recovery_event() {
+        let directory = tempfile::tempdir().expect("temporary live replay receipt store");
+        let database = directory.path().join("state.db");
+        let store: Arc<dyn StateStore> = Arc::new(
+            SqliteStore::open(&database)
+                .await
+                .expect("open live replay receipt store"),
+        );
+        let record = complete_record();
+        let recorded_at = ab_store::now_secs();
+        let (startup_facts, startup_event) =
+            recovered_event(&record, recorded_at).expect("build startup projection");
+        let mut live_facts = startup_facts.clone();
+        live_facts["recovery_scope"] = json!("live_body_span");
+        live_facts["body_before_after_recovered"] = json!(true);
+        let mut live_event = startup_event.clone();
+        live_event.action = "task_span_closed".to_string();
+        live_event.facts = live_facts.to_string();
+
+        let inserted = commit_workload_receipt_event_with_ack(
+            &store,
+            std::slice::from_ref(&record.receipt_ref),
+            &record.span_id,
+            recorded_at,
+            WorkloadReceiptCommitKind::LiveBodySpan,
+            &live_facts,
+            live_event,
+            |_| Err(Error::Backend("forced isolated ACK failure".into())),
+        )
+        .await
+        .expect("live database commit survives ACK failure");
+        assert_eq!(inserted.status, WorkloadReceiptCommitStatus::Inserted);
+        assert!(inserted.event_projection_present);
+        assert_eq!(inserted.acknowledgement_failures, 1);
+
+        let replayed = commit_workload_receipt_event_with_ack(
+            &store,
+            std::slice::from_ref(&record.receipt_ref),
+            &record.span_id,
+            recorded_at + 1,
+            WorkloadReceiptCommitKind::StartupReconciliation,
+            &startup_facts,
+            startup_event,
+            |_| Ok(true),
+        )
+        .await
+        .expect("startup classifies the live receipt identity as a duplicate");
+        assert_eq!(replayed.status, WorkloadReceiptCommitStatus::Duplicate);
+        assert!(!replayed.event_projection_present);
+        assert_eq!(replayed.acknowledged, 1);
+
+        let commits = store
+            .recent_workload_receipt_commits(3_600, 10)
+            .await
+            .expect("read live replay ledger");
+        assert_eq!(commits.len(), 1);
+        assert_eq!(
+            commits[0].commit_kind,
+            WorkloadReceiptCommitKind::LiveBodySpan
+        );
+        let events = store
+            .recent_semantic_events(3_600, 10)
+            .await
+            .expect("read live replay event ring");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action, "task_span_closed");
+        assert!(events
+            .iter()
+            .all(|event| event.action != "workload_receipt_reconciled"));
+    }
+
+    #[tokio::test]
     async fn duplicate_identity_does_not_claim_a_different_projection() {
         let directory = tempfile::tempdir().expect("temporary projection receipt store");
         let database = directory.path().join("state.db");

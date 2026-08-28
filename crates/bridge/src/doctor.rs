@@ -172,6 +172,174 @@ fn read_head(path: &Path, n: usize) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+#[cfg(target_os = "linux")]
+const WORKLOAD_RECEIPT_ROOT_FIX: &str =
+    "configure AGENT_BRIDGE_CGROUP_RECEIPT_DIR or AGENT_BRIDGE_STATE_DIR on a permission-capable private filesystem, then start or restart the R9 binary once; do not blindly chmod a FUSE-backed path";
+
+/// Verify the R9 receipt root without creating it or changing any permissions.
+#[cfg(target_os = "linux")]
+fn check_workload_receipt_root() -> Check {
+    match ab_agent::durable_workload_receipt_root_path() {
+        Ok(path) => check_workload_receipt_root_path(&path),
+        Err(error) => Check::fail(
+            "workload_receipt_root",
+            format!("cannot resolve the durable workload receipt root: {error}"),
+            WORKLOAD_RECEIPT_ROOT_FIX,
+        ),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn check_workload_receipt_root() -> Check {
+    Check::ok(
+        "workload_receipt_root",
+        "not applicable: durable cgroup workload receipts are Linux-only",
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn check_workload_receipt_root_path(path: &Path) -> Check {
+    use std::io::ErrorKind;
+
+    let euid = unsafe { libc::geteuid() };
+    let mut current = PathBuf::new();
+    let mut nearest_existing = None;
+    let mut missing_component = None;
+
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Check::fail(
+                        "workload_receipt_root",
+                        format!(
+                            "{} is unsafe: path component {} is a symlink",
+                            path.display(),
+                            current.display()
+                        ),
+                        WORKLOAD_RECEIPT_ROOT_FIX,
+                    );
+                }
+                if !metadata.file_type().is_dir() {
+                    return Check::fail(
+                        "workload_receipt_root",
+                        format!(
+                            "{} is unsafe: path component {} is not a directory",
+                            path.display(),
+                            current.display()
+                        ),
+                        WORKLOAD_RECEIPT_ROOT_FIX,
+                    );
+                }
+                if current != path {
+                    let mode = metadata.mode();
+                    let root_owned_sticky_tmp =
+                        current == Path::new("/tmp") && metadata.uid() == 0 && mode & 0o1000 != 0;
+                    if (metadata.uid() != 0 && metadata.uid() != euid)
+                        || (metadata.uid() == euid && mode & 0o700 != 0o700)
+                        || (mode & 0o022 != 0 && !root_owned_sticky_tmp)
+                    {
+                        return Check::fail(
+                            "workload_receipt_root",
+                            format!(
+                                "{} is unsafe: ancestor {} must be root/euid-owned, every euid-owned ancestor must be owner-rwx, and no ancestor may be writable by group/other (uid={}, mode={:04o}, euid={euid}; root-owned sticky /tmp is allowed)",
+                                path.display(),
+                                current.display(),
+                                metadata.uid(),
+                                mode & 0o7777,
+                            ),
+                            WORKLOAD_RECEIPT_ROOT_FIX,
+                        );
+                    }
+                }
+                nearest_existing = Some((current.clone(), metadata));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                missing_component = Some(current.clone());
+                break;
+            }
+            Err(error) => {
+                return Check::fail(
+                    "workload_receipt_root",
+                    format!(
+                        "cannot inspect physical path component {} for {}: {error}",
+                        current.display(),
+                        path.display()
+                    ),
+                    WORKLOAD_RECEIPT_ROOT_FIX,
+                );
+            }
+        }
+    }
+
+    if let Some(missing) = missing_component {
+        let Some((parent, metadata)) = nearest_existing else {
+            return Check::fail(
+                "workload_receipt_root",
+                format!(
+                    "{} is absent and has no inspectable physical parent",
+                    path.display()
+                ),
+                WORKLOAD_RECEIPT_ROOT_FIX,
+            );
+        };
+        let full_mode = metadata.mode();
+        let mode = full_mode & 0o777;
+        if metadata.uid() != euid || mode & 0o700 != 0o700 || mode & 0o022 != 0 {
+            return Check::fail(
+                "workload_receipt_root",
+                format!(
+                    "{} is absent at {}; nearest physical parent {} cannot safely and durably host creation because it is not euid-owned, owner-rwx, and non-writable by group/other (uid={}, mode={:04o}, euid={euid})",
+                    path.display(),
+                    missing.display(),
+                    parent.display(),
+                    metadata.uid(),
+                    full_mode & 0o7777,
+                ),
+                WORKLOAD_RECEIPT_ROOT_FIX,
+            );
+        }
+        return Check::warn(
+            "workload_receipt_root",
+            format!(
+                "{} is absent; nearest physical parent {} is euid-owned and safely permissioned (mode={:04o}); Doctor left it untouched",
+                path.display(),
+                parent.display(),
+                full_mode & 0o7777,
+            ),
+            WORKLOAD_RECEIPT_ROOT_FIX,
+        );
+    }
+
+    let Some((_, metadata)) = nearest_existing else {
+        return Check::fail(
+            "workload_receipt_root",
+            format!("{} has no inspectable physical path", path.display()),
+            WORKLOAD_RECEIPT_ROOT_FIX,
+        );
+    };
+    let mode = metadata.mode() & 0o7777;
+    if metadata.uid() != euid || mode != 0o700 {
+        return Check::fail(
+            "workload_receipt_root",
+            format!(
+                "{} must be an owner-bound physical 0700 directory (uid={}, mode={mode:04o}, euid={euid})",
+                path.display(),
+                metadata.uid(),
+            ),
+            WORKLOAD_RECEIPT_ROOT_FIX,
+        );
+    }
+    Check::ok(
+        "workload_receipt_root",
+        format!(
+            "{} is an owner-bound physical 0700 directory",
+            path.display()
+        ),
+    )
+}
+
 /// Check 1+3: wrapper integrity + SVD injection. The headline check — this is
 /// the exact failure mode from 2026-05-23.
 fn check_wrapper(dir: &Path) -> Check {
@@ -1312,6 +1480,7 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
         check_mcp_tool_surface(),
         check_system_control_api(&dir),
         check_desktop_runtime(&dir),
+        check_workload_receipt_root(),
         check_instinct_observer(),
     ];
 
@@ -1397,6 +1566,169 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    fn set_test_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn workload_receipt_root_accepts_only_owner_bound_0700_existing_root() {
+        let parent = tempfile::tempdir().expect("private parent");
+        set_test_mode(parent.path(), 0o700);
+        let root = parent.path().join("workload-receipts");
+        std::fs::create_dir(&root).unwrap();
+        set_test_mode(&root, 0o700);
+
+        let ok = check_workload_receipt_root_path(&root);
+        assert_eq!(ok.status, Status::Ok, "{}", ok.detail);
+
+        set_test_mode(&root, 0o755);
+        let fail = check_workload_receipt_root_path(&root);
+        assert_eq!(fail.status, Status::Fail, "{}", fail.detail);
+        assert!(fail.detail.contains("0700"));
+
+        set_test_mode(&root, 0o1700);
+        let special_bits = check_workload_receipt_root_path(&root);
+        assert_eq!(special_bits.status, Status::Fail, "{}", special_bits.detail);
+        assert!(special_bits.detail.contains("1700"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn workload_receipt_root_rejects_final_and_intermediate_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().expect("private parent");
+        set_test_mode(parent.path(), 0o700);
+        let physical = parent.path().join("physical");
+        std::fs::create_dir(&physical).unwrap();
+        set_test_mode(&physical, 0o700);
+
+        let final_link = parent.path().join("receipt-link");
+        symlink(&physical, &final_link).unwrap();
+        let final_check = check_workload_receipt_root_path(&final_link);
+        assert_eq!(final_check.status, Status::Fail, "{}", final_check.detail);
+        assert!(final_check.detail.contains("symlink"));
+
+        let intermediate_link = parent.path().join("state-link");
+        symlink(&physical, &intermediate_link).unwrap();
+        let intermediate_check =
+            check_workload_receipt_root_path(&intermediate_link.join("workload-receipts"));
+        assert_eq!(
+            intermediate_check.status,
+            Status::Fail,
+            "{}",
+            intermediate_check.detail
+        );
+        assert!(intermediate_check.detail.contains("symlink"));
+
+        let regular = parent.path().join("regular-component");
+        std::fs::write(&regular, b"not a directory").unwrap();
+        let regular_check = check_workload_receipt_root_path(&regular.join("workload-receipts"));
+        assert_eq!(
+            regular_check.status,
+            Status::Fail,
+            "{}",
+            regular_check.detail
+        );
+        assert!(regular_check.detail.contains("not a directory"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn workload_receipt_root_warns_for_absent_root_under_safe_parent_without_creating_it() {
+        let parent = tempfile::tempdir().expect("private parent");
+        set_test_mode(parent.path(), 0o700);
+        let root = parent.path().join("nested/workload-receipts");
+
+        let check = check_workload_receipt_root_path(&root);
+        assert_eq!(check.status, Status::Warn, "{}", check.detail);
+        assert!(!root.exists());
+        assert!(!parent.path().join("nested").exists());
+
+        let direct_tmp = Path::new("/tmp").join(format!(
+            ".agent-bridge-r9-doctor-missing-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let tmp_check = check_workload_receipt_root_path(&direct_tmp);
+        assert_eq!(tmp_check.status, Status::Fail, "{}", tmp_check.detail);
+        assert!(!direct_tmp.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn workload_receipt_root_fails_for_absent_root_under_world_writable_parent() {
+        let parent = tempfile::tempdir().expect("unsafe parent");
+        set_test_mode(parent.path(), 0o777);
+        let root = parent.path().join("workload-receipts");
+
+        let check = check_workload_receipt_root_path(&root);
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+        assert!(check.detail.contains("ancestor"));
+        assert!(!root.exists());
+
+        let private_child = parent.path().join("private-state");
+        std::fs::create_dir(&private_child).unwrap();
+        set_test_mode(&private_child, 0o700);
+        let existing_root = private_child.join("workload-receipts");
+        std::fs::create_dir(&existing_root).unwrap();
+        set_test_mode(&existing_root, 0o700);
+        let higher_ancestor = check_workload_receipt_root_path(&existing_root);
+        assert_eq!(
+            higher_ancestor.status,
+            Status::Fail,
+            "{}",
+            higher_ancestor.detail
+        );
+        assert!(higher_ancestor.detail.contains("ancestor"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn workload_receipt_root_fails_for_absent_root_under_unusable_private_parent() {
+        for unusable_mode in [0o500, 0o300] {
+            let parent = tempfile::tempdir().expect("unusable private parent");
+            set_test_mode(parent.path(), unusable_mode);
+            let root = parent.path().join("workload-receipts");
+
+            let check = check_workload_receipt_root_path(&root);
+            assert_eq!(
+                check.status,
+                Status::Fail,
+                "mode {unusable_mode:04o}: {}",
+                check.detail
+            );
+            assert!(check.detail.contains("owner-rwx"));
+            assert!(!root.exists());
+            set_test_mode(parent.path(), 0o700);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn workload_receipt_root_fails_for_existing_root_under_unsyncable_euid_ancestor() {
+        for unusable_mode in [0o111, 0o311, 0o500] {
+            let parent = tempfile::tempdir().expect("unsyncable private ancestor");
+            set_test_mode(parent.path(), 0o700);
+            let root = parent.path().join("workload-receipts");
+            std::fs::create_dir(&root).unwrap();
+            set_test_mode(&root, 0o700);
+            set_test_mode(parent.path(), unusable_mode);
+
+            let check = check_workload_receipt_root_path(&root);
+            assert_eq!(
+                check.status,
+                Status::Fail,
+                "mode {unusable_mode:04o}: {}",
+                check.detail
+            );
+            assert!(check.detail.contains("owner-rwx"));
+            set_test_mode(parent.path(), 0o700);
+        }
+    }
 
     #[test]
     fn md_cell_escapes_pipes_and_collapses_ws() {

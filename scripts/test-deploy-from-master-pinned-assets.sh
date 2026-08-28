@@ -86,7 +86,7 @@ sha="$(git rev-parse HEAD)"
 source_file="$CARGO_TARGET_DIR/fake-agent-bridge.c"
 cat > "$source_file" <<EOF
 #include <stdio.h>
-int main(void) { puts("agent-bridge test ${sha} agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0 agent_bridge.app_control.wrapper_contract.v1"); return 0; }
+int main(void) { puts("agent-bridge test ${sha} agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0 agent_bridge.app_control.wrapper_contract.v1 agent_bridge.workload_receipt_commit.v1"); return 0; }
 EOF
 mkdir -p "$CARGO_TARGET_DIR/release"
 "$AB_DEPLOY_PINNED_ASSETS_CC" "$source_file" -o "$CARGO_TARGET_DIR/release/agent-bridge"

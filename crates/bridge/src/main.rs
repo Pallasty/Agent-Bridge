@@ -21551,6 +21551,31 @@ async fn run_rescue_snapshot(
     }
 }
 
+fn log_workload_receipt_reconciliation_report(
+    report: &ab_bridge::workload_receipt_reconciliation::WorkloadReceiptReconciliationReport,
+) {
+    if report.scanned_receipts > 0
+        || report.unresolved > 0
+        || report.invalid > 0
+        || report.commit_failures > 0
+    {
+        tracing::info!(
+            scanned = report.scanned_receipts,
+            inserted = report.inserted_commits,
+            duplicate = report.duplicate_commits,
+            conflicts = report.conflicts,
+            acknowledged = report.acknowledged,
+            already_acknowledged = report.already_acknowledged,
+            acknowledgement_failures = report.acknowledgement_failures,
+            unresolved = report.unresolved,
+            active_producers = report.active_producers,
+            invalid = report.invalid,
+            commit_failures = report.commit_failures,
+            "durable workload receipt startup reconciliation completed"
+        );
+    }
+}
+
 /// Construct the shared backend bundle used by both modes.
 ///
 /// Relevant env vars:
@@ -21595,27 +21620,7 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
     match ab_bridge::workload_receipt_reconciliation::reconcile_workload_receipt_spool(&store)
         .await
     {
-        Ok(report) => {
-            if report.scanned_receipts > 0
-                || report.unresolved > 0
-                || report.invalid > 0
-                || report.commit_failures > 0
-            {
-                tracing::info!(
-                    scanned = report.scanned_receipts,
-                    inserted = report.inserted_commits,
-                    duplicate = report.duplicate_commits,
-                    conflicts = report.conflicts,
-                    acknowledged = report.acknowledged,
-                    acknowledgement_failures = report.acknowledgement_failures,
-                    unresolved = report.unresolved,
-                    active_producers = report.active_producers,
-                    invalid = report.invalid,
-                    commit_failures = report.commit_failures,
-                    "durable workload receipt startup reconciliation completed"
-                );
-            }
-        }
+        Ok(report) => log_workload_receipt_reconciliation_report(&report),
         Err(error) => {
             // New bound launches fail closed if their private outbox cannot be
             // established. Existing malformed state remains visible here, but
@@ -21729,6 +21734,65 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone)]
+    struct SharedTraceWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedTraceWriter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("trace buffer lock").extend(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn startup_workload_receipt_log_exposes_complete_duplicate_evidence() {
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer_output = output.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_target(false)
+            .with_writer(move || SharedTraceWriter(writer_output.clone()))
+            .finish();
+        let report =
+            ab_bridge::workload_receipt_reconciliation::WorkloadReceiptReconciliationReport {
+                scanned_receipts: 1,
+                duplicate_commits: 1,
+                acknowledged: 1,
+                ..Default::default()
+            };
+
+        tracing::subscriber::with_default(subscriber, || {
+            super::log_workload_receipt_reconciliation_report(&report);
+        });
+
+        let rendered = String::from_utf8(output.lock().expect("trace buffer lock").clone())
+            .expect("trace output utf8");
+        for expected in [
+            "durable workload receipt startup reconciliation completed",
+            "scanned=1",
+            "inserted=0",
+            "duplicate=1",
+            "conflicts=0",
+            "acknowledged=1",
+            "already_acknowledged=0",
+            "acknowledgement_failures=0",
+            "unresolved=0",
+            "active_producers=0",
+            "invalid=0",
+            "commit_failures=0",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "startup receipt trace must contain {expected:?}: {rendered}"
+            );
+        }
+    }
 
     #[test]
     fn resident_loss_tolerant_cli_is_unambiguous() {

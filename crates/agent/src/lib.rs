@@ -48,9 +48,10 @@ pub use resident_codex::{
 };
 pub use terminal_rusage::{TerminalResourceSnapshot, TerminalResourceStatus};
 pub use workload_cgroup::{
-    DurableWorkloadReceiptIssue, DurableWorkloadReceiptLeaseGuard, DurableWorkloadReceiptRecord,
-    DurableWorkloadReceiptRef, DurableWorkloadReceiptScan, WorkloadControl, WorkloadGeneration,
-    WorkloadResourceSnapshot, WorkloadResourceStatus,
+    durable_workload_receipt_root_path, DurableWorkloadReceiptIssue,
+    DurableWorkloadReceiptLeaseGuard, DurableWorkloadReceiptRecord, DurableWorkloadReceiptRef,
+    DurableWorkloadReceiptScan, WorkloadControl, WorkloadGeneration, WorkloadResourceSnapshot,
+    WorkloadResourceStatus,
 };
 pub use worktree::{GitWorktreeManager, Worktree};
 

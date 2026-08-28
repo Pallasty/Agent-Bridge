@@ -1,7 +1,39 @@
 # R9 durable workload-receipt reconciliation
 
 Date: 2026-08-27
-Status: source-verified candidate; authoritative publication and installed acceptance blocked
+Status: historical source verification retained; installed-acceptance source gate implemented locally; authoritative publication and installed acceptance blocked
+
+## 2026-08-28 installed-gate update
+
+The shared candidate now contains the source-side installed-acceptance gate:
+the Doctor has a dedicated `workload_receipt_root` check, an independent
+read-only verifier binds an explicit physical binary, commit, content hash,
+production receipt root, running service executables and environments, health
+endpoints, and strict Doctor output, and a separate restart harness defaults to
+read-only preflight before an explicitly authorized isolated live exercise.
+Dedicated fake-fixture tests accompany both scripts.
+
+This is source-gate implementation, not deployment evidence. No authenticated
+authoritative publication, production install, production service restart, or
+installed PASS is claimed here. Because the currently installed services have
+not been proven to contain this candidate, the read-only verifier is expected
+to fail closed on the current node. That expectation is not an executed result
+and cannot be used as either positive admission or publication evidence.
+
+The evidence fields intentionally remain open for the release owner:
+
+- **PENDING — clean source commit:** replace with the final 40-hex candidate
+  commit after the candidate tree is clean.
+- **PENDING — candidate/installed binary SHA-256:** replace with the exact
+  64-hex digest bound to that clean commit and installed candidate.
+- **PENDING — isolated live harness result:** replace with the final bounded
+  result packet after authorized execution.
+- **PENDING — final installed verifier result:** replace with the bounded
+  read-only result after authoritative publication, install, and service
+  adoption.
+
+The frozen installed-gate packet and its stop rules are recorded in
+`2026-08-28-r9-installed-acceptance-gate.md`.
 
 ## Outcome
 
@@ -71,8 +103,11 @@ value and privacy review.
 
 ## Verification ledger
 
-The implementation commit is `e96f7bd4`, replayed directly onto authoritative
-GitLab master `0e6a1a0b`. Source verification passed:
+The 2026-08-27 implementation snapshot was `e96f7bd4`, replayed locally onto a
+worktree based on the readable authoritative GitLab master `0e6a1a0b`. This
+records source ancestry and historical source verification; it is not evidence
+that an authenticated publisher published the current 2026-08-28 acceptance-
+gate candidate. The historical source verification passed:
 
 - `cargo test -p ab-agent --lib`: 155 passed;
 - `cargo test -p ab-agent workload_cgroup::tests --lib`: 22 passed;
@@ -113,15 +148,18 @@ This does not lose or falsely ACK evidence, and adding a background reconciler
 would be a separate daemon/authority decision.
 
 Source verification does not satisfy the installed gate. Required live
-acceptance is one authoritative build, explicit restart of daemon,
+acceptance remains one authoritative build, explicit restart of daemon,
 daemon-http, and Palace, executable-hash alignment, both health endpoints,
 Doctor, fresh-MCP admission, a commit-before-ACK restart/replay exercise, and
-absence of residual spool entries or transient scopes.
+absence of residual spool entries or transient scopes. The new source-side
+verifier and isolated harness make those observations repeatable and
+fail-closed; their existence does not satisfy any observation by itself.
 
 ## Current blocker
 
 The candidate worktree is based on the readable GitLab authoritative master,
-but this node currently has no authenticated push path to an authoritative
-remote. The installed services therefore remain outside this candidate, and
-R9 is not deployed or live-admitted. A local file remote or an unproven binary
-override is not an equivalent publication authority.
+but this node currently has no authenticated publisher identity or push path
+to the authoritative GitLab remote. The installed services therefore remain
+outside the proven candidate boundary, and R9 is not deployed or live-admitted.
+A local file remote, local commit, local build, copied binary, or expected
+fail-closed verifier result is not equivalent publication authority.

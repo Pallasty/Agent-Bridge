@@ -29,7 +29,7 @@ export AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR"
 cat > "$ROOT/new-agent-bridge.c" <<'FAKE_BINARY'
 #include <stdio.h>
 int main(void) {
-    puts("agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0 agent_bridge.app_control.wrapper_contract.v1 agent_bridge.avatar.native_linux.v1 present_voice");
+    puts("agent_bridge.app_control.operation_preflight.v0 agent_bridge.app_control.track_settlement.v0 agent_bridge.app_control.wrapper_contract.v1 agent_bridge.workload_receipt_commit.v1 agent_bridge.avatar.native_linux.v1 present_voice");
     return 0;
 }
 FAKE_BINARY
