@@ -1,7 +1,9 @@
 # AB interoception: durable workload receipts
 
 Status: R9 durable-v1 plus trusted deployment-root framework source-ready;
-not published or deployed
+R9-M1 trusted runtime-state migration source-ready locally at
+`eda927d1837b50c6680ce3ea337456a79e52a965`; not published or deployed;
+production remains `HOLD`
 Scope: body-bound local Agent workloads on Linux cgroup v2
 Depends on: `INTEROCEPTION_CGROUP_WORKLOAD_CUSTODY_2026_08_27.md`
 
@@ -340,7 +342,7 @@ production script entry (wrapper installer, publisher, and binder) must use an
 outer `env -i` with fixed system PATH and `/bin/bash --noprofile --norc`; an
 inner script cannot remove interpreter-start injection that already happened.
 State migration is a first-class gate: SQLite must use backup/checkpoint/
-integrity validation rather than a raw DB/WAL/SHM copy, and existing
+integrity validation rather than a raw DB/WAL/SHM/journal copy, and existing
 app-control/resident/Avatar leaves must be mapped into the one writable
 runtime-state subtree.
 
@@ -358,3 +360,81 @@ unmigrated SQLite/WAL, and limited `/Data` capacity therefore remain stop
 conditions. See
 `docs/reports/goal-c-u/2026-08-28-r9-installed-acceptance-gate.md` for the
 authoritative ordered ledger and current live truth.
+
+## 2026-08-28 R9-M1 trusted runtime-state migration
+
+R9-M1 closes the remaining state-continuity gap inside R9. A trusted wrapper
+and binary do not form one body if an old HOME database and the new
+`$ROOT/runtime-state` database can both accept writes. The migration organ
+therefore binds one published candidate, publisher pending admission, physical
+deployment root, explicit migration plan, exhaustive source manifest, SQLite
+source/target facts, target manifest, and complete quiescence baseline into a
+private current receipt. It is not R10 and grants no new runtime authority.
+
+Legacy inventory must remain outside the trusted deployment root. The current
+`/Data/.agent-bridge-state` body-state source therefore cannot be repurposed as
+the new root and migrated into itself; production must provision a separate
+private root after authoritative publication is available. This source
+increment does not create one.
+
+The migrator is read-only by default through `preflight`. Its writing
+`migrate` command requires an exact candidate/pending-bound confirmation, and
+`verify` independently revalidates the completed handoff. It never stops,
+starts, enables, disables, reloads, or kills a process. The operator must first
+quiesce daemon, daemon-http, Palace, and every sync, memory-decay, distill, and
+digest timer/oneshot pair. The day2 audit timer/oneshot is included
+conservatively. Same-UID MCP, hook, CLI, and manually launched jobs with an
+open legacy or destination DB/WAL/SHM/journal descriptor also block; the tool
+reports them rather than killing them. Yama-hidden same-UID processes fail
+closed except for the exactly identified `systemd --user`/`(sd-pam)` manager
+infrastructure pair; current session helpers are therefore a live HOLD, not an
+empty-descriptor inference.
+
+The unit proof is type-aware. Loaded services and oneshots must be
+`inactive`/`dead` with `MainPID=0`; timers have no service-style PID proof and
+are admitted only as loaded/disabled, masked/masked, or not-found with an empty
+`UnitFileState`. This exact baseline is receipt evidence; a stopped-but-enabled
+timer or contradictory timer metadata is not quiesced.
+
+SQLite transfer uses a quiesced checkpoint, the SQLite backup API, and source
+plus target integrity validation. A WAL-bearing preflight stays byte-passive
+and defers logical integrity to the separately confirmed checkpoint, because a
+nominal read-only SQLite open can modify `-shm`. DB/WAL/SHM,
+rollback/super-journals, and locks are never raw-copied. The receipt freezes
+the post-checkpoint source DB-family sidecar state, so any family-member
+reappearance or replacement after migration invalidates `verify` and exposes a
+late legacy writer.
+
+Every immediate inventory leaf must be declared and every durable sidecar must
+be explicitly retained, retired, or reconstructed. Unknown or newly appearing
+entries, symlinks, hard-linked regular files, special files, unsafe target
+types, duplicate destinations, and target collisions fail closed. Retirement
+means omission from the new target, not deletion of the legacy rollback
+source.
+
+The current-boot binder now treats the migration receipt as a mandatory
+handoff rather than an operator assertion. It verifies the exact candidate
+migration tool, current receipt, and typed writer baseline under the shared
+publisher mutex before any mutation; repeats quiescence immediately before
+fragment activation/reload; and after `daemon-reload` repeats both receipt
+verification and quiescence before success. The receipt recheck detects a
+short-lived writer that changed the source DB and exited between inactive-state
+samples. A stale receipt or rearmed timer/service leaves adoption blocked. An
+exact-existing no-mutation replay is admitted only within the same migration
+freeze window, before any adopted service writes the target, and still
+requires receipt plus quiescence verification. After adoption, target manifest
+drift is expected and binder replay must fail closed; the installed verifier,
+not migration replay, owns steady-state acceptance. The binder starts no
+service in either migration path.
+
+Production remains `HOLD`. Authenticated GitLab publication is blocked by
+public-key authentication; the private root/toolchain/minimal configuration/
+credentials are absent; the real `UnitPath` remains unsafe; and the three
+long-running services still execute deleted old binary inodes. This increment
+has not changed any production DB, state leaf, unit, service, timer, credential,
+or migration receipt. The frozen order is publication, provisioning,
+publisher, explicit complete-writer quiescence, R9-M1 migrate/verify, old
+drop-in/unit archival plus current-boot binding, ordered adoption, isolated
+restart harness and installed verifier, then fresh MCP admission. See
+`INTEROCEPTION_TRUSTED_RUNTIME_STATE_MIGRATION_2026_08_28.md` for the exact
+contract.

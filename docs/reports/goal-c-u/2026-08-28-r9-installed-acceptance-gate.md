@@ -2,9 +2,11 @@
 
 Date: 2026-08-28
 
-Status: trusted deployment-root framework source-ready locally; not published,
-provisioned, installed, restarted, or live-admitted; current installation
-remains `FAIL_CLOSED`
+Status: trusted deployment-root framework and R9-M1 trusted runtime-state
+migration source-ready locally at
+`eda927d1837b50c6680ce3ea337456a79e52a965`; not published, provisioned,
+installed, migrated, restarted, or live-admitted; production remains `HOLD`
+and the current installation remains `FAIL_CLOSED`
 
 ## Decision boundary
 
@@ -20,6 +22,12 @@ candidate `9bc924a2c1641983ac954ee9416e18ddb5fcdf77` and local binary SHA-256
 `f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c`.
 It does not prove that the new deployment-root framework has been published or
 that a production service has adopted it.
+
+R9-M1 is the next bounded implementation inside R9, not an R10 lane. It closes
+the split-brain risk between the legacy HOME database/body-state tree and the
+new trusted-root database/body-state tree. Its source-ready implementation is
+`eda927d1837b50c6680ce3ea337456a79e52a965`; this identity is local source
+evidence, not publication or production-adoption authority.
 
 No production file, service, unit, database, credential, or workload-receipt
 spool was changed in this increment. No service was stopped, restarted, or
@@ -124,10 +132,82 @@ This is a current-boot adoption seam, not reboot-persistent unit authority.
 The user manager and D-Bus remain a same-UID boundary. Stronger isolation would
 require root-managed system units and dedicated service identities.
 
-## Verification completed
+## R9-M1 trusted runtime-state migration source-ready implementation
 
-All verification used debug/test artifacts and private fixtures; no release
-test build or production path was used.
+The migration tool defaults to read-only `preflight`. Its only writing path is
+an explicitly confirmed `migrate` operation bound to the exact publisher
+candidate and pending-admission digest; `verify` is read-only. It never stops,
+starts, enables, disables, reloads, or kills a process. The release operator
+must perform and preserve quiescence.
+
+The writer set is deliberately larger than the three long-running services. It
+also includes sync, memory-decay-unused, distill, and digest timer/oneshot
+pairs, plus the day2 audit timer/oneshot as a conservative gate. External MCP
+servers, hooks, CLIs, and manual jobs with an open descriptor to the legacy or
+destination SQLite/`-wal`/`-shm`/journal family block migration; they are reported, not
+killed. A dormant same-UID process that later reopens the old path remains a
+bounded handoff residual and must be held quiescent by the operator.
+
+Unreadable same-UID descriptor tables fail closed under Yama. Only the exact
+`systemd --user` manager and its exact same-scope `(sd-pam)` child are excluded
+as user-manager infrastructure. Current ssh-agent, Waydroid, and other session
+processes therefore remain an explicit live preflight blocker; no broad
+permission-error skip was admitted.
+
+Writer state is type-aware. Loaded services/oneshots must be
+`inactive`/`dead` with `MainPID=0`; a loaded timer has no service-style PID
+proof and must be `inactive`/`dead` plus `disabled` or `masked`. A missing
+timer is accepted only as `LoadState=not-found` with an empty `UnitFileState`.
+Malformed, ambiguous, stopped-but-enabled, or unknown states block and the
+typed baseline becomes receipt evidence.
+
+The database path is migrated through SQLite checkpoint, backup API, and
+source/target integrity checks. A WAL-bearing preflight remains byte-passive
+and defers its logical integrity check to the separately confirmed checkpoint;
+a WAL-free source is checked immutably. DB/WAL/SHM, rollback/super-journals,
+and locks are not raw-copied. The
+explicit migration plan inventories every immediate legacy leaf and gives each
+sidecar a retain, retire, or reconstruct disposition. Unknown/new entries,
+symlinks, hard links, special files, type changes, duplicate destinations, and
+target collisions fail closed.
+
+Every inventory source must remain outside the trusted deployment root. The
+existing `/Data/.agent-bridge-state` body-state source cannot be relabeled as
+the new root and migrated into itself; a separate private root must be
+provisioned after authoritative publication. The receipt also freezes the
+post-checkpoint source DB-family sidecar state, so a recreated or replaced
+legacy WAL/SHM/journal family invalidates `verify` and exposes a late writer.
+
+A completed private receipt binds the candidate, pending admission, physical
+root, plan, mappings/source and target manifests, source/target DB facts, and
+the typed quiesced unit baseline. The binder must verify the exact candidate
+migration tool, current receipt, and typed quiescence under the shared
+publisher lock before any mutation. It repeats quiescence immediately before
+fragment activation/reload, then reruns both receipt verification and
+quiescence after `daemon-reload`; this catches a short-lived writer that
+changed the legacy DB and exited between inactive-state samples. A rearmed
+timer/service or stale receipt blocks acceptance. Exact-existing no-mutation
+replay is admitted only in the same migration freeze window, before an adopted
+service writes the target, and still verifies receipt plus quiescence. After
+adoption, target-manifest drift is expected and binder replay must fail closed;
+the installed verifier owns steady-state acceptance. The binder never starts
+or restarts services.
+
+This is source-ready local work only. No production state, SQLite database,
+service, timer, unit, credential, drop-in, or migration receipt was changed.
+The detailed contract is in
+`docs/design/INTEROCEPTION_TRUSTED_RUNTIME_STATE_MIGRATION_2026_08_28.md`.
+
+## Verification ledger
+
+The baseline rows below preserve earlier durable-receipt and trusted-root
+evidence. This increment reran Python `62/62`, wrapper, publisher, post-build
+race, pinned-assets, runtime/audio parity, systemd binder, and syntax/whitespace
+gates against the R9-M1 tree; the unchanged Rust `157` and wrapper-Rust `4/4`
+rows remain prior evidence because no Rust source changed. The migration and
+migration-aware binder rows establish local source readiness only. All
+verification used debug/test artifacts and private fixtures; no release test
+build or production path was used.
 
 | Gate | Result |
 |---|---|
@@ -140,7 +220,10 @@ test build or production path was used.
 | Pinned master runtime assets | `pinned-master-runtime-assets-ok` |
 | Binary/audio/runtime parity | `PASS` |
 | Trusted systemd binder adversarial suite | `systemd-trusted-daemon-root-ok`; final implementation also passed repeated worker runs |
-| Touched Rust formatting, changed shell syntax, staged whitespace | `PASS` |
+| Changed shell syntax, Python AST, and staged whitespace | `PASS`; no Rust source changed |
+| R9-M1 migration harness | `15/15 PASS` with warnings as errors |
+| Migration-aware binder handoff | `systemd-trusted-daemon-root-ok`; receipt/quiescence gates exercised at initial, pre-activation, and post-reload boundaries |
+| Independent adversarial review | `APPROVED WITH RESIDUALS`; no reproducible blocker, major, or minor defect |
 
 The repository has unrelated pre-existing whole-workspace rustfmt drift; the
 two touched Rust files pass exact `rustfmt --check` and were not widened into a
@@ -158,27 +241,38 @@ the trusted boundary:
   daemon-http also have foreign `int8-model.conf` drop-ins. Their ONNX/embed
   settings must be moved into a reviewed allowlisted machine file and the
   drop-ins archived before binding.
-- `/Data/.agent-bridge-state` is a physical euid-owned mode-`0700` candidate
-  root, but it currently contains owner body state rather than the new
-  source/config/toolchain/bin/publisher/runtime layout. Those required
-  subtrees and publication credentials are not provisioned.
+- `/Data/.agent-bridge-state` is a physical euid-owned mode-`0700` legacy
+  body-state source. R9-M1 forbids inventory sources from residing inside the
+  deployment root, so this path cannot double as the new root. A separate
+  private root with source/config/toolchain/bin/publisher/runtime layout and
+  publication credentials must be independently provisioned; none was created
+  here.
 - The legacy machine file is on the unsafe HOME mount, contains a secret-like
   key, many settings outside the bounded service allowlist, legacy writable
   state paths, HOME resources, and development-tree assets. It must not be
   copied. Each required non-secret setting needs an explicit retain/default/
   retire decision; secrets must be provisioned separately.
 - Existing SQLite plus WAL state remains on the unsafe mount. Migration must
-  quiesce writers and use SQLite backup/checkpoint/integrity procedures; raw
-  copying a database together with WAL/SHM files is prohibited. Existing
-  app-control, resident, Avatar, and other body-state leaves also require an
-  explicit mapping into `$ROOT/runtime-state` because the hardened units make
-  the rest of `$ROOT` read-only.
+  quiesce the complete service/timer/oneshot writer set and reject external
+  MCP/hook/manual-process database descriptors before using SQLite checkpoint,
+  backup, and integrity procedures; raw copying a database together with
+  WAL/SHM, rollback/super-journal, or lock files is prohibited. Existing
+  app-control, Resident, Avatar,
+  and other body-state leaves require an exhaustive retain/retire/reconstruct
+  plan into `$ROOT/runtime-state` because the hardened units make the rest of
+  `$ROOT` read-only. Unknown entries or unsafe inode/collision states stop the
+  migration.
 - `/Data` has about 12 GiB free at 96% use. The root filesystem backing the
   intended `/var/tmp` production build cache has about 59 GiB free; production
   migration still needs an explicit capacity margin and rollback copy budget.
-- Authenticated GitLab publication is unavailable from this session. The safe
-  clone, deploy key, known-hosts file, trusted toolchain, minimal machine file,
-  and credentials file are absent.
+- Authenticated GitLab publication is unavailable from this session because
+  public-key authentication is not provisioned. The safe clone, deploy key,
+  known-hosts file, trusted toolchain, minimal machine file, and credentials
+  file are absent.
+- Yama currently hides descriptor tables for several non-manager same-UID
+  session processes, including the SSH agent and Waydroid components. The
+  strict migration gate intentionally blocks until those processes are
+  quiesced or a separately reviewed privileged inspection path exists.
 - A real systemd parser/mount-namespace/cgroup/service smoke has not run.
   Fake-manager transaction proof cannot be relabeled as live adoption.
 - External `Before`/`After` ordering edges remain outside the enumerated
@@ -199,45 +293,58 @@ failures.
 The release owner must preserve this order. A later step cannot repair or
 substitute for a missing earlier authority boundary.
 
-1. Publish one clean descendant containing implementation
-   `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` to authoritative GitLab
+1. Publish one clean descendant containing R9-M1 implementation
+   `eda927d1837b50c6680ce3ea337456a79e52a965` (and therefore trusted-root
+   implementation `a4f4f4e153a5a824f28e6f1486c670af38c15ea5`) to authoritative GitLab
    `master` with an authenticated publisher identity. Record the exact 40-hex
    commit; a local commit, file remote, GitHub mirror, or copied binary is not a
    substitute.
-2. Provision the private deployment root, fixed safe clone, exact GitLab deploy
-   key and known-hosts file, trusted Cargo/rustc toolchain, build-cache base,
-   minimal allowlisted machine file, and credentials independently. Never
-   bootstrap them by copying the unsafe HOME files or secret-bearing output.
+2. Provision a new private deployment root, physically separate from every
+   legacy inventory source including `/Data/.agent-bridge-state`, plus the
+   fixed safe clone, exact GitLab deploy key and known-hosts file, trusted
+   Cargo/rustc toolchain, build-cache base, minimal allowlisted machine file,
+   and credentials. Never bootstrap them by copying unsafe HOME files or
+   secret-bearing output.
 3. Through an outer clean launcher (`env -i`, fixed system PATH, and
    `/bin/bash --noprofile --norc`), fetch and advance the dedicated safe clone
    so both HEAD and `refs/remotes/gitlab/master` equal the published commit.
    Reapply its frozen private custody modes after checkout: source directories
-   `0700`, deploy/systemd orchestrators `0700`, and wrapper installer/template/
-   example `0600`.
+   `0700`, deploy/migration/systemd orchestrators `0700`, and wrapper
+   installer/template/example `0600`.
 4. Invoke the exact trusted wrapper installer through that same clean outer
    launcher. This forms and locks publisher custody but does not install a
    caller binary or import HOME credentials.
 5. Invoke the publisher through that same clean outer launcher. It builds and
    installs the exact published master, assets, private runtime leaves, and
    pending admission receipt without restarting Linux services.
-6. Explicitly quiesce the three old services and prove no state writer remains.
-   Migrate SQLite through online backup/checkpoint/integrity validation and map
-   each retained body-state organ into `$ROOT/runtime-state`; keep a bounded
-   rollback source. Do not raw-copy DB/WAL/SHM.
-7. Archive the old drop-ins and obsolete unit material, then invoke the exact
+6. Explicitly quiesce the complete writer set: the three long-running
+   services; sync, memory-decay-unused, distill, digest, and conservative day2
+   timer/oneshot pairs; and every external MCP/hook/manual process holding a
+   relevant legacy or destination SQLite descriptor. The migration tool does
+   not stop or kill them.
+7. Run R9-M1 `preflight`, then invoke its exact candidate-bound `migrate`
+   confirmation and independent `verify`. Migrate SQLite through checkpoint,
+   backup API, and integrity validation; apply the exhaustive sidecar plan;
+   retain the bounded legacy rollback source; and require the complete private
+   migration receipt. Do not raw-copy DB/WAL/SHM, journals, or locks.
+8. Archive the old drop-ins and obsolete unit material, then invoke the exact
    current-boot binder through that same clean outer launcher only after the
    real manager `UnitPath` is safe. It must consume the exact publisher
-   candidate and make no service restart.
-8. Start the three services in the explicit dependency order and prove each
+   candidate, verify the migration receipt and typed quiescence before any
+   mutation, revalidate quiescence before fragment activation/reload, rerun
+   receipt verification plus quiescence after reload, and make no service
+   restart. Exact-existing no-mutation replay is limited to this still-quiesced
+   pre-adoption freeze window.
+9. Start the three services in the explicit dependency order and prove each
    adopted the exact non-deleted installed inode, pinned runtime state, and
    health endpoint. A mixed generation stops the release.
-9. Run the isolated restart harness against the pinned installed binary and
+10. Run the isolated restart harness against the pinned installed binary and
    require one workload execution, exact Duplicate reconciliation, unchanged
    committed rows, and zero receipt/scope residue.
-10. Run the independent installed verifier against
+11. Run the independent installed verifier against
     `$ROOT/runtime-state/workload-receipts`; every aggregate and per-service
     check must pass in one bounded observation.
-11. Perform a fresh independent MCP stdio probe and consume the publisher's
+12. Perform a fresh independent MCP stdio probe and consume the publisher's
     pending fresh-MCP admission. Retain the exact probe/pending binding.
 
 Any authority mismatch, unsafe path, unexpected machine key, unit dependency
@@ -251,14 +358,17 @@ capacity stops admission. It must not be reported as a partial PASS.
 |---|---|---|
 | Trusted-root implementation | `SOURCE_READY` at `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` | Local code and adversarial fixtures are green; not publication authority. |
 | Earlier isolated restart exercise | `PASS` at source candidate `9bc924a2...` | Durable receipt reconciliation behavior only; must repeat after authoritative install. |
+| R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
 | Authoritative GitLab publication | `BLOCKED` | Authenticated publisher identity/path is unavailable. |
 | Private root provisioning | `NOT_DONE` | Candidate parent is safe; source/config/toolchain/bin/publisher/runtime layout is absent. |
-| State migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated. |
+| Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
 | Real systemd current-boot adoption | `NOT_DONE` | Current HOME `UnitPath` and drop-ins fail closed; fake-manager tests are not live proof. |
 | Independent current-installed verifier | `FAIL_CLOSED` | Unsafe owner boundary, absent receipt root, and three deleted executables block admission. |
 | R9 deployed/live-admitted | `NO` | No deployed/PASS claim is permitted. |
 
-Until publication, provisioning, state migration, explicit adoption, isolated
+Until publication, provisioning, complete-writer quiescence, R9-M1 migration
+and receipt verification, current-boot binding, explicit adoption, isolated
 exercise, installed verification, and fresh-MCP admission are all bound to one
-authoritative candidate and green, the truthful status is: source-ready
-trusted-root framework, current installation failed closed, R9 not deployed.
+authoritative candidate and green, the truthful status is: trusted-root
+framework and R9-M1 source-ready locally; production remains on hold; current
+installation failed closed; R9 not published or deployed.
