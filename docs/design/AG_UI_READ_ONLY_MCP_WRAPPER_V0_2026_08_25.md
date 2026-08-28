@@ -1,7 +1,7 @@
 # AG-UI Read-Only MCP Wrapper v0
 
 - Date: 2026-08-25
-- Status: deployed and active; macOS read-only observation profile extension source admission PASS, publication pending
+- Status: deployed and active; macOS read-only observation profile extension live acceptance PASS
 - Pure projector: `agent_bridge.ag_ui_readonly_projection.v0`
 - Tool: `ag_ui_readonly_project`
 - External wire pin: `@ag-ui/core@0.0.57`
@@ -11,8 +11,8 @@
 > opt-in v1 request/projection behavior is specified in
 > `AG_UI_OPENBOT_REQUEST_COMPLETENESS_V1_D6_2026_08_26.md`.
 >
-> Toolset note (2026-08-26): the deployed `codex-ag-ui-readonly` surface contains the Codex lean
-> base plus the projector. The current source candidate extends that explicit profile with
+> Toolset note (updated 2026-08-27): the deployed `codex-ag-ui-readonly` surface contains the Codex lean
+> base plus the projector and
 > `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch`; it does not add
 > `macos_ax_action_admission`, `embodiment_lease`, or `macos_ax_focus_transaction`. This changes
 > profile composition, not the AG-UI projection contract or authority.
@@ -35,14 +35,14 @@ explicit `all-dev` surface. It must remain absent from the default profile, `ess
 `codex-essential`, `codex-lean`, Claude standard, Gemini lean, ChatGPT read/collab, and hook
 lifecycle surfaces.
 
-In the profile-extension candidate, `codex-ag-ui-readonly` means that its added AG-UI projector and
+In the deployed profile extension, `codex-ag-ui-readonly` means that its added AG-UI projector and
 macOS semantic observation triad are read-only; it is otherwise the existing `codex-lean` toolset,
 whose other tools retain their normal per-tool authority. The name is not a claim that every tool in
 that toolset is read-only.
 
-This document did not itself authorize the now-completed projector publication and activation; the
-gate record below records those later facts. It does not authorize publication, deployment, or
-activation of the current macOS profile-extension candidate, nor any AG-UI transport.
+This document did not itself authorize the now-completed projector or profile-extension publication
+and activation; the gate records below record those later facts. It does not authorize any AG-UI
+transport or any action-side macOS tool.
 
 ## Context
 
@@ -183,7 +183,7 @@ behavior over the earlier design table's name-hash wording.
 ## Exposure policy
 
 The deployed registration uses a named `codex-ag-ui-readonly` toolset containing the bounded Codex
-lean surface plus `ag_ui_readonly_project`. This profile-extension candidate adds the native macOS
+lean surface plus `ag_ui_readonly_project`. The profile extension adds the native macOS
 read-only observation triad `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch`. The projector
 remains `Tier::Niche`, so the normal profile-based default and standard surfaces do not gain it.
 `all-dev` may include it because that surface is already an explicit broad development opt-in. The
@@ -324,13 +324,14 @@ server-side request forgery concerns that are deliberately outside v0.
 7. **D5 — runtime gate:** complete. The current installed `8c913594d0bf` build exposes the
    projector only through the explicit `codex-ag-ui-readonly` opt-in (and broad development
    surfaces); fresh MCP confirms that deployed boundary.
-8. **macOS observation profile extension:** source candidate verified. It adds only
-   `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch` to that explicit toolset; publication,
-   deployment, and fresh installed-process acceptance remain later gates. The production wrappers
+8. **macOS observation profile extension:** complete at `daca14b9aea1` and live-accepted in the
+   installed `db7203f2c048` build. It adds only `macos_ax_probe`, `macos_ax_verify`, and
+   `macos_ax_watch` to that explicit toolset. The production wrappers
    reject caller runtime overrides and unknown request fields, validate binary-bound runtime assets,
    and carry explicit read-only annotations.
 
-Current verdict: `PROJECTOR_DEPLOYED_MACOS_READONLY_PROFILE_EXTENSION_SOURCE_PASS`.
+Current verdict: `PROJECTOR_AND_MACOS_READONLY_PROFILE_EXTENSION_LIVE_PASS`.
 
-This verdict records the projector's deployed state without claiming that the macOS profile
-extension has been merged, published, deployed, or accepted through a fresh installed MCP process.
+This verdict records source landing, dual-remote publication, installed-build adoption, fresh MCP
+profile disclosure, and a live native read-only probe. It does not admit action authority or an
+AG-UI transport.
