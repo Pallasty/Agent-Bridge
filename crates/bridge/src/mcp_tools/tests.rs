@@ -33664,6 +33664,39 @@ fn session_finalize_schema_advertises_outcome_gated_optin() {
 }
 
 #[tokio::test]
+async fn session_finalize_invalid_evidence_digest_explains_canonical_format() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let mut claim = valid_task_outcome_json("outcome-finalize-invalid-evidence-format");
+    claim["evidence_sha256"] = json!(["a".repeat(64)]);
+
+    let rejected = SessionFinalizeTool::new(hub)
+        .execute(
+            json!({ "skip_decay": true, "dry_run": true, "task_outcome": claim }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("invalid digest rejection");
+    let text = result_text(&rejected);
+
+    assert!(rejected.is_error);
+    assert!(text.contains("invalid_sha256_digest"));
+    assert!(text.contains("evidence_sha256[0]"));
+    assert!(text.contains("sha256:<64 lowercase hex>"));
+    assert!(text.contains("bare 64-character hex digest is invalid"));
+    assert!(
+        store
+            .recent_agent_task_outcomes(3_600, 10)
+            .await
+            .expect("read ledger after rejected digest")
+            .is_empty(),
+        "a rejected digest must not reach the outcome ledger"
+    );
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
 async fn session_finalize_task_outcome_is_dry_run_safe_idempotent_and_conflict_closed() {
     let (hub, temp_dir) = mk_test_hub_with_store().await;
     let store = hub.store.clone().expect("store");
