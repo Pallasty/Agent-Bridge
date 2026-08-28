@@ -1,7 +1,7 @@
 # R9 durable workload-receipt reconciliation
 
 Date: 2026-08-27
-Status: source candidate under verification; authoritative publication and installed acceptance blocked
+Status: source-verified candidate; authoritative publication and installed acceptance blocked
 
 ## Outcome
 
@@ -71,11 +71,46 @@ value and privacy review.
 
 ## Verification ledger
 
-The final source gate must include Agent durable-spool and full library tests,
-Store ledger and full library tests, Bridge reconciliation/reserved-binding/
-cgroup-body tests, and all-target compile checks. It must exercise pre-START
-cleanup, capacity admission, producer ownership handoff, Store failure,
-commit-before-ACK replay, projection mismatch rejection, and privacy checks.
+The implementation commit is `e96f7bd4`, replayed directly onto authoritative
+GitLab master `0e6a1a0b`. Source verification passed:
+
+- `cargo test -p ab-agent --lib`: 155 passed;
+- `cargo test -p ab-agent workload_cgroup::tests --lib`: 22 passed;
+- `cargo test -p ab-store --lib`: 543 passed;
+- `cargo test -p ab-store --test workload_receipt_ledger`: 9 passed;
+- `cargo test -p ab-bridge workload_receipt_reconciliation::tests --lib`:
+  8 passed;
+- `cargo test -p ab-bridge body_telemetry::tests --lib`: 23 passed;
+- `cargo test -p ab-bridge --lib -- --test-threads=1`: 2087 passed and
+  5 pre-existing ignored tests;
+- `AGENT_BRIDGE_EMBED_BACKEND=hash cargo test -p ab-bridge --lib`: 2087
+  passed and 5 pre-existing ignored tests;
+- all-target checks for `ab-agent`, `ab-store`, and `ab-bridge`: passed; and
+- `git diff --check`: passed.
+
+The new regression surface exercises pre-START cleanup, root-locked capacity,
+active-producer exclusion and lease handoff, interrupted tombstone cleanup,
+Store failure before ACK, commit-before-ACK replay, different-projection
+Duplicate semantics, mixed-projection/kind and private-field rejection, and
+the standalone-only recovery truth boundary. An independent read-only review
+found no false-ACK, early-release, or peer-steal blocker. It prompted three
+closures before the final gate: the unguarded generic live-commit API was
+removed, the deployable manifest was advanced to schema 2 with mandatory
+`producer.lock`, and the terminal response cache now releases its operational
+lease after its background record attempt.
+
+One default-parallel Bridge run exposed the existing optional-ONNX cold-start
+transition in `b3_preflight_excludes_foreign_project_near_duplicates`: the
+stored row used the hash fallback while the query switched to ONNX, producing
+an empty B3 result. The exact test passed with the deterministic hash backend,
+and the complete unpinned single-thread suite passed. No R9 test failed, and
+R9 changes do not touch embedding or B3 code.
+
+The remaining source-level liveness limit is explicit: reconciliation runs at
+startup, not as a permanent polling service. A peer that crashes after another
+Bridge's startup scan waits for the next startup (or another peer startup).
+This does not lose or falsely ACK evidence, and adding a background reconciler
+would be a separate daemon/authority decision.
 
 Source verification does not satisfy the installed gate. Required live
 acceptance is one authoritative build, explicit restart of daemon,

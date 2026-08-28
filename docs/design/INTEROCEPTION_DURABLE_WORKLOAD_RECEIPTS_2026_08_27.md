@@ -1,6 +1,6 @@
 # AB interoception: durable workload receipts
 
-Status: R9 durable-v1 source candidate under verification; not deployed
+Status: R9 durable-v1 source-verified candidate; not deployed
 Scope: body-bound local Agent workloads on Linux cgroup v2
 Depends on: `INTEROCEPTION_CGROUP_WORKLOAD_CUSTODY_2026_08_27.md`
 

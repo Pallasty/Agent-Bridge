@@ -1,7 +1,7 @@
 # AB interoception: delegated cgroup workload custody
 
 Date: 2026-08-27
-Status: base cgroup organ implemented and current-node one-shot admitted; R9 durable-v1 source candidate not deployed; PTY foreground-terminal admission still pending
+Status: base cgroup organ implemented and current-node one-shot admitted; R9 durable-v1 source-verified candidate not deployed; PTY foreground-terminal admission still pending
 Scope: local Agent runtimes on Linux cgroup v2
 
 ## Decision
