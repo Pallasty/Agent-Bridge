@@ -555,7 +555,7 @@ write_production_checkout_fixture() {
     local root="$1" remote_url="$2" checkout
     checkout="$root/source/agent-bridge"
     mkdir -p \
-        "$checkout/scripts" \
+        "$checkout/scripts/systemd" \
         "$root/config/git" \
         "$root/build-cache"
     chmod 700 \
@@ -563,6 +563,7 @@ write_production_checkout_fixture() {
         "$root/source" \
         "$checkout" \
         "$checkout/scripts" \
+        "$checkout/scripts/systemd" \
         "$root/config" \
         "$root/config/git" \
         "$root/build-cache"
@@ -571,11 +572,17 @@ write_production_checkout_fixture() {
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
         /usr/bin/git -C "$checkout" remote add gitlab "$remote_url"
     cp "$DEPLOY" "$checkout/scripts/deploy_from_master.sh"
+    cp "$SCRIPT_DIR/migrate-trusted-runtime-state.py" \
+        "$checkout/scripts/migrate-trusted-runtime-state.py"
+    cp "$SCRIPT_DIR/systemd/install-trusted-daemon-root.sh" \
+        "$checkout/scripts/systemd/install-trusted-daemon-root.sh"
     printf '%s\n' fixture-deploy-key > "$root/config/git/gitlab_deploy_key"
     printf '%s\n' fixture-known-host > "$root/config/git/known_hosts"
     chmod 700 \
         "$checkout/.git" \
-        "$checkout/scripts/deploy_from_master.sh"
+        "$checkout/scripts/deploy_from_master.sh" \
+        "$checkout/scripts/migrate-trusted-runtime-state.py" \
+        "$checkout/scripts/systemd/install-trusted-daemon-root.sh"
     chmod 600 \
         "$root/config/git/gitlab_deploy_key" \
         "$root/config/git/known_hosts"
@@ -586,6 +593,12 @@ write_production_checkout_fixture() {
     assert_owned_mode "$checkout/scripts" 700 "production fixture scripts directory"
     assert_owned_mode "$checkout/scripts/deploy_from_master.sh" 700 \
         "production fixture deploy orchestrator"
+    assert_owned_mode "$checkout/scripts/migrate-trusted-runtime-state.py" 700 \
+        "production fixture migration orchestrator"
+    assert_owned_mode "$checkout/scripts/systemd" 700 \
+        "production fixture systemd directory"
+    assert_owned_mode "$checkout/scripts/systemd/install-trusted-daemon-root.sh" 700 \
+        "production fixture systemd orchestrator"
     assert_owned_mode "$root/config" 700 "production fixture configuration root"
     assert_owned_mode "$root/config/git" 700 "production fixture Git configuration"
     assert_owned_mode "$root/config/git/gitlab_deploy_key" 600 \
@@ -832,7 +845,9 @@ esac
 # The root-bound checkout is a real, local Git repository with a fully private
 # source/configuration chain. Each deliberately widened custody component must
 # fail while the checkout remains unfetched and publisher/build paths untouched.
-for private_component in source git-metadata scripts deploy-script; do
+for private_component in \
+    source git-metadata scripts systemd-dir deploy-script migration-script systemd-installer
+do
     private_root="$TEST_ROOT/production-private-$private_component"
     write_production_checkout_fixture \
         "$private_root" git@gitlab.com:pallasting/agent-bridge.git
@@ -849,9 +864,21 @@ for private_component in source git-metadata scripts deploy-script; do
             unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts"
             expected_rejection="trusted source scripts directory mode must be 700"
             ;;
+        systemd-dir)
+            unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts/systemd"
+            expected_rejection="trusted source systemd directory mode must be 700"
+            ;;
         deploy-script)
             unsafe_path="$PRODUCTION_FIXTURE_DEPLOY"
             expected_rejection="trusted deploy orchestrator mode must be 700"
+            ;;
+        migration-script)
+            unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts/migrate-trusted-runtime-state.py"
+            expected_rejection="trusted runtime-state migration orchestrator mode must be 700"
+            ;;
+        systemd-installer)
+            unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts/systemd/install-trusted-daemon-root.sh"
+            expected_rejection="trusted systemd binding orchestrator mode must be 700"
             ;;
     esac
     chmod 755 "$unsafe_path"

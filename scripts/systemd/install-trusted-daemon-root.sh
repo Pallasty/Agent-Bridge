@@ -207,6 +207,8 @@ PUBLISHER_STATE="$DEPLOY_ROOT/publisher-state/deploy"
 PENDING_ADMISSION="$PUBLISHER_STATE/pending-admission.meta"
 PUBLISHER_KERNEL_LOCK="$PUBLISHER_STATE/publisher.kernel.lock"
 SOURCE_REPOSITORY="$DEPLOY_ROOT/source/agent-bridge"
+MIGRATION_TOOL="$SOURCE_REPOSITORY/scripts/migrate-trusted-runtime-state.py"
+MIGRATION_RECEIPT="$DEPLOY_ROOT/publisher-state/migrations/current.json"
 GITLAB_REMOTE_URL=git@gitlab.com:pallasting/agent-bridge.git
 PUBLISHER_LOCK_FD=""
 PUBLISHER_ASSETS_SHA=""
@@ -313,6 +315,14 @@ trusted_source_git() {
         -C "$SOURCE_REPOSITORY" "$@"
 }
 
+candidate_source_file_matches() {
+    local installed="$1" repository_path="$2" label="$3"
+    cmp -s "$installed" \
+        <(trusted_source_git show --no-textconv --no-ext-diff \
+            "$PUBLISHER_CANDIDATE:$repository_path") ||
+        die "$label bytes do not match the publisher candidate"
+}
+
 validate_source_candidate_authority() {
     local expected="$1" head remote_master remote_urls remote_url_count override
     for override in \
@@ -339,10 +349,10 @@ validate_source_candidate_authority() {
         die "trusted source repository GitLab URL is not exact"
     trusted_source_git cat-file -e "$PUBLISHER_CANDIDATE^{commit}" ||
         die "publisher candidate commit is absent from the trusted source repository"
-    cmp -s "$expected" \
-        <(trusted_source_git show --no-textconv --no-ext-diff \
-            "$PUBLISHER_CANDIDATE:scripts/systemd/install-trusted-daemon-root.sh") ||
-        die "trusted daemon installer bytes do not match the publisher candidate"
+    candidate_source_file_matches "$expected" \
+        scripts/systemd/install-trusted-daemon-root.sh "trusted daemon installer"
+    candidate_source_file_matches "$MIGRATION_TOOL" \
+        scripts/migrate-trusted-runtime-state.py "trusted runtime-state migration tool"
 }
 
 validate_published_installer_source() {
@@ -361,6 +371,7 @@ validate_published_installer_source() {
     validate_private_directory_tree "$DEPLOY_ROOT/source/agent-bridge/scripts/systemd" \
         "trusted systemd installer directory"
     validate_installed_file "$expected" 700 "trusted daemon installer"
+    validate_installed_file "$MIGRATION_TOOL" 700 "trusted runtime-state migration tool"
     [ "$MODE" = install ] || return 0
     acquire_publisher_kernel_lock
     validate_publisher_candidate
@@ -1050,7 +1061,8 @@ run_systemctl() {
         for name in \
             AGENT_BRIDGE_FAKE_SYSTEMCTL_FAIL_RELOAD_ONCE \
             AGENT_BRIDGE_FAKE_SYSTEMCTL_INJECT_AFTER_RELOAD \
-            AGENT_BRIDGE_FAKE_SYSTEMCTL_TAMPER_AFTER_RELOAD
+            AGENT_BRIDGE_FAKE_SYSTEMCTL_TAMPER_AFTER_RELOAD \
+            AGENT_BRIDGE_FAKE_SYSTEMCTL_REARM_WRITER_AFTER_RELOAD
         do
             if [ "${!name+x}" = x ]; then
                 passthrough+=("$name=${!name}")
@@ -1065,6 +1077,69 @@ run_systemctl() {
         PATH=/usr/bin:/bin \
         "${passthrough[@]}" \
         "$SYSTEMCTL" "$@"
+}
+
+# The migration receipt is only meaningful while every known process that can
+# reopen the legacy database remains quiesced.  The three long-lived services
+# are not the complete writer set: enabled maintenance timers and their
+# one-shot services can otherwise recreate a split-brain store between the old
+# HOME path and the trusted runtime root during binding.
+MIGRATION_QUIESCENCE_UNITS=(
+    agent-bridge-daemon.service
+    agent-bridge-daemon-http.service
+    agent-bridge-palace.service
+    agent-bridge-sync.timer
+    agent-bridge-sync.service
+    agent-bridge-memory-decay-unused.timer
+    agent-bridge-memory-decay-unused.service
+    agent-bridge-distill.timer
+    agent-bridge-distill.service
+    agent-bridge-digest.timer
+    agent-bridge-digest.service
+    agent-bridge-day2-audit.timer
+    agent-bridge-day2-audit.service
+)
+
+validate_migration_writer_quiescence() {
+    local unit active substate main_pid load_state unit_file_state
+    for unit in "${MIGRATION_QUIESCENCE_UNITS[@]}"; do
+        active="$(systemctl_value "$unit" ActiveState)" ||
+            die "cannot inspect migration writer ActiveState: $unit"
+        substate="$(systemctl_value "$unit" SubState)" ||
+            die "cannot inspect migration writer SubState: $unit"
+        [ "$active" = inactive ] && [ "$substate" = dead ] ||
+            die "runtime-state migration writer is not quiesced: $unit"
+        case "$unit" in
+            *.timer)
+                load_state="$(systemctl_value "$unit" LoadState)" ||
+                    die "cannot inspect migration timer LoadState: $unit"
+                unit_file_state="$(systemctl_value "$unit" UnitFileState)" ||
+                    die "cannot inspect migration timer UnitFileState: $unit"
+                case "$load_state" in
+                    loaded)
+                        case "$unit_file_state" in disabled) ;;
+                            *) die "runtime-state migration timer remains triggerable: $unit" ;;
+                        esac
+                        ;;
+                    masked)
+                        [ "$unit_file_state" = masked ] ||
+                            die "masked runtime-state migration timer has an inconsistent unit-file state: $unit"
+                        ;;
+                    not-found)
+                        [ -z "$unit_file_state" ] ||
+                            die "missing runtime-state migration timer has an inconsistent unit-file state: $unit"
+                        ;;
+                    *) die "runtime-state migration timer has an unsafe load state: $unit" ;;
+                esac
+                ;;
+            *)
+                main_pid="$(systemctl_value "$unit" MainPID)" ||
+                    die "cannot inspect migration writer MainPID: $unit"
+                [ "$main_pid" = 0 ] ||
+                    die "runtime-state migration writer is not quiesced: $unit"
+                ;;
+        esac
+    done
 }
 
 DEPENDENCY_PROPERTIES=(
@@ -1246,6 +1321,48 @@ validate_staged_unit() {
         die "staged complete runtime unit differs from its exact template: ${units[$index]}"
 }
 
+validate_migration_receipt_handoff() {
+    local verifier result prefix suffix digest
+    validate_private_directory_tree "$DEPLOY_ROOT/publisher-state" \
+        "trusted publisher state root"
+    validate_private_directory_tree "$DEPLOY_ROOT/publisher-state/migrations" \
+        "trusted runtime-state migration receipt root"
+    validate_installed_file "$MIGRATION_RECEIPT" 600 \
+        "trusted runtime-state migration receipt"
+    if [ "$SYSTEMD_BIND_TEST_MODE" = 0 ]; then
+        [ -n "$PUBLISHER_LOCK_FD" ] ||
+            die "trusted binding does not own the publisher kernel lock"
+        verifier=/usr/bin/python3
+        result="$(/usr/bin/env -i \
+            HOME="$TRUSTED_HOME" \
+            LANG=C \
+            PATH=/usr/bin:/bin \
+            PYTHONNOUSERSITE=1 \
+            "$verifier" -I -B "$MIGRATION_TOOL" verify \
+                --deploy-root "$DEPLOY_ROOT" \
+                --inherited-lock-fd "$PUBLISHER_LOCK_FD")" ||
+            die "trusted runtime-state migration receipt verification failed"
+    else
+        verifier="$SYSTEMD_TEST_ROOT/fake-migration-verify"
+        validate_installed_file "$verifier" 755 \
+            "systemd binding test migration verifier"
+        result="$(/usr/bin/env -i \
+            LANG=C \
+            PATH=/usr/bin:/bin \
+            "$verifier" verify --deploy-root "$DEPLOY_ROOT")" ||
+            die "trusted runtime-state migration receipt verification failed"
+    fi
+    prefix='{"command":"verify","receipt_digest":"'
+    suffix='","schema":"agent_bridge.trusted_runtime_state_migration_result.v1","status":"verified"}'
+    case "$result" in "$prefix"*"$suffix") ;; *)
+        die "trusted runtime-state migration verifier returned an invalid result" ;;
+    esac
+    digest="${result#"$prefix"}"
+    digest="${digest%"$suffix"}"
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] && [ "$result" = "$prefix$digest$suffix" ] ||
+        die "trusted runtime-state migration verifier returned an invalid result"
+}
+
 if [ "$MODE" = dry-run ]; then
     for index in "${!units[@]}"; do
         printf '%s\n' "--- ${units[$index]} (complete current-boot replacement)"
@@ -1255,12 +1372,14 @@ if [ "$MODE" = dry-run ]; then
     exit 0
 fi
 
+validate_migration_receipt_handoff
 validate_runtime_directory "$SYSTEMD_RUNTIME_DIR"
 validate_runtime_bus "$SYSTEMD_RUNTIME_DIR/bus"
 export XDG_RUNTIME_DIR="$SYSTEMD_RUNTIME_DIR"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$SYSTEMD_RUNTIME_DIR/bus"
 validate_user_unit_search_boundary
 validate_existing_runtime_control_tree
+validate_migration_writer_quiescence
 
 # Foreign drop-ins and dependency-directory injections remain authoritative
 # even when the main unit is replaced. Refuse them before the first filesystem
@@ -1334,6 +1453,12 @@ for index in "${!units[@]}"; do
     validate_staged_unit "$index" "$staged"
 done
 
+# The user manager is a same-UID boundary and cannot be locked by this script.
+# Recheck immediately before the first fragment activation so a timer/service
+# restart during staging cannot silently invalidate the migration handoff.
+validate_migration_writer_quiescence
+validate_migration_receipt_handoff
+
 for index in "${!units[@]}"; do
     unit="${units[$index]}"
     activation_number=$((index + 1))
@@ -1352,10 +1477,12 @@ STAGE_CREATED=0
 
 RELOAD_ATTEMPTED=1
 run_systemctl --user daemon-reload || die "failed to reload the user service manager"
+validate_migration_writer_quiescence
 for index in "${!units[@]}"; do
     verify_effective_unit "$index" ||
         die "effective systemd configuration is not the exact trusted binding: ${units[$index]}"
 done
+validate_migration_receipt_handoff
 
 trap - EXIT
 printf '%s\n' "Installed and verified complete trusted current-boot units; services were not restarted."

@@ -712,7 +712,8 @@ validate_existing_trusted_subdirectory_components() {
 }
 
 validate_private_source_checkout() {
-    local expected_repo source_dir invoked_script local_git_override
+    local expected_repo source_dir invoked_script migration_script systemd_installer
+    local local_git_override
     expected_repo="$DEPLOY_ROOT/source/agent-bridge"
     source_dir="$DEPLOY_ROOT/source"
     invoked_script="$SCRIPT_PATH"
@@ -729,6 +730,14 @@ validate_private_source_checkout() {
     verify_owned_directory_mode "$SCRIPT_DIR" 700 "trusted source scripts directory"
     verify_owned_regular_mode "$invoked_script" 700 "trusted deploy orchestrator"
     [ -x "$invoked_script" ] || die "trusted deploy orchestrator is not executable"
+    migration_script="$REPO/scripts/migrate-trusted-runtime-state.py"
+    systemd_installer="$REPO/scripts/systemd/install-trusted-daemon-root.sh"
+    verify_owned_directory_mode "$REPO/scripts/systemd" 700 \
+        "trusted source systemd directory"
+    verify_owned_regular_mode "$migration_script" 700 \
+        "trusted runtime-state migration orchestrator"
+    verify_owned_regular_mode "$systemd_installer" 700 \
+        "trusted systemd binding orchestrator"
     # `git archive` honors repository-local info attributes, while legacy
     # grafts can rewrite object ancestry. Neither belongs in the root-bound
     # publisher clone: authoritative tree semantics come only from the fetched

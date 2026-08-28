@@ -252,6 +252,7 @@ make_install_fixture() {
     mkdir -p "$root/bin" "$root/share/ab-tts" \
         "$root/share/config" "$root/share/docs/reports/tts-comparison" \
         "$root/lib/agent-bridge/scripts" "$root/config/agent-bridge" "$root/home" \
+        "$root/publisher-state/migrations" \
         "$root/runtime-state/workload-receipts" "$root/runtime-state/home" \
         "$root/runtime-state/workload-tmp" \
         "$root/runtime-state/cache" "$root/runtime-state/data" \
@@ -260,12 +261,36 @@ make_install_fixture() {
         "$root/share/config" "$root/share/docs" "$root/share/docs/reports" \
         "$root/share/docs/reports/tts-comparison" \
         "$root/lib" "$root/lib/agent-bridge" "$root/lib/agent-bridge/scripts" \
-        "$root/config" "$root/home" "$root/runtime-state" \
+        "$root/config" "$root/home" "$root/publisher-state" \
+        "$root/publisher-state/migrations" "$root/runtime-state" \
         "$root/runtime-state/workload-receipts" "$root/runtime-state/home" \
         "$root/runtime-state/workload-tmp" \
         "$root/runtime-state/cache" "$root/runtime-state/data" \
         "$root/runtime-state/xdg-state" "$root/runtime-state/tmp"
     chmod "$config_parent_mode" "$root/config/agent-bridge"
+    printf '%s\n' fixture-valid > "$root/publisher-state/migrations/current.json"
+    chmod 600 "$root/publisher-state/migrations/current.json"
+cat > "$root/fake-migration-verify" <<'FAKE_MIGRATION_VERIFY'
+#!/bin/bash
+set -euo pipefail
+[ "$#" -eq 3 ] && [ "$1" = verify ] && [ "$2" = --deploy-root ] || exit 64
+root="$3"
+receipt="$(cat "$root/publisher-state/migrations/current.json")"
+case "$receipt" in
+    fixture-valid) fail_on=0 ;;
+    fixture-fail-on-second) fail_on=2 ;;
+    fixture-fail-on-third) fail_on=3 ;;
+    *) exit 65 ;;
+esac
+count_file="$root/migration-verify.count"
+if [ -f "$count_file" ]; then count="$(cat "$count_file")"; else count=0; fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$count_file"
+chmod 600 "$count_file"
+[ "$count" -ne "$fail_on" ] || exit 66
+printf '%s\n' '{"command":"verify","receipt_digest":"0000000000000000000000000000000000000000000000000000000000000000","schema":"agent_bridge.trusted_runtime_state_migration_result.v1","status":"verified"}'
+FAKE_MIGRATION_VERIFY
+    chmod 755 "$root/fake-migration-verify"
     cp /usr/bin/true "$root/bin/agent-bridge"
     cp /usr/bin/true "$root/bin/agent-bridge.real"
     cp /usr/bin/true "$root/share/ab-tts/audio_embody.py"
@@ -292,17 +317,19 @@ make_install_fixture() {
 }
 
 make_source_authority_fixture() {
-    local root repo script candidate binary_sha binary_inode pending
+    local root repo script migration candidate binary_sha binary_inode pending
     root="$(mktemp -d "$TEST_ROOT-authority.XXXXXX")"
     EXTRA_TEST_ROOTS+=("$root")
     chmod 700 "$root"
     repo="$root/source/agent-bridge"
     script="$repo/scripts/systemd/install-trusted-daemon-root.sh"
+    migration="$repo/scripts/migrate-trusted-runtime-state.py"
     mkdir -p "$repo/scripts/systemd" "$root/bin" "$root/publisher-state/deploy"
     chmod 700 "$root/source" "$repo" "$repo/scripts" "$repo/scripts/systemd" \
         "$root/bin" "$root/publisher-state" "$root/publisher-state/deploy"
     cp "$INSTALLER" "$script"
-    chmod 700 "$script"
+    cp "$SCRIPT_DIR/migrate-trusted-runtime-state.py" "$migration"
+    chmod 700 "$script" "$migration"
     /usr/bin/env -i HOME="$root" LANG=C PATH=/usr/bin:/bin \
         /usr/bin/git -C "$repo" init -q
     /usr/bin/env -i HOME="$root" LANG=C PATH=/usr/bin:/bin \
@@ -310,7 +337,8 @@ make_source_authority_fixture() {
     /usr/bin/env -i HOME="$root" LANG=C PATH=/usr/bin:/bin \
         /usr/bin/git -C "$repo" config user.email systemd-authority-test@example.invalid
     /usr/bin/env -i HOME="$root" LANG=C PATH=/usr/bin:/bin \
-        /usr/bin/git -C "$repo" add scripts/systemd/install-trusted-daemon-root.sh
+        /usr/bin/git -C "$repo" add scripts/systemd/install-trusted-daemon-root.sh \
+            scripts/migrate-trusted-runtime-state.py
     /usr/bin/env -i HOME="$root" LANG=C PATH=/usr/bin:/bin \
         /usr/bin/git -C "$repo" -c commit.gpgsign=false commit -q -m trusted-installer
     candidate="$(/usr/bin/env -i HOME="$root" LANG=C PATH=/usr/bin:/bin \
@@ -348,6 +376,7 @@ make_source_authority_fixture() {
     AUTHORITY_ROOT="$root"
     AUTHORITY_REPO="$repo"
     AUTHORITY_SCRIPT="$script"
+    AUTHORITY_MIGRATION="$migration"
     AUTHORITY_PENDING="$pending"
     AUTHORITY_CANDIDATE="$candidate"
 }
@@ -478,6 +507,19 @@ case "$dirty_installer_output" in *"trusted daemon installer bytes do not match 
     fail "dirty/stale installer rejection reason missing" ;;
 esac
 [ ! -e "$dirty_installer_root/runtime" ] || fail "dirty installer reached user runtime state"
+
+make_source_authority_fixture
+dirty_migration_root="$AUTHORITY_ROOT"
+printf '%s\n' '# post-publisher migration-tool drift' >> "$AUTHORITY_MIGRATION"
+set +e
+dirty_migration_output="$(run_authority_install "$AUTHORITY_ROOT" "$AUTHORITY_SCRIPT" 2>&1)"
+dirty_migration_status=$?
+set -e
+[ "$dirty_migration_status" -ne 0 ] || fail "source authority accepted a dirty migration tool"
+case "$dirty_migration_output" in *"trusted runtime-state migration tool bytes do not match the publisher candidate"*) ;; *)
+    fail "dirty/stale migration-tool rejection reason missing" ;;
+esac
+[ ! -e "$dirty_migration_root/runtime" ] || fail "dirty migration tool reached user runtime state"
 
 make_source_authority_fixture
 binary_drift_root="$AUTHORITY_ROOT"
@@ -638,6 +680,44 @@ case "$action" in
             ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost|EnvironmentFiles)
                 printf '\n'
                 ;;
+            ActiveState)
+                state="$fake_root/unit-states/$unit.ActiveState"
+                if [ -f "$state" ]; then cat "$state"; else printf '%s\n' inactive; fi
+                ;;
+            SubState)
+                state="$fake_root/unit-states/$unit.SubState"
+                if [ -f "$state" ]; then cat "$state"; else printf '%s\n' dead; fi
+                ;;
+            MainPID)
+                state="$fake_root/unit-states/$unit.MainPID"
+                if [ -f "$state" ]; then
+                    cat "$state"
+                else
+                    case "$unit" in *.timer) printf '\n' ;; *) printf '%s\n' 0 ;; esac
+                fi
+                ;;
+            LoadState)
+                state="$fake_root/unit-states/$unit.LoadState"
+                if [ -f "$state" ]; then
+                    cat "$state"
+                else
+                    case "$unit" in
+                        agent-bridge-day2-audit.timer) printf '%s\n' not-found ;;
+                        *) printf '%s\n' loaded ;;
+                    esac
+                fi
+                ;;
+            UnitFileState)
+                state="$fake_root/unit-states/$unit.UnitFileState"
+                if [ -f "$state" ]; then
+                    cat "$state"
+                else
+                    case "$unit" in
+                        agent-bridge-day2-audit.timer) printf '\n' ;;
+                        *) printf '%s\n' disabled ;;
+                    esac
+                fi
+                ;;
             *) exit 65 ;;
         esac
         ;;
@@ -665,6 +745,20 @@ case "$action" in
                 "$runtime_control/agent-bridge-daemon.service"
             : > "$fake_root/tamper-after-reload.done"
             chmod 600 "$fake_root/tamper-after-reload.done"
+        fi
+        if [ "${AGENT_BRIDGE_FAKE_SYSTEMCTL_REARM_WRITER_AFTER_RELOAD:-0}" = 1 ] &&
+                [ ! -e "$fake_root/rearm-after-reload.done" ]; then
+            mkdir -p "$fake_root/unit-states"
+            chmod 700 "$fake_root/unit-states"
+            printf '%s\n' active > \
+                "$fake_root/unit-states/agent-bridge-sync.timer.ActiveState"
+            printf '%s\n' waiting > \
+                "$fake_root/unit-states/agent-bridge-sync.timer.SubState"
+            printf '%s\n' 0 > \
+                "$fake_root/unit-states/agent-bridge-sync.timer.MainPID"
+            chmod 600 "$fake_root/unit-states/"*
+            : > "$fake_root/rearm-after-reload.done"
+            chmod 600 "$fake_root/rearm-after-reload.done"
         fi
         ;;
     *) exit 67 ;;
@@ -721,6 +815,15 @@ fake_log_count() {
     [ -f "$root/systemctl.log" ] || { printf '%s\n' 0; return 0; }
     awk -F '\t' -v action="$action" '$1 == action { count += 1 } END { print count + 0 }' \
         "$root/systemctl.log"
+}
+
+migration_verify_count() {
+    local root="$1"
+    if [ -f "$root/migration-verify.count" ]; then
+        cat "$root/migration-verify.count"
+    else
+        printf '%s\n' 0
+    fi
 }
 
 assert_no_runtime_fragments() {
@@ -1079,11 +1182,157 @@ esac
     fail "replaceable missing UnitPath progressed beyond its manager query"
 assert_no_runtime_fragments "$missing_search_root"
 
+# The current-boot binder cannot bypass the body-state migration transaction.
+# Missing or tampered completion evidence is rejected before the manager is
+# inspected and before any runtime fragment exists.
+new_bind_test_root
+missing_migration_root="$BIND_ROOT"
+rm "$missing_migration_root/publisher-state/migrations/current.json"
+set +e
+missing_migration_output="$(run_test_install "$missing_migration_root" 2>&1)"
+missing_migration_status=$?
+set -e
+[ "$missing_migration_status" -ne 0 ] || fail "trusted binding accepted a missing migration receipt"
+case "$missing_migration_output" in *"trusted runtime-state migration receipt must be a physical regular file"*) ;; *)
+    fail "missing migration-receipt rejection reason absent" ;;
+esac
+[ "$(fake_log_count "$missing_migration_root" show)" = 0 ] ||
+    fail "missing migration receipt reached the user manager"
+assert_no_runtime_fragments "$missing_migration_root"
+
+new_bind_test_root
+tampered_migration_root="$BIND_ROOT"
+printf '%s\n' fixture-tampered > \
+    "$tampered_migration_root/publisher-state/migrations/current.json"
+set +e
+tampered_migration_output="$(run_test_install "$tampered_migration_root" 2>&1)"
+tampered_migration_status=$?
+set -e
+[ "$tampered_migration_status" -ne 0 ] || fail "trusted binding accepted a tampered migration receipt"
+case "$tampered_migration_output" in *"trusted runtime-state migration receipt verification failed"*) ;; *)
+    fail "tampered migration-receipt rejection reason absent" ;;
+esac
+[ "$(fake_log_count "$tampered_migration_root" show)" = 0 ] ||
+    fail "tampered migration receipt reached the user manager"
+assert_no_runtime_fragments "$tampered_migration_root"
+
+# Binding cannot consume a migration handoff while any registered long-lived
+# writer, maintenance timer, or maintenance one-shot remains live.  This gate
+# runs before the first runtime fragment or daemon-reload mutation.
+new_bind_test_root
+active_writer_root="$BIND_ROOT"
+mkdir -m 700 "$active_writer_root/unit-states"
+printf '%s\n' active > \
+    "$active_writer_root/unit-states/agent-bridge-sync.timer.ActiveState"
+printf '%s\n' waiting > \
+    "$active_writer_root/unit-states/agent-bridge-sync.timer.SubState"
+printf '%s\n' 0 > \
+    "$active_writer_root/unit-states/agent-bridge-sync.timer.MainPID"
+chmod 600 "$active_writer_root/unit-states/"*
+set +e
+active_writer_output="$(run_test_install "$active_writer_root" 2>&1)"
+active_writer_status=$?
+set -e
+[ "$active_writer_status" -ne 0 ] || fail "trusted binding accepted a rearmed migration writer"
+case "$active_writer_output" in
+    *"runtime-state migration writer is not quiesced: agent-bridge-sync.timer"*) ;;
+    *) fail "active migration-writer rejection reason missing" ;;
+esac
+assert_no_runtime_fragments "$active_writer_root"
+[ "$(fake_log_count "$active_writer_root" daemon-reload)" = 0 ] ||
+    fail "active migration writer reached daemon-reload"
+
+new_bind_test_root
+triggerable_timer_root="$BIND_ROOT"
+mkdir -m 700 "$triggerable_timer_root/unit-states"
+printf '%s\n' enabled > \
+    "$triggerable_timer_root/unit-states/agent-bridge-sync.timer.UnitFileState"
+chmod 600 "$triggerable_timer_root/unit-states/"*
+set +e
+triggerable_timer_output="$(run_test_install "$triggerable_timer_root" 2>&1)"
+triggerable_timer_status=$?
+set -e
+[ "$triggerable_timer_status" -ne 0 ] || fail "trusted binding accepted an enabled legacy timer"
+case "$triggerable_timer_output" in
+    *"runtime-state migration timer remains triggerable: agent-bridge-sync.timer"*) ;;
+    *) fail "triggerable migration-timer rejection reason missing" ;;
+esac
+assert_no_runtime_fragments "$triggerable_timer_root"
+[ "$(fake_log_count "$triggerable_timer_root" daemon-reload)" = 0 ] ||
+    fail "triggerable migration timer reached daemon-reload"
+
+# systemd represents an absent timer as LoadState=not-found with an empty
+# UnitFileState.  Reject contradictory metadata rather than treating the
+# literal string "not-found" as a UnitFileState value.
+new_bind_test_root
+missing_timer_state_root="$BIND_ROOT"
+mkdir -m 700 "$missing_timer_state_root/unit-states"
+printf '%s\n' disabled > \
+    "$missing_timer_state_root/unit-states/agent-bridge-day2-audit.timer.UnitFileState"
+chmod 600 "$missing_timer_state_root/unit-states/"*
+set +e
+missing_timer_state_output="$(run_test_install "$missing_timer_state_root" 2>&1)"
+missing_timer_state_status=$?
+set -e
+[ "$missing_timer_state_status" -ne 0 ] ||
+    fail "trusted binding accepted contradictory missing-timer metadata"
+case "$missing_timer_state_output" in
+    *"missing runtime-state migration timer has an inconsistent unit-file state: agent-bridge-day2-audit.timer"*) ;;
+    *) fail "missing-timer metadata rejection reason absent" ;;
+esac
+assert_no_runtime_fragments "$missing_timer_state_root"
+[ "$(fake_log_count "$missing_timer_state_root" daemon-reload)" = 0 ] ||
+    fail "contradictory missing-timer metadata reached daemon-reload"
+
+# The receipt is sampled again at both mutation boundaries. A drift detected
+# after staging must leave no fragment; a drift detected after reload must
+# roll fragments back and issue the one compensating reload.
+new_bind_test_root
+second_receipt_root="$BIND_ROOT"
+printf '%s\n' fixture-fail-on-second > \
+    "$second_receipt_root/publisher-state/migrations/current.json"
+set +e
+second_receipt_output="$(run_test_install "$second_receipt_root" 2>&1)"
+second_receipt_status=$?
+set -e
+[ "$second_receipt_status" -ne 0 ] || fail "binding accepted receipt drift before activation"
+case "$second_receipt_output" in *"migration receipt verification failed"*) ;;
+    *) fail "pre-activation receipt drift reason absent" ;;
+esac
+[ "$(migration_verify_count "$second_receipt_root")" = 2 ] ||
+    fail "binding did not resample receipt immediately before activation"
+assert_no_runtime_fragments "$second_receipt_root"
+[ "$(fake_log_count "$second_receipt_root" daemon-reload)" = 0 ] ||
+    fail "pre-activation receipt drift reached daemon-reload"
+
+new_bind_test_root
+third_receipt_root="$BIND_ROOT"
+printf '%s\n' fixture-fail-on-third > \
+    "$third_receipt_root/publisher-state/migrations/current.json"
+set +e
+third_receipt_output="$(run_test_install "$third_receipt_root" 2>&1)"
+third_receipt_status=$?
+set -e
+[ "$third_receipt_status" -ne 0 ] || fail "binding accepted receipt drift after reload"
+case "$third_receipt_output" in *"migration receipt verification failed"*) ;;
+    *) fail "post-reload receipt drift reason absent" ;;
+esac
+[ "$(migration_verify_count "$third_receipt_root")" = 3 ] ||
+    fail "binding did not resample receipt after effective-unit verification"
+assert_no_runtime_fragments "$third_receipt_root"
+[ "$(fake_log_count "$third_receipt_root" daemon-reload)" = 2 ] ||
+    fail "post-reload receipt drift did not perform one compensating reload"
+
 # A positive transaction writes three complete runtime units, reloads once,
 # verifies their effective values through systemctl show, and never restarts a
-# service. Replaying the exact transaction is an idempotent read-only success.
+# service. Exact replay is read-only while the migration freeze remains held;
+# normal post-adoption writes intentionally make the migration receipt stale.
 new_bind_test_root
 positive_root="$BIND_ROOT"
+mkdir -m 700 "$positive_root/unit-states"
+printf '%s\n' masked > "$positive_root/unit-states/agent-bridge-sync.timer.LoadState"
+printf '%s\n' masked > "$positive_root/unit-states/agent-bridge-sync.timer.UnitFileState"
+chmod 600 "$positive_root/unit-states/"*
 positive_output="$(run_test_install "$positive_root")"
 printf '%s\n' "$positive_output" | grep -qxF \
     'Installed and verified complete trusted current-boot units; services were not restarted.' ||
@@ -1129,6 +1378,8 @@ grep -qxF '  export AB_SUBSTRATE_PROJECTION=bucket_pool  ' \
     fail "positive machine.env literal fixture changed unexpectedly"
 [ "$(fake_log_count "$positive_root" edit)" = 0 ] || fail "positive transaction called systemctl edit"
 [ "$(fake_log_count "$positive_root" daemon-reload)" = 1 ] || fail "positive transaction reload count mismatch"
+[ "$(migration_verify_count "$positive_root")" = 3 ] ||
+    fail "positive transaction did not verify migration handoff at all three boundaries"
 case "$(cat "$positive_root/systemctl.log")" in *restart*) fail "positive transaction restarted a service" ;; esac
 edits_before="$(fake_log_count "$positive_root" edit)"
 idempotent_output="$(run_test_install "$positive_root")"
@@ -1137,6 +1388,8 @@ printf '%s\n' "$idempotent_output" | grep -qxF \
     fail "exact full-unit replay was not idempotent"
 [ "$(fake_log_count "$positive_root" edit)" = "$edits_before" ] ||
     fail "idempotent replay rewrote a trusted runtime unit"
+[ "$(migration_verify_count "$positive_root")" = 4 ] ||
+    fail "freeze-window replay did not revalidate the migration handoff"
 
 # Exact idempotence includes directives that are not represented by the
 # ordinary property checklist. A pre-existing fragment with one extra
@@ -1211,6 +1464,25 @@ esac
 assert_no_runtime_fragments "$post_reload_tamper_root"
 [ "$(fake_log_count "$post_reload_tamper_root" daemon-reload)" = 2 ] ||
     fail "post-reload exact-body mismatch did not perform compensating reload"
+
+# A maintenance timer rearmed after the commit reload invalidates the
+# migration handoff.  Final quiescence verification must roll back all three
+# fragments and perform the compensating reload.
+new_bind_test_root
+post_reload_writer_root="$BIND_ROOT"
+set +e
+post_reload_writer_output="$(AGENT_BRIDGE_FAKE_SYSTEMCTL_REARM_WRITER_AFTER_RELOAD=1 \
+    run_test_install "$post_reload_writer_root" 2>&1)"
+post_reload_writer_status=$?
+set -e
+[ "$post_reload_writer_status" -ne 0 ] || fail "post-reload writer rearm was accepted"
+case "$post_reload_writer_output" in
+    *"runtime-state migration writer is not quiesced: agent-bridge-sync.timer"*) ;;
+    *) fail "post-reload writer-rearm rejection reason missing" ;;
+esac
+assert_no_runtime_fragments "$post_reload_writer_root"
+[ "$(fake_log_count "$post_reload_writer_root" daemon-reload)" = 2 ] ||
+    fail "post-reload writer rearm did not perform one compensating reload"
 
 # If effective verification fails after the one commit reload, rollback must
 # remove all three fragments and issue exactly one compensating reload.
