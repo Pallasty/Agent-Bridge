@@ -49,6 +49,22 @@ mode_fixture() {
     esac
 }
 
+owner_fixture() {
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %u "$1" ;;
+        Linux) stat -c %u "$1" ;;
+        *) return 1 ;;
+    esac
+}
+
+assert_owned_mode() {
+    local path="$1" expected_mode="$2" label="$3"
+    [ -e "$path" ] && [ ! -L "$path" ] || fail "$label is not a physical path: $path"
+    [ "$(owner_fixture "$path")" = "$(id -u)" ] || fail "$label is not euid-owned: $path"
+    [ "$(mode_fixture "$path")" = "$expected_mode" ] ||
+        fail "$label mode is not exact $expected_mode: $path (mode $(mode_fixture "$path"))"
+}
+
 mutation_count() {
     if [ -f "$1/mutations.log" ]; then
         wc -l < "$1/mutations.log" | tr -d ' '
@@ -535,9 +551,484 @@ write_handoff_completion_fixture() {
     chmod 600 "$root/state/recovery-handoff-completion.meta"
 }
 
+write_production_checkout_fixture() {
+    local root="$1" remote_url="$2" checkout
+    checkout="$root/source/agent-bridge"
+    mkdir -p \
+        "$checkout/scripts" \
+        "$root/config/git" \
+        "$root/build-cache"
+    chmod 700 \
+        "$root" \
+        "$root/source" \
+        "$checkout" \
+        "$checkout/scripts" \
+        "$root/config" \
+        "$root/config/git" \
+        "$root/build-cache"
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        /usr/bin/git -c init.defaultBranch=master init -q "$checkout"
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        /usr/bin/git -C "$checkout" remote add gitlab "$remote_url"
+    cp "$DEPLOY" "$checkout/scripts/deploy_from_master.sh"
+    printf '%s\n' fixture-deploy-key > "$root/config/git/gitlab_deploy_key"
+    printf '%s\n' fixture-known-host > "$root/config/git/known_hosts"
+    chmod 700 \
+        "$checkout/.git" \
+        "$checkout/scripts/deploy_from_master.sh"
+    chmod 600 \
+        "$root/config/git/gitlab_deploy_key" \
+        "$root/config/git/known_hosts"
+    assert_owned_mode "$root" 700 "production fixture root"
+    assert_owned_mode "$root/source" 700 "production fixture source directory"
+    assert_owned_mode "$checkout" 700 "production fixture checkout"
+    assert_owned_mode "$checkout/.git" 700 "production fixture Git metadata"
+    assert_owned_mode "$checkout/scripts" 700 "production fixture scripts directory"
+    assert_owned_mode "$checkout/scripts/deploy_from_master.sh" 700 \
+        "production fixture deploy orchestrator"
+    assert_owned_mode "$root/config" 700 "production fixture configuration root"
+    assert_owned_mode "$root/config/git" 700 "production fixture Git configuration"
+    assert_owned_mode "$root/config/git/gitlab_deploy_key" 600 \
+        "production fixture GitLab key"
+    assert_owned_mode "$root/config/git/known_hosts" 600 \
+        "production fixture known-hosts"
+    [ "$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        /usr/bin/git -C "$checkout" remote get-url gitlab)" = "$remote_url" ] ||
+        fail "production fixture deploy remote mismatch"
+    PRODUCTION_FIXTURE_ROOT="$root"
+    PRODUCTION_FIXTURE_CHECKOUT="$checkout"
+    PRODUCTION_FIXTURE_DEPLOY="$checkout/scripts/deploy_from_master.sh"
+}
+
+write_production_toolchain_fixture() {
+    local root="$1" sysroot="$2"
+    mkdir -p "$root/toolchain/bin" "$sysroot"
+    chmod 700 "$root/toolchain" "$root/toolchain/bin" "$sysroot"
+    {
+        printf '%s\n' '#!/bin/sh'
+        printf ': > %s\n' "$root/cargo-invoked"
+        printf '%s\n' 'exit 97'
+    } > "$root/toolchain/bin/cargo"
+    {
+        printf '%s\n' '#!/bin/sh'
+        printf "printf '%%s\\n' '%s'\n" "$sysroot"
+    } > "$root/toolchain/bin/rustc"
+    chmod 755 "$root/toolchain/bin/cargo" "$root/toolchain/bin/rustc"
+}
+
+run_production_checkout_fixture() {
+    local root="$1" deploy="$2" lane="${3:-build}"
+    if [ "$lane" = use-binary ]; then
+        env -i HOME="$production_home" PATH=/usr/bin:/bin \
+            AGENT_BRIDGE_DEPLOY_ROOT="$root" \
+            CARGO_TARGET_DIR="$root/build-cache" \
+            "$deploy" --use-binary "$root/missing-binary" --yes
+    else
+        env -i HOME="$production_home" PATH=/usr/bin:/bin \
+            AGENT_BRIDGE_DEPLOY_ROOT="$root" \
+            CARGO_TARGET_DIR="$root/build-cache" \
+            "$deploy" --yes
+    fi
+}
+
+assert_production_pre_mutation_rejection() {
+    local root="$1" checkout="$2" label="$3"
+    [ ! -e "$root/publisher-state" ] && [ ! -e "$root/bin" ] ||
+        fail "$label formed publisher state/bin before rejection"
+    [ ! -e "$checkout/.git/FETCH_HEAD" ] ||
+        fail "$label reached Git fetch before rejection"
+    if [ -d "$checkout/.git/refs/remotes" ]; then
+        [ "$(find "$checkout/.git/refs/remotes" -mindepth 1 -print -quit)" = "" ] ||
+            fail "$label formed a remote ref before rejection"
+    fi
+    [ ! -e "$checkout/target" ] && [ ! -e "$root/cargo-invoked" ] ||
+        fail "$label reached Cargo build before rejection"
+    [ "$(find "$root/build-cache" -mindepth 1 -print -quit)" = "" ] ||
+        fail "$label mutated the isolated build cache before rejection"
+}
+
+# Production rejects an untrusted or ambiguous canonical root before creating
+# even the publisher state parent. These probes intentionally stay outside the
+# synthetic lease lane so they exercise the real production trust decision.
+production_home="$TEST_ROOT/production-home"
+mkdir -p "$production_home"
+
+unsafe_root="$TEST_ROOT/production-unsafe-root"
+mkdir -p "$unsafe_root"
+chmod 777 "$unsafe_root"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$unsafe_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted group/other-writable deployment root"
+case "$output" in *"must not be group/other writable"*|*"mode must be exact 0700"*) ;; *)
+    fail "unsafe-root rejection reason missing" ;;
+esac
+[ ! -e "$unsafe_root/publisher-state" ] || fail "unsafe root formed publisher state before rejection"
+
+# Read/search-only roots are still too broad for canonical custody. Production
+# requires an exact private 0700 root; 0755 and 0750 must fail before any
+# derived publisher path is formed, rather than continuing until candidate
+# inspection happens to fail.
+for root_mode in 755 750; do
+    broad_root="$TEST_ROOT/production-root-mode-$root_mode"
+    mkdir -p "$broad_root"
+    chmod "$root_mode" "$broad_root"
+    set +e
+    output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+        AGENT_BRIDGE_DEPLOY_ROOT="$broad_root" \
+        "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "production accepted deployment root mode $root_mode"
+    case "$output" in *"mode"*"700"*|*"mode"*"0700"*) ;; *)
+        fail "deployment root mode $root_mode rejection reason missing" ;;
+    esac
+    [ ! -e "$broad_root/bin" ] && [ ! -e "$broad_root/publisher-state" ] ||
+        fail "deployment root mode $root_mode mutated derived paths before rejection"
+done
+
+# Existing descendants are part of the trust decision, not material to repair
+# opportunistically. A wide bin or state ancestor must be rejected unchanged
+# and before another derived path is created.
+wide_bin_root="$TEST_ROOT/production-wide-bin-root"
+mkdir -p "$wide_bin_root/bin"
+chmod 700 "$wide_bin_root"
+chmod 777 "$wide_bin_root/bin"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$wide_bin_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted a wide pre-existing bin directory"
+case "$output" in *"canonical deployment directory component mode must be 700"*) ;; *)
+    fail "wide bin rejection reason missing" ;;
+esac
+[ "$(mode_fixture "$wide_bin_root/bin")" = 777 ] ||
+    fail "wide bin was repaired/mutated instead of rejected"
+[ ! -e "$wide_bin_root/publisher-state" ] || fail "wide bin formed publisher state before rejection"
+
+wide_state_root="$TEST_ROOT/production-wide-state-root"
+mkdir -p "$wide_state_root/publisher-state"
+chmod 700 "$wide_state_root"
+chmod 777 "$wide_state_root/publisher-state"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$wide_state_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted a wide pre-existing state ancestor"
+case "$output" in *"canonical deployment directory component mode must be 700"*) ;; *)
+    fail "wide state ancestor rejection reason missing" ;;
+esac
+[ "$(mode_fixture "$wide_state_root/publisher-state")" = 777 ] ||
+    fail "wide state ancestor was repaired/mutated instead of rejected"
+[ ! -e "$wide_state_root/bin" ] && [ ! -e "$wide_state_root/publisher-state/deploy" ] ||
+    fail "wide state ancestor mutated derived paths before rejection"
+
+symlink_intermediate_root="$TEST_ROOT/production-symlink-intermediate-root"
+symlink_intermediate_target="$TEST_ROOT/production-symlink-intermediate-target"
+mkdir -p "$symlink_intermediate_root" "$symlink_intermediate_target"
+chmod 700 "$symlink_intermediate_root" "$symlink_intermediate_target"
+ln -s "$symlink_intermediate_target" "$symlink_intermediate_root/publisher-state"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$symlink_intermediate_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted a symlinked derived-state ancestor"
+case "$output" in *"must not traverse a symlink"*|*"not a physical directory"*) ;; *)
+    fail "symlinked state ancestor rejection reason missing" ;;
+esac
+[ ! -e "$symlink_intermediate_root/bin" ] &&
+    [ "$(find "$symlink_intermediate_target" -mindepth 1 -print -quit)" = "" ] ||
+    fail "symlinked state ancestor caused a derived-path mutation"
+
+physical_root="$TEST_ROOT/production-physical-root"
+symlink_root="$TEST_ROOT/production-symlink-root"
+mkdir -p "$physical_root"
+chmod 700 "$physical_root"
+ln -s "$physical_root" "$symlink_root"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$symlink_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted symlinked deployment root"
+case "$output" in *"pre-existing physical directory"*|*"must not traverse a symlink"*) ;; *)
+    fail "symlink-root rejection reason missing" ;;
+esac
+[ ! -e "$physical_root/publisher-state" ] || fail "symlink root formed publisher state before rejection"
+
+canonical_root="$TEST_ROOT/production-canonical-root"
+mkdir -p "$canonical_root"
+chmod 700 "$canonical_root"
+noncanonical_root="$canonical_root/../$(basename "$canonical_root")"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$noncanonical_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted non-canonical deployment root"
+case "$output" in *"must be an absolute canonical path"*) ;; *) fail "noncanonical-root rejection reason missing" ;; esac
+[ ! -e "$canonical_root/publisher-state" ] || fail "noncanonical root formed publisher state before rejection"
+
+leaf_root="$TEST_ROOT/production-divergent-leaf-root"
+mkdir -p "$leaf_root"
+chmod 700 "$leaf_root"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$leaf_root" \
+    AGENT_BRIDGE_INSTALL_DIR="$leaf_root/not-the-canonical-bin" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted divergent legacy leaf override"
+case "$output" in *"AGENT_BRIDGE_INSTALL_DIR diverges from AGENT_BRIDGE_DEPLOY_ROOT"*) ;; *)
+    fail "divergent leaf rejection reason missing" ;;
+esac
+[ ! -e "$leaf_root/publisher-state" ] || fail "divergent leaf formed publisher state before rejection"
+
+injected_root="$TEST_ROOT/production-bad:root"
+mkdir -p "$injected_root"
+chmod 700 "$injected_root"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$injected_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted deployment-root metadata injection characters"
+case "$output" in *"contains an unsupported character"*) ;; *) fail "unsafe-character rejection reason missing" ;; esac
+[ ! -e "$injected_root/publisher-state" ] || fail "unsafe-character root formed publisher state before rejection"
+
+# A private root alone cannot bootstrap publisher authority. The orchestrator
+# must itself execute from the one root-bound checkout, and this rejection must
+# happen before the publisher creates either canonical state or bin custody.
+wrong_checkout_root="$TEST_ROOT/production-wrong-checkout-root"
+mkdir -p "$wrong_checkout_root"
+chmod 700 "$wrong_checkout_root"
+set +e
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    AGENT_BRIDGE_DEPLOY_ROOT="$wrong_checkout_root" \
+    "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted an orchestrator outside its fixed checkout"
+case "$output" in
+    *"production deploy must run from the fixed trusted checkout: $wrong_checkout_root/source/agent-bridge"*) ;;
+    *) fail "fixed-checkout rejection reason missing" ;;
+esac
+[ ! -e "$wrong_checkout_root/publisher-state" ] && [ ! -e "$wrong_checkout_root/bin" ] ||
+    fail "wrong-checkout rejection formed publisher state/bin"
+
+# The root-bound checkout is a real, local Git repository with a fully private
+# source/configuration chain. Each deliberately widened custody component must
+# fail while the checkout remains unfetched and publisher/build paths untouched.
+for private_component in source git-metadata scripts deploy-script; do
+    private_root="$TEST_ROOT/production-private-$private_component"
+    write_production_checkout_fixture \
+        "$private_root" git@gitlab.com:pallasting/agent-bridge.git
+    case "$private_component" in
+        source)
+            unsafe_path="$private_root/source"
+            expected_rejection="trusted source directory mode must be 700"
+            ;;
+        git-metadata)
+            unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/.git"
+            expected_rejection="trusted source Git metadata mode must be 700"
+            ;;
+        scripts)
+            unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts"
+            expected_rejection="trusted source scripts directory mode must be 700"
+            ;;
+        deploy-script)
+            unsafe_path="$PRODUCTION_FIXTURE_DEPLOY"
+            expected_rejection="trusted deploy orchestrator mode must be 700"
+            ;;
+    esac
+    chmod 755 "$unsafe_path"
+    set +e
+    output="$(run_production_checkout_fixture \
+        "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" use-binary 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "production accepted widened $private_component custody"
+    case "$output" in *"$expected_rejection"*) ;; *)
+        fail "$private_component custody rejection reason missing" ;;
+    esac
+    [ "$(mode_fixture "$unsafe_path")" = 755 ] ||
+        fail "production repaired/mutated widened $private_component custody"
+    assert_production_pre_mutation_rejection \
+        "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+        "$private_component custody rejection"
+done
+
+# A same-directory copy/alias must not cause the publisher to validate the
+# untouched canonical sibling while executing different bytes.
+alias_root="$TEST_ROOT/production-orchestrator-alias"
+write_production_checkout_fixture \
+    "$alias_root" git@gitlab.com:pallasting/agent-bridge.git
+alias_deploy="$PRODUCTION_FIXTURE_CHECKOUT/scripts/deploy-alias.sh"
+cp "$PRODUCTION_FIXTURE_DEPLOY" "$alias_deploy"
+chmod 700 "$alias_deploy"
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$alias_deploy" use-binary 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted a same-directory orchestrator alias"
+case "$output" in *"must execute the exact trusted orchestrator path"*) ;; *)
+    fail "same-directory orchestrator alias rejection reason missing" ;;
+esac
+assert_production_pre_mutation_rejection \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+    "same-directory orchestrator alias rejection"
+
+# Repository-local attributes/grafts can otherwise change archive/object
+# semantics without changing the fetched remote SHA. The production source
+# gate must reject both before publisher or build state is formed.
+for git_override in attributes grafts; do
+    override_root="$TEST_ROOT/production-git-info-$git_override"
+    write_production_checkout_fixture \
+        "$override_root" git@gitlab.com:pallasting/agent-bridge.git
+    mkdir -p "$PRODUCTION_FIXTURE_CHECKOUT/.git/info"
+    printf '%s\n' '* export-ignore' > \
+        "$PRODUCTION_FIXTURE_CHECKOUT/.git/info/$git_override"
+    set +e
+    output="$(run_production_checkout_fixture \
+        "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" use-binary 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "production accepted local Git $git_override override"
+    case "$output" in *"trusted source Git override must be absent"*) ;; *)
+        fail "local Git $git_override rejection reason missing" ;;
+    esac
+    assert_production_pre_mutation_rejection \
+        "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+        "local Git $git_override rejection"
+done
+
+# An authenticated-looking remote name is insufficient: its exact URL must
+# still bind to the authoritative GitLab project, never the GitHub mirror.
+github_remote_root="$TEST_ROOT/production-github-remote"
+write_production_checkout_fixture \
+    "$github_remote_root" git@github.com:pallasting/agent-bridge.git
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted GitHub as its authoritative deploy remote"
+case "$output" in
+    *"production deploy remote must be the authenticated pallasting/agent-bridge GitLab SSH URL"*) ;;
+    *) fail "GitHub deploy-remote rejection reason missing" ;;
+esac
+assert_production_pre_mutation_rejection \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+    "GitHub deploy-remote rejection"
+
+# Cargo and rustc are part of the production trust chain. Exact private roots
+# do not compensate for a widened executable, and neither unsafe mode may reach
+# a Git fetch, Cargo invocation, or publisher mutation.
+for unsafe_tool in cargo rustc; do
+    toolchain_root="$TEST_ROOT/production-unsafe-$unsafe_tool"
+    write_production_checkout_fixture \
+        "$toolchain_root" git@gitlab.com:pallasting/agent-bridge.git
+    write_production_toolchain_fixture \
+        "$toolchain_root" "$toolchain_root/toolchain/sysroot"
+    chmod 777 "$toolchain_root/toolchain/bin/$unsafe_tool"
+    set +e
+    output="$(run_production_checkout_fixture \
+        "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "production accepted unsafe $unsafe_tool mode"
+    case "$unsafe_tool:$output" in
+        cargo:*"trusted Cargo executable mode must be 755"*) ;;
+        rustc:*"trusted rustc executable mode must be 755"*) ;;
+        *) fail "unsafe $unsafe_tool mode rejection reason missing" ;;
+    esac
+    [ "$(mode_fixture "$toolchain_root/toolchain/bin/$unsafe_tool")" = 777 ] ||
+        fail "production repaired/mutated unsafe $unsafe_tool mode"
+    assert_production_pre_mutation_rejection \
+        "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+        "unsafe $unsafe_tool mode rejection"
+done
+
+# A mode-correct rustc is still untrusted when its reported sysroot resolves
+# outside the root-bound toolchain. The external sysroot is an inert fixture
+# beneath TEST_ROOT; no compiler, fetch, build, or production path is touched.
+external_sysroot="$TEST_ROOT/production-external-rust-sysroot"
+sysroot_escape_root="$TEST_ROOT/production-rustc-sysroot-escape"
+write_production_checkout_fixture \
+    "$sysroot_escape_root" git@gitlab.com:pallasting/agent-bridge.git
+write_production_toolchain_fixture "$sysroot_escape_root" "$external_sysroot"
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production accepted a rustc sysroot outside its trusted toolchain"
+case "$output" in *"trusted rustc sysroot escapes the trusted toolchain root"*) ;; *)
+    fail "rustc sysroot-escape rejection reason missing" ;;
+esac
+assert_production_pre_mutation_rejection \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+    "rustc sysroot-escape rejection"
+
+# The synthetic publisher lane is privileged test scaffolding, so its retained
+# --use-binary escape hatch must remain inside the one private fixture root.
+# Reject an otherwise valid native binary outside that root before a lease,
+# receipt, or installed-binary mutation can be formed.
+new_case contained-use-binary; root="$CASE_ROOT"
+baseline_sha="$(sha256_fixture "$root/bin/agent-bridge.real")"
+set +e
+output="$(HOME="$root/home" \
+    AGENT_BRIDGE_INSTALL_DIR="$root/bin" \
+    AGENT_BRIDGE_REAL_BIN="$root/bin/agent-bridge.real" \
+    AGENT_BRIDGE_DEPLOY_STATE_DIR="$root/state" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1 \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$TEST_ROOT" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_ACTION=probe \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_CANDIDATE=contained-use-binary \
+    "$DEPLOY" --use-binary /usr/bin/git --yes 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "lease test mode accepted --use-binary outside its isolated root"
+case "$output" in *"publisher lease test use_binary escapes its isolated root"*) ;; *)
+    fail "lease test --use-binary containment rejection reason missing" ;;
+esac
+[ "$(mutation_count "$root")" = 0 ] ||
+    fail "rejected lease test --use-binary escape recorded a mutation"
+[ "$(sha256_fixture "$root/bin/agent-bridge.real")" = "$baseline_sha" ] ||
+    fail "rejected lease test --use-binary escape changed the installed binary"
+[ "$(find "$root/state" -mindepth 1 -print -quit)" = "" ] ||
+    fail "rejected lease test --use-binary escape formed publisher state"
+
 # 1. A live pid with the exact start+boot fingerprint owns the mutex.
 new_case live-owner; root="$CASE_ROOT"
 start_holder "$root" building America/Los_Angeles
+for publisher_dir in \
+    "$TEST_ROOT/tmp" \
+    "$root/state" \
+    "$root/state/receipts" \
+    "$root/state/quarantine" \
+    "$root/state/intents" \
+    "$root/state/active.lock"
+do
+    assert_owned_mode "$publisher_dir" 700 "successful publisher directory"
+done
+assert_owned_mode "$root/state/publisher.kernel.lock" 600 "publisher kernel mutex"
+assert_owned_mode "$root/state/active.lock/lease.meta" 600 "publisher lease metadata"
+assert_owned_mode "$root/state/active.lock/pid" 600 "publisher lease pid"
 set +e
 output="$(TZ=Asia/Shanghai run_lease "$root" probe contender 2>&1)"
 status=$?
@@ -555,8 +1046,10 @@ wait "$HOLDER_PID" 2>/dev/null || true
 wait_kernel_lock_released "$root"
 meta="$root/state/active.lock/lease.meta"
 sed "s/^pid=.*/pid=$$/" "$meta" > "$meta.next"
+chmod 600 "$meta.next"
 mv -f "$meta.next" "$meta"
 sed 's/^process_start_fingerprint=.*/process_start_fingerprint=0000000000000000000000000000000000000000000000000000000000000000/' "$meta" > "$meta.next"
+chmod 600 "$meta.next"
 mv -f "$meta.next" "$meta"
 run_lease "$root" probe contender >/dev/null
 grep -Rqs '^reason=dead_owner_pre_mutation_reclaimed$' "$root/state/receipts" ||
@@ -670,6 +1163,26 @@ case "$output" in *"pending-admission fingerprint no longer matches"*) ;; *) fai
 [ "$(wc -l < "$root/mutations.log" | tr -d ' ')" = 1 ] ||
     fail "asset content drift caused an unexpected mutation"
 
+# The wrapper is part of the shared executable generation even though the
+# publisher never overwrites it. A sequential installer after pending
+# publication must invalidate both idempotent reuse and fresh-MCP admission.
+new_case pending-wrapper-content-mismatch; root="$CASE_ROOT"
+wrapper="$root/bin/agent-bridge"
+printf 'wrapper-v1\n' > "$wrapper"
+chmod 755 "$wrapper"
+run_lease "$root" install candidate-a "$root/payload-a" >/dev/null
+printf 'wrapper-v2\n' > "$wrapper"
+set +e
+output="$(run_lease "$root" probe candidate-a 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "same-candidate wrapper drift used the idempotent path"
+case "$output" in *"pending-admission fingerprint no longer matches"*) ;; *)
+    fail "wrapper content drift reason missing" ;;
+esac
+[ "$(wc -l < "$root/mutations.log" | tr -d ' ')" = 1 ] ||
+    fail "wrapper content drift caused an unexpected mutation"
+
 # 9. A different candidate is blocked by default, then superseded explicitly.
 new_case supersede; root="$CASE_ROOT"
 run_lease "$root" install candidate-a "$root/payload-a" >/dev/null
@@ -759,6 +1272,7 @@ new_case shared-target-mismatch; root="$CASE_ROOT"
 run_lease "$root" install candidate-a "$root/payload-a" >/dev/null
 pending="$root/state/pending-admission.meta"
 sed 's|^shared_targets=.*|shared_targets=/mismatched/physical/targets|' "$pending" > "$pending.next"
+chmod 600 "$pending.next"
 mv -f "$pending.next" "$pending"
 set +e
 output="$(run_lease "$root" install candidate-a "$root/payload-a" 2>&1)"
@@ -1181,6 +1695,31 @@ esac
 [ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] || fail "fresh MCP wrong-build failure changed pending state"
 [ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "fresh MCP wrong-build failure published an intent"
 
+# A valid probe cannot admit a binary after its shared wrapper generation has
+# changed. Wrapper drift is checked before probe execution/intent publication.
+new_case fresh-mcp-wrapper-drift; root="$CASE_ROOT"
+candidate=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+probe="$root/fresh-probe.meta"
+wrapper="$root/bin/agent-bridge"
+printf 'wrapper-v1\n' > "$wrapper"
+chmod 755 "$wrapper"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+printf 'wrapper-v2\n' > "$wrapper"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "fresh MCP admitted a split wrapper/binary generation"
+case "$output" in *"pending-admission fingerprint no longer matches"*) ;; *)
+    fail "fresh MCP wrapper-drift rejection reason missing" ;;
+esac
+[ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] ||
+    fail "fresh MCP wrapper-drift failure changed pending state"
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] ||
+    fail "fresh MCP wrapper-drift failure published an intent"
+
 # 29. Binary drift after pending publication fails before the probe and leaves
 # the original pending state untouched for governed recovery.
 new_case fresh-mcp-binary-drift; root="$CASE_ROOT"
@@ -1460,5 +1999,62 @@ assert_descendant_reaped "$CASE_ROOT/payload-a.descendant.pid" "timed-out MCP pa
 assert_live_probe_rejected fresh-mcp-descendant-stderr-limit \
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacc descendant-stderr-limit "MCP descendant stderr overflow"
 assert_descendant_reaped "$CASE_ROOT/payload-a.descendant.pid" "stderr-over-limit MCP parent"
+
+# 44. Recovery input is executable publisher state. Exact schema/content is
+# insufficient when the canonical leaf has become permissive: both pending
+# admission and an interrupted active lease must fail closed before mutation.
+new_case metadata-mode-pending; root="$CASE_ROOT"
+run_lease "$root" install metadata-mode-pending >/dev/null
+chmod 644 "$root/state/pending-admission.meta"
+pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+set +e
+output="$(run_lease "$root" probe metadata-mode-pending 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "publisher resumed from mode-0644 pending metadata"
+case "$output" in *"pending-admission metadata is missing, unknown, or corrupt"*|*"pending-admission metadata is unknown or corrupt"*) ;; *)
+    fail "mode-0644 pending metadata rejection reason missing" ;;
+esac
+[ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] ||
+    fail "mode-0644 pending metadata was mutated"
+[ "$(mutation_count "$root")" = 1 ] || fail "mode-0644 pending metadata triggered a second mutation"
+
+new_case metadata-mode-active; root="$CASE_ROOT"
+start_holder "$root" building
+kill_holder_without_cleanup "$root"
+chmod 644 "$root/state/active.lock/lease.meta"
+active_sha="$(sha256_fixture "$root/state/active.lock/lease.meta")"
+set +e
+output="$(run_lease "$root" probe metadata-mode-active 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "publisher resumed from mode-0644 active-lease metadata"
+case "$output" in *"metadata is missing, unknown, or corrupt"*) ;; *)
+    fail "mode-0644 active metadata rejection reason missing" ;;
+esac
+[ "$(sha256_fixture "$root/state/active.lock/lease.meta")" = "$active_sha" ] ||
+    fail "mode-0644 active metadata was mutated"
+[ "$(mutation_count "$root")" = 0 ] || fail "mode-0644 active metadata triggered a mutation"
+
+# 45. A symlink to byte-identical metadata is not a physical publisher-state
+# leaf and must never be followed during crash recovery.
+new_case metadata-symlink-active; root="$CASE_ROOT"
+start_holder "$root" prepared
+kill_holder_without_cleanup "$root"
+mv "$root/state/active.lock/lease.meta" "$root/external-lease.meta"
+ln -s "$root/external-lease.meta" "$root/state/active.lock/lease.meta"
+external_sha="$(sha256_fixture "$root/external-lease.meta")"
+set +e
+output="$(run_lease "$root" probe metadata-symlink-active 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "publisher followed symlinked active-lease metadata"
+case "$output" in *"metadata is missing, unknown, or corrupt"*) ;; *)
+    fail "symlinked active metadata rejection reason missing" ;;
+esac
+[ -L "$root/state/active.lock/lease.meta" ] || fail "symlinked active metadata was replaced"
+[ "$(sha256_fixture "$root/external-lease.meta")" = "$external_sha" ] ||
+    fail "symlink target metadata was mutated"
+[ "$(mutation_count "$root")" = 0 ] || fail "symlinked active metadata triggered a mutation"
 
 printf '%s\n' publisher-lease-v0-ok

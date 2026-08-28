@@ -28,6 +28,7 @@ pub const POLICY_ENV: &str = "AGENT_BRIDGE_CGROUP_CUSTODY";
 pub const RUNTIME_MAX_ENV: &str = "AGENT_BRIDGE_CGROUP_RUNTIME_MAX_SEC";
 pub const RECEIPT_BINDING_ENV: &str = "AGENT_BRIDGE_WORKLOAD_RECEIPT_BINDING";
 pub const RECEIPT_DIR_ENV: &str = "AGENT_BRIDGE_CGROUP_RECEIPT_DIR";
+pub const TRANSIENT_DIR_ENV: &str = "AGENT_BRIDGE_CGROUP_TRANSIENT_DIR";
 pub const INTERNAL_MARKER: &str = "__ab_agent_cgroup_supervise";
 
 const SOURCE: &str = "linux_cgroup_v2_systemd_delegated_scope";
@@ -1204,9 +1205,9 @@ pub(crate) fn wrap_launch_spec(
 
     #[cfg(target_os = "linux")]
     {
-        if env.contains_key(RECEIPT_DIR_ENV) {
+        if env.contains_key(RECEIPT_DIR_ENV) || env.contains_key(TRANSIENT_DIR_ENV) {
             return Err(Error::InvalidArgument(format!(
-                "agent_spawn env cannot override ambient {RECEIPT_DIR_ENV} durable receipt policy"
+                "agent_spawn env cannot override ambient {RECEIPT_DIR_ENV}/{TRANSIENT_DIR_ENV} cgroup custody policy"
             )));
         }
         if !custody_enabled(env)? {
@@ -1247,20 +1248,8 @@ pub(crate) fn wrap_launch_spec(
                 )
             }
             None => {
-                let base = runtime_directory().ok_or_else(|| {
-                    Error::Backend(format!(
-                        "{runtime}: cgroup custody enabled but the user runtime directory is unavailable"
-                    ))
-                })?;
-                let runtime_dir = tempfile::Builder::new()
-                    .prefix("agent-bridge-cgroup-")
-                    .tempdir_in(&base)
-                    .map_err(|error| {
-                        Error::Backend(format!(
-                            "{runtime}: create private cgroup state directory: {error}"
-                        ))
-                    })?;
-                set_mode(runtime_dir.path(), 0o700)?;
+                let base = transient_custody_root(runtime)?;
+                let runtime_dir = create_transient_state_directory(runtime, &base)?;
                 let runtime_dir = Arc::new(runtime_dir);
                 (
                     runtime_dir.path().to_path_buf(),
@@ -1430,6 +1419,72 @@ fn runtime_directory() -> Option<PathBuf> {
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}")));
     let metadata = std::fs::symlink_metadata(&path).ok()?;
     (metadata.is_dir() && metadata.uid() == uid && metadata.file_type().is_dir()).then_some(path)
+}
+
+/// Resolve transient (non-receipt-bound) supervisor custody separately from
+/// the systemd user bus directory. Hardened services deliberately mount
+/// XDG_RUNTIME_DIR read-only; their publisher-provisioned state leaf remains
+/// the only writable allocation root. Legacy invocations without the explicit
+/// policy retain the historical user-runtime fallback.
+#[cfg(target_os = "linux")]
+fn transient_custody_root(runtime: &str) -> Result<PathBuf> {
+    let configured = std::env::var_os(TRANSIENT_DIR_ENV);
+    let fallback = runtime_directory();
+    let root = resolve_transient_custody_root(configured.as_deref(), fallback.as_deref()).map_err(
+        |error| {
+            Error::Backend(format!(
+                "{runtime}: resolve transient cgroup custody root: {error}"
+            ))
+        },
+    )?;
+    if configured.is_some() {
+        ensure_private_directory(&root, false).map_err(|error| {
+            Error::Backend(format!(
+                "{runtime}: validate transient cgroup custody root: {error}"
+            ))
+        })?;
+    }
+    Ok(root)
+}
+
+fn resolve_transient_custody_root(
+    configured: Option<&std::ffi::OsStr>,
+    runtime_fallback: Option<&Path>,
+) -> Result<PathBuf> {
+    let root = match configured {
+        Some(value) if value.is_empty() => {
+            return Err(Error::InvalidArgument(format!(
+                "ambient {TRANSIENT_DIR_ENV} cannot be empty"
+            )))
+        }
+        Some(value) => PathBuf::from(value),
+        None => runtime_fallback.map(Path::to_path_buf).ok_or_else(|| {
+            Error::Backend(
+                "cgroup custody enabled but neither a transient custody root nor the user runtime directory is available"
+                    .into(),
+            )
+        })?,
+    };
+    validate_durable_root_path(&root).map_err(|_| {
+        Error::InvalidArgument(format!(
+            "{TRANSIENT_DIR_ENV} must be an absolute, normalized, non-root path"
+        ))
+    })?;
+    Ok(root)
+}
+
+#[cfg(target_os = "linux")]
+fn create_transient_state_directory(runtime: &str, root: &Path) -> Result<tempfile::TempDir> {
+    let directory = tempfile::Builder::new()
+        .prefix("agent-bridge-cgroup-")
+        .tempdir_in(root)
+        .map_err(|error| {
+            Error::Backend(format!(
+                "{runtime}: create private cgroup state directory: {error}"
+            ))
+        })?;
+    set_mode(directory.path(), 0o700)?;
+    Ok(directory)
 }
 
 #[cfg(target_os = "linux")]
@@ -4326,6 +4381,48 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn transient_custody_root_prefers_explicit_writable_state_over_runtime_bus() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::PermissionsExt;
+
+        let runtime = tempfile::tempdir().expect("runtime bus root");
+        let state = tempfile::tempdir().expect("trusted workload state root");
+        set_mode(runtime.path(), 0o500).unwrap();
+        set_mode(state.path(), 0o700).unwrap();
+
+        let resolved =
+            resolve_transient_custody_root(Some(state.path().as_os_str()), Some(runtime.path()))
+                .expect("explicit transient root");
+        assert_eq!(resolved, state.path());
+        ensure_private_directory(&resolved, false).expect("private transient root");
+        let allocation = create_transient_state_directory("test-runtime", &resolved)
+            .expect("allocate below writable transient root");
+        assert!(allocation.path().starts_with(state.path()));
+        assert_eq!(
+            std::fs::symlink_metadata(allocation.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o700
+        );
+
+        for invalid in [OsStr::new(""), OsStr::new("relative"), OsStr::new("/")] {
+            assert!(resolve_transient_custody_root(Some(invalid), Some(runtime.path())).is_err());
+        }
+        assert_eq!(
+            resolve_transient_custody_root(None, Some(runtime.path())).unwrap(),
+            runtime.path()
+        );
+        assert!(resolve_transient_custody_root(None, None).is_err());
+
+        // tempfile cleanup needs owner access restored on the read-only
+        // fallback root; the allocation itself never used this directory.
+        std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[cfg(target_os = "linux")]

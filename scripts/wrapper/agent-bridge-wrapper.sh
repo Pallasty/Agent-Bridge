@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # agent-bridge wrapper — injects environment variables from a credentials
 # file before exec'ing the real binary.
 #
@@ -8,43 +8,143 @@
 # starts with an empty token environment and tool calls (Anthropic API,
 # GitHub PAT, Tailscale OAuth, etc.) fail.
 #
-# Layout: this wrapper is installed at $HOME/.local/bin/agent-bridge and
-# exec's the real binary at $HOME/.local/bin/agent-bridge.real. The
-# credentials file is plain text with named sections (see creds.example
-# in this directory).
+# Layout: this wrapper is installed at $DEPLOY_ROOT/bin/agent-bridge and
+# exec's its physical sibling $DEPLOY_ROOT/bin/agent-bridge.real. Runtime
+# assets derive from the parent deployment root, so the same wrapper works at
+# a permission-capable non-HOME root. The credentials file is plain text with
+# named sections (see creds.example in this directory).
 #
 # Override paths via env:
 #   AGENT_BRIDGE_CREDS_FILE  — credentials file path (default below)
-#   AGENT_BRIDGE_REAL_BIN    — real binary path (default ~/.local/bin/agent-bridge.real)
+#   AGENT_BRIDGE_REAL_BIN    — explicit real binary compatibility override
 
 set -euo pipefail
 
-# Default creds path — adjust per-host or override via AGENT_BRIDGE_CREDS_FILE.
-# Common locations: ~/Documents/ClaudeCode.txt, /Media/Ubuntu/Documents/ClaudeCode.txt
-default_creds="${HOME}/Documents/ClaudeCode.txt"
-[ -f "/Media/Ubuntu/Documents/ClaudeCode.txt" ] && default_creds="/Media/Ubuntu/Documents/ClaudeCode.txt"
-creds="${AGENT_BRIDGE_CREDS_FILE:-$default_creds}"
+# Wrapper bootstrap is part of the executable trust chain. Resolve every tool
+# used to inspect credentials/configuration from the fixed system path; a
+# caller-provided or HOME-writable PATH is handed to legacy children only after
+# parsing is complete.
+caller_path="${PATH:-}"
+PATH=/usr/bin:/bin
+export PATH
+# These names can influence a later dynamic loader, shell, or language runtime.
+# A trusted parent (for example the bounded systemd unit) must remove them
+# before this interpreter starts; clear them again here so they never reach the
+# real binary or repository-matched helpers.
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_PROFILE GCONV_PATH \
+    LOCPATH NLSPATH BASH_ENV ENV PYTHONPATH PYTHONHOME PERL5LIB RUBYLIB \
+    NODE_OPTIONS NODE_PATH RUSTC_WRAPPER 2>/dev/null || true
 
-real_bin="${AGENT_BRIDGE_REAL_BIN:-$HOME/.local/bin/agent-bridge.real}"
-
-# MCP/IDE launchers often provide a minimal PATH. Keep user-installed CLIs
-# visible for tools such as agent_spawn without requiring every client config
-# to duplicate shell rc setup.
-user_cli_path=""
-for dir in "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/.cargo/bin"; do
-    [ -d "$dir" ] || continue
-    case ":${PATH:-}:" in
-        *":$dir:"*) ;;
-        *) user_cli_path="${user_cli_path:+$user_cli_path:}$dir" ;;
+# Resolve the installed wrapper itself, including a symlinked invocation, then
+# bind the default executable and assets to that physical deployment tree. Do
+# this before loading owner-controlled environment files so the executable
+# identity cannot silently drift back to a HOME leaf on alternate-root hosts.
+wrapper_source="${BASH_SOURCE[0]}"
+case "$wrapper_source" in /*) ;; *) wrapper_source="$PWD/$wrapper_source" ;; esac
+wrapper_link_depth=0
+while [ -L "$wrapper_source" ]; do
+    wrapper_link_depth=$((wrapper_link_depth + 1))
+    [ "$wrapper_link_depth" -le 40 ] || {
+        printf 'agent-bridge wrapper symlink depth exceeds 40\n' >&2
+        exit 1
+    }
+    wrapper_link="$(readlink "$wrapper_source")"
+    [ -n "$wrapper_link" ] || {
+        printf 'agent-bridge wrapper cannot resolve its symlink target\n' >&2
+        exit 1
+    }
+    case "$wrapper_link" in
+        /*) wrapper_source="$wrapper_link" ;;
+        *) wrapper_source="$(dirname "$wrapper_source")/$wrapper_link" ;;
     esac
 done
-if [ -n "$user_cli_path" ]; then
-    export PATH="$user_cli_path${PATH:+:$PATH}"
+wrapper_bin_dir="$(cd -P "$(dirname "$wrapper_source")" && pwd -P)"
+wrapper_deploy_root="$(dirname "$wrapper_bin_dir")"
+real_bin="${AGENT_BRIDGE_REAL_BIN:-$wrapper_bin_dir/agent-bridge.real}"
+
+# An alternate trusted root must not fall back to executable configuration or
+# credentials on HOME. Legacy ~/.local installs retain their historical
+# defaults unless the caller explicitly opts into the pinned-root contract.
+if [ "${AGENT_BRIDGE_DEPLOY_ROOT+x}" = x ] ||
+        [ "$wrapper_deploy_root" != "$HOME/.local" ]; then
+    default_config_dir="$wrapper_deploy_root/config/agent-bridge"
+    default_creds="$default_config_dir/credentials"
+    default_machine_env="$default_config_dir/machine.env"
 else
-    export PATH="${PATH:-}"
+    default_creds="${HOME}/Documents/ClaudeCode.txt"
+    [ -f "/Media/Ubuntu/Documents/ClaudeCode.txt" ] && default_creds="/Media/Ubuntu/Documents/ClaudeCode.txt"
+    default_machine_env="$HOME/.config/agent-bridge/machine.env"
+fi
+creds="${AGENT_BRIDGE_CREDS_FILE:-$default_creds}"
+if [ "${AGENT_BRIDGE_DEPLOY_ROOT+x}" = x ] ||
+        [ "$wrapper_deploy_root" != "$HOME/.local" ]; then
+    wrapper_secure_mode=1
+    child_path="$wrapper_bin_dir:/usr/bin:/bin"
+else
+    wrapper_secure_mode=0
+    user_cli_path=""
+    for dir in "$HOME/.local/bin" "$HOME/.npm-global/bin" "$HOME/.cargo/bin"; do
+        [ -d "$dir" ] || continue
+        case ":${caller_path:-}:" in
+            *":$dir:"*) ;;
+            *) user_cli_path="${user_cli_path:+$user_cli_path:}$dir" ;;
+        esac
+    done
+    child_path="${user_cli_path:+$user_cli_path:}${caller_path:-/usr/bin:/bin}"
 fi
 
-if [ -z "${AGENT_BRIDGE_CLAUDE_BIN:-}" ] && [ -x "$HOME/.local/bin/claude" ]; then
+activate_child_path() {
+    PATH="$child_path"
+    export PATH
+}
+
+wrapper_pin_fail() {
+    printf 'agent-bridge pinned deployment root mismatch: %s\n' "$1" >&2
+    exit 1
+}
+
+if [ "${AGENT_BRIDGE_DEPLOY_ROOT+x}" = x ]; then
+    pinned_root="$AGENT_BRIDGE_DEPLOY_ROOT"
+    [ "$pinned_root" = "$wrapper_deploy_root" ] || wrapper_pin_fail deploy_root
+    [ "${AGENT_BRIDGE_INSTALL_DIR-$pinned_root/bin}" = "$pinned_root/bin" ] ||
+        wrapper_pin_fail install_dir
+    [ "${AGENT_BRIDGE_REAL_BIN-$pinned_root/bin/agent-bridge.real}" = "$pinned_root/bin/agent-bridge.real" ] ||
+        wrapper_pin_fail real_bin
+    [ "${AGENT_BRIDGE_STATE_DIR-$pinned_root/runtime-state}" = "$pinned_root/runtime-state" ] ||
+        wrapper_pin_fail state_dir
+    [ "${AGENT_BRIDGE_CGROUP_RECEIPT_DIR-$pinned_root/runtime-state/workload-receipts}" = "$pinned_root/runtime-state/workload-receipts" ] ||
+        wrapper_pin_fail receipt_dir
+    [ "${AGENT_BRIDGE_CGROUP_TRANSIENT_DIR-$pinned_root/runtime-state/workload-tmp}" = "$pinned_root/runtime-state/workload-tmp" ] ||
+        wrapper_pin_fail cgroup_transient_dir
+    [ "${AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT-$pinned_root/share/ab-tts/audio_embody.py}" = "$pinned_root/share/ab-tts/audio_embody.py" ] ||
+        wrapper_pin_fail audio_script
+    [ "${AGENT_BRIDGE_RUNTIME_ASSET_DIR-$pinned_root/lib/agent-bridge/scripts}" = "$pinned_root/lib/agent-bridge/scripts" ] ||
+        wrapper_pin_fail runtime_assets
+    [ "${AGENT_BRIDGE_MACHINE_ENV-$pinned_root/config/agent-bridge/machine.env}" = "$pinned_root/config/agent-bridge/machine.env" ] ||
+        wrapper_pin_fail machine_env
+    [ "${AGENT_BRIDGE_CREDS_FILE-$pinned_root/config/agent-bridge/credentials}" = "$pinned_root/config/agent-bridge/credentials" ] ||
+        wrapper_pin_fail credentials
+fi
+
+# Secure-root invocations receive a private HOME/XDG namespace derived only
+# from the executable root. This prevents a validated machine.env from
+# accidentally expanding `$HOME` back onto a replaceable legacy mount. The
+# publisher/systemd admission path creates and validates these directories.
+if [ "$wrapper_secure_mode" = 1 ]; then
+    export HOME="$wrapper_deploy_root/runtime-state/home"
+    export XDG_CONFIG_HOME="$wrapper_deploy_root/config"
+    export XDG_DATA_HOME="$wrapper_deploy_root/runtime-state/data"
+    export XDG_CACHE_HOME="$wrapper_deploy_root/runtime-state/cache"
+    export XDG_STATE_HOME="$wrapper_deploy_root/runtime-state/xdg-state"
+    export TMPDIR="$wrapper_deploy_root/runtime-state/tmp"
+    export AGENT_BRIDGE_CGROUP_TRANSIENT_DIR="$wrapper_deploy_root/runtime-state/workload-tmp"
+fi
+
+# Legacy ~/.local invocations retain their historical CLI discovery. A pinned
+# trusted-root service must provision executable paths explicitly instead of
+# inheriting tools from the unsafe HOME mount.
+if [ "$wrapper_secure_mode" = 0 ] &&
+        [ -z "${AGENT_BRIDGE_CLAUDE_BIN:-}" ] && [ -x "$HOME/.local/bin/claude" ]; then
     export AGENT_BRIDGE_CLAUDE_BIN="$HOME/.local/bin/claude"
 fi
 
@@ -71,7 +171,7 @@ resident_machine_value() {
 }
 
 load_resident_machine_paths() {
-    local resident_machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}"
+    local resident_machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$default_machine_env}"
     local line key raw value
     [ -f "$resident_machine_env" ] || return 0
     while IFS= read -r line || [ -n "$line" ]; do
@@ -108,7 +208,7 @@ if [ "${1:-}" = "resident" ]; then
                 ;;
         esac
     fi
-    if [ -z "${AB_RESIDENT_CODEX_BIN:-}" ]; then
+    if [ "$wrapper_secure_mode" = 0 ] && [ -z "${AB_RESIDENT_CODEX_BIN:-}" ]; then
         for resident_codex_candidate in \
             "$HOME"/.local/opt/node-*/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
         do
@@ -117,6 +217,7 @@ if [ "${1:-}" = "resident" ]; then
             break
         done
     fi
+    activate_child_path
     exec "$real_bin" "$@"
 fi
 
@@ -296,9 +397,65 @@ fi
 # per-call `VAR=… agent-bridge …` still wins — so write entries here with
 # `export VAR="${VAR:-value}"` guards to preserve that precedence. Override the
 # file path via AGENT_BRIDGE_MACHINE_ENV. See scripts/wrapper/machine.env.example.
-machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}"
+machine_env="${AGENT_BRIDGE_MACHINE_ENV:-$default_machine_env}"
+# A caller such as the bounded systemd deployment profile may pin the complete
+# deployment and receipt identity. Preserve those explicit parent values even
+# if the validated owner-controlled machine.env assigns the same names.
+caller_deploy_root_set="${AGENT_BRIDGE_DEPLOY_ROOT+x}"
+caller_deploy_root="${AGENT_BRIDGE_DEPLOY_ROOT-}"
+caller_install_dir_set="${AGENT_BRIDGE_INSTALL_DIR+x}"
+caller_install_dir="${AGENT_BRIDGE_INSTALL_DIR-}"
+caller_real_bin_set="${AGENT_BRIDGE_REAL_BIN+x}"
+caller_real_bin="${AGENT_BRIDGE_REAL_BIN-}"
+caller_state_dir_set="${AGENT_BRIDGE_STATE_DIR+x}"
+caller_state_dir="${AGENT_BRIDGE_STATE_DIR-}"
+caller_receipt_dir_set="${AGENT_BRIDGE_CGROUP_RECEIPT_DIR+x}"
+caller_receipt_dir="${AGENT_BRIDGE_CGROUP_RECEIPT_DIR-}"
+caller_cgroup_transient_dir_set="${AGENT_BRIDGE_CGROUP_TRANSIENT_DIR+x}"
+caller_cgroup_transient_dir="${AGENT_BRIDGE_CGROUP_TRANSIENT_DIR-}"
+caller_audio_script_set="${AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT+x}"
+caller_audio_script="${AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT-}"
+caller_runtime_assets_set="${AGENT_BRIDGE_RUNTIME_ASSET_DIR+x}"
+caller_runtime_assets="${AGENT_BRIDGE_RUNTIME_ASSET_DIR-}"
+caller_machine_env_set="${AGENT_BRIDGE_MACHINE_ENV+x}"
+caller_machine_env="${AGENT_BRIDGE_MACHINE_ENV-}"
+caller_creds_file_set="${AGENT_BRIDGE_CREDS_FILE+x}"
+caller_creds_file="${AGENT_BRIDGE_CREDS_FILE-}"
+caller_home="$HOME"
+caller_xdg_config_home="${XDG_CONFIG_HOME-}"
+caller_xdg_data_home="${XDG_DATA_HOME-}"
+caller_xdg_cache_home="${XDG_CACHE_HOME-}"
+caller_xdg_state_home="${XDG_STATE_HOME-}"
+caller_tmpdir="${TMPDIR-}"
+caller_xdg_runtime_dir_set="${XDG_RUNTIME_DIR+x}"
+caller_xdg_runtime_dir="${XDG_RUNTIME_DIR-}"
+caller_dbus_address_set="${DBUS_SESSION_BUS_ADDRESS+x}"
+caller_dbus_address="${DBUS_SESSION_BUS_ADDRESS-}"
 # shellcheck source=/dev/null
 [ -f "$machine_env" ] && . "$machine_env"
+[ -z "$caller_deploy_root_set" ] || export AGENT_BRIDGE_DEPLOY_ROOT="$caller_deploy_root"
+[ -z "$caller_install_dir_set" ] || export AGENT_BRIDGE_INSTALL_DIR="$caller_install_dir"
+[ -z "$caller_real_bin_set" ] || export AGENT_BRIDGE_REAL_BIN="$caller_real_bin"
+[ -z "$caller_state_dir_set" ] || export AGENT_BRIDGE_STATE_DIR="$caller_state_dir"
+[ -z "$caller_receipt_dir_set" ] || export AGENT_BRIDGE_CGROUP_RECEIPT_DIR="$caller_receipt_dir"
+[ -z "$caller_cgroup_transient_dir_set" ] || export AGENT_BRIDGE_CGROUP_TRANSIENT_DIR="$caller_cgroup_transient_dir"
+[ -z "$caller_audio_script_set" ] || export AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT="$caller_audio_script"
+[ -z "$caller_runtime_assets_set" ] || export AGENT_BRIDGE_RUNTIME_ASSET_DIR="$caller_runtime_assets"
+[ -z "$caller_machine_env_set" ] || export AGENT_BRIDGE_MACHINE_ENV="$caller_machine_env"
+[ -z "$caller_creds_file_set" ] || export AGENT_BRIDGE_CREDS_FILE="$caller_creds_file"
+if [ "$wrapper_secure_mode" = 1 ]; then
+    export HOME="$caller_home"
+    export XDG_CONFIG_HOME="$caller_xdg_config_home"
+    export XDG_DATA_HOME="$caller_xdg_data_home"
+    export XDG_CACHE_HOME="$caller_xdg_cache_home"
+    export XDG_STATE_HOME="$caller_xdg_state_home"
+    export TMPDIR="$caller_tmpdir"
+    [ -z "$caller_xdg_runtime_dir_set" ] || export XDG_RUNTIME_DIR="$caller_xdg_runtime_dir"
+    [ -z "$caller_dbus_address_set" ] || export DBUS_SESSION_BUS_ADDRESS="$caller_dbus_address"
+fi
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_PROFILE GCONV_PATH \
+    LOCPATH NLSPATH BASH_ENV ENV PYTHONPATH PYTHONHOME PERL5LIB RUBYLIB \
+    NODE_OPTIONS NODE_PATH RUSTC_WRAPPER 2>/dev/null || true
 
 # Use one host-local, permission-capable root for durable AB journals. Existing
 # installations may only declare the older app-control journal location; when
@@ -319,7 +476,8 @@ export AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-all}"
 # Deploys install this adapter from the same repository revision as
 # agent-bridge.real. A caller may still override it explicitly for an
 # alternate checkout or test fixture.
-export AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT="${AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT:-$HOME/.local/share/ab-tts/audio_embody.py}"
+export AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT="${AGENT_BRIDGE_AUDIO_EMBODY_SCRIPT:-$wrapper_deploy_root/share/ab-tts/audio_embody.py}"
+export AGENT_BRIDGE_RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$wrapper_deploy_root/lib/agent-bridge/scripts}"
 
 # v22 Phase 2.4 — α-α SVD warm-start projection defaults.
 # When AB_SUBSTRATE is opted in (manually or by future wrapper change),
@@ -345,4 +503,5 @@ export AB_SUBSTRATE_SVD_PATH="${AB_SUBSTRATE_SVD_PATH:-/Data/CascadeProjects/AiO
 # safe NewerWins fallback. `${VAR:-}` guard keeps per-call overrides working.
 export AB_SYNC_NODE="${AB_SYNC_NODE:-$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)}"
 
+activate_child_path
 exec "$real_bin" "$@"

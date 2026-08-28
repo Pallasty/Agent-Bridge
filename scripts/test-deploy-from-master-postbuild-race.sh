@@ -50,6 +50,7 @@ mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR" "$STATE_DIR"
 export AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1
 export AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$TEST_ROOT"
 export AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR"
+export AGENT_BRIDGE_DEPLOY_REMOTE=origin
 git init -q --bare "$REMOTE"
 git init -q -b master "$SEED"
 git -C "$SEED" config user.name deploy-race-test

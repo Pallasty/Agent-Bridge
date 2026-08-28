@@ -43,6 +43,7 @@ mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR" "$STATE_DIR"
 CANONICAL_REAL_PATH="$(cd "$INSTALL_DIR" && pwd -P)/agent-bridge.real"
 export AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE=1
 export AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT="$TEST_ROOT"
+export AGENT_BRIDGE_DEPLOY_REMOTE=origin
 git init -q --bare "$REMOTE"
 git init -q -b master "$SEED"
 git -C "$SEED" config user.name deploy-pinned-assets-test

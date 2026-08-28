@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
-# Safe, race-resistant deploy of the agent-bridge MCP binary to
-# ~/.local/bin/agent-bridge.real (the file the env-injection wrapper exec's).
+#!/bin/bash
+# Safe, race-resistant deploy of the agent-bridge MCP binary to the canonical
+# trusted deployment root (the file the env-injection wrapper exec's).
 #
 # WHY THIS EXISTS
 # ~/.local/bin/agent-bridge.real is a SINGLE shared deploy point. When two lanes
@@ -36,21 +36,30 @@
 #   scripts/deploy_from_master.sh --admit-fresh-mcp
 #                                             # consume one matching pending admission
 #                                             # after an independent MCP stdio probe
-#   scripts/deploy_from_master.sh --use-binary PATH   # skip build; deploy PATH (still gated+backed up)
-#                                                     # (provenance NOT verified — prints a warning)
+#   scripts/deploy_from_master.sh --use-binary PATH   # contained regression mode only;
+#                                                     # production never admits caller binaries
 #
 # Env:
-#   AGENT_BRIDGE_INSTALL_DIR   install dir (default ~/.local/bin)
-#   AGENT_BRIDGE_REAL_BIN      real binary path (default $INSTALL_DIR/agent-bridge.real)
+#   AGENT_BRIDGE_DEPLOY_ROOT   required pre-existing trusted deployment root.
+#                              Production paths are derived only from this root;
+#                              there is no implicit HOME fallback.
+#   AGENT_BRIDGE_INSTALL_DIR   legacy compatibility assertion; when set in
+#                              production it must equal $DEPLOY_ROOT/bin
+#   AGENT_BRIDGE_REAL_BIN      legacy compatibility assertion; when set in
+#                              production it must equal
+#                              $DEPLOY_ROOT/bin/agent-bridge.real
 #   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
-#                              (default ~/.local/share/ab-tts/audio_embody.py)
+#                              (production: $DEPLOY_ROOT/share/ab-tts/audio_embody.py)
 #   AGENT_BRIDGE_RUNTIME_ASSET_DIR stable script directory
-#                              (default ~/.local/lib/agent-bridge/scripts)
-#   CARGO_TARGET_DIR           build target root (default ~/.cache/agent-bridge-deploy-target,
-#                              with one child per master SHA to prevent cross-ref artifact reuse;
-#                              kept OFF /Data so ntfs-3g pressure cannot ENOSPC the release build)
-#   AGENT_BRIDGE_DEPLOY_REMOTE git remote containing authoritative master
-#                              (default: origin; use github after GitHub migration)
+#                              (production: $DEPLOY_ROOT/lib/agent-bridge/scripts)
+#   CARGO_TARGET_DIR           optional pre-existing private build-cache base
+#                              (exact 0700). The publisher appends a deployment-
+#                              root fingerprint and master SHA so distinct trust
+#                              domains can never share a candidate executable.
+#                              Default: /var/tmp/agent-bridge-deploy-target-<uid>.
+#   AGENT_BRIDGE_DEPLOY_REMOTE SSH git remote containing the authoritative
+#                              GitLab master (default: gitlab). Production
+#                              accepts only pallasting/agent-bridge on GitLab.
 #   AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 plus AGENT_BRIDGE_DEPLOY_FORCE_REASON
 #                              re-runs an exact pending candidate intentionally
 #   AGENT_BRIDGE_DEPLOY_SUPERSEDE_PENDING=1 plus reason and the exact
@@ -60,21 +69,50 @@
 #                              resumes a durable failed publisher/handoff from
 #                              authoritative remote source (never --use-binary/dry-run)
 #
-# Production publisher state is deliberately fixed at the real account home's
-# ~/.local/state/agent-bridge/deploy. State-root override and synthetic
-# lease-test actions are available only inside the
-# contained regression-test mode.
+# Production binary, wrapper, assets, and publisher state all derive from the
+# single AGENT_BRIDGE_DEPLOY_ROOT trust decision. Legacy leaf overrides may
+# only repeat the exact derived path. Synthetic lease-test actions retain their
+# isolated path overrides inside the contained regression-test mode.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Publisher-created directories and transaction files are private from their
+# first inode. Individual activation files still receive explicit final modes.
+umask 077
 
-INSTALL_DIR="${AGENT_BRIDGE_INSTALL_DIR:-$HOME/.local/bin}"
-REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
+LEASE_TEST_MODE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE:-0}"
+case "$LEASE_TEST_MODE" in 0|1) ;; *) printf 'ERROR: AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE must be 0 or 1\n' >&2; exit 1 ;; esac
+
+# Production orchestration never resolves git, lock, compiler helpers, or
+# parsing tools from caller/HOME PATH. Contained tests retain their synthetic
+# command shims inside a separately validated OS-temp root.
+if [ "$LEASE_TEST_MODE" = 0 ]; then
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    export PATH
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    # The contained regression lane deliberately exercises arbitrary leaf
+    # paths. validate_lease_test_environment binds every one beneath its
+    # physical OS-temp root before it may create state.
+    DEPLOY_ROOT_RAW=""
+    INSTALL_DIR="${AGENT_BRIDGE_INSTALL_DIR:-$HOME/.local/bin}"
+    REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
+    ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
+    RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
+else
+    DEPLOY_ROOT_RAW="${AGENT_BRIDGE_DEPLOY_ROOT:-}"
+    INSTALL_DIR="$DEPLOY_ROOT_RAW/bin"
+    REAL_PATH="$INSTALL_DIR/agent-bridge.real"
+    ADAPTER_PATH="$DEPLOY_ROOT_RAW/share/ab-tts/audio_embody.py"
+    RUNTIME_ASSET_DIR="$DEPLOY_ROOT_RAW/lib/agent-bridge/scripts"
+fi
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
 ASSET_SOURCE_ROOT="$REPO"
 ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
-ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
 AUDIO_ADAPTER_COMPANIONS=(
     omnivoice_mac_remote_synth.py
     omnivoice_onnx_bundle_synth.py
@@ -89,7 +127,6 @@ AUDIO_POLICY_ASSETS=(
     config/omnivoice-canary.json
     docs/reports/tts-comparison/human-review-decision-owner-2026-08-15.json
 )
-RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 RUNTIME_ASSETS=(
     app_control.py
     app-control-recovery-candidates.py
@@ -112,7 +149,7 @@ RUNTIME_ASSETS=(
     macos_ax_watch.py
     vision_grounding_ocr.py
 )
-DEPLOY_REMOTE="${AGENT_BRIDGE_DEPLOY_REMOTE:-origin}"
+DEPLOY_REMOTE="${AGENT_BRIDGE_DEPLOY_REMOTE:-gitlab}"
 MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 
 # Lane feature-markers. The gate asserts: every marker present in the CURRENT
@@ -190,6 +227,14 @@ file_inode() {
     esac
 }
 
+file_device() {
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %d "$1" 2>/dev/null ;;
+        Linux) stat -c %d "$1" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
 file_mode() {
     [ -e "$1" ] || { printf '%s\n' absent; return 0; }
     case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
@@ -262,7 +307,7 @@ canonical_target_path() {
     fi
     dir="$(dirname "$path")"
     base="$(basename "$path")"
-    mkdir -p "$dir"
+    [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
     resolved="$(cd -P "$dir" && pwd -P)" || return 1
     printf '%s/%s\n' "$resolved" "$base"
 }
@@ -303,25 +348,6 @@ boot_identity() {
     printf '%s\n' "$raw" | sha256_text
 }
 
-account_home_directory() {
-    local uid user raw
-    uid="$(id -u)"
-    user="$(id -un)"
-    raw=""
-    if command -v dscl >/dev/null 2>&1; then
-        raw="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null |
-            awk '$1 == "NFSHomeDirectory:" { print $2; exit }')"
-    fi
-    if [ -z "$raw" ] && command -v getent >/dev/null 2>&1; then
-        raw="$(getent passwd "$uid" 2>/dev/null | awk -F: 'NR == 1 { print $6 }')"
-    fi
-    if [ -z "$raw" ] && [ -r /etc/passwd ]; then
-        raw="$(awk -F: -v uid="$uid" '$3 == uid { print $6; exit }' /etc/passwd)"
-    fi
-    [ -n "$raw" ] && [ -d "$raw" ] && [ ! -L "$raw" ] || return 1
-    (cd -P "$raw" && pwd -P)
-}
-
 utc_now() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 receipt_stamp() { date -u '+%Y%m%dT%H%M%SZ'; }
 clean_field() { printf '%s' "$1" | tr '\r\n' '  '; }
@@ -345,9 +371,22 @@ meta_value() {
     case "$line" in "$key="*) printf '%s\n' "${line#*=}" ;; *) return 1 ;; esac
 }
 
+# Durable publisher control metadata is executable state, not an ordinary
+# parseable text input. Never follow a pre-planted symlink or resume from a
+# file that another account (or a later permissive chmod) could replace. The
+# enclosing state roots are separately required to be physical exact-0700
+# directories; this leaf check closes the corresponding recovery-read gap.
+metadata_file_is_trusted() {
+    local file="$1" owner mode
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    owner="$(file_owner_uid "$file" 2>/dev/null)" || return 1
+    mode="$(file_mode "$file" 2>/dev/null)" || return 1
+    [ "$owner" = "$(id -u)" ] && [ "$mode" = 600 ]
+}
+
 read_active_lease() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,lease_id,pid,process_start_fingerprint,boot_identity,real_path,shared_targets,phase,state_seq,started_at,updated_at,baseline_binary_sha256,candidate_commit,challenge,force_reinstall,force_reason,failed_phase,failure_reason" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 18 ] || return 1
@@ -385,7 +424,7 @@ read_active_lease() {
 
 read_pending_admission() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,lease_id,challenge,real_path,shared_targets,candidate_commit,installed_binary_sha256,installed_binary_inode,installed_binary_mode,installed_assets_sha256,installed_at,fresh_mcp,force_reinstall,force_reason" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 14 ] || return 1
@@ -416,7 +455,7 @@ read_pending_admission() {
 
 read_recovery_handoff() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,predecessor_lease_id,predecessor_challenge,predecessor_phase,predecessor_failed_phase,predecessor_boot_identity,predecessor_binary_sha256,successor_lease_id,successor_challenge,successor_stage_path,real_path,shared_targets,started_at,reason" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 14 ] || return 1
@@ -447,7 +486,7 @@ read_recovery_handoff() {
 
 read_handoff_completion_intent() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,successor_lease_id,successor_challenge,successor_candidate_commit,handoff_meta_sha256,quarantine_path,handoff_receipt_path,recovery_receipt_path,started_at" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 9 ] || return 1
@@ -470,7 +509,7 @@ read_handoff_completion_intent() {
 
 read_release_intent() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,lease_id,challenge,disposition,reason,quarantine_path,active_meta_sha256,current_binary_sha256,current_binary_inode,receipt_path,real_path,shared_targets,started_at" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 13 ] || return 1
@@ -509,6 +548,96 @@ path_has_symlink_component() {
     return 1
 }
 
+mode_value() {
+    local mode="$1"
+    case "$mode" in ''|*[!0-7]*) return 1 ;; esac
+    printf '%s\n' "$((8#$mode))"
+}
+
+validate_trusted_deploy_root() {
+    local raw="$1" canonical euid owner mode numeric ancestor
+    [ -n "$raw" ] || die "AGENT_BRIDGE_DEPLOY_ROOT must not be empty"
+    case "$raw" in
+        *[!A-Za-z0-9._/-]*)
+            die "AGENT_BRIDGE_DEPLOY_ROOT contains an unsupported character"
+            ;;
+    esac
+    case "$raw" in /*) ;; *) die "AGENT_BRIDGE_DEPLOY_ROOT must be absolute: $raw" ;; esac
+    [ -d "$raw" ] && [ ! -L "$raw" ] ||
+        die "AGENT_BRIDGE_DEPLOY_ROOT must be a pre-existing physical directory: $raw"
+    ! path_has_symlink_component "$raw" ||
+        die "AGENT_BRIDGE_DEPLOY_ROOT must not traverse a symlink: $raw"
+    canonical="$(cd -P "$raw" && pwd -P)" ||
+        die "cannot canonicalize AGENT_BRIDGE_DEPLOY_ROOT: $raw"
+    [ "$raw" = "$canonical" ] ||
+        die "AGENT_BRIDGE_DEPLOY_ROOT must be an absolute canonical path: $raw"
+
+    euid="$(id -u)"
+    owner="$(file_owner_uid "$canonical")" ||
+        die "cannot inspect AGENT_BRIDGE_DEPLOY_ROOT owner: $canonical"
+    [ "$owner" = "$euid" ] ||
+        die "AGENT_BRIDGE_DEPLOY_ROOT must be owned by euid $euid: $canonical"
+    mode="$(file_mode "$canonical")" ||
+        die "cannot inspect AGENT_BRIDGE_DEPLOY_ROOT mode: $canonical"
+    numeric="$(mode_value "$mode")" ||
+        die "cannot parse AGENT_BRIDGE_DEPLOY_ROOT mode: $canonical"
+    [ "$mode" = 700 ] ||
+        die "AGENT_BRIDGE_DEPLOY_ROOT mode must be exact 0700: $canonical (mode $mode)"
+
+    ancestor="$(dirname "$canonical")"
+    while :; do
+        [ -d "$ancestor" ] && [ ! -L "$ancestor" ] ||
+            die "AGENT_BRIDGE_DEPLOY_ROOT ancestor is not a physical directory: $ancestor"
+        owner="$(file_owner_uid "$ancestor")" ||
+            die "cannot inspect AGENT_BRIDGE_DEPLOY_ROOT ancestor owner: $ancestor"
+        [ "$owner" = "$euid" ] || [ "$owner" = 0 ] ||
+            die "AGENT_BRIDGE_DEPLOY_ROOT ancestor must be owned by euid $euid or root: $ancestor"
+        mode="$(file_mode "$ancestor")" ||
+            die "cannot inspect AGENT_BRIDGE_DEPLOY_ROOT ancestor mode: $ancestor"
+        numeric="$(mode_value "$mode")" ||
+            die "cannot parse AGENT_BRIDGE_DEPLOY_ROOT ancestor mode: $ancestor"
+        if [ $((numeric & 0022)) -ne 0 ]; then
+            [ "$owner" = 0 ] && [ $((numeric & 01000)) -ne 0 ] ||
+                die "AGENT_BRIDGE_DEPLOY_ROOT ancestor is group/other writable without a root-owned sticky boundary: $ancestor (mode $mode)"
+        fi
+        [ "$ancestor" = / ] && break
+        ancestor="$(dirname "$ancestor")"
+    done
+    DEPLOY_ROOT="$canonical"
+}
+
+validate_legacy_leaf_override() {
+    local name="$1" present="$2" raw="$3" expected="$4"
+    [ -z "$present" ] || [ "$raw" = "$expected" ] ||
+        die "$name diverges from AGENT_BRIDGE_DEPLOY_ROOT; expected exact path: $expected"
+}
+
+verify_owned_directory_mode() {
+    local path="$1" expected_mode="$2" label="$3" euid owner mode
+    [ -d "$path" ] && [ ! -L "$path" ] || die "$label is not a physical directory: $path"
+    euid="$(id -u)"
+    owner="$(file_owner_uid "$path")" || die "cannot inspect $label owner: $path"
+    [ "$owner" = "$euid" ] || die "$label must be owned by euid $euid: $path"
+    mode="$(file_mode "$path")" || die "cannot inspect $label mode: $path"
+    [ "$mode" = "$expected_mode" ] || die "$label mode must be $expected_mode: $path (mode $mode)"
+}
+
+protect_owned_directory() {
+    local path="$1" label="$2"
+    chmod 700 "$path" || die "cannot protect $label: $path"
+    verify_owned_directory_mode "$path" 700 "$label"
+}
+
+verify_owned_regular_mode() {
+    local path="$1" expected_mode="$2" label="$3" euid owner mode
+    [ -f "$path" ] && [ ! -L "$path" ] || die "$label is not a physical regular file: $path"
+    euid="$(id -u)"
+    owner="$(file_owner_uid "$path")" || die "cannot inspect $label owner: $path"
+    [ "$owner" = "$euid" ] || die "$label must be owned by euid $euid: $path"
+    mode="$(file_mode "$path")" || die "cannot inspect $label mode: $path"
+    [ "$mode" = "$expected_mode" ] || die "$label mode must be $expected_mode: $path (mode $mode)"
+}
+
 ensure_physical_directory_path() {
     local path="$1" rest part current=""
     case "$path" in /*) rest="${path#/}" ;; *) die "physical directory path must be absolute: $path" ;; esac
@@ -519,13 +648,209 @@ ensure_physical_directory_path() {
         current="$current/$part"
         if [ -e "$current" ] || [ -L "$current" ]; then
             [ -d "$current" ] && [ ! -L "$current" ] ||
-                die "publisher state path component is not a physical directory: $current"
+                die "trusted path component is not a physical directory: $current"
         else
-            mkdir "$current" || die "cannot create publisher state directory component: $current"
+            mkdir "$current" || die "cannot create trusted directory component: $current"
             [ -d "$current" ] && [ ! -L "$current" ] ||
-                die "created publisher state component is not a physical directory: $current"
+                die "created trusted path component is not a physical directory: $current"
         fi
     done
+}
+
+ensure_trusted_subdirectory_path() {
+    local root="$1" path="$2" label="$3" relative part current
+    case "$path" in
+        "$root") verify_owned_directory_mode "$root" 700 "$label root"; return 0 ;;
+        "$root"/*) relative="${path#"$root"/}" ;;
+        *) die "$label escapes its trusted root: $path" ;;
+    esac
+    current="$root"
+    verify_owned_directory_mode "$current" 700 "$label root"
+    while [ -n "$relative" ]; do
+        case "$relative" in
+            */*) part="${relative%%/*}"; relative="${relative#*/}" ;;
+            *) part="$relative"; relative="" ;;
+        esac
+        case "$part" in ''|.|..) die "$label contains a non-canonical path component: $path" ;; esac
+        current="$current/$part"
+        if [ -e "$current" ] || [ -L "$current" ]; then
+            [ -d "$current" ] && [ ! -L "$current" ] ||
+                die "$label component is not a physical directory: $current"
+        else
+            if ! mkdir -m 700 "$current"; then
+                [ -d "$current" ] && [ ! -L "$current" ] ||
+                    die "cannot create $label component: $current"
+            fi
+        fi
+        verify_owned_directory_mode "$current" 700 "$label component"
+    done
+}
+
+validate_existing_trusted_subdirectory_components() {
+    local root="$1" path="$2" label="$3" relative part current
+    case "$path" in
+        "$root") verify_owned_directory_mode "$root" 700 "$label root"; return 0 ;;
+        "$root"/*) relative="${path#"$root"/}" ;;
+        *) die "$label escapes its trusted root: $path" ;;
+    esac
+    current="$root"
+    verify_owned_directory_mode "$current" 700 "$label root"
+    while [ -n "$relative" ]; do
+        case "$relative" in
+            */*) part="${relative%%/*}"; relative="${relative#*/}" ;;
+            *) part="$relative"; relative="" ;;
+        esac
+        case "$part" in ''|.|..) die "$label contains a non-canonical path component: $path" ;; esac
+        current="$current/$part"
+        if [ ! -e "$current" ] && [ ! -L "$current" ]; then
+            return 0
+        fi
+        [ -d "$current" ] && [ ! -L "$current" ] ||
+            die "$label component is not a physical directory: $current"
+        verify_owned_directory_mode "$current" 700 "$label component"
+    done
+}
+
+validate_private_source_checkout() {
+    local expected_repo source_dir invoked_script local_git_override
+    expected_repo="$DEPLOY_ROOT/source/agent-bridge"
+    source_dir="$DEPLOY_ROOT/source"
+    invoked_script="$SCRIPT_PATH"
+
+    [ "$REPO" = "$expected_repo" ] ||
+        die "production deploy must run from the fixed trusted checkout: $expected_repo"
+    [ "$invoked_script" = "$expected_repo/scripts/deploy_from_master.sh" ] ||
+        die "production deploy must execute the exact trusted orchestrator path: $expected_repo/scripts/deploy_from_master.sh"
+    ! path_has_symlink_component "$invoked_script" ||
+        die "production deploy script must not traverse a symlink: $invoked_script"
+    verify_owned_directory_mode "$source_dir" 700 "trusted source directory"
+    verify_owned_directory_mode "$REPO" 700 "trusted source checkout"
+    verify_owned_directory_mode "$REPO/.git" 700 "trusted source Git metadata"
+    verify_owned_directory_mode "$SCRIPT_DIR" 700 "trusted source scripts directory"
+    verify_owned_regular_mode "$invoked_script" 700 "trusted deploy orchestrator"
+    [ -x "$invoked_script" ] || die "trusted deploy orchestrator is not executable"
+    # `git archive` honors repository-local info attributes, while legacy
+    # grafts can rewrite object ancestry. Neither belongs in the root-bound
+    # publisher clone: authoritative tree semantics come only from the fetched
+    # GitLab objects and committed attributes.
+    for local_git_override in "$REPO/.git/info/attributes" "$REPO/.git/info/grafts"; do
+        ! path_has_symlink_component "$local_git_override" ||
+            die "trusted source Git override path must not traverse a symlink: $local_git_override"
+        [ ! -e "$local_git_override" ] && [ ! -L "$local_git_override" ] ||
+            die "trusted source Git override must be absent: $local_git_override"
+    done
+}
+
+validate_trusted_git_configuration() {
+    TRUSTED_GIT_CONFIG_DIR="$DEPLOY_ROOT/config/git"
+    TRUSTED_GIT_KEY="$TRUSTED_GIT_CONFIG_DIR/gitlab_deploy_key"
+    TRUSTED_GIT_KNOWN_HOSTS="$TRUSTED_GIT_CONFIG_DIR/known_hosts"
+    verify_owned_directory_mode "$DEPLOY_ROOT/config" 700 "trusted configuration root"
+    verify_owned_directory_mode "$TRUSTED_GIT_CONFIG_DIR" 700 "trusted Git configuration"
+    verify_owned_regular_mode "$TRUSTED_GIT_KEY" 600 "trusted GitLab deploy key"
+    verify_owned_regular_mode "$TRUSTED_GIT_KNOWN_HOSTS" 600 "trusted GitLab known-hosts file"
+    TRUSTED_GIT_SSH_COMMAND="/usr/bin/ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=$TRUSTED_GIT_KEY -o UserKnownHostsFile=$TRUSTED_GIT_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+}
+
+deploy_git() {
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        command git "$@"
+    else
+        /usr/bin/env -i \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            HOME="$DEPLOY_ROOT" \
+            LANG=C \
+            GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_ATTR_NOSYSTEM=1 \
+            GIT_NO_REPLACE_OBJECTS=1 \
+            GIT_PROTOCOL_FROM_USER=0 \
+            GIT_TERMINAL_PROMPT=0 \
+            GIT_SSH_COMMAND="$TRUSTED_GIT_SSH_COMMAND" \
+            /usr/bin/git \
+                -c core.hooksPath=/dev/null \
+                -c core.attributesFile=/dev/null \
+                -c protocol.file.allow=never \
+                -c protocol.ext.allow=never \
+                "$@"
+    fi
+}
+
+validate_authoritative_remote() {
+    local url
+    case "$DEPLOY_REMOTE" in
+        ''|*[!A-Za-z0-9._-]*) die "AGENT_BRIDGE_DEPLOY_REMOTE is not a safe remote name" ;;
+    esac
+    url="$(deploy_git -C "$REPO" remote get-url "$DEPLOY_REMOTE" 2>/dev/null)" ||
+        die "configured deploy remote does not exist: $DEPLOY_REMOTE"
+    case "$url" in
+        git@gitlab.com:pallasting/agent-bridge.git|ssh://git@gitlab.com/pallasting/agent-bridge.git) ;;
+        *) die "production deploy remote must be the authenticated pallasting/agent-bridge GitLab SSH URL" ;;
+    esac
+    AUTHORITATIVE_REMOTE_URL="$url"
+}
+
+validate_trusted_build_toolchain() {
+    local sysroot canonical_sysroot
+    TRUSTED_TOOLCHAIN_ROOT="$DEPLOY_ROOT/toolchain"
+    TRUSTED_TOOLCHAIN_BIN="$TRUSTED_TOOLCHAIN_ROOT/bin"
+    TRUSTED_CARGO="$TRUSTED_TOOLCHAIN_BIN/cargo"
+    TRUSTED_RUSTC="$TRUSTED_TOOLCHAIN_BIN/rustc"
+    verify_owned_directory_mode "$TRUSTED_TOOLCHAIN_ROOT" 700 "trusted Rust toolchain"
+    verify_owned_directory_mode "$TRUSTED_TOOLCHAIN_BIN" 700 "trusted Rust toolchain bin directory"
+    verify_owned_regular_mode "$TRUSTED_CARGO" 755 "trusted Cargo executable"
+    verify_owned_regular_mode "$TRUSTED_RUSTC" 755 "trusted rustc executable"
+    [ -x "$TRUSTED_CARGO" ] && [ -x "$TRUSTED_RUSTC" ] ||
+        die "trusted Rust toolchain executables must be executable"
+    sysroot="$(/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="$DEPLOY_ROOT" \
+        "$TRUSTED_RUSTC" --print sysroot 2>/dev/null)" ||
+        die "trusted rustc cannot report its sysroot"
+    case "$sysroot" in /*) ;; *) die "trusted rustc reported a non-absolute sysroot" ;; esac
+    [ -d "$sysroot" ] && [ ! -L "$sysroot" ] ||
+        die "trusted rustc sysroot is not a physical directory: $sysroot"
+    ! path_has_symlink_component "$sysroot" ||
+        die "trusted rustc sysroot must not traverse a symlink: $sysroot"
+    canonical_sysroot="$(cd -P "$sysroot" && pwd -P)" || die "cannot canonicalize trusted rustc sysroot"
+    case "$canonical_sysroot" in
+        "$TRUSTED_TOOLCHAIN_ROOT"|"$TRUSTED_TOOLCHAIN_ROOT"/*) ;;
+        *) die "trusted rustc sysroot escapes the trusted toolchain root" ;;
+    esac
+}
+
+validate_private_build_base() {
+    local raw="$1" canonical euid owner mode numeric ancestor
+    [ -n "$raw" ] || die "private Cargo build-cache base must not be empty"
+    case "$raw" in
+        *[!A-Za-z0-9._/-]*) die "private Cargo build-cache base contains an unsupported character" ;;
+    esac
+    case "$raw" in /*) ;; *) die "private Cargo build-cache base must be absolute: $raw" ;; esac
+    [ -d "$raw" ] && [ ! -L "$raw" ] ||
+        die "private Cargo build-cache base must be a pre-existing physical directory: $raw"
+    ! path_has_symlink_component "$raw" ||
+        die "private Cargo build-cache base must not traverse a symlink: $raw"
+    canonical="$(cd -P "$raw" && pwd -P)" || die "cannot canonicalize private Cargo build-cache base: $raw"
+    [ "$canonical" = "$raw" ] || die "private Cargo build-cache base must be canonical: $raw"
+    euid="$(id -u)"
+    owner="$(file_owner_uid "$canonical")" || die "cannot inspect private Cargo build-cache base owner"
+    [ "$owner" = "$euid" ] || die "private Cargo build-cache base must be owned by euid $euid: $canonical"
+    mode="$(file_mode "$canonical")" || die "cannot inspect private Cargo build-cache base mode"
+    [ "$mode" = 700 ] || die "private Cargo build-cache base mode must be exact 0700: $canonical (mode $mode)"
+    ancestor="$(dirname "$canonical")"
+    while :; do
+        [ -d "$ancestor" ] && [ ! -L "$ancestor" ] ||
+            die "private Cargo build-cache base ancestor is not a physical directory: $ancestor"
+        owner="$(file_owner_uid "$ancestor")" || die "cannot inspect private Cargo build-cache base ancestor owner"
+        [ "$owner" = "$euid" ] || [ "$owner" = 0 ] ||
+            die "private Cargo build-cache base ancestor has an untrusted owner: $ancestor"
+        mode="$(file_mode "$ancestor")" || die "cannot inspect private Cargo build-cache base ancestor mode"
+        numeric="$(mode_value "$mode")" || die "cannot parse private Cargo build-cache base ancestor mode"
+        if [ $((numeric & 0022)) -ne 0 ]; then
+            [ "$owner" = 0 ] && [ $((numeric & 01000)) -ne 0 ] ||
+                die "private Cargo build-cache base ancestor is replaceable: $ancestor (mode $mode)"
+        fi
+        [ "$ancestor" = / ] && break
+        ancestor="$(dirname "$ancestor")"
+    done
+    DEPLOY_TARGET_BASE="$canonical"
 }
 
 canonical_contained_test_path() {
@@ -570,6 +895,12 @@ validate_lease_test_environment() {
     canonical_contained_test_path "$ADAPTER_PATH" "$root" adapter >/dev/null
     canonical_contained_test_path "$RUNTIME_ASSET_DIR" "$root" runtime_assets >/dev/null
     canonical_contained_test_path "${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}" "$root" state >/dev/null
+    if [ -n "$USE_BINARY" ]; then
+        # Store the canonical absolute result, not merely a successful check:
+        # downstream native-magic/hash/copy tools must never receive a
+        # caller-controlled leading-dash or relative operand.
+        USE_BINARY="$(canonical_contained_test_path "$USE_BINARY" "$root" use_binary)"
+    fi
     for path in "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_PAYLOAD:-}" \
         "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_READY_FILE:-}" \
         "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MUTATION_LOG:-}" \
@@ -736,6 +1067,7 @@ CLEANUP_WT=""
 CLEANUP_RUNTIME_STAGE=""
 CLEANUP_PKG_CONFIG=""
 CLEANUP_BINARY_STAGE=""
+CLEANUP_CANDIDATE_SNAPSHOT=""
 CLEANUP_DEPLOY_LOCK=""
 CLEANUP_LEASE_INTENT=""
 CLEANUP_FRESH_MCP_TMP=""
@@ -796,10 +1128,99 @@ if [ "$ADMIT_FRESH_MCP" -eq 1 ]; then
     [ "$RECOVERY_MODE" = none ] || die "fresh MCP admission cannot perform publisher recovery"
 fi
 
+if [ "$LEASE_TEST_MODE" = 0 ]; then
+    validate_trusted_deploy_root "$DEPLOY_ROOT_RAW"
+    derived_install="$DEPLOY_ROOT/bin"
+    derived_real="$derived_install/agent-bridge.real"
+    derived_adapter="$DEPLOY_ROOT/share/ab-tts/audio_embody.py"
+    derived_runtime="$DEPLOY_ROOT/lib/agent-bridge/scripts"
+    derived_state="$DEPLOY_ROOT/publisher-state/deploy"
+    validate_legacy_leaf_override AGENT_BRIDGE_INSTALL_DIR \
+        "${AGENT_BRIDGE_INSTALL_DIR+x}" "${AGENT_BRIDGE_INSTALL_DIR-}" "$derived_install"
+    validate_legacy_leaf_override AGENT_BRIDGE_REAL_BIN \
+        "${AGENT_BRIDGE_REAL_BIN+x}" "${AGENT_BRIDGE_REAL_BIN-}" "$derived_real"
+    validate_legacy_leaf_override AGENT_BRIDGE_AUDIO_EMBODY_PATH \
+        "${AGENT_BRIDGE_AUDIO_EMBODY_PATH+x}" "${AGENT_BRIDGE_AUDIO_EMBODY_PATH-}" "$derived_adapter"
+    validate_legacy_leaf_override AGENT_BRIDGE_RUNTIME_ASSET_DIR \
+        "${AGENT_BRIDGE_RUNTIME_ASSET_DIR+x}" "${AGENT_BRIDGE_RUNTIME_ASSET_DIR-}" "$derived_runtime"
+    validate_legacy_leaf_override AGENT_BRIDGE_DEPLOY_STATE_DIR \
+        "${AGENT_BRIDGE_DEPLOY_STATE_DIR+x}" "${AGENT_BRIDGE_DEPLOY_STATE_DIR-}" "$derived_state"
+    INSTALL_DIR="$derived_install"
+    REAL_PATH="$derived_real"
+    WRAPPER_PATH="$derived_install/agent-bridge"
+    ADAPTER_PATH="$derived_adapter"
+    RUNTIME_ASSET_DIR="$derived_runtime"
+    LEASE_STATE_RAW="$derived_state"
+    for trusted_directory in \
+        "$derived_install" \
+        "$derived_state" \
+        "$DEPLOY_ROOT/share/ab-tts" \
+        "$derived_runtime"
+    do
+        validate_existing_trusted_subdirectory_components \
+            "$DEPLOY_ROOT" "$trusted_directory" "canonical deployment directory"
+    done
+    derived_adapter_root="$(dirname "$(dirname "$derived_adapter")")"
+    for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
+        trusted_policy_target="$derived_adapter_root/$asset"
+        validate_existing_trusted_subdirectory_components \
+            "$DEPLOY_ROOT" "$(dirname "$trusted_policy_target")" \
+            "installed audio policy directory"
+        ! path_has_symlink_component "$trusted_policy_target" ||
+            die "installed audio policy path must not traverse a symlink: $trusted_policy_target"
+    done
+    for trusted_target in "$REAL_PATH" "$WRAPPER_PATH" "$ADAPTER_PATH" "$RUNTIME_ASSET_DIR" "$LEASE_STATE_RAW"; do
+        ! path_has_symlink_component "$trusted_target" ||
+            die "canonical deployment path must not traverse a symlink: $trusted_target"
+    done
+    # A publisher cannot bootstrap trust while executing from a replaceable
+    # development checkout. Production is entered only through the fixed,
+    # private clone provisioned beneath the deployment root.
+    validate_private_source_checkout
+    [ -z "$USE_BINARY" ] ||
+        die "--use-binary is disabled for production trusted-root deployment"
+    DEPLOY_TARGET_ROOT=""
+    if [ -z "$USE_BINARY" ] && [ "$ADMIT_FRESH_MCP" -eq 0 ]; then
+        validate_trusted_git_configuration
+        validate_authoritative_remote
+        validate_trusted_build_toolchain
+        if [ "${CARGO_TARGET_DIR+x}" = x ]; then
+            validate_private_build_base "$CARGO_TARGET_DIR"
+        else
+            default_build_parent="$(cd -P /var/tmp 2>/dev/null && pwd -P)" ||
+                die "cannot establish the default private Cargo build-cache parent"
+            default_build_base="$default_build_parent/agent-bridge-deploy-target-$(id -u)"
+            if [ -e "$default_build_base" ] || [ -L "$default_build_base" ]; then
+                [ -d "$default_build_base" ] && [ ! -L "$default_build_base" ] ||
+                    die "default private Cargo build-cache base is not a physical directory"
+            else
+                if ! mkdir -m 700 "$default_build_base"; then
+                    [ -d "$default_build_base" ] && [ ! -L "$default_build_base" ] ||
+                        die "cannot create the default private Cargo build-cache base"
+                fi
+            fi
+            validate_private_build_base "$default_build_base"
+        fi
+        deploy_root_device="$(file_device "$DEPLOY_ROOT")" ||
+            die "cannot inspect deployment-root device identity"
+        deploy_root_inode="$(file_inode "$DEPLOY_ROOT")" ||
+            die "cannot inspect deployment-root inode identity"
+        deploy_root_fingerprint="$(printf '%s\t%s\t%s\n' \
+            "$DEPLOY_ROOT" "$deploy_root_device" "$deploy_root_inode" | sha256_text)"
+        DEPLOY_TARGET_ROOT="$DEPLOY_TARGET_BASE/root-$deploy_root_fingerprint"
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_TARGET_BASE" "$DEPLOY_TARGET_ROOT" "deployment-scoped Cargo build target"
+        TRUSTED_CARGO_HOME="$DEPLOY_TARGET_ROOT/cargo-home"
+        TRUSTED_BUILD_TMP="$DEPLOY_TARGET_ROOT/tmp"
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_TARGET_BASE" "$TRUSTED_CARGO_HOME" "trusted Cargo home"
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_TARGET_BASE" "$TRUSTED_BUILD_TMP" "trusted Cargo temporary directory"
+    fi
+fi
+
 [ ! -L "$REAL_PATH" ] || [ -e "$REAL_PATH" ] ||
     die "deployment target is a dangling final symlink; fail closed: $REAL_PATH"
-LEASE_TEST_MODE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE:-0}"
-case "$LEASE_TEST_MODE" in 0|1) ;; *) die "AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE must be 0 or 1" ;; esac
 LEASE_TEST_LIVE_FRESH_MCP="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_LIVE_FRESH_MCP:-0}"
 LEASE_TEST_HOLD_AFTER_FRESH_MCP="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_HOLD_AFTER_FRESH_MCP_SETTLED:-0}"
 case "$LEASE_TEST_LIVE_FRESH_MCP" in 0|1) ;; *) die "AGENT_BRIDGE_DEPLOY_LEASE_TEST_LIVE_FRESH_MCP must be 0 or 1" ;; esac
@@ -817,23 +1238,42 @@ if [ "$LEASE_TEST_MODE" = 1 ]; then
     validate_lease_test_environment "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_ROOT"
     DEPLOY_TMPDIR="$TEST_PHYSICAL_ROOT/tmp"
     mkdir -p "$DEPLOY_TMPDIR"
-    chmod 700 "$DEPLOY_TMPDIR" 2>/dev/null || true
+    protect_owned_directory "$DEPLOY_TMPDIR" "publisher lease test temp directory"
 else
-    DEPLOY_TMPDIR="${TMPDIR:-/tmp}"
+    DEPLOY_TMPDIR="$DEPLOY_ROOT/publisher-state/tmp"
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$DEPLOY_TMPDIR" "publisher temporary directory"
 fi
 
-REAL_PATH="$(canonical_target_path "$REAL_PATH")" || die "cannot canonicalize deployment target: $REAL_PATH"
-mkdir -p "$(dirname "$REAL_PATH")"
 if [ "$LEASE_TEST_MODE" = 1 ]; then
     LEASE_STATE_RAW="${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}"
 else
-    [ -z "${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}" ] ||
-        die "AGENT_BRIDGE_DEPLOY_STATE_DIR is test-only; production publisher lock identity is fixed"
-    ACCOUNT_HOME="$(account_home_directory)" || die "cannot resolve the real account home for the host-wide publisher lease"
-    LEASE_STATE_RAW="$ACCOUNT_HOME/.local/state/agent-bridge/deploy"
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$INSTALL_DIR" "canonical deployment bin directory"
+    # The publisher owns the persistent workload runtime substrate consumed by
+    # both the fixed wrapper and the full user-systemd units. Provision every
+    # leaf as an exact physical 0700 directory only after the deployment root,
+    # private source, remote configuration, and toolchain gates have passed.
+    # The service installer intentionally remains zero-write until its own
+    # UnitPath/runtime-bus preflight succeeds, so it must never bootstrap these
+    # trust roots itself.
+    RUNTIME_STATE_ROOT="$DEPLOY_ROOT/runtime-state"
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$RUNTIME_STATE_ROOT" "workload runtime-state root"
+    for runtime_state_leaf in home data cache xdg-state tmp workload-tmp workload-receipts; do
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_ROOT" "$RUNTIME_STATE_ROOT/$runtime_state_leaf" \
+            "workload runtime-state directory"
+    done
 fi
+REAL_PATH="$(canonical_target_path "$REAL_PATH")" || die "cannot canonicalize deployment target: $REAL_PATH"
 [ ! -L "$LEASE_STATE_RAW" ] || die "publisher lease state root must not be a symlink: $LEASE_STATE_RAW"
-ensure_physical_directory_path "$LEASE_STATE_RAW"
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    ensure_physical_directory_path "$LEASE_STATE_RAW"
+else
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$LEASE_STATE_RAW" "publisher state directory"
+fi
 LEASE_STATE_ROOT="$(cd -P "$LEASE_STATE_RAW" && pwd -P)"
 LEASE_RECEIPT_DIR="$LEASE_STATE_ROOT/receipts"
 LEASE_QUARANTINE_DIR="$LEASE_STATE_ROOT/quarantine"
@@ -845,53 +1285,46 @@ RELEASE_INTENT="$LEASE_STATE_ROOT/release-intent.meta"
 FRESH_MCP_ADMISSION_INTENT="$LEASE_STATE_ROOT/fresh-mcp-admission-intent.meta"
 deploy_lock="$LEASE_STATE_ROOT/active.lock"
 ACTIVE_META="$deploy_lock/lease.meta"
-ensure_physical_directory_path "$LEASE_RECEIPT_DIR"
-ensure_physical_directory_path "$LEASE_QUARANTINE_DIR"
-ensure_physical_directory_path "$LEASE_INTENT_DIR"
-chmod 700 "$LEASE_STATE_ROOT" "$LEASE_RECEIPT_DIR" "$LEASE_QUARANTINE_DIR" "$LEASE_INTENT_DIR" 2>/dev/null || true
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    ensure_physical_directory_path "$LEASE_RECEIPT_DIR"
+    ensure_physical_directory_path "$LEASE_QUARANTINE_DIR"
+    ensure_physical_directory_path "$LEASE_INTENT_DIR"
+else
+    ensure_trusted_subdirectory_path "$DEPLOY_ROOT" "$LEASE_RECEIPT_DIR" "publisher receipt directory"
+    ensure_trusted_subdirectory_path "$DEPLOY_ROOT" "$LEASE_QUARANTINE_DIR" "publisher quarantine directory"
+    ensure_trusted_subdirectory_path "$DEPLOY_ROOT" "$LEASE_INTENT_DIR" "publisher intent directory"
+fi
+protect_owned_directory "$LEASE_STATE_ROOT" "publisher state root"
+protect_owned_directory "$LEASE_RECEIPT_DIR" "publisher receipt directory"
+protect_owned_directory "$LEASE_QUARANTINE_DIR" "publisher quarantine directory"
+protect_owned_directory "$LEASE_INTENT_DIR" "publisher intent directory"
 KERNEL_LOCK_FILE="$LEASE_STATE_ROOT/publisher.kernel.lock"
 PUBLISHER_PREVIOUS_UMASK="$(umask)"
 umask 077
-: >>"$KERNEL_LOCK_FILE" || die "cannot create the host-wide publisher kernel mutex"
-chmod 600 "$KERNEL_LOCK_FILE" 2>/dev/null || true
+if [ -e "$KERNEL_LOCK_FILE" ] || [ -L "$KERNEL_LOCK_FILE" ]; then
+    verify_owned_regular_mode "$KERNEL_LOCK_FILE" 600 "publisher kernel mutex"
+else
+    : >"$KERNEL_LOCK_FILE" || die "cannot create the publisher kernel mutex"
+    chmod 600 "$KERNEL_LOCK_FILE" || die "cannot protect the publisher kernel mutex"
+fi
+verify_owned_regular_mode "$KERNEL_LOCK_FILE" 600 "publisher kernel mutex"
 umask "$PUBLISHER_PREVIOUS_UMASK"
 HOST_KERNEL_OS="$(/usr/bin/uname -s 2>/dev/null || uname -s)"
-PUBLISHER_LOCK_HOLDER="${AGENT_BRIDGE_DEPLOY_KERNEL_LOCK_HOLDER:-}"
-if [ -z "$PUBLISHER_LOCK_HOLDER" ]; then
-    # Acquire the advisory mutex on fd 9 in the shell that will exec this
-    # script.  The actual publisher therefore owns the open file description;
-    # there is no separate lock-holder process that can die while leaving an
-    # orphan publisher running.  Foreground descendants inherit fd 9, so a
-    # SIGKILL of the shell cannot release the mutex while its current child is
-    # still executing.
-    PUBLISHER_LOCK_PROGRAM='
-lock_file="$1"; host_os="$2"; script="$3"; shift 3
-exec 9>>"$lock_file" || exit 73
-case "$host_os" in
-    Darwin) /usr/bin/lockf -s -t 0 9 || exit $? ;;
-    Linux) flock -n 9 || exit $? ;;
-    *) exit 64 ;;
+# The publisher shell itself owns fd 9. No mutable-script re-exec or separate
+# lock-holder process sits between validation and the transaction.
+exec 9>>"$KERNEL_LOCK_FILE" || die "cannot open publisher kernel mutex"
+case "$HOST_KERNEL_OS" in
+    Darwin)
+        [ -x /usr/bin/lockf ] || die "macOS lockf is required for publisher serialization"
+        /usr/bin/lockf -s -t 0 9 || die "another publisher owns the kernel mutex"
+        ;;
+    Linux)
+        [ -x /usr/bin/flock ] || die "Linux /usr/bin/flock is required for publisher serialization"
+        /usr/bin/flock -n 9 || die "another publisher owns the kernel mutex"
+        ;;
+    *) die "unsupported publisher mutex platform: $HOST_KERNEL_OS" ;;
 esac
-AGENT_BRIDGE_DEPLOY_KERNEL_LOCK_HOLDER="$$"
-export AGENT_BRIDGE_DEPLOY_KERNEL_LOCK_HOLDER
-exec "$script" "$@"
-'
-    case "$HOST_KERNEL_OS" in
-        Darwin)
-            [ -x /usr/bin/lockf ] || die "macOS lockf is required for publisher serialization"
-            ;;
-        Linux)
-            KERNEL_FLOCK="$(command -v flock 2>/dev/null || true)"
-            [ -n "$KERNEL_FLOCK" ] || die "Linux flock is required for publisher serialization"
-            ;;
-        *) die "unsupported publisher mutex platform: $HOST_KERNEL_OS" ;;
-    esac
-    exec /bin/bash -c "$PUBLISHER_LOCK_PROGRAM" publisher-lock-holder \
-        "$KERNEL_LOCK_FILE" "$HOST_KERNEL_OS" "$SCRIPT_DIR/deploy_from_master.sh" "${DEPLOY_ORIGINAL_ARGS[@]}"
-fi
-case "$PUBLISHER_LOCK_HOLDER" in ''|*[!0-9]*) die "invalid publisher kernel lock-holder marker" ;; esac
-[ "$$" = "$PUBLISHER_LOCK_HOLDER" ] || die "publisher kernel lock-holder marker does not match this process"
-[ -e /dev/fd/9 ] || die "publisher process did not inherit kernel mutex fd 9"
+[ -e /dev/fd/9 ] || die "publisher process does not own kernel mutex fd 9"
 /usr/bin/env -i PATH=/usr/bin:/bin PYTHONNOUSERSITE=1 \
     /usr/bin/python3 -I - "$KERNEL_LOCK_FILE" 9 <<'PY' ||
 import os
@@ -916,9 +1349,9 @@ if [ "$HOST_KERNEL_OS" = Darwin ]; then
     KERNEL_LOCK_PROBE_STATUS=$?
     KERNEL_LOCK_EXPECTED_BUSY=75
 else
-    flock -n 9 2>/dev/null
+    /usr/bin/flock -n 9 2>/dev/null
     KERNEL_LOCK_SELF_STATUS=$?
-    flock -n "$KERNEL_LOCK_FILE" /usr/bin/true 2>/dev/null
+    /usr/bin/flock -n "$KERNEL_LOCK_FILE" /usr/bin/true 2>/dev/null
     KERNEL_LOCK_PROBE_STATUS=$?
     KERNEL_LOCK_EXPECTED_BUSY=1
 fi
@@ -934,6 +1367,8 @@ installed_assets_sha256() {
     adapter_dir="$(dirname "$ADAPTER_PATH")"
     adapter_root="$(dirname "$adapter_dir")"
     {
+        path_has_symlink_component "$WRAPPER_PATH" && die "installed wrapper path must not traverse a symlink: $WRAPPER_PATH"
+        printf 'wrapper\t%s\t%s\t%s\n' "$WRAPPER_PATH" "$(sha256_file "$WRAPPER_PATH")" "$(file_mode "$WRAPPER_PATH")"
         path_has_symlink_component "$ADAPTER_PATH" && die "installed adapter path must not traverse a symlink: $ADAPTER_PATH"
         printf 'adapter\t%s\t%s\t%s\n' "$ADAPTER_PATH" "$(sha256_file "$ADAPTER_PATH")" "$(file_mode "$ADAPTER_PATH")"
         for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
@@ -955,7 +1390,7 @@ installed_assets_sha256() {
 }
 
 write_active_values() {
-    local tmp="$ACTIVE_META.tmp.$$.$RANDOM"
+    local tmp="$ACTIVE_META.tmp.$$.$RANDOM" pid_path pid_tmp
     {
         printf 'schema=%s\n' agent_bridge.publisher_lease.v0
         printf 'lease_id=%s\n' "$LEASE_ID"
@@ -977,8 +1412,16 @@ write_active_values() {
         printf 'failure_reason=%s\n' "$(clean_field "$LEASE_FAILURE_REASON")"
     } > "$tmp"
     chmod 600 "$tmp"
+    verify_owned_regular_mode "$tmp" 600 "staged publisher lease metadata"
     mv -f "$tmp" "$ACTIVE_META"
-    printf '%s\n' "$$" > "$(dirname "$ACTIVE_META")/pid"
+    verify_owned_regular_mode "$ACTIVE_META" 600 "publisher lease metadata"
+    pid_path="$(dirname "$ACTIVE_META")/pid"
+    pid_tmp="$pid_path.tmp.$$.$RANDOM"
+    printf '%s\n' "$$" > "$pid_tmp"
+    chmod 600 "$pid_tmp"
+    verify_owned_regular_mode "$pid_tmp" 600 "staged publisher lease pid"
+    mv -f "$pid_tmp" "$pid_path"
+    verify_owned_regular_mode "$pid_path" 600 "publisher lease pid"
 }
 
 lease_phase_update() {
@@ -1629,10 +2072,19 @@ reconcile_existing_lease() {
 
 cleanup() {
     local status="${1:-0}" current_sha
-    [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
+    if [ -n "$CLEANUP_WT" ]; then
+        if [ "$LEASE_TEST_MODE" = 1 ]; then
+            deploy_git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
+        else
+            case "$CLEANUP_WT" in
+                "$DEPLOY_ROOT/build/worktrees/"*) rm -rf -- "$CLEANUP_WT" 2>/dev/null || true ;;
+            esac
+        fi
+    fi
     [ -n "$CLEANUP_RUNTIME_STAGE" ] && rm -rf "$CLEANUP_RUNTIME_STAGE" 2>/dev/null || true
     [ -n "$CLEANUP_PKG_CONFIG" ] && rm -rf "$CLEANUP_PKG_CONFIG" 2>/dev/null || true
     [ -n "$CLEANUP_BINARY_STAGE" ] && rm -f "$CLEANUP_BINARY_STAGE" 2>/dev/null || true
+    [ -n "$CLEANUP_CANDIDATE_SNAPSHOT" ] && rm -f "$CLEANUP_CANDIDATE_SNAPSHOT" 2>/dev/null || true
     [ -n "$CLEANUP_LEASE_INTENT" ] && rm -rf "$CLEANUP_LEASE_INTENT" 2>/dev/null || true
     [ -n "$CLEANUP_FRESH_MCP_TMP" ] && rm -rf "$CLEANUP_FRESH_MCP_TMP" 2>/dev/null || true
     if [ "$LEASE_OWNED" -eq 1 ] && [ "$LEASE_FINALIZED" -eq 0 ] &&
@@ -1668,12 +2120,27 @@ cleanup() {
 }
 trap 'status=$?; trap - EXIT; cleanup "$status"; exit "$status"' EXIT
 
-# Serialize the complete build/install/restart transaction. Per-SHA Cargo
-# targets prevent build corruption, but the installed binary, assets, backups,
-# and launchd jobs are shared mutable state.
+# Serialize the complete build/install/restart transaction within one canonical
+# deployment domain. Per-root/per-SHA Cargo targets prevent candidate sharing;
+# the installed binary, assets, backups, and launch jobs remain mutable as one
+# unit under that domain's publisher lease.
+if [ -e "$deploy_lock" ] || [ -L "$deploy_lock" ]; then
+    [ -d "$deploy_lock" ] && [ ! -L "$deploy_lock" ] ||
+        die "publisher active lease path is not a physical directory: $deploy_lock"
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        protect_owned_directory "$deploy_lock" "publisher active lease directory"
+    else
+        verify_owned_directory_mode "$deploy_lock" 700 "publisher active lease directory"
+    fi
+fi
 settle_handoff_completion_intent
 settle_release_intent
-mkdir -p "$INSTALL_DIR"
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    mkdir -p "$INSTALL_DIR"
+else
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$INSTALL_DIR" "canonical deployment bin directory"
+fi
 LEASE_ID="lease-$(date -u '+%Y%m%dT%H%M%SZ')-$$-$RANDOM"
 LEASE_PROCESS_START="$(process_start_fingerprint "$$")" || die "cannot establish publisher process start fingerprint"
 LEASE_STARTED_AT="$(utc_now)"
@@ -1683,11 +2150,12 @@ LEASE_PHASE=acquired
 LEASE_STATE_SEQ=1
 LEASE_STAGED_LOCK="$LEASE_INTENT_DIR/$LEASE_ID.lock"
 [ ! -e "$LEASE_STAGED_LOCK" ] || die "publisher lease staging intent already exists: $LEASE_STAGED_LOCK"
-mkdir "$LEASE_STAGED_LOCK" || die "cannot create publisher lease staging intent"
+mkdir -m 700 "$LEASE_STAGED_LOCK" || die "cannot create publisher lease staging intent"
+verify_owned_directory_mode "$LEASE_STAGED_LOCK" 700 "publisher staged lease directory"
 CLEANUP_LEASE_INTENT="$LEASE_STAGED_LOCK"
 ACTIVE_META="$LEASE_STAGED_LOCK/lease.meta"
 write_active_values || die "cannot initialize publisher lease metadata"
-chmod 700 "$LEASE_STAGED_LOCK" 2>/dev/null || true
+protect_owned_directory "$LEASE_STAGED_LOCK" "publisher staged lease directory"
 read_active_lease "$ACTIVE_META" && [ "$R_LEASE_ID" = "$LEASE_ID" ] && [ "$R_CHALLENGE" = "$LEASE_CHALLENGE" ] ||
     die "staged publisher lease failed strict self-validation"
 STAGED_ACTIVE_META="$ACTIVE_META"
@@ -1710,8 +2178,8 @@ if [ "$HANDOFF_RESUME_AFTER_RECLAIM" -eq 1 ]; then
 fi
 [ ! -e "$deploy_lock" ] && [ ! -L "$deploy_lock" ] ||
     die "active publisher lease appeared while the kernel mutex was held"
-mkdir "$deploy_lock" || die "cannot exclusively claim the active publisher lease path"
-chmod 700 "$deploy_lock" 2>/dev/null || true
+mkdir -m 700 "$deploy_lock" || die "cannot exclusively claim the active publisher lease path"
+protect_owned_directory "$deploy_lock" "publisher active lease directory"
 mv "$LEASE_STAGED_LOCK/lease.meta" "$deploy_lock/lease.meta" ||
     die "cannot publish the staged publisher lease metadata"
 mv "$LEASE_STAGED_LOCK/pid" "$deploy_lock/pid" ||
@@ -1902,7 +2370,7 @@ domain_separated_meta_sha256() {
 
 read_legacy_fresh_mcp_probe_fixture() {
     local file="$1" keys legacy_evidence
-    [ "$LEASE_TEST_MODE" = 1 ] && [ -f "$file" ] || return 1
+    [ "$LEASE_TEST_MODE" = 1 ] && metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,evidence_sha256" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 10 ] || return 1
@@ -1932,7 +2400,7 @@ read_legacy_fresh_mcp_probe_fixture() {
 
 read_fresh_mcp_probe_observation() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,probe_nonce,probe_started_at,probe_finished_at,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,copied_binary_sha256" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 13 ] || return 1
@@ -1999,7 +2467,7 @@ write_bound_fresh_mcp_probe() {
 
 read_fresh_mcp_probe() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,probe_nonce,probe_started_at,probe_finished_at,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,copied_binary_sha256,pending_sha256,pending_lease_id,pending_challenge,candidate_commit,real_path,shared_targets,installed_binary_sha256,installed_binary_inode,installed_binary_mode,installed_assets_sha256,pending_installed_at,admission_lease_id,admission_challenge,evidence_sha256" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 27 ] || return 1
@@ -2051,7 +2519,7 @@ read_fresh_mcp_probe() {
 
 read_fresh_mcp_admission_intent() {
     local file="$1" keys
-    [ -f "$file" ] || return 1
+    metadata_file_is_trusted "$file" || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,pending_lease_id,pending_challenge,candidate_commit,real_path,shared_targets,pending_sha256,installed_binary_sha256,installed_binary_inode,installed_binary_mode,installed_assets_sha256,pending_installed_at,admission_lease_id,admission_challenge,receipt_path,quarantine_path,probe_schema,probe_nonce,probe_started_at,probe_finished_at,probe_server_name,probe_server_version,probe_protocol_version,probe_build_git_sha,probe_toolset,probe_tool_count,probe_capabilities_tool_present,probe_method,probe_copied_binary_sha256,probe_evidence_sha256,admission_binding_sha256" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 31 ] || return 1
@@ -2743,63 +3211,90 @@ if [ -n "$USE_BINARY" ]; then
     say "WARNING: --use-binary skips the build-from-master guarantee."
     say "         Only the regression gate + backup protect this deploy."
 else
-    git -C "$REPO" remote get-url "$DEPLOY_REMOTE" >/dev/null 2>&1 ||
+    deploy_git -C "$REPO" remote get-url "$DEPLOY_REMOTE" >/dev/null 2>&1 ||
         die "configured deploy remote does not exist: $DEPLOY_REMOTE"
     say ">> fetching $DEPLOY_REMOTE/master ..."
-    git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
-    MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        deploy_git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+    else
+        deploy_git -C "$REPO" fetch "$AUTHORITATIVE_REMOTE_URL" \
+            "+refs/heads/master:$MASTER_REF" --quiet
+    fi
+    MASTER_SHA="$(deploy_git -C "$REPO" rev-parse --verify "$MASTER_REF")"
+    if [ "$LEASE_TEST_MODE" = 0 ]; then
+        PUBLISHED_ORCHESTRATOR_SHA="$(deploy_git -C "$REPO" show \
+            "$MASTER_SHA:scripts/deploy_from_master.sh" | sha256_text)" ||
+            die "cannot read the deploy orchestrator from authoritative master"
+        [ "$PUBLISHED_ORCHESTRATOR_SHA" = "$(sha256_file "$SCRIPT_PATH")" ] ||
+            die "running deploy orchestrator does not exactly match authoritative master"
+    fi
     LEASE_CANDIDATE="$MASTER_SHA"
     lease_phase_update acquired
     inspect_pending_for_candidate "$LEASE_CANDIDATE"
     lease_phase_update building
     PROVENANCE="$DEPLOY_REMOTE/master @ ${MASTER_SHA:0:7}"
-    # Build in a worktree placed as a SIBLING of the repo so the cross-repo path
-    # dep (crates/seed-bridge -> ../../../AiOT/rust/seed_neuron) resolves natively
-    # without symlinks. AiOT is always a sibling of the repo on every node.
-    # Reclaim staging worktrees leaked by a PRIOR run that was hard-killed (OOM /
-    # SIGKILL mid-build, before its EXIT trap could fire). PID-unique names mean the
-    # next run no longer collides with a stale dir, but also no longer reclaims it —
-    # so sweep dead-PID siblings here (skip any whose PID is still alive to stay
-    # concurrency-safe), then prune stale worktree registrations.
-    for d in "$(dirname "$REPO")"/.ab-deploy-build.*; do
-        [ -e "$d" ] || continue
-        pid="${d##*.}"
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then continue; fi
-        git -C "$REPO" worktree remove --force "$d" >/dev/null 2>&1 || true
-        rm -rf "$d" 2>/dev/null || true
-    done
-    git -C "$REPO" worktree prune >/dev/null 2>&1 || true
-    # Unique per-run (PID-suffixed) so two concurrent deploys don't rm -rf / build
-    # into the SAME staging worktree and corrupt each other — the build dir must
-    # stay a sibling of the repo (and thus of AiOT) for ../AiOT to resolve.
-    BUILD_DIR="$(dirname "$REPO")/.ab-deploy-build.$$"
-    git -C "$REPO" worktree remove --force "$BUILD_DIR" >/dev/null 2>&1 || true
-    rm -rf "$BUILD_DIR" 2>/dev/null || true
-    say ">> creating build worktree at $BUILD_DIR (detached @ ${MASTER_SHA:0:7})"
-    git -C "$REPO" worktree add --detach "$BUILD_DIR" "$MASTER_SHA" >/dev/null
-    CLEANUP_WT="$BUILD_DIR"
-    git config --global --add safe.directory "$BUILD_DIR" >/dev/null 2>&1 || true
-    # Build target dir defaults to /home (ext4, ~TB free), NOT the build
-    # worktree's own target/ under $(dirname "$REPO"). The worktree itself must
-    # stay a SIBLING of REPO so the ../AiOT path dep resolves (above) — but its
-    # target/ would then land on /Data, an ntfs-3g volume that ~50 sibling
-    # worktrees' target/ dirs fill to 100%, ENOSPC-ing the release build
-    # mid-link (hit twice on 2026-06-19 by two agents; both had to set
-    # CARGO_TARGET_DIR=/home by hand to recover). Redirecting it off /Data is the
-    # root fix. A SHA-scoped path prevents concurrent builds from different
-    # worktrees from reusing a binary compiled from another ref. Cargo's target
-    # lock serializes writes, but does not prove final executable provenance.
-    # Honor an operator-set CARGO_TARGET_DIR as the root of this scoped path.
-    # See lesson_data_fills_from_worktree_targets_deploy_builds_there_20260619.
-    DEPLOY_TARGET_ROOT="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    # Production materializes the exact tree through `git archive`, which does
+    # not run checkout hooks or smudge filters from local Git configuration.
+    # Build identity is injected explicitly below, so the snapshot needs no
+    # mutable .git link. Synthetic regression fixtures retain worktree behavior
+    # to exercise their fake Git/Cargo lanes.
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        BUILD_DIR="$(dirname "$REPO")/.ab-deploy-build.$$"
+        deploy_git -C "$REPO" worktree remove --force "$BUILD_DIR" >/dev/null 2>&1 || true
+        rm -rf "$BUILD_DIR" 2>/dev/null || true
+        say ">> creating build worktree at $BUILD_DIR (detached @ ${MASTER_SHA:0:7})"
+        deploy_git -C "$REPO" worktree add --detach "$BUILD_DIR" "$MASTER_SHA" >/dev/null
+        CLEANUP_WT="$BUILD_DIR"
+    else
+        TRUSTED_WORKTREE_ROOT="$DEPLOY_ROOT/build/worktrees"
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_ROOT" "$TRUSTED_WORKTREE_ROOT" "trusted release worktree root"
+        BUILD_DIR="$TRUSTED_WORKTREE_ROOT/master-$MASTER_SHA-$$"
+        [ ! -e "$BUILD_DIR" ] && [ ! -L "$BUILD_DIR" ] ||
+            die "trusted release worktree path already exists: $BUILD_DIR"
+        mkdir -m 700 "$BUILD_DIR" || die "cannot create trusted release source snapshot"
+        CLEANUP_WT="$BUILD_DIR"
+        [ -x /usr/bin/tar ] || die "trusted release source snapshot requires /usr/bin/tar"
+        deploy_git -C "$REPO" archive --format=tar "$MASTER_SHA" |
+            /usr/bin/tar --extract --directory "$BUILD_DIR" \
+                --no-same-owner --no-same-permissions ||
+            die "cannot materialize authoritative release source snapshot"
+        [ -z "$(find "$BUILD_DIR" -type l -print -quit)" ] ||
+            die "authoritative release source snapshot contains a symlink"
+    fi
+    say ">> materialized authoritative release source at $BUILD_DIR (${MASTER_SHA:0:7})"
+    # A production target is scoped first by canonical deployment-root identity
+    # and then by authoritative master SHA. This keeps candidate executables
+    # disjoint across trust domains while retaining Cargo reuse for repeated
+    # attempts of the exact release. Synthetic contained tests keep their
+    # caller-provided target root.
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        DEPLOY_TARGET_ROOT="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+        ensure_physical_directory_path "$DEPLOY_TARGET_ROOT"
+        protect_owned_directory "$DEPLOY_TARGET_ROOT" "publisher lease test Cargo target root"
+    else
+        [ -n "$DEPLOY_TARGET_ROOT" ] || die "production Cargo target root was not initialized"
+    fi
     DEPLOY_TARGET_DIR="$DEPLOY_TARGET_ROOT/$MASTER_SHA"
-    mkdir -p "$DEPLOY_TARGET_DIR" || die "cannot create build target dir $DEPLOY_TARGET_DIR"
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        ensure_physical_directory_path "$DEPLOY_TARGET_DIR"
+        protect_owned_directory "$DEPLOY_TARGET_DIR" "publisher lease test SHA Cargo target"
+    else
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_TARGET_BASE" "$DEPLOY_TARGET_DIR" "authoritative SHA Cargo target"
+    fi
     CARGO_FEATURE_ARGS=()
     if [ "$(uname -s)" = "Linux" ]; then
         CARGO_FEATURE_ARGS+=(--features linux-native-avatar)
         say ">> enabling linux-native-avatar for the production Linux binary"
     fi
-    BUILD_PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        BUILD_PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
+    else
+        # Do not admit caller-controlled .pc search roots into an authoritative
+        # production build. System defaults and the bounded shim below suffice.
+        BUILD_PKG_CONFIG_PATH=""
+    fi
     if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists xkbcommon >/dev/null 2>&1; then
         XKB_LIB="$(ldconfig -p 2>/dev/null | awk '/libxkbcommon\.so\.0 \(/ {print $NF; exit}')"
         [ -n "$XKB_LIB" ] || XKB_LIB="/usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
@@ -2822,16 +3317,49 @@ EOF
         say ">> using runtime libxkbcommon pkg-config shim for linux-native-avatar"
     fi
     say ">> cargo build --release --bin agent-bridge ${CARGO_FEATURE_ARGS[*]-}"
-    say "   (target dir: $DEPLOY_TARGET_DIR — off /Data; takes several minutes) ..."
-    if [ "${#CARGO_FEATURE_ARGS[@]}" -gt 0 ]; then
-        ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge "${CARGO_FEATURE_ARGS[@]}" )
+    say "   (private deployment-scoped target dir: $DEPLOY_TARGET_DIR; takes several minutes) ..."
+    if [ "$LEASE_TEST_MODE" = 0 ]; then
+        if [ "${#CARGO_FEATURE_ARGS[@]}" -gt 0 ]; then
+            ( cd "$BUILD_DIR" && /usr/bin/env -i \
+                PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+                HOME="$DEPLOY_ROOT" \
+                CARGO_HOME="$TRUSTED_CARGO_HOME" \
+                CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" \
+                CARGO_TERM_COLOR=never \
+                PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" \
+                RUSTC="$TRUSTED_RUSTC" \
+                TMPDIR="$TRUSTED_BUILD_TMP" \
+                AGENT_BRIDGE_BUILD_SHA="${MASTER_SHA:0:12}" \
+                AGENT_BRIDGE_BUILD_DESCRIBE="${MASTER_SHA:0:12}" \
+                "$TRUSTED_CARGO" build --locked --release --bin agent-bridge \
+                "${CARGO_FEATURE_ARGS[@]}" )
+        else
+            ( cd "$BUILD_DIR" && /usr/bin/env -i \
+                PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+                HOME="$DEPLOY_ROOT" \
+                CARGO_HOME="$TRUSTED_CARGO_HOME" \
+                CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" \
+                CARGO_TERM_COLOR=never \
+                PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" \
+                RUSTC="$TRUSTED_RUSTC" \
+                TMPDIR="$TRUSTED_BUILD_TMP" \
+                AGENT_BRIDGE_BUILD_SHA="${MASTER_SHA:0:12}" \
+                AGENT_BRIDGE_BUILD_DESCRIBE="${MASTER_SHA:0:12}" \
+                "$TRUSTED_CARGO" build --locked --release --bin agent-bridge )
+        fi
+    elif [ "${#CARGO_FEATURE_ARGS[@]}" -gt 0 ]; then
+        ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --locked --release --bin agent-bridge "${CARGO_FEATURE_ARGS[@]}" )
     else
         # macOS ships Bash 3.2, where expanding an empty array under `set -u`
         # raises "unbound variable" instead of yielding zero arguments.
-        ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge )
+        ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --locked --release --bin agent-bridge )
     fi
     NEW_BIN="$DEPLOY_TARGET_DIR/release/agent-bridge"
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
+    [ -f "$NEW_BIN" ] && [ ! -L "$NEW_BIN" ] ||
+        die "build candidate is not a physical regular file: $NEW_BIN"
+    [ "$(file_owner_uid "$NEW_BIN")" = "$(id -u)" ] ||
+        die "build candidate is not owned by the effective publisher: $NEW_BIN"
     BUILT_VERSION="$("$NEW_BIN" --version 2>&1)" ||
         die "built binary does not execute for provenance verification"
     case "$BUILT_VERSION" in
@@ -2841,12 +3369,47 @@ EOF
     say "OK: built binary reports master ${MASTER_SHA:0:12}."
 fi
 
-# A normal deploy must install scripts from the exact detached master snapshot
+# Freeze one exact candidate inode before feature gates, operator confirmation,
+# or any live-file mutation. The source is hashed on both sides of the copy so
+# even the contained --use-binary regression lane cannot swap an equal-sized
+# payload between candidate selection and custody.
+CANDIDATE_SOURCE="$NEW_BIN"
+CANDIDATE_SOURCE_SHA_BEFORE="$(sha256_file "$CANDIDATE_SOURCE")"
+case "$LEASE_CANDIDATE" in
+    use-binary-sha256:*)
+        [ "${LEASE_CANDIDATE#use-binary-sha256:}" = "$CANDIDATE_SOURCE_SHA_BEFORE" ] ||
+            die "caller binary changed after lease candidate selection"
+        ;;
+esac
+CANDIDATE_SNAPSHOT="$LEASE_STATE_ROOT/.candidate.$LEASE_ID"
+[ ! -e "$CANDIDATE_SNAPSHOT" ] && [ ! -L "$CANDIDATE_SNAPSHOT" ] ||
+    die "private candidate snapshot path already exists"
+cp "$CANDIDATE_SOURCE" "$CANDIDATE_SNAPSHOT" || die "cannot freeze the deployment candidate"
+chmod 700 "$CANDIDATE_SNAPSHOT" || die "cannot protect the frozen deployment candidate"
+CLEANUP_CANDIDATE_SNAPSHOT="$CANDIDATE_SNAPSHOT"
+verify_owned_regular_mode "$CANDIDATE_SNAPSHOT" 700 "frozen deployment candidate"
+CANDIDATE_SOURCE_SHA_AFTER="$(sha256_file "$CANDIDATE_SOURCE")"
+FROZEN_CANDIDATE_SHA="$(sha256_file "$CANDIDATE_SNAPSHOT")"
+[ "$CANDIDATE_SOURCE_SHA_BEFORE" = "$CANDIDATE_SOURCE_SHA_AFTER" ] &&
+    [ "$CANDIDATE_SOURCE_SHA_BEFORE" = "$FROZEN_CANDIDATE_SHA" ] ||
+    die "deployment candidate changed while entering private custody"
+is_native_exe "$CANDIDATE_SNAPSHOT" || die "frozen deployment candidate is not native"
+FROZEN_VERSION="$("$CANDIDATE_SNAPSHOT" --version 2>&1)" ||
+    die "frozen deployment candidate does not execute"
+if [ -z "$USE_BINARY" ]; then
+    case "$FROZEN_VERSION" in
+        *"${MASTER_SHA:0:12}"*) ;;
+        *) die "frozen candidate provenance no longer matches authoritative master" ;;
+    esac
+fi
+NEW_BIN="$CANDIDATE_SNAPSHOT"
+
+# A normal deploy must install scripts from the exact archived master snapshot
 # that produced NEW_BIN, never from the caller's possibly stale/dirty worktree.
 # Otherwise two same-SHA deploys launched from different worktrees can end with
 # the correct binary but whichever caller's runtime assets happened to run last.
-# --use-binary has no verified source snapshot, so it deliberately retains the
-# documented repository-matched behavior and uses the invoking checkout.
+# The contained --use-binary regression lane has no verified source snapshot,
+# so it retains repository-matched fixture behavior and uses its invoking tree.
 if [ -z "$USE_BINARY" ]; then
     ASSET_SOURCE_ROOT="$BUILD_DIR"
 fi
@@ -2864,6 +3427,11 @@ for asset in "${RUNTIME_ASSETS[@]}"; do
     [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
         die "deploy-source runtime asset missing: $ASSET_SOURCE_ROOT/scripts/$asset"
 done
+if [ "$LEASE_TEST_MODE" = 0 ]; then
+    verify_owned_regular_mode "$WRAPPER_PATH" 755 "installed trusted wrapper"
+    cmp -s "$ASSET_SOURCE_ROOT/scripts/wrapper/agent-bridge-wrapper.sh" "$WRAPPER_PATH" ||
+        die "installed wrapper does not exactly match authoritative master; run the trusted wrapper installer before binary deployment"
+fi
 grep -q 'agent_bridge.app_control.operation_preflight.v0' \
     "$ASSET_SOURCE_ROOT/scripts/app_control.py" ||
     die "deploy-source app_control missing durable operation preflight before live-state mutation: $ASSET_SOURCE_ROOT/scripts/app_control.py"
@@ -2882,8 +3450,13 @@ is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach
 # build start. Re-check before the first live-state mutation (backup/copy).
 if [ -z "$USE_BINARY" ]; then
     say ">> rechecking $DEPLOY_REMOTE/master after build ..."
-    git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
-    CURRENT_MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        deploy_git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+    else
+        deploy_git -C "$REPO" fetch "$AUTHORITATIVE_REMOTE_URL" \
+            "+refs/heads/master:$MASTER_REF" --quiet
+    fi
+    CURRENT_MASTER_SHA="$(deploy_git -C "$REPO" rev-parse --verify "$MASTER_REF")"
     if [ "$CURRENT_MASTER_SHA" != "$MASTER_SHA" ]; then
         die "$DEPLOY_REMOTE/master advanced during the release build (${MASTER_SHA:0:7} -> ${CURRENT_MASTER_SHA:0:7}); refusing to deploy a stale artifact before backup/copy. Re-run the deploy from the new master."
     fi
@@ -2958,7 +3531,8 @@ if [ -f "$REAL_PATH" ]; then
     # NB: ${MASTER_SHA:0:7} must not be expanded on the --use-binary path, where
     # MASTER_SHA is unset and `set -u` would abort here (before the backup+deploy).
     if [ -n "$USE_BINARY" ]; then tag="usebin"; else tag="${MASTER_SHA:0:7}"; fi
-    bak="$REAL_PATH.bak-deploy-$tag-$ts"
+    bak="$REAL_PATH.bak-deploy-$tag-$ts-$LEASE_ID"
+    [ ! -e "$bak" ] && [ ! -L "$bak" ] || die "binary backup target already exists: $bak"
     cp "$REAL_PATH" "$bak"
     say ">> backed up current binary -> $bak"
 fi
@@ -2968,9 +3542,17 @@ fi
 # compatible companions, never the new adapter with a missing sibling import.
 adapter_dir="$(dirname "$ADAPTER_PATH")"
 adapter_root="$(dirname "$adapter_dir")"
-mkdir -p "$adapter_dir"
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    ensure_physical_directory_path "$adapter_dir"
+    protect_owned_directory "$adapter_dir" "publisher lease test audio adapter directory"
+else
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$adapter_dir" "installed audio adapter directory"
+fi
 if [ -f "$ADAPTER_PATH" ]; then
-    adapter_bak="$ADAPTER_PATH.bak-deploy-$(date +%Y%m%dT%H%M%S)"
+    adapter_bak="$ADAPTER_PATH.bak-deploy-$(date +%Y%m%dT%H%M%S)-$LEASE_ID"
+    [ ! -e "$adapter_bak" ] && [ ! -L "$adapter_bak" ] ||
+        die "audio adapter backup target already exists: $adapter_bak"
     cp "$ADAPTER_PATH" "$adapter_bak"
     say ">> backed up current audio adapter -> $adapter_bak"
 fi
@@ -2978,16 +3560,24 @@ for asset in "${AUDIO_ADAPTER_COMPANIONS[@]}"; do
     companion_source="$ASSET_SOURCE_ROOT/scripts/$asset"
     companion_target="$adapter_dir/$asset"
     companion_stage="$companion_target.stage.$$"
+    [ ! -e "$companion_stage" ] && [ ! -L "$companion_stage" ] ||
+        die "audio companion stage already exists: $companion_stage"
     cp "$companion_source" "$companion_stage"
-    chmod +x "$companion_stage"
+    chmod 755 "$companion_stage"
+    verify_owned_regular_mode "$companion_stage" 755 "staged audio companion"
     mv -f "$companion_stage" "$companion_target"
+    verify_owned_regular_mode "$companion_target" 755 "installed audio companion"
     cmp -s "$companion_source" "$companion_target" ||
         die "installed audio companion differs from repository source: $asset"
 done
 adapter_stage="$ADAPTER_PATH.stage.$$"
+[ ! -e "$adapter_stage" ] && [ ! -L "$adapter_stage" ] ||
+    die "audio adapter stage already exists: $adapter_stage"
 cp "$ADAPTER_SOURCE" "$adapter_stage"
-chmod +x "$adapter_stage"
+chmod 755 "$adapter_stage"
+verify_owned_regular_mode "$adapter_stage" 755 "staged audio adapter"
 mv -f "$adapter_stage" "$ADAPTER_PATH"
+verify_owned_regular_mode "$ADAPTER_PATH" 755 "installed audio adapter"
 cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "installed audio adapter differs from repository source"
 say ">> deployed matched audio adapter -> $ADAPTER_PATH"
@@ -2995,11 +3585,22 @@ say ">> deployed matched audio companions -> $adapter_dir"
 for asset in "${AUDIO_POLICY_ASSETS[@]}"; do
     policy_source="$ASSET_SOURCE_ROOT/$asset"
     policy_target="$adapter_root/$asset"
-    mkdir -p "$(dirname "$policy_target")"
+    policy_dir="$(dirname "$policy_target")"
+    if [ "$LEASE_TEST_MODE" = 1 ]; then
+        ensure_physical_directory_path "$policy_dir"
+        protect_owned_directory "$policy_dir" "publisher lease test audio policy directory"
+    else
+        ensure_trusted_subdirectory_path \
+            "$DEPLOY_ROOT" "$policy_dir" "installed audio policy directory"
+    fi
     policy_stage="$policy_target.stage.$$"
+    [ ! -e "$policy_stage" ] && [ ! -L "$policy_stage" ] ||
+        die "audio policy stage already exists: $policy_stage"
     cp "$policy_source" "$policy_stage"
     chmod 644 "$policy_stage"
+    verify_owned_regular_mode "$policy_stage" 644 "staged audio policy asset"
     mv -f "$policy_stage" "$policy_target"
+    verify_owned_regular_mode "$policy_target" 644 "installed audio policy asset"
     cmp -s "$policy_source" "$policy_target" ||
         die "installed audio policy asset differs from repository source: $asset"
 done
@@ -3010,16 +3611,28 @@ say ">> deployed matched audio policy assets -> $adapter_root"
 # alone breaks as soon as the deploy cleanup removes that worktree. Stage the
 # complete dependency set, then swap the directory as one repository-matched
 # unit before installing the binary that resolves it.
-mkdir -p "$(dirname "$RUNTIME_ASSET_DIR")"
+runtime_parent="$(dirname "$RUNTIME_ASSET_DIR")"
+if [ "$LEASE_TEST_MODE" = 1 ]; then
+    ensure_physical_directory_path "$runtime_parent"
+    protect_owned_directory "$runtime_parent" "publisher lease test runtime parent"
+else
+    ensure_trusted_subdirectory_path \
+        "$DEPLOY_ROOT" "$runtime_parent" "installed runtime parent"
+fi
 runtime_stage="$RUNTIME_ASSET_DIR.stage.$$"
 CLEANUP_RUNTIME_STAGE="$runtime_stage"
-rm -rf "$runtime_stage"
-mkdir -p "$runtime_stage"
+[ ! -e "$runtime_stage" ] && [ ! -L "$runtime_stage" ] ||
+    die "runtime asset stage already exists: $runtime_stage"
+mkdir -m 700 "$runtime_stage"
+verify_owned_directory_mode "$runtime_stage" 700 "staged runtime asset directory"
 for asset in "${RUNTIME_ASSETS[@]}"; do
     install -m 755 "$ASSET_SOURCE_ROOT/scripts/$asset" "$runtime_stage/$asset"
+    verify_owned_regular_mode "$runtime_stage/$asset" 755 "staged runtime asset"
 done
 if [ -e "$RUNTIME_ASSET_DIR" ]; then
-    runtime_bak="$RUNTIME_ASSET_DIR.bak-deploy-$(date +%Y%m%dT%H%M%S)"
+    runtime_bak="$RUNTIME_ASSET_DIR.bak-deploy-$(date +%Y%m%dT%H%M%S)-$LEASE_ID"
+    [ ! -e "$runtime_bak" ] && [ ! -L "$runtime_bak" ] ||
+        die "runtime asset backup target already exists: $runtime_bak"
     mv "$RUNTIME_ASSET_DIR" "$runtime_bak"
     if ! mv "$runtime_stage" "$RUNTIME_ASSET_DIR"; then
         mv "$runtime_bak" "$RUNTIME_ASSET_DIR" || true
@@ -3030,29 +3643,42 @@ else
     mv "$runtime_stage" "$RUNTIME_ASSET_DIR"
 fi
 CLEANUP_RUNTIME_STAGE=""
+verify_owned_directory_mode "$RUNTIME_ASSET_DIR" 700 "installed runtime asset directory"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    verify_owned_regular_mode "$RUNTIME_ASSET_DIR/$asset" 755 "installed runtime asset"
+done
 say ">> deployed matched runtime assets -> $RUNTIME_ASSET_DIR"
 
 binary_stage="$(dirname "$REAL_PATH")/.$(basename "$REAL_PATH").stage.$LEASE_ID.$$"
 CLEANUP_BINARY_STAGE="$binary_stage"
 [ ! -e "$binary_stage" ] || die "binary activation stage already exists: $binary_stage"
 cp "$NEW_BIN" "$binary_stage"
-chmod +x "$binary_stage"
+chmod 755 "$binary_stage" || die "cannot set exact mode 0755 on staged binary"
+verify_owned_regular_mode "$binary_stage" 755 "staged deployment binary"
 staged_size="$(file_size "$binary_stage")"
 [ "$staged_size" = "$new_size" ] || die "staged binary size $staged_size != built $new_size"
 is_native_exe "$binary_stage" || die "staged binary is no longer a native executable"
+STAGED_PRE_SIGN_SHA="$(sha256_file "$binary_stage")"
+[ "$STAGED_PRE_SIGN_SHA" = "$FROZEN_CANDIDATE_SHA" ] ||
+    die "staged binary differs from the frozen gated candidate"
 if [ "$(uname -s)" = "Darwin" ]; then
     command -v codesign >/dev/null 2>&1 || die "codesign is required on macOS before activating the staged Mach-O binary"
     codesign --force --sign - "$binary_stage" >/dev/null
     codesign --verify "$binary_stage" >/dev/null 2>&1 || die "staged macOS binary signature verification failed"
     say ">> ad-hoc signed and verified staged macOS binary"
 fi
+verify_owned_regular_mode "$binary_stage" 755 "staged deployment binary"
 "$binary_stage" --version >/dev/null 2>&1 || die "staged binary failed its execution check"
+ACTIVATION_BINARY_SHA="$(sha256_file "$binary_stage")"
 new_size="$(file_size "$binary_stage")"
 mv -f "$binary_stage" "$REAL_PATH" || die "atomic binary activation failed"
 CLEANUP_BINARY_STAGE=""
+verify_owned_regular_mode "$REAL_PATH" 755 "installed deployment binary"
 say ">> atomically deployed -> $REAL_PATH"
 copied_size="$(file_size "$REAL_PATH")"
 [ "$copied_size" = "$new_size" ] || die "deployed size $copied_size != staged $new_size"
+[ "$(sha256_file "$REAL_PATH")" = "$ACTIVATION_BINARY_SHA" ] ||
+    die "installed binary differs from the exact activation candidate"
 
 # Replacing a Mach-O does not refresh long-lived launchd processes: they keep
 # the old inode. Refresh only canonical jobs bound to this deployment, then
