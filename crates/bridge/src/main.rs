@@ -21592,6 +21592,37 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
     tracing::info!(path = %db_path.display(), "SQLite store");
     let store_impl = Arc::new(SqliteStore::open(&db_path).await?);
     let store: Arc<dyn StateStore> = store_impl.clone();
+    match ab_bridge::workload_receipt_reconciliation::reconcile_workload_receipt_spool(&store)
+        .await
+    {
+        Ok(report) => {
+            if report.scanned_receipts > 0
+                || report.unresolved > 0
+                || report.invalid > 0
+                || report.commit_failures > 0
+            {
+                tracing::info!(
+                    scanned = report.scanned_receipts,
+                    inserted = report.inserted_commits,
+                    duplicate = report.duplicate_commits,
+                    conflicts = report.conflicts,
+                    acknowledged = report.acknowledged,
+                    acknowledgement_failures = report.acknowledgement_failures,
+                    unresolved = report.unresolved,
+                    active_producers = report.active_producers,
+                    invalid = report.invalid,
+                    commit_failures = report.commit_failures,
+                    "durable workload receipt startup reconciliation completed"
+                );
+            }
+        }
+        Err(error) => {
+            // New bound launches fail closed if their private outbox cannot be
+            // established. Existing malformed state remains visible here, but
+            // does not make scope absence look like terminal evidence.
+            tracing::warn!(%error, "durable workload receipt startup scan unavailable");
+        }
+    }
     let terminal: Arc<dyn TerminalBackend> = auto_backend();
     tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
     let browser: Arc<dyn BrowserBackend> = Arc::new(ChromiumCdpBackend::new());

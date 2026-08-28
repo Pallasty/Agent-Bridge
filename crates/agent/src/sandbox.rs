@@ -145,6 +145,9 @@ pub fn wrap_local_command(
     program: &str,
     args: &[String],
 ) -> Result<LaunchSpec> {
+    let workload_receipt_binding = env
+        .get(crate::workload_cgroup::RECEIPT_BINDING_ENV)
+        .map(String::as_str);
     let mode = effective_mode(env)?;
     let launch = wrap_local_command_from(
         mode,
@@ -157,7 +160,7 @@ pub fn wrap_local_command(
         program,
         args,
     )?;
-    crate::workload_cgroup::wrap_launch_spec(launch, runtime, env)
+    crate::workload_cgroup::wrap_launch_spec(launch, runtime, env, workload_receipt_binding)
 }
 
 fn wrap_local_command_from(
@@ -212,6 +215,11 @@ pub fn configure_command_env(
     env: &HashMap<String, String>,
     sandboxed: bool,
 ) -> Result<()> {
+    // The binding is consumed by the trusted launch planner only. Explicitly
+    // mask an ambient inherited value as well as skipping a per-spawn value;
+    // otherwise either startup path could leak another task span's authority
+    // into the executor environment.
+    cmd.env_remove(crate::workload_cgroup::RECEIPT_BINDING_ENV);
     #[cfg(target_os = "macos")]
     if let Some(path) = macos_sandbox_ca_file(env, sandboxed) {
         cmd.env("SSL_CERT_FILE", path);
@@ -228,6 +236,9 @@ pub fn configure_command_env(
         }
     }
     for (key, value) in env {
+        if key == crate::workload_cgroup::RECEIPT_BINDING_ENV {
+            continue;
+        }
         if key.starts_with(INTERNAL_PREFIX) {
             return Err(Error::InvalidArgument(
                 "agent_spawn env contains reserved sandbox launcher key".into(),
@@ -247,6 +258,7 @@ pub fn configure_pty_env(
     env: &HashMap<String, String>,
     sandboxed: bool,
 ) -> Result<()> {
+    cmd.env_remove(crate::workload_cgroup::RECEIPT_BINDING_ENV);
     #[cfg(target_os = "macos")]
     if let Some(path) = macos_sandbox_ca_file(env, sandboxed) {
         cmd.env("SSL_CERT_FILE", path);
@@ -263,6 +275,9 @@ pub fn configure_pty_env(
         }
     }
     for (key, value) in env {
+        if key == crate::workload_cgroup::RECEIPT_BINDING_ENV {
+            continue;
+        }
         if key.starts_with(INTERNAL_PREFIX) {
             return Err(Error::InvalidArgument(
                 "agent_spawn env contains reserved sandbox launcher key".into(),
@@ -308,6 +323,7 @@ fn is_spawn_control_env(key: &str) -> bool {
             | CREDS_FILE_ENV
             | crate::workload_cgroup::POLICY_ENV
             | crate::workload_cgroup::RUNTIME_MAX_ENV
+            | crate::workload_cgroup::RECEIPT_BINDING_ENV
     )
 }
 
@@ -1205,6 +1221,39 @@ mod tests {
         }
         assert!(!should_forward_spawn_env(POLICY_ENV, false));
         assert!(!should_forward_spawn_env("GITHUB_TOKEN", true));
+    }
+
+    #[test]
+    fn workload_receipt_binding_is_consumed_and_ambient_is_masked_on_both_paths() {
+        let mut env = HashMap::new();
+        env.insert(
+            crate::workload_cgroup::RECEIPT_BINDING_ENV.to_string(),
+            "agent-spawn-opaque-span".to_string(),
+        );
+        assert!(!should_forward_spawn_env(
+            crate::workload_cgroup::RECEIPT_BINDING_ENV,
+            false
+        ));
+        let mut command = TokioCommand::new("/usr/bin/true");
+        command.env(
+            crate::workload_cgroup::RECEIPT_BINDING_ENV,
+            "ambient-binding-that-must-be-masked",
+        );
+        configure_command_env(&mut command, &env, false).expect("consume private binding");
+        assert!(command.as_std().get_envs().any(|(key, value)| key
+            == OsStr::new(crate::workload_cgroup::RECEIPT_BINDING_ENV)
+            && value.is_none()));
+
+        let mut pty = CommandBuilder::new("/usr/bin/true");
+        pty.env(
+            crate::workload_cgroup::RECEIPT_BINDING_ENV,
+            "ambient-binding-that-must-be-masked",
+        );
+        configure_pty_env(&mut pty, &env, false).expect("consume private PTY binding");
+        assert_eq!(
+            pty.get_env(crate::workload_cgroup::RECEIPT_BINDING_ENV),
+            None
+        );
     }
 
     #[test]

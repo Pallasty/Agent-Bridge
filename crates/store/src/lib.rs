@@ -3,7 +3,7 @@
 //! Default impl: [`SqliteStore`] — single-file rusqlite (bundled), zero system deps.
 //! Future: in-memory (tests), Postgres (multi-machine), Redis (cache).
 
-use ab_core::{NotifyEvent, Result, SessionId};
+use ab_core::{Error, NotifyEvent, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -292,6 +292,88 @@ pub struct SemanticEventRecord {
     /// Distinct from `facts` (adapter-specific extras). None for legacy rows /
     /// producers that have not adopted the contract yet.
     pub descriptor: Option<String>,
+}
+
+/// One privacy-minimal delegated-workload receipt committed together with its
+/// semantic projection. The raw supervisor receipt remains in private Agent
+/// custody; this row contains only its digest, stable span binding, and a
+/// canonical redacted projection.
+pub const WORKLOAD_RECEIPT_COMMIT_SCHEMA_V1: &str = "agent_bridge.workload_receipt_commit.v1";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkloadReceiptCommitKind {
+    LiveBodySpan,
+    StartupReconciliation,
+}
+
+impl WorkloadReceiptCommitKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveBodySpan => "live_body_span",
+            Self::StartupReconciliation => "startup_reconciliation",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkloadReceiptCommitRecord {
+    pub schema_version: String,
+    pub receipt_id: String,
+    pub span_id: String,
+    pub recorded_at: i64,
+    /// Digest of the private, identity-bound supervisor receipt. The receipt
+    /// itself, including nonce/unit/private paths, is never stored here.
+    pub receipt_sha256: String,
+    pub commit_kind: WorkloadReceiptCommitKind,
+    /// Canonical JSON containing only the PID-free public projection.
+    pub redacted_facts_json: String,
+    /// Digest of the canonical record claim (all fields above). This is an
+    /// idempotency/conflict binding, not independent evidence of truth.
+    pub record_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkloadReceiptCommitStatus {
+    Inserted,
+    Duplicate,
+    Conflict,
+}
+
+/// Compute the canonical record digest expected by the workload-receipt
+/// ledger. `redacted_facts_json` must itself already be canonical JSON so the
+/// caller and Store cannot disagree about byte identity.
+pub fn workload_receipt_commit_record_sha256(
+    record: &WorkloadReceiptCommitRecord,
+) -> Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let facts: serde_json::Value =
+        serde_json::from_str(&record.redacted_facts_json).map_err(|error| {
+            Error::InvalidArgument(format!("parse workload receipt facts: {error}"))
+        })?;
+    let canonical_facts = serde_json_canonicalizer::to_vec(&facts).map_err(|error| {
+        Error::InvalidArgument(format!("canonicalize workload receipt facts: {error}"))
+    })?;
+    if canonical_facts != record.redacted_facts_json.as_bytes() {
+        return Err(Error::InvalidArgument(
+            "workload receipt redacted_facts_json is not canonical".into(),
+        ));
+    }
+    let claim = serde_json::json!({
+        "schema_version": &record.schema_version,
+        "receipt_id": &record.receipt_id,
+        "span_id": &record.span_id,
+        "recorded_at": record.recorded_at,
+        "receipt_sha256": &record.receipt_sha256,
+        "commit_kind": record.commit_kind.as_str(),
+        "redacted_facts": facts,
+    });
+    let canonical = serde_json_canonicalizer::to_vec(&claim).map_err(|error| {
+        Error::InvalidArgument(format!("canonicalize workload receipt record: {error}"))
+    })?;
+    Ok(format!("sha256:{:x}", Sha256::digest(canonical)))
 }
 
 /// Privacy-minimal, goal-level closure evidence for one agent task contract.
@@ -3369,6 +3451,45 @@ pub trait StateStore: Send + Sync {
     ) -> Result<Vec<SemanticEventRecord>> {
         let _ = (window_secs, limit);
         Ok(Vec::new())
+    }
+
+    /// Atomically commit one or more immutable delegated-workload receipts and
+    /// exactly one semantic projection. A batch that adds any row must carry a
+    /// single span and canonical redacted projection, with a target/facts-bound,
+    /// privacy-validated SSB event. `Inserted` is the only path that adds the
+    /// event; an all-duplicate replay returns `Duplicate` without validating or
+    /// adding a later projection, while any identity conflict leaves the whole
+    /// batch unchanged.
+    ///
+    /// The default is deliberately an error: callers use successful DB commit
+    /// as the sole gate for ACKing and cleaning up a private supervisor spool.
+    async fn commit_workload_receipt_event(
+        &self,
+        _records: Vec<WorkloadReceiptCommitRecord>,
+        _event: SemanticEventRecord,
+    ) -> Result<WorkloadReceiptCommitStatus> {
+        Err(ab_core::Error::Backend(
+            "workload receipt commit ledger is not supported by this store".into(),
+        ))
+    }
+
+    async fn load_workload_receipt_commit(
+        &self,
+        _receipt_id: &str,
+    ) -> Result<Option<WorkloadReceiptCommitRecord>> {
+        Err(ab_core::Error::Backend(
+            "workload receipt commit ledger is not supported by this store".into(),
+        ))
+    }
+
+    async fn recent_workload_receipt_commits(
+        &self,
+        _window_secs: i64,
+        _limit: u32,
+    ) -> Result<Vec<WorkloadReceiptCommitRecord>> {
+        Err(ab_core::Error::Backend(
+            "workload receipt commit ledger is not supported by this store".into(),
+        ))
     }
 
     /// Append one idempotent task-outcome record. Implementations must treat an

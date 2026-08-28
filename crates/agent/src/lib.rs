@@ -48,7 +48,9 @@ pub use resident_codex::{
 };
 pub use terminal_rusage::{TerminalResourceSnapshot, TerminalResourceStatus};
 pub use workload_cgroup::{
-    WorkloadControl, WorkloadGeneration, WorkloadResourceSnapshot, WorkloadResourceStatus,
+    DurableWorkloadReceiptIssue, DurableWorkloadReceiptLeaseGuard, DurableWorkloadReceiptRecord,
+    DurableWorkloadReceiptRef, DurableWorkloadReceiptScan, WorkloadControl, WorkloadGeneration,
+    WorkloadResourceSnapshot, WorkloadResourceStatus,
 };
 pub use worktree::{GitWorktreeManager, Worktree};
 
@@ -364,6 +366,16 @@ impl SpawnedProcessCustody {
     /// local generations in this runtime session.
     pub fn workload_resources(&self) -> WorkloadResourceSnapshot {
         self.workload.snapshot()
+    }
+
+    /// Atomically snapshot workload resources and retain every durable
+    /// producer lease represented by that snapshot. The caller must keep the
+    /// returned guard alive until its Store commit and digest-bound ACK have
+    /// both completed.
+    pub fn workload_resources_with_lease(
+        &self,
+    ) -> (WorkloadResourceSnapshot, DurableWorkloadReceiptLeaseGuard) {
+        self.workload.snapshot_with_lease()
     }
 
     /// Private control handle for the newest live workload generation.

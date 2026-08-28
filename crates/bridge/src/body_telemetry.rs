@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,10 +25,13 @@ pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.
 pub const TASK_RESOURCE_SPAN_SCHEMA_V1: &str = "agent_bridge.task_resource_span.v1";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V2: &str = "agent_bridge.task_resource_span.v2";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V3: &str = "agent_bridge.task_resource_span.v3";
+pub const TASK_RESOURCE_SPAN_SCHEMA_V4: &str = "agent_bridge.task_resource_span.v4";
 pub const TASK_TERMINAL_RESOURCES_SCHEMA_V0: &str =
     "agent_bridge.task_terminal_resources.v0";
 pub const TASK_WORKLOAD_RESOURCES_SCHEMA_V0: &str =
     "agent_bridge.task_workload_resources.v0";
+pub const TASK_WORKLOAD_RESOURCES_SCHEMA_V1: &str =
+    "agent_bridge.task_workload_resources.v1";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
 pub const BODY_SCHEDULING_REPORT_SCHEMA_V0: &str = "agent_bridge.body_scheduling_report.v0";
@@ -953,10 +956,37 @@ pub struct TaskResourceSpan {
     /// supervisor is outside this accounting cgroup and does not publish a
     /// receipt until the recursively observed `populated` state reaches zero.
     pub task_workload_resources: Option<TaskWorkloadResourceUsage>,
+    /// In-process ownership handoff for durable workload receipts. This is an
+    /// operational capability, not evidence: serialization omits it and its
+    /// opaque Debug/PartialEq wrapper exposes no filesystem identity.
+    #[serde(skip)]
+    durable_workload_receipt_lease: OpaqueDurableWorkloadReceiptLease,
     #[serde(skip)]
     process_scope: Option<TaskProcessScopeBinding>,
     pub sampling_gaps: u32,
     pub abandonment_reason: Option<String>,
+}
+
+#[derive(Clone, Default)]
+struct OpaqueDurableWorkloadReceiptLease {
+    guard: ab_agent::DurableWorkloadReceiptLeaseGuard,
+}
+
+impl std::fmt::Debug for OpaqueDurableWorkloadReceiptLease {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpaqueDurableWorkloadReceiptLease")
+            .field("held", &!self.guard.is_empty())
+            .finish()
+    }
+}
+
+impl PartialEq for OpaqueDurableWorkloadReceiptLease {
+    fn eq(&self, _other: &Self) -> bool {
+        // Lease identity is intentionally excluded from the semantic equality
+        // of two public task-span observations.
+        true
+    }
 }
 
 /// Bounded, derived receipt suitable for persistent event history. Raw body
@@ -1040,6 +1070,11 @@ pub struct TaskWorkloadResourceUsage {
     pub final_populated_zero: bool,
     pub complete_for_cpu_memory_workload_tree: bool,
     pub complete_for_pids_workload_tree: bool,
+    /// Opaque, content-addressed handles for every terminal generation whose
+    /// supervisor receipt was sealed in the private durable outbox. These are
+    /// safe to persist; unit names, nonces, paths, and process identities are
+    /// deliberately absent.
+    pub durable_receipts: Vec<ab_agent::DurableWorkloadReceiptRef>,
     pub io_accounting_status: String,
     pub terminal_condition: String,
     pub failure_reason: Option<String>,
@@ -1050,7 +1085,24 @@ impl TaskWorkloadResourceUsage {
     /// Redundant durable gate: no single deserialized boolean is sufficient to
     /// turn a task event into Verified whole-tree CPU/memory evidence.
     pub fn proves_complete_cpu_memory_workload_tree(&self) -> bool {
-        self.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V0
+        let mut seen_receipt_ids = HashSet::with_capacity(self.durable_receipts.len());
+        let durable_receipts_complete = self.durable_receipts.len()
+            == self.captured_generation_count as usize
+            && !self.durable_receipts.is_empty()
+            && self.durable_receipts.iter().all(|reference| {
+                reference.receipt_id.len() == 32
+                    && reference
+                        .receipt_id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                    && reference.sha256.len() == 71
+                    && reference.sha256.starts_with("sha256:")
+                    && reference.sha256.as_bytes()[7..]
+                        .iter()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+                    && seen_receipt_ids.insert(reference.receipt_id.as_str())
+            });
+        self.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V1
             && self.accounting_status == "complete"
             && self.source == "linux_cgroup_v2_systemd_delegated_scope"
             && self.scope == "delegated_session_workload_tree"
@@ -1064,6 +1116,7 @@ impl TaskWorkloadResourceUsage {
             && self.start_before_exec
             && self.final_populated_zero
             && self.complete_for_cpu_memory_workload_tree
+            && durable_receipts_complete
             && self.controllers.iter().any(|value| value == "cpu")
             && self.controllers.iter().any(|value| value == "memory")
             && self.io_accounting_status == "unknown_not_delegated"
@@ -1116,7 +1169,7 @@ impl TaskResourceSpan {
         task_process_before: Option<TaskProcessTreeSample>,
     ) -> Self {
         Self {
-            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V3.to_string(),
+            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V4.to_string(),
             span_id,
             task_kind,
             task_ref,
@@ -1134,6 +1187,7 @@ impl TaskResourceSpan {
             task_process_whole_task_prefix_covered: false,
             task_terminal_resources: None,
             task_workload_resources: None,
+            durable_workload_receipt_lease: OpaqueDurableWorkloadReceiptLease::default(),
             process_scope,
             sampling_gaps: 0,
             abandonment_reason: None,
@@ -1193,6 +1247,12 @@ impl TaskResourceSpan {
                         .task_process_after
                         .as_ref()
                         .is_some_and(TaskProcessTreeSample::is_complete)))
+    }
+
+    pub(crate) fn durable_workload_receipt_lease_guard(
+        &self,
+    ) -> ab_agent::DurableWorkloadReceiptLeaseGuard {
+        self.durable_workload_receipt_lease.guard.clone()
     }
 
     /// Produce the only form of a span that may enter durable event history.
@@ -1342,7 +1402,7 @@ fn workload_resource_usage(
     let failure_reason = (!snapshot.incomplete_reasons.is_empty())
         .then(|| snapshot.incomplete_reasons.join("; "));
     TaskWorkloadResourceUsage {
-        schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V0.to_string(),
+        schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V1.to_string(),
         accounting_status: accounting_status.to_string(),
         source: snapshot
             .source
@@ -1366,6 +1426,7 @@ fn workload_resource_usage(
         complete_for_cpu_memory_workload_tree: snapshot
             .complete_for_cpu_memory_workload_tree,
         complete_for_pids_workload_tree: snapshot.complete_for_pids_workload_tree,
+        durable_receipts: snapshot.durable_receipts,
         io_accounting_status: "unknown_not_delegated".to_string(),
         terminal_condition: terminal_condition.to_string(),
         failure_reason,
@@ -1378,7 +1439,9 @@ fn refresh_task_custody_resources(
     custody: &ab_agent::SpawnedProcessCustody,
 ) {
     span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
-    span.task_workload_resources = Some(workload_resource_usage(custody.workload_resources()));
+    let (workload_resources, lease_guard) = custody.workload_resources_with_lease();
+    span.task_workload_resources = Some(workload_resource_usage(workload_resources));
+    span.durable_workload_receipt_lease = OpaqueDurableWorkloadReceiptLease { guard: lease_guard };
 }
 
 fn process_tree_delta(
@@ -1776,6 +1839,25 @@ fn cache_terminal_session_span(
     tracker
         .terminal_session_spans
         .insert(session_id.to_string(), span);
+}
+
+/// A terminal-session cache preserves only the public response after its
+/// background observer has consumed the sole event-recording responsibility.
+/// Keeping an operational producer lease in that cache could otherwise block
+/// a healthy peer from reconciling a Store/ACK failure until the user waits,
+/// the cache evicts, or this Bridge restarts.
+pub(crate) fn release_cached_task_resource_span_receipt_lease_for_session(
+    session_id: &str,
+) -> std::result::Result<bool, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    let Some(span) = tracker.terminal_session_spans.get_mut(session_id) else {
+        return Ok(false);
+    };
+    span.durable_workload_receipt_lease = OpaqueDurableWorkloadReceiptLease::default();
+    Ok(true)
 }
 
 /// Abandon and cache a session span after the bounded observer lifetime. This
@@ -2392,7 +2474,7 @@ mod tests {
 
         assert!(!span.has_complete_capture());
         let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
-        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V3);
+        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V4);
         assert_eq!(receipt["task_process_binding_status"], "unavailable");
         assert_eq!(
             receipt["task_process_binding_reason"],
@@ -2458,7 +2540,7 @@ mod tests {
                 "max_ru_maxrss_across_attempts_not_concurrent_tree_peak".into(),
         });
         span.task_workload_resources = Some(TaskWorkloadResourceUsage {
-            schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V0.into(),
+            schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V1.into(),
             accounting_status: "complete".into(),
             source: "linux_cgroup_v2_systemd_delegated_scope".into(),
             scope: "delegated_session_workload_tree".into(),
@@ -2477,6 +2559,10 @@ mod tests {
             final_populated_zero: true,
             complete_for_cpu_memory_workload_tree: true,
             complete_for_pids_workload_tree: true,
+            durable_receipts: vec![ab_agent::DurableWorkloadReceiptRef {
+                receipt_id: "a".repeat(32),
+                sha256: format!("sha256:{}", "b".repeat(64)),
+            }],
             io_accounting_status: "unknown_not_delegated".into(),
             terminal_condition: "all_generations_populated_zero".into(),
             failure_reason: None,
@@ -2488,7 +2574,7 @@ mod tests {
         assert!(!debug.contains("root_start_ticks"));
         assert!(span.has_complete_capture());
         let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
-        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V3);
+        assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V4);
         assert_eq!(
             receipt["task_workload_resources"]
                 ["complete_for_cpu_memory_workload_tree"],
@@ -2515,6 +2601,9 @@ mod tests {
         assert!(!tampered.proves_complete_cpu_memory_workload_tree());
         tampered = baseline.clone();
         tampered.controllers.retain(|controller| controller != "memory");
+        assert!(!tampered.proves_complete_cpu_memory_workload_tree());
+        tampered = baseline.clone();
+        tampered.durable_receipts.clear();
         assert!(!tampered.proves_complete_cpu_memory_workload_tree());
 
         span.task_terminal_resources

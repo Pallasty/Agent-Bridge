@@ -17393,6 +17393,15 @@ fn validate_workspace_runtime_request(
     use ab_agent::{CapabilitySupport, RuntimeLocality};
 
     let contract = runtime.workspace_contract();
+    if cfg
+        .env
+        .contains_key(ab_agent::workload_cgroup::RECEIPT_BINDING_ENV)
+    {
+        return Err(format!(
+            "{}: agent_spawn env contains reserved workload receipt binding key",
+            runtime.id()
+        ));
+    }
     if contract.source_kind != "agent_prompt" {
         return Err(format!(
             "{}: source kind '{}' is incompatible with agent_spawn ('agent_prompt' required)",
@@ -17571,7 +17580,7 @@ async fn record_body_scheduling_advice_event(
 async fn spawn_agent_with_body_span(
     hub: &Hub,
     agent: Arc<dyn AgentRuntime>,
-    cfg: SpawnConfig,
+    mut cfg: SpawnConfig,
 ) -> std::result::Result<(ab_agent::AgentSession, Option<Value>), String> {
     validate_workspace_runtime_request(agent.as_ref(), &cfg)?;
     let runtime_id = agent.id().to_string();
@@ -17591,6 +17600,21 @@ async fn spawn_agent_with_body_span(
     } else {
         None
     };
+
+    let contract = agent.workspace_contract();
+    let local_workload = match contract.locality {
+        ab_agent::RuntimeLocality::Local => true,
+        ab_agent::RuntimeLocality::LocalOrRemote => !agent_node_is_remote(cfg.node.as_deref()),
+        ab_agent::RuntimeLocality::Cloud | ab_agent::RuntimeLocality::Unknown => false,
+    };
+    if local_workload {
+        if let Some(span_id) = span_id.as_ref() {
+            cfg.env.insert(
+                ab_agent::workload_cgroup::RECEIPT_BINDING_ENV.to_string(),
+                span_id.clone(),
+            );
+        }
+    }
 
     match agent.spawn(cfg).await {
         Ok(session) => {
@@ -17759,6 +17783,12 @@ async fn spawn_agent_with_body_span(
 
 const AGENT_BODY_SPAN_OBSERVER_MAX_SECS: u64 = 86_400;
 
+fn release_cached_agent_body_span_lease(session_id: &SessionId) {
+    let _ = crate::body_telemetry::release_cached_task_resource_span_receipt_lease_for_session(
+        session_id.as_str(),
+    );
+}
+
 async fn observe_agent_body_span_terminal(
     hub: Hub,
     agent: Arc<dyn AgentRuntime>,
@@ -17789,6 +17819,7 @@ async fn observe_agent_body_span_terminal(
                     if let Some(store) = &hub.store {
                         let _ = record_body_task_span_event(store, &span).await;
                     }
+                    release_cached_agent_body_span_lease(&session_id);
                 }
                 Ok(None) => {}
                 Err(error) => tracing::debug!(
@@ -17808,6 +17839,7 @@ async fn observe_agent_body_span_terminal(
                     if let Some(store) = &hub.store {
                         let _ = record_body_task_span_event(store, &span).await;
                     }
+                    release_cached_agent_body_span_lease(&session_id);
                 }
                 Ok(None) => {}
                 Err(error) => tracing::debug!(
@@ -33420,6 +33452,12 @@ async fn record_body_task_span_event(
 ) -> bool {
     let complete = span.has_complete_capture();
     let receipt = span.receipt();
+    let durable_receipt_lease = span.durable_workload_receipt_lease_guard();
+    let durable_receipts = receipt
+        .task_workload_resources
+        .as_ref()
+        .map(|usage| usage.durable_receipts.clone())
+        .unwrap_or_default();
     let verdict = if complete {
         crate::semantic_event::Verdict {
             status: crate::semantic_event::VerdictStatus::Verified,
@@ -33442,6 +33480,8 @@ async fn record_body_task_span_event(
                     .task_workload_resources
                     .as_ref()
                     .map(|usage| usage.proves_complete_cpu_memory_workload_tree()),
+                "durable_receipt_count": durable_receipts.len(),
+                "durable_commit_required": !durable_receipts.is_empty(),
             }),
         }
     } else {
@@ -33491,8 +33531,9 @@ async fn record_body_task_span_event(
             }),
         }
     };
+    let recorded_at = dispatch_now_secs();
     let event = crate::semantic_event::SemanticEvent {
-        ts: dispatch_now_secs(),
+        ts: recorded_at,
         actor: "mcp".to_string(),
         source: "body_telemetry".to_string(),
         action: match span.state {
@@ -33515,18 +33556,46 @@ async fn record_body_task_span_event(
             expected_effect: Some("record a bounded task resource-span receipt".to_string()),
         },
         verdict,
-        facts: serde_json::to_value(receipt).unwrap_or_else(|_| {
+        facts: serde_json::to_value(&receipt).unwrap_or_else(|_| {
             json!({
                 "schema_version": crate::body_telemetry::TASK_RESOURCE_SPAN_SCHEMA_V0,
                 "serialization_error": true,
             })
         }),
     };
-    match store.record_semantic_event(event.to_record()).await {
-        Ok(()) => true,
-        Err(error) => {
-            tracing::debug!(error = %error, span_id = %span.span_id, "record_semantic_event (body_task_span) failed");
-            false
+    if durable_receipts.is_empty() {
+        match store.record_semantic_event(event.to_record()).await {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::debug!(error = %error, span_id = %span.span_id, "record_semantic_event (body_task_span) failed");
+                false
+            }
+        }
+    } else {
+        match crate::workload_receipt_reconciliation::commit_live_workload_receipt_event_and_ack(
+            store,
+            &durable_receipts,
+            &durable_receipt_lease,
+            &span.span_id,
+            recorded_at,
+            &event.facts,
+            event.to_record(),
+        )
+        .await
+        {
+            Ok(outcome) if outcome.event_projection_present => true,
+            Ok(outcome) => {
+                tracing::warn!(
+                    span_id = %span.span_id,
+                    status = ?outcome.status,
+                    "durable workload receipt identity was not bound to the requested live event projection"
+                );
+                false
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, span_id = %span.span_id, "durable workload receipt commit failed; outbox preserved");
+                false
+            }
         }
     }
 }

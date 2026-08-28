@@ -7,14 +7,16 @@
 //! transient scope disappears.  Process identifiers and cgroup paths never
 //! enter the public snapshot.
 //!
-//! Security boundary: v0 provides cooperative same-UID lifecycle custody and
-//! accounting, not hostile same-UID containment.  An unsandboxed executor with
+//! Security boundary: cgroup custody and the v1 durable outbox provide
+//! cooperative same-UID lifecycle/accounting integrity and crash recovery,
+//! not hostile same-UID containment. An unsandboxed executor with
 //! deliberate access to its delegated cgroup filesystem can interfere with
 //! that subtree; hardening that boundary requires a separately validated LSM
 //! or namespace policy and must not be inferred from a `Complete` receipt.
 
 use ab_core::{Error, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -24,11 +26,62 @@ static SUPERVISOR_SIGNAL_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::A
 
 pub const POLICY_ENV: &str = "AGENT_BRIDGE_CGROUP_CUSTODY";
 pub const RUNTIME_MAX_ENV: &str = "AGENT_BRIDGE_CGROUP_RUNTIME_MAX_SEC";
+pub const RECEIPT_BINDING_ENV: &str = "AGENT_BRIDGE_WORKLOAD_RECEIPT_BINDING";
+pub const RECEIPT_DIR_ENV: &str = "AGENT_BRIDGE_CGROUP_RECEIPT_DIR";
 pub const INTERNAL_MARKER: &str = "__ab_agent_cgroup_supervise";
 
 const SOURCE: &str = "linux_cgroup_v2_systemd_delegated_scope";
 const SCOPE: &str = "delegated_session_workload_tree";
 const MAX_PROTOCOL_FRAME_BYTES: usize = 64 * 1024;
+const MAX_DURABLE_RECEIPT_ENTRIES: usize = 4096;
+const MAX_DURABLE_ENTRY_FILES: usize = 16;
+const MAX_RECEIPT_BINDING_BYTES: usize = 256;
+// Schema 2 includes the mandatory producer.lock lease object. Schema 1 was
+// never deployed; rejecting it explicitly avoids treating a pre-lease source
+// candidate as a safely recoverable outbox entry.
+const DURABLE_MANIFEST_SCHEMA: u32 = 2;
+const DURABLE_RECEIPT_SCHEMA: u32 = 2;
+const MANIFEST_FILE: &str = "manifest.json";
+const RECEIPT_FILE: &str = "receipt.json";
+const SPOOL_LOCK_FILE: &str = ".spool.lock";
+const PRODUCER_LOCK_FILE: &str = "producer.lock";
+
+/// PID-free content address for one durably spooled terminal cgroup receipt.
+/// The path, unit nonce, cgroup path, and process identity remain private.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DurableWorkloadReceiptRef {
+    pub receipt_id: String,
+    pub sha256: String,
+}
+
+/// One independently manifest-bound terminal receipt found by restart scan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DurableWorkloadReceiptRecord {
+    pub receipt_ref: DurableWorkloadReceiptRef,
+    pub span_id: String,
+    pub runtime: String,
+    pub resources: WorkloadResourceSnapshot,
+}
+
+/// Bounded, content-free explanation for an entry that cannot be admitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DurableWorkloadReceiptIssue {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt_id: Option<String>,
+    pub state: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DurableWorkloadReceiptScan {
+    pub receipts: Vec<DurableWorkloadReceiptRecord>,
+    pub unresolved: Vec<DurableWorkloadReceiptIssue>,
+    pub issues: Vec<DurableWorkloadReceiptIssue>,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +129,88 @@ pub struct WorkloadResourceSnapshot {
     pub captured_generation_count: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub incomplete_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub durable_receipts: Vec<DurableWorkloadReceiptRef>,
+}
+
+/// Opaque ownership handoff that keeps durable producer leases held while a
+/// caller commits the corresponding terminal evidence and performs its
+/// digest-bound ACK. The guard deliberately implements neither `Debug` nor
+/// serde traits: it is an in-process capability, never durable evidence.
+#[must_use = "dropping this guard releases durable receipt producer leases"]
+#[derive(Clone, Default)]
+pub struct DurableWorkloadReceiptLeaseGuard {
+    _entries: Vec<HeldDurableReceiptLease>,
+}
+
+#[derive(Clone)]
+struct HeldDurableReceiptLease {
+    entry: Arc<DurableReceiptEntry>,
+    receipt_ref: Option<DurableWorkloadReceiptRef>,
+}
+
+impl DurableWorkloadReceiptLeaseGuard {
+    /// Whether this snapshot carried no durable producer lease.
+    pub fn is_empty(&self) -> bool {
+        self._entries.is_empty()
+    }
+
+    /// Whether this guard owns the producer lease for this exact
+    /// content-addressed receipt reference.
+    pub fn covers(&self, receipt_ref: &DurableWorkloadReceiptRef) -> bool {
+        self._entries
+            .iter()
+            .any(|held| held.receipt_ref.as_ref() == Some(receipt_ref))
+    }
+
+    /// Fail-closed coverage check for a complete commit batch.
+    pub fn covers_all(&self, receipt_refs: &[DurableWorkloadReceiptRef]) -> bool {
+        receipt_refs
+            .iter()
+            .all(|receipt_ref| self.covers(receipt_ref))
+    }
+
+    /// PID-free opaque IDs whose producer leases are held by this guard.
+    pub fn receipt_ids(&self) -> Vec<String> {
+        let mut ids: Vec<_> = self
+            ._entries
+            .iter()
+            .map(|held| held.entry.receipt_id.clone())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    /// Digest-bound ACK using the producer lease already owned by this
+    /// guard. This is the live-path counterpart of the restart scanner's
+    /// public ACK, which intentionally refuses entries with active owners.
+    pub fn acknowledge(&self, receipt_ref: &DurableWorkloadReceiptRef) -> Result<bool> {
+        let held = self
+            ._entries
+            .iter()
+            .find(|held| held.receipt_ref.as_ref() == Some(receipt_ref))
+            .ok_or_else(|| {
+                Error::InvalidArgument(
+                    "durable receipt lease guard does not cover the requested digest".into(),
+                )
+            })?;
+        #[cfg(target_os = "linux")]
+        {
+            acknowledge_durable_workload_receipt_at_with_lease(
+                &held.entry.root,
+                receipt_ref,
+                Some(&held.entry._producer_lease),
+            )
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = held;
+            Err(Error::Backend(
+                "durable workload receipt acknowledgement is Linux-only".into(),
+            ))
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -227,11 +362,37 @@ impl WorkloadCustody {
     }
 
     pub(crate) fn snapshot(&self) -> WorkloadResourceSnapshot {
+        self.snapshot_with_lease().0
+    }
+
+    pub(crate) fn snapshot_with_lease(
+        &self,
+    ) -> (WorkloadResourceSnapshot, DurableWorkloadReceiptLeaseGuard) {
         let state = lock_unpoison(&self.inner);
-        merge_snapshots(
+        let snapshot = merge_snapshots(
             &state.generations,
             state.generation_count,
             state.unaccounted_generation_count,
+        );
+        let mut entries: Vec<HeldDurableReceiptLease> = Vec::new();
+        for generation in &state.generations {
+            let StateDirectoryLease::Durable { _entry } = &generation._state_directory else {
+                continue;
+            };
+            if !entries.iter().any(|held| Arc::ptr_eq(&held.entry, _entry)) {
+                entries.push(HeldDurableReceiptLease {
+                    entry: _entry.clone(),
+                    receipt_ref: snapshot
+                        .durable_receipts
+                        .iter()
+                        .find(|receipt_ref| receipt_ref.receipt_id == _entry.receipt_id)
+                        .cloned(),
+                });
+            }
+        }
+        (
+            snapshot,
+            DurableWorkloadReceiptLeaseGuard { _entries: entries },
         )
     }
 
@@ -339,11 +500,64 @@ struct GenerationState {
     receipt_path: std::path::PathBuf,
     expected_nonce: String,
     expected_unit: String,
+    durable_manifest: Option<DurableReceiptManifest>,
     /// Spawn-time capability for the exact systemd-run/supervisor process.
     /// Used only to invoke its drain handler if the authenticated control
     /// stream is lost; it is never reconstructed from a later numeric PID.
     supervisor_pidfd: Option<PidFd>,
-    _runtime_dir: Arc<tempfile::TempDir>,
+    _state_directory: StateDirectoryLease,
+}
+
+#[derive(Clone)]
+enum StateDirectoryLease {
+    Transient {
+        _directory: Arc<tempfile::TempDir>,
+    },
+    /// Durable entries are deliberately not removed on Drop. Only an explicit,
+    /// digest-bound ACK may rename and collect them after a durable consumer
+    /// commit, so daemon loss cannot turn a valid terminal receipt into absence.
+    Durable {
+        _entry: Arc<DurableReceiptEntry>,
+    },
+}
+
+struct DurableReceiptEntry {
+    root: PathBuf,
+    entry: PathBuf,
+    receipt_id: String,
+    /// The producer owns this exclusive lease from allocation until the last
+    /// custody/prepared handle is dropped. A restart scanner may only import
+    /// the entry after the kernel releases this open-file-description lock.
+    _producer_lease: ProducerLease,
+}
+
+#[cfg(target_os = "linux")]
+struct ProducerLease {
+    _file: std::fs::File,
+}
+
+#[cfg(not(target_os = "linux"))]
+struct ProducerLease;
+
+#[cfg(target_os = "linux")]
+impl DurableReceiptEntry {
+    fn cleanup_proven_pre_start(&self) {
+        let Ok(_root_lock) = lock_spool_root(&self.root) else {
+            return;
+        };
+        // The producer lease held by `self` proves that no scanner or ACK owns
+        // this entry. Removal is deliberately explicit and non-recursive.
+        for name in [
+            "supervisor.sock",
+            RECEIPT_FILE,
+            MANIFEST_FILE,
+            PRODUCER_LOCK_FILE,
+        ] {
+            let _ = std::fs::remove_file(self.entry.join(name));
+        }
+        let _ = std::fs::remove_dir(&self.entry);
+        let _ = sync_directory(&self.root);
+    }
 }
 
 struct GenerationSnapshotState {
@@ -384,8 +598,17 @@ impl GenerationState {
                     &self.receipt_path,
                     &self.expected_nonce,
                     &self.expected_unit,
+                    self.durable_manifest.as_ref(),
                 ) {
-                    Ok(receipt) => state.cached = receipt.resources,
+                    Ok(mut receipt) => {
+                        if let Some(manifest) = &self.durable_manifest {
+                            receipt.resources.durable_receipts = vec![DurableWorkloadReceiptRef {
+                                receipt_id: manifest.receipt_id.clone(),
+                                sha256: receipt.sha256,
+                            }];
+                        }
+                        state.cached = receipt.resources;
+                    }
                     Err(error) => {
                         state.cached.status = WorkloadResourceStatus::Partial;
                         state
@@ -488,6 +711,7 @@ fn merge_snapshots(
         merged
             .incomplete_reasons
             .extend(snapshot.incomplete_reasons);
+        merged.durable_receipts.extend(snapshot.durable_receipts);
     }
     if cpu_total_overflow || cpu_user_overflow || cpu_system_overflow {
         if cpu_total_overflow {
@@ -527,6 +751,20 @@ fn merge_snapshots(
         ));
     }
     merged.controllers.sort();
+    merged.durable_receipts.sort();
+    merged.durable_receipts.dedup();
+    if merged
+        .durable_receipts
+        .windows(2)
+        .any(|pair| pair[0].receipt_id == pair[1].receipt_id)
+    {
+        merged.status = WorkloadResourceStatus::Partial;
+        merged.complete_for_cpu_memory_workload_tree = false;
+        merged.complete_for_pids_workload_tree = false;
+        merged
+            .incomplete_reasons
+            .push("durable receipt id was observed with conflicting digests".into());
+    }
     merged.incomplete_reasons.sort();
     merged.incomplete_reasons.dedup();
     merged
@@ -714,9 +952,29 @@ struct ControlMessage<'a> {
 #[serde(deny_unknown_fields)]
 struct Receipt {
     schema: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    receipt_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    span_id: Option<String>,
     nonce: String,
     unit: String,
     resources: WorkloadResourceSnapshot,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct DurableReceiptManifest {
+    schema: u32,
+    receipt_id: String,
+    span_id: String,
+    runtime: String,
+    unit: String,
+    nonce: String,
+}
+
+struct ValidatedReceipt {
+    resources: WorkloadResourceSnapshot,
+    sha256: String,
 }
 
 fn read_bounded_protocol_line<R: std::io::BufRead>(reader: &mut R, frame: &str) -> Result<String> {
@@ -781,6 +1039,7 @@ fn validate_terminal_snapshot(snapshot: &WorkloadResourceSnapshot) -> Result<()>
         || !snapshot.start_before_exec
         || snapshot.generation_count != 1
         || snapshot.captured_generation_count != 1
+        || !snapshot.durable_receipts.is_empty()
         || !status_consistent
         || (cpu_complete && !cpu_fields_complete)
         || (pids_complete && !pids_fields_complete)
@@ -797,7 +1056,8 @@ fn read_receipt(
     path: &std::path::Path,
     expected_nonce: &str,
     expected_unit: &str,
-) -> Result<Receipt> {
+    durable_manifest: Option<&DurableReceiptManifest>,
+) -> Result<ValidatedReceipt> {
     use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
@@ -812,6 +1072,7 @@ fn read_receipt(
     if !metadata.file_type().is_file()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
+        || (durable_manifest.is_some() && metadata.mode() & 0o777 != 0o600)
         || metadata.len() > MAX_PROTOCOL_FRAME_BYTES as u64
     {
         return Err(Error::Backend(
@@ -830,19 +1091,43 @@ fn read_receipt(
     }
     let receipt: Receipt = serde_json::from_slice(&bytes)
         .map_err(|error| Error::Backend(format!("decode workload receipt: {error}")))?;
-    if receipt.schema != 1 {
-        return Err(Error::Backend(format!(
-            "unsupported workload receipt schema {}",
-            receipt.schema
-        )));
-    }
     if receipt.nonce != expected_nonce || receipt.unit != expected_unit {
         return Err(Error::Backend(
             "workload receipt binding does not match prepared launch".into(),
         ));
     }
+    match durable_manifest {
+        None => {
+            if receipt.schema != 1 || receipt.receipt_id.is_some() || receipt.span_id.is_some() {
+                return Err(Error::Backend(format!(
+                    "unsupported transient workload receipt schema {}",
+                    receipt.schema
+                )));
+            }
+        }
+        Some(manifest) => {
+            validate_manifest(manifest)?;
+            if receipt.schema != DURABLE_RECEIPT_SCHEMA
+                || receipt.receipt_id.as_deref() != Some(manifest.receipt_id.as_str())
+                || receipt.span_id.as_deref() != Some(manifest.span_id.as_str())
+                || receipt.nonce != manifest.nonce
+                || receipt.unit != manifest.unit
+            {
+                return Err(Error::Backend(
+                    "durable workload receipt does not match its independent manifest".into(),
+                ));
+            }
+        }
+    }
     validate_terminal_snapshot(&receipt.resources)?;
-    Ok(receipt)
+    Ok(ValidatedReceipt {
+        resources: receipt.resources,
+        sha256: sha256_hex(&bytes),
+    })
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
 #[derive(Clone)]
@@ -865,7 +1150,25 @@ struct PreparedInner {
     receipt_path: PathBuf,
     nonce: String,
     unit: String,
-    runtime_dir: Arc<tempfile::TempDir>,
+    durable_manifest: Option<DurableReceiptManifest>,
+    state_directory: StateDirectoryLease,
+    /// Set only after the complete newline-framed START command has been
+    /// written successfully. Before that point the target cannot execute, so
+    /// dropping the final prepared launch may safely remove its durable stub.
+    start_authorized: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for PreparedInner {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        if self.start_authorized.load(Ordering::Acquire) {
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        if let StateDirectoryLease::Durable { _entry } = &self.state_directory {
+            _entry.cleanup_proven_pre_start();
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -891,55 +1194,110 @@ pub(crate) fn wrap_launch_spec(
     mut launch: crate::sandbox::LaunchSpec,
     runtime: &str,
     env: &std::collections::HashMap<String, String>,
+    receipt_binding: Option<&str>,
 ) -> Result<crate::sandbox::LaunchSpec> {
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (runtime, env);
+        let _ = (runtime, env, receipt_binding);
         return Ok(launch);
     }
 
     #[cfg(target_os = "linux")]
     {
+        if env.contains_key(RECEIPT_DIR_ENV) {
+            return Err(Error::InvalidArgument(format!(
+                "agent_spawn env cannot override ambient {RECEIPT_DIR_ENV} durable receipt policy"
+            )));
+        }
         if !custody_enabled(env)? {
             return Ok(launch);
+        }
+        if let Some(binding) = receipt_binding {
+            validate_receipt_binding(binding)?;
         }
         let current_exe = std::env::current_exe().map_err(|error| {
             Error::Backend(format!(
                 "{runtime}: resolve cgroup supervisor executable: {error}"
             ))
         })?;
+        let current_exe = path_to_utf8(&current_exe, runtime)?;
         let systemd_run = find_in_trusted_path("systemd-run").ok_or_else(|| {
             Error::Backend(format!(
                 "{runtime}: cgroup custody enabled but systemd-run is unavailable"
             ))
         })?;
-        let base = runtime_directory().ok_or_else(|| {
-            Error::Backend(format!(
-                "{runtime}: cgroup custody enabled but the user runtime directory is unavailable"
-            ))
-        })?;
-        let runtime_dir = tempfile::Builder::new()
-            .prefix("agent-bridge-cgroup-")
-            .tempdir_in(&base)
-            .map_err(|error| {
-                Error::Backend(format!(
-                    "{runtime}: create private cgroup state directory: {error}"
-                ))
-            })?;
-        set_mode(runtime_dir.path(), 0o700)?;
-        let runtime_dir = Arc::new(runtime_dir);
-        let socket_path = runtime_dir.path().join("supervisor.sock");
-        let receipt_path = runtime_dir.path().join("receipt.json");
+        let systemd_run = path_to_utf8(&systemd_run, runtime)?;
+        // Parse every ambient policy value before allocating a durable outbox
+        // entry. Unavoidable state-local failures below are covered by the
+        // PreparedInner pre-START drop guard.
+        let runtime_max_seconds = runtime_max_seconds()?;
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let unit = format!("agent-bridge-agent-{id}.scope");
+        let (state_path, state_directory, durable_manifest) = match receipt_binding {
+            Some(span_id) => {
+                let (path, entry, manifest) =
+                    prepare_durable_receipt_entry(runtime, span_id, &unit, &nonce)?;
+                (
+                    path,
+                    StateDirectoryLease::Durable {
+                        _entry: Arc::new(entry),
+                    },
+                    Some(manifest),
+                )
+            }
+            None => {
+                let base = runtime_directory().ok_or_else(|| {
+                    Error::Backend(format!(
+                        "{runtime}: cgroup custody enabled but the user runtime directory is unavailable"
+                    ))
+                })?;
+                let runtime_dir = tempfile::Builder::new()
+                    .prefix("agent-bridge-cgroup-")
+                    .tempdir_in(&base)
+                    .map_err(|error| {
+                        Error::Backend(format!(
+                            "{runtime}: create private cgroup state directory: {error}"
+                        ))
+                    })?;
+                set_mode(runtime_dir.path(), 0o700)?;
+                let runtime_dir = Arc::new(runtime_dir);
+                (
+                    runtime_dir.path().to_path_buf(),
+                    StateDirectoryLease::Transient {
+                        _directory: runtime_dir,
+                    },
+                    None,
+                )
+            }
+        };
+        let socket_path = state_path.join("supervisor.sock");
+        let receipt_path = state_path.join(RECEIPT_FILE);
+        let start_authorized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let prepared_inner = Arc::new(PreparedInner {
+            listener: Mutex::new(None),
+            socket_path: socket_path.clone(),
+            receipt_path: receipt_path.clone(),
+            nonce: nonce.clone(),
+            unit: unit.clone(),
+            durable_manifest: durable_manifest.clone(),
+            state_directory,
+            start_authorized,
+        });
         let listener = std::os::unix::net::UnixListener::bind(&socket_path).map_err(|error| {
             Error::Backend(format!(
                 "{runtime}: bind private cgroup control socket: {error}"
             ))
         })?;
         set_mode(&socket_path, 0o600)?;
+        *lock_unpoison(&prepared_inner.listener) = Some(listener);
 
-        let id = uuid::Uuid::new_v4().simple().to_string();
-        let nonce = uuid::Uuid::new_v4().simple().to_string();
-        let unit = format!("agent-bridge-agent-{id}.scope");
+        // These paths are validated only after PreparedInner exists, so any
+        // unexpected encoding failure still removes a provably pre-START
+        // durable entry through its drop guard.
+        let socket_path_argument = path_to_utf8(&socket_path, runtime)?;
+        let receipt_path_argument = path_to_utf8(&receipt_path, runtime)?;
+
         let original_program = std::mem::take(&mut launch.program);
         let original_args = std::mem::take(&mut launch.args);
         let mut supervisor_args = vec![
@@ -955,35 +1313,35 @@ pub(crate) fn wrap_launch_spec(
             "--property".into(),
             "OOMPolicy=continue".into(),
             "--property".into(),
-            format!("RuntimeMaxSec={}", runtime_max_seconds()?),
+            format!("RuntimeMaxSec={runtime_max_seconds}"),
             "--".into(),
-            path_to_utf8(&current_exe, runtime)?,
+            current_exe,
             INTERNAL_MARKER.into(),
             "--runtime".into(),
             runtime.into(),
             "--unit".into(),
             unit.clone(),
             "--socket".into(),
-            path_to_utf8(&socket_path, runtime)?,
+            socket_path_argument,
             "--receipt".into(),
-            path_to_utf8(&receipt_path, runtime)?,
+            receipt_path_argument,
             "--nonce".into(),
             nonce.clone(),
-            "--".into(),
-            original_program,
         ];
+        if let Some(manifest) = &durable_manifest {
+            supervisor_args.extend([
+                "--receipt-id".into(),
+                manifest.receipt_id.clone(),
+                "--span-id".into(),
+                manifest.span_id.clone(),
+            ]);
+        }
+        supervisor_args.extend(["--".into(), original_program]);
         supervisor_args.extend(original_args);
-        launch.program = path_to_utf8(&systemd_run, runtime)?;
+        launch.program = systemd_run;
         launch.args = supervisor_args;
         launch.workload = Some(PreparedWorkload {
-            inner: Arc::new(PreparedInner {
-                listener: Mutex::new(Some(listener)),
-                socket_path,
-                receipt_path,
-                nonce,
-                unit,
-                runtime_dir,
-            }),
+            inner: prepared_inner,
         });
         Ok(launch)
     }
@@ -1093,6 +1451,422 @@ fn set_mode(path: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .map_err(|error| Error::Backend(format!("secure private cgroup custody state: {error}")))
+}
+
+fn validate_receipt_id(receipt_id: &str) -> Result<()> {
+    if receipt_id.len() != 32
+        || !receipt_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::InvalidArgument(
+            "durable workload receipt id must be 32 lowercase hexadecimal bytes".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_receipt_binding(binding: &str) -> Result<()> {
+    if binding.is_empty()
+        || binding.len() > MAX_RECEIPT_BINDING_BYTES
+        || binding.chars().any(char::is_control)
+    {
+        return Err(Error::InvalidArgument(format!(
+            "durable workload receipt binding must be 1..={MAX_RECEIPT_BINDING_BYTES} non-control UTF-8 bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_manifest(manifest: &DurableReceiptManifest) -> Result<()> {
+    if manifest.schema != DURABLE_MANIFEST_SCHEMA {
+        return Err(Error::Backend(format!(
+            "unsupported durable workload manifest schema {}",
+            manifest.schema
+        )));
+    }
+    validate_receipt_id(&manifest.receipt_id)
+        .map_err(|error| Error::Backend(format!("invalid durable receipt manifest: {error}")))?;
+    validate_receipt_binding(&manifest.span_id)
+        .map_err(|error| Error::Backend(format!("invalid durable receipt manifest: {error}")))?;
+    if manifest.runtime.is_empty()
+        || manifest.runtime.len() > 128
+        || manifest.runtime.chars().any(char::is_control)
+        || !manifest.unit.starts_with("agent-bridge-agent-")
+        || !manifest.unit.ends_with(".scope")
+        || manifest.unit.len() > 96
+        || !manifest
+            .unit
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '.'))
+        || manifest.nonce.len() != 32
+        || !manifest.nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(Error::Backend(
+            "durable workload receipt manifest fields are malformed or unbounded".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn durable_receipt_root() -> Result<PathBuf> {
+    let root = if let Some(configured) = std::env::var_os(RECEIPT_DIR_ENV) {
+        if configured.is_empty() {
+            return Err(Error::InvalidArgument(format!(
+                "ambient {RECEIPT_DIR_ENV} cannot be empty"
+            )));
+        }
+        PathBuf::from(configured)
+    } else if let Some(database) = std::env::var_os("AGENT_BRIDGE_DB") {
+        let database = PathBuf::from(database);
+        let parent = database.parent().ok_or_else(|| {
+            Error::InvalidArgument(
+                "ambient AGENT_BRIDGE_DB has no parent for durable workload receipts".into(),
+            )
+        })?;
+        parent.join("workload-receipts")
+    } else if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+        PathBuf::from(data_home)
+            .join("agent-bridge")
+            .join("workload-receipts")
+    } else {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            Error::Backend(
+                "durable workload receipts require AGENT_BRIDGE_CGROUP_RECEIPT_DIR, AGENT_BRIDGE_DB, XDG_DATA_HOME, or HOME"
+                    .into(),
+            )
+        })?;
+        PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("agent-bridge")
+            .join("workload-receipts")
+    };
+    validate_durable_root_path(&root)?;
+    ensure_private_directory(&root, true)?;
+    Ok(root)
+}
+
+#[cfg(target_os = "linux")]
+fn validate_durable_root_path(path: &Path) -> Result<()> {
+    if !path.is_absolute()
+        || path == Path::new("/")
+        || path.to_str().is_none()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err(Error::InvalidArgument(
+            "durable workload receipt root must be an absolute, normalized, non-root path".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_private_directory(path: &Path, create: bool) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    if create {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                use std::os::unix::fs::DirBuilderExt;
+                let mut builder = std::fs::DirBuilder::new();
+                builder.recursive(true).mode(0o700);
+                builder.create(path).map_err(|error| {
+                    Error::Backend(format!(
+                        "create private durable workload receipt directory: {error}"
+                    ))
+                })?;
+                set_mode(path, 0o700)?;
+                if let Some(parent) = path.parent() {
+                    sync_directory(parent)?;
+                }
+            }
+            Err(error) => {
+                return Err(Error::Backend(format!(
+                    "inspect durable workload receipt directory before creation: {error}"
+                )))
+            }
+        }
+    }
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        Error::Backend(format!(
+            "inspect private durable workload receipt directory: {error}"
+        ))
+    })?;
+    if !metadata.file_type().is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o777 != 0o700
+    {
+        return Err(Error::Backend(
+            "durable workload receipt directory must be a non-symlink owner-bound 0700 directory"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+struct SpoolRootLock {
+    _file: std::fs::File,
+}
+
+#[cfg(target_os = "linux")]
+enum ProducerLeaseAttempt {
+    Acquired(ProducerLease),
+    Active,
+}
+
+#[cfg(target_os = "linux")]
+fn lock_spool_root(root: &Path) -> Result<SpoolRootLock> {
+    let file = open_private_lock_file(&root.join(SPOOL_LOCK_FILE), true, false, false)?
+        .ok_or_else(|| Error::Backend("durable spool root lock unexpectedly active".into()))?;
+    Ok(SpoolRootLock { _file: file })
+}
+
+#[cfg(target_os = "linux")]
+fn create_producer_lease(entry: &Path) -> Result<ProducerLease> {
+    let path = entry.join(PRODUCER_LOCK_FILE);
+    let file = open_private_lock_file(&path, true, true, true)?.ok_or_else(|| {
+        Error::Backend("new durable producer lock was unexpectedly already leased".into())
+    })?;
+    Ok(ProducerLease { _file: file })
+}
+
+#[cfg(target_os = "linux")]
+fn try_acquire_producer_lease(entry: &Path) -> Result<ProducerLeaseAttempt> {
+    let path = entry.join(PRODUCER_LOCK_FILE);
+    match open_private_lock_file(&path, false, false, true)? {
+        Some(file) => Ok(ProducerLeaseAttempt::Acquired(ProducerLease {
+            _file: file,
+        })),
+        None => Ok(ProducerLeaseAttempt::Active),
+    }
+}
+
+/// Open and exclusively flock one owner-only lock file. `create_new` is used
+/// for producer locks; the root lock is persistent and reopened. A nonblocking
+/// conflict returns `None`, allowing scanners to report active ownership as a
+/// distinct unresolved state rather than misclassifying it as corruption.
+#[cfg(target_os = "linux")]
+fn open_private_lock_file(
+    path: &Path,
+    create_if_missing: bool,
+    create_exclusive: bool,
+    nonblocking: bool,
+) -> Result<Option<std::fs::File>> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    if create_if_missing {
+        if create_exclusive {
+            options.create_new(true);
+        } else {
+            options.create(true);
+        }
+    }
+    let file = options.open(path).map_err(|error| {
+        Error::Backend(format!(
+            "open durable workload lock '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        Error::Backend(format!(
+            "inspect durable workload lock '{}': {error}",
+            path.display()
+        ))
+    })?;
+    if !metadata.file_type().is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o777 != 0o600
+        || metadata.len() != 0
+    {
+        return Err(Error::Backend(format!(
+            "durable workload lock '{}' is not an empty owner-bound 0600 regular file",
+            path.display()
+        )));
+    }
+    let operation = libc::LOCK_EX | if nonblocking { libc::LOCK_NB } else { 0 };
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {
+            return Ok(Some(file));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        if nonblocking && error.kind() == std::io::ErrorKind::WouldBlock {
+            return Ok(None);
+        }
+        return Err(Error::Backend(format!(
+            "lock durable workload file '{}': {error}",
+            path.display()
+        )));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_spool_capacity_locked(root: &Path, maximum: usize) -> Result<()> {
+    let entries = std::fs::read_dir(root)
+        .map_err(|error| Error::Backend(format!("enumerate durable receipt capacity: {error}")))?;
+    let mut count = 0usize;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            Error::Backend(format!("inspect durable receipt capacity entry: {error}"))
+        })?;
+        if entry.file_name() == std::ffi::OsStr::new(SPOOL_LOCK_FILE) {
+            continue;
+        }
+        count = count.saturating_add(1);
+        if count >= maximum {
+            return Err(Error::Backend(format!(
+                "durable workload receipt spool capacity {maximum} is exhausted"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_durable_receipt_entry(
+    runtime: &str,
+    span_id: &str,
+    unit: &str,
+    nonce: &str,
+) -> Result<(PathBuf, DurableReceiptEntry, DurableReceiptManifest)> {
+    let root = durable_receipt_root()?;
+    prepare_durable_receipt_entry_at(&root, runtime, span_id, unit, nonce)
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_durable_receipt_entry_at(
+    root: &Path,
+    runtime: &str,
+    span_id: &str,
+    unit: &str,
+    nonce: &str,
+) -> Result<(PathBuf, DurableReceiptEntry, DurableReceiptManifest)> {
+    prepare_durable_receipt_entry_at_with_limit(
+        root,
+        runtime,
+        span_id,
+        unit,
+        nonce,
+        MAX_DURABLE_RECEIPT_ENTRIES,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_durable_receipt_entry_at_with_limit(
+    root: &Path,
+    runtime: &str,
+    span_id: &str,
+    unit: &str,
+    nonce: &str,
+    maximum_entries: usize,
+) -> Result<(PathBuf, DurableReceiptEntry, DurableReceiptManifest)> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    ensure_private_directory(root, false)?;
+    let receipt_id = uuid::Uuid::new_v4().simple().to_string();
+    let manifest = DurableReceiptManifest {
+        schema: DURABLE_MANIFEST_SCHEMA,
+        receipt_id: receipt_id.clone(),
+        span_id: span_id.to_owned(),
+        runtime: runtime.to_owned(),
+        unit: unit.to_owned(),
+        nonce: nonce.to_owned(),
+    };
+    validate_manifest(&manifest)?;
+    let _root_lock = lock_spool_root(root)?;
+    ensure_spool_capacity_locked(root, maximum_entries)?;
+    let entry = root.join(format!("receipt-{receipt_id}"));
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder
+            .create(&entry)
+            .map_err(|error| Error::Backend(format!("create durable receipt entry: {error}")))?;
+    }
+    if let Err(error) =
+        set_mode(&entry, 0o700).and_then(|()| ensure_private_directory(&entry, false))
+    {
+        let _ = std::fs::remove_dir(&entry);
+        return Err(error);
+    }
+    let producer_lease = match create_producer_lease(&entry) {
+        Ok(lease) => lease,
+        Err(error) => {
+            let _ = std::fs::remove_dir(&entry);
+            let _ = sync_directory(root);
+            return Err(error);
+        }
+    };
+    let manifest_path = entry.join(MANIFEST_FILE);
+    let write_result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&manifest_path)
+            .map_err(|error| Error::Backend(format!("create durable receipt manifest: {error}")))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| Error::Backend(format!("secure durable receipt manifest: {error}")))?;
+        serde_json::to_writer(&mut file, &manifest)
+            .map_err(|error| Error::Backend(format!("encode durable receipt manifest: {error}")))?;
+        file.write_all(b"\n")
+            .map_err(|error| Error::Backend(format!("finish durable receipt manifest: {error}")))?;
+        file.sync_all()
+            .map_err(|error| Error::Backend(format!("sync durable receipt manifest: {error}")))?;
+        sync_directory(&entry)?;
+        sync_directory(root)?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = std::fs::remove_file(&manifest_path);
+        let _ = std::fs::remove_file(entry.join(PRODUCER_LOCK_FILE));
+        let _ = std::fs::remove_dir(&entry);
+        let _ = sync_directory(root);
+        return Err(error);
+    }
+    Ok((
+        entry.clone(),
+        DurableReceiptEntry {
+            root: root.to_path_buf(),
+            entry,
+            receipt_id,
+            _producer_lease: producer_lease,
+        },
+        manifest,
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn sync_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|error| Error::Backend(format!("open directory for durable sync: {error}")))?;
+    directory
+        .sync_all()
+        .map_err(|error| Error::Backend(format!("sync durable directory: {error}")))
 }
 
 impl crate::sandbox::LaunchSpec {
@@ -1243,6 +2017,9 @@ impl PreparedWorkload {
         )
         .and_then(|()| stream.write_all(b"\n").map_err(serde_json::Error::io))
         .map_err(|error| Error::Backend(format!("send cgroup supervisor START: {error}")))?;
+        self.inner
+            .start_authorized
+            .store(true, std::sync::atomic::Ordering::Release);
         let cached = WorkloadResourceSnapshot {
             status: WorkloadResourceStatus::Pending,
             source: Some(SOURCE.into()),
@@ -1263,8 +2040,9 @@ impl PreparedWorkload {
             receipt_path: self.inner.receipt_path.clone(),
             expected_nonce: self.inner.nonce.clone(),
             expected_unit: self.inner.unit.clone(),
+            durable_manifest: self.inner.durable_manifest.clone(),
             supervisor_pidfd: direct_pidfd,
-            _runtime_dir: self.inner.runtime_dir.clone(),
+            _state_directory: self.inner.state_directory.clone(),
         });
         let _ = std::fs::remove_file(&self.inner.socket_path);
         Ok(WorkloadGeneration { state })
@@ -1370,6 +2148,8 @@ struct SupervisorRequest {
     socket: PathBuf,
     receipt: PathBuf,
     nonce: String,
+    receipt_id: Option<String>,
+    span_id: Option<String>,
     program: std::ffi::OsString,
     args: Vec<std::ffi::OsString>,
 }
@@ -1396,6 +2176,8 @@ fn parse_supervisor_request(args: &[std::ffi::OsString]) -> Result<Option<Superv
     let mut socket = None;
     let mut receipt = None;
     let mut nonce = None;
+    let mut receipt_id = None;
+    let mut span_id = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].to_str() {
@@ -1404,6 +2186,8 @@ fn parse_supervisor_request(args: &[std::ffi::OsString]) -> Result<Option<Superv
             Some("--socket") => parse_supervisor_path(args, &mut index, &mut socket)?,
             Some("--receipt") => parse_supervisor_path(args, &mut index, &mut receipt)?,
             Some("--nonce") => parse_supervisor_string(args, &mut index, &mut nonce)?,
+            Some("--receipt-id") => parse_supervisor_string(args, &mut index, &mut receipt_id)?,
+            Some("--span-id") => parse_supervisor_string(args, &mut index, &mut span_id)?,
             Some("--") => {
                 index += 1;
                 break;
@@ -1439,6 +2223,19 @@ fn parse_supervisor_request(args: &[std::ffi::OsString]) -> Result<Option<Superv
             "cgroup supervisor: invalid launch nonce".into(),
         ));
     }
+    match (&receipt_id, &span_id) {
+        (None, None) => {}
+        (Some(receipt_id), Some(span_id)) => {
+            validate_receipt_id(receipt_id)?;
+            validate_receipt_binding(span_id)?;
+        }
+        _ => {
+            return Err(Error::InvalidArgument(
+                "cgroup supervisor: durable receipt id and span binding must appear together"
+                    .into(),
+            ));
+        }
+    }
     let socket = socket
         .ok_or_else(|| Error::InvalidArgument("cgroup supervisor: missing --socket".into()))?;
     let receipt = receipt
@@ -1462,6 +2259,8 @@ fn parse_supervisor_request(args: &[std::ffi::OsString]) -> Result<Option<Superv
         socket,
         receipt,
         nonce,
+        receipt_id,
+        span_id,
         program,
         args: args[index + 1..].to_vec(),
     }))
@@ -1665,7 +2464,13 @@ fn run_supervisor(request: SupervisorRequest) -> Result<()> {
     write_receipt_atomic(
         &request.receipt,
         &Receipt {
-            schema: 1,
+            schema: if request.receipt_id.is_some() {
+                DURABLE_RECEIPT_SCHEMA
+            } else {
+                1
+            },
+            receipt_id: request.receipt_id.clone(),
+            span_id: request.span_id.clone(),
             nonce: request.nonce.clone(),
             unit: request.unit.clone(),
             resources,
@@ -2147,6 +2952,7 @@ fn collect_resources(root: &Path, controllers: &[String]) -> WorkloadResourceSna
         generation_count: 1,
         captured_generation_count: 1,
         incomplete_reasons,
+        durable_receipts: Vec::new(),
     }
 }
 
@@ -2190,7 +2996,7 @@ fn read_single_counter(path: PathBuf) -> Option<u64> {
 #[cfg(target_os = "linux")]
 fn write_receipt_atomic(path: &Path, receipt: &Receipt) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let parent = path
         .parent()
         .ok_or_else(|| Error::Backend("workload receipt path has no parent".into()))?;
@@ -2202,6 +3008,8 @@ fn write_receipt_atomic(path: &Path, receipt: &Receipt) -> Result<()> {
             .mode(0o600)
             .open(&temporary)
             .map_err(|error| Error::Backend(format!("create workload receipt: {error}")))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| Error::Backend(format!("secure workload receipt: {error}")))?;
         serde_json::to_writer(&mut file, receipt)
             .map_err(|error| Error::Backend(format!("encode workload receipt: {error}")))?;
         file.write_all(b"\n")
@@ -2210,12 +3018,507 @@ fn write_receipt_atomic(path: &Path, receipt: &Receipt) -> Result<()> {
             .map_err(|error| Error::Backend(format!("sync workload receipt: {error}")))?;
         std::fs::rename(&temporary, path)
             .map_err(|error| Error::Backend(format!("publish workload receipt: {error}")))?;
+        sync_directory(parent)?;
         Ok(())
     })();
     if write_result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     write_result
+}
+
+/// Scan the bounded durable outbox without inferring terminal success from an
+/// absent scope or missing receipt. The manifest is the independently durable
+/// launch binding; a receipt that merely repeats its own identifiers is never
+/// admitted without matching that manifest.
+#[cfg(target_os = "linux")]
+pub fn scan_durable_workload_receipts() -> Result<DurableWorkloadReceiptScan> {
+    let root = durable_receipt_root()?;
+    scan_durable_workload_receipts_at(&root)
+}
+
+#[cfg(target_os = "linux")]
+fn scan_durable_workload_receipts_at(root: &Path) -> Result<DurableWorkloadReceiptScan> {
+    ensure_private_directory(root, false)?;
+    let _root_lock = lock_spool_root(root)?;
+    let mut entries = std::fs::read_dir(&root)
+        .map_err(|error| Error::Backend(format!("scan durable receipt root: {error}")))?
+        .take(MAX_DURABLE_RECEIPT_ENTRIES + 2)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| Error::Backend(format!("enumerate durable receipt root: {error}")))?;
+    entries.retain(|entry| entry.file_name() != std::ffi::OsStr::new(SPOOL_LOCK_FILE));
+    if entries.len() > MAX_DURABLE_RECEIPT_ENTRIES {
+        return Err(Error::Backend(format!(
+            "durable workload receipt root exceeds bounded entry limit {MAX_DURABLE_RECEIPT_ENTRIES}"
+        )));
+    }
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    let mut scan = DurableWorkloadReceiptScan::default();
+    for entry in entries {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            scan.issues.push(durable_issue(
+                None,
+                "invalid",
+                "durable receipt entry name is not valid UTF-8",
+            ));
+            continue;
+        };
+        if let Some(receipt_id) = parse_entry_name(name, ".acked-") {
+            // The no-replace rename to `.acked-*` is the ACK linearization
+            // point. Once it exists, Store has already authorized deletion;
+            // the producer lease is no longer an admission boundary. This
+            // also makes cleanup restartable if a prior process died after
+            // deleting producer.lock but before removing the directory.
+            match cleanup_acked_entry(&entry.path()) {
+                Ok(()) => {
+                    let _ = sync_directory(&root);
+                }
+                Err(error) => scan.issues.push(durable_issue(
+                    Some(receipt_id),
+                    "acked_cleanup_pending",
+                    &error.to_string(),
+                )),
+            }
+            continue;
+        }
+        let Some(receipt_id) = parse_entry_name(name, "receipt-") else {
+            scan.issues.push(durable_issue(
+                None,
+                "invalid",
+                "unexpected entry in durable workload receipt root",
+            ));
+            continue;
+        };
+        let producer_lease = match try_acquire_producer_lease(&entry.path()) {
+            Ok(ProducerLeaseAttempt::Acquired(lease)) => lease,
+            Ok(ProducerLeaseAttempt::Active) => {
+                scan.unresolved.push(durable_issue(
+                    Some(receipt_id),
+                    "producer_active",
+                    "durable receipt producer lease is still held; terminal commit remains unresolved",
+                ));
+                continue;
+            }
+            Err(error) => {
+                scan.issues.push(durable_issue(
+                    Some(receipt_id),
+                    "invalid",
+                    &error.to_string(),
+                ));
+                continue;
+            }
+        };
+        match inspect_durable_entry(&entry.path(), &receipt_id) {
+            Ok((manifest, Some(mut receipt))) => {
+                let receipt_ref = DurableWorkloadReceiptRef {
+                    receipt_id: receipt_id.clone(),
+                    sha256: receipt.sha256,
+                };
+                receipt.resources.durable_receipts = vec![receipt_ref.clone()];
+                scan.receipts.push(DurableWorkloadReceiptRecord {
+                    receipt_ref,
+                    span_id: manifest.span_id,
+                    runtime: manifest.runtime,
+                    resources: receipt.resources,
+                });
+            }
+            Ok((_manifest, None)) => scan.unresolved.push(durable_issue(
+                Some(receipt_id),
+                "receipt_commit_unknown",
+                "durable launch manifest has no valid terminal receipt; terminal completeness is unknown",
+            )),
+            Err(error) => scan.issues.push(durable_issue(
+                Some(receipt_id),
+                "invalid",
+                &error.to_string(),
+            )),
+        }
+        drop(producer_lease);
+    }
+    scan.receipts
+        .sort_by(|left, right| left.receipt_ref.cmp(&right.receipt_ref));
+    scan.unresolved.sort_by(|left, right| {
+        left.receipt_id
+            .cmp(&right.receipt_id)
+            .then(left.reason.cmp(&right.reason))
+    });
+    scan.issues.sort_by(|left, right| {
+        left.receipt_id
+            .cmp(&right.receipt_id)
+            .then(left.reason.cmp(&right.reason))
+    });
+    Ok(scan)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn scan_durable_workload_receipts() -> Result<DurableWorkloadReceiptScan> {
+    Ok(DurableWorkloadReceiptScan::default())
+}
+
+/// Acknowledge one receipt only after its caller has durably and idempotently
+/// committed the projection. Rename is the ACK linearization point; cleanup is
+/// deliberately best-effort and restart-scannable through the `.acked-*`
+/// tombstone. No recursive deletion or caller-supplied path is used.
+#[cfg(target_os = "linux")]
+pub fn acknowledge_durable_workload_receipt(
+    receipt_ref: &DurableWorkloadReceiptRef,
+) -> Result<bool> {
+    validate_receipt_id(&receipt_ref.receipt_id)?;
+    let Some(digest_hex) = receipt_ref.sha256.strip_prefix("sha256:") else {
+        return Err(Error::InvalidArgument(
+            "durable workload receipt digest must use sha256:<64 lowercase hex>".into(),
+        ));
+    };
+    if digest_hex.len() != 64
+        || !digest_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::InvalidArgument(
+            "durable workload receipt digest must use sha256:<64 lowercase hex>".into(),
+        ));
+    }
+    let root = durable_receipt_root()?;
+    acknowledge_durable_workload_receipt_at(&root, receipt_ref)
+}
+
+#[cfg(target_os = "linux")]
+fn acknowledge_durable_workload_receipt_at(
+    root: &Path,
+    receipt_ref: &DurableWorkloadReceiptRef,
+) -> Result<bool> {
+    acknowledge_durable_workload_receipt_at_with_lease(root, receipt_ref, None)
+}
+
+#[cfg(target_os = "linux")]
+fn acknowledge_durable_workload_receipt_at_with_lease(
+    root: &Path,
+    receipt_ref: &DurableWorkloadReceiptRef,
+    owned_producer_lease: Option<&ProducerLease>,
+) -> Result<bool> {
+    ensure_private_directory(root, false)?;
+    let _root_lock = lock_spool_root(root)?;
+    validate_receipt_id(&receipt_ref.receipt_id)?;
+    let Some(digest_hex) = receipt_ref.sha256.strip_prefix("sha256:") else {
+        return Err(Error::InvalidArgument(
+            "durable workload receipt digest must use sha256:<64 lowercase hex>".into(),
+        ));
+    };
+    if digest_hex.len() != 64
+        || !digest_hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::InvalidArgument(
+            "durable workload receipt digest must use sha256:<64 lowercase hex>".into(),
+        ));
+    }
+    let pending = root.join(format!("receipt-{}", receipt_ref.receipt_id));
+    let acknowledged = root.join(format!(".acked-{}", receipt_ref.receipt_id));
+
+    match std::fs::symlink_metadata(&pending) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::symlink_metadata(&acknowledged) {
+                Ok(_) => {
+                    cleanup_acked_entry(&acknowledged)?;
+                    sync_directory(root)?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(Error::Backend(format!(
+                        "inspect acknowledged workload receipt tombstone: {error}"
+                    )))
+                }
+            }
+            return Ok(false);
+        }
+        Err(error) => {
+            return Err(Error::Backend(format!(
+                "inspect pending durable workload receipt: {error}"
+            )))
+        }
+    }
+    let acquired_lease = if owned_producer_lease.is_none() {
+        Some(match try_acquire_producer_lease(&pending)? {
+            ProducerLeaseAttempt::Acquired(lease) => lease,
+            ProducerLeaseAttempt::Active => {
+                return Err(Error::Backend(
+                    "cannot acknowledge durable receipt while producer lease is active".into(),
+                ));
+            }
+        })
+    } else {
+        None
+    };
+    let _producer_lease = owned_producer_lease
+        .or(acquired_lease.as_ref())
+        .expect("owned or newly acquired producer lease");
+    let (_manifest, receipt) = inspect_durable_entry(&pending, &receipt_ref.receipt_id)?;
+    let receipt = receipt.ok_or_else(|| {
+        Error::Backend(
+            "cannot acknowledge a durable workload launch without a terminal receipt".into(),
+        )
+    })?;
+    if receipt.sha256 != receipt_ref.sha256 {
+        return Err(Error::Backend(
+            "durable workload receipt digest changed before acknowledgement".into(),
+        ));
+    }
+    if let Err(error) = rename_directory_noreplace(&pending, &acknowledged) {
+        if std::fs::symlink_metadata(&pending).is_err() {
+            if std::fs::symlink_metadata(&acknowledged).is_ok() {
+                cleanup_acked_entry(&acknowledged)?;
+                sync_directory(root)?;
+            }
+            return Ok(false);
+        }
+        return Err(error);
+    }
+    sync_directory(&root)?;
+    if let Err(error) = cleanup_acked_entry(&acknowledged) {
+        tracing::warn!(
+            receipt_id = %receipt_ref.receipt_id,
+            error = %error,
+            "durable workload receipt acknowledged; tombstone cleanup deferred"
+        );
+    } else {
+        let _ = sync_directory(&root);
+    }
+    Ok(true)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn acknowledge_durable_workload_receipt(
+    _receipt_ref: &DurableWorkloadReceiptRef,
+) -> Result<bool> {
+    Err(Error::Backend(
+        "durable workload receipt acknowledgement is Linux-only".into(),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn durable_issue(
+    receipt_id: Option<String>,
+    state: &str,
+    reason: &str,
+) -> DurableWorkloadReceiptIssue {
+    DurableWorkloadReceiptIssue {
+        receipt_id,
+        state: state.chars().take(64).collect(),
+        reason: reason.chars().take(512).collect(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_entry_name(name: &str, prefix: &str) -> Option<String> {
+    let receipt_id = name.strip_prefix(prefix)?;
+    validate_receipt_id(receipt_id).ok()?;
+    Some(receipt_id.to_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn inspect_durable_entry(
+    entry: &Path,
+    expected_receipt_id: &str,
+) -> Result<(DurableReceiptManifest, Option<ValidatedReceipt>)> {
+    ensure_private_directory(entry, false)?;
+    validate_durable_entry_contents(entry)?;
+    let manifest_bytes = read_private_durable_file(&entry.join(MANIFEST_FILE), "manifest")?;
+    let manifest: DurableReceiptManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|error| Error::Backend(format!("decode durable receipt manifest: {error}")))?;
+    validate_manifest(&manifest)?;
+    if manifest.receipt_id != expected_receipt_id {
+        return Err(Error::Backend(
+            "durable receipt manifest id does not match its entry name".into(),
+        ));
+    }
+    let receipt_path = entry.join(RECEIPT_FILE);
+    let receipt = match std::fs::symlink_metadata(&receipt_path) {
+        Ok(_) => Some(read_receipt(
+            &receipt_path,
+            &manifest.nonce,
+            &manifest.unit,
+            Some(&manifest),
+        )?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(Error::Backend(format!(
+                "inspect durable terminal receipt: {error}"
+            )))
+        }
+    };
+    Ok((manifest, receipt))
+}
+
+#[cfg(target_os = "linux")]
+fn validate_durable_entry_contents(entry: &Path) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let mut files = std::fs::read_dir(entry)
+        .map_err(|error| Error::Backend(format!("enumerate durable receipt entry: {error}")))?
+        .take(MAX_DURABLE_ENTRY_FILES + 1)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| Error::Backend(format!("read durable receipt entry: {error}")))?;
+    if files.len() > MAX_DURABLE_ENTRY_FILES {
+        return Err(Error::Backend(format!(
+            "durable receipt entry exceeds bounded file limit {MAX_DURABLE_ENTRY_FILES}"
+        )));
+    }
+    files.sort_by_key(std::fs::DirEntry::file_name);
+    for file in files {
+        let name = file.file_name();
+        let Some(name) = name.to_str() else {
+            return Err(Error::Backend(
+                "durable receipt file name is not valid UTF-8".into(),
+            ));
+        };
+        let metadata = std::fs::symlink_metadata(file.path())
+            .map_err(|error| Error::Backend(format!("inspect durable receipt file: {error}")))?;
+        if metadata.file_type().is_symlink() || metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(Error::Backend(
+                "durable receipt entry contains a symlink or foreign-owned object".into(),
+            ));
+        }
+        match name {
+            PRODUCER_LOCK_FILE => {
+                if !metadata.file_type().is_file()
+                    || metadata.mode() & 0o777 != 0o600
+                    || metadata.len() != 0
+                {
+                    return Err(Error::Backend(
+                        "durable producer lease has invalid type, mode, or content".into(),
+                    ));
+                }
+            }
+            MANIFEST_FILE | RECEIPT_FILE => {
+                if !metadata.file_type().is_file()
+                    || metadata.mode() & 0o777 != 0o600
+                    || metadata.len() > MAX_PROTOCOL_FRAME_BYTES as u64
+                {
+                    return Err(Error::Backend(
+                        "durable receipt JSON file is not a bounded owner-only regular file".into(),
+                    ));
+                }
+            }
+            "supervisor.sock" => {
+                use std::os::unix::fs::FileTypeExt;
+                if !metadata.file_type().is_socket() || metadata.mode() & 0o777 != 0o600 {
+                    return Err(Error::Backend(
+                        "durable receipt control socket has invalid type or mode".into(),
+                    ));
+                }
+            }
+            _ if valid_receipt_temporary_name(name) => {
+                if !metadata.file_type().is_file()
+                    || metadata.mode() & 0o777 != 0o600
+                    || metadata.len() > MAX_PROTOCOL_FRAME_BYTES as u64
+                {
+                    return Err(Error::Backend(
+                        "durable temporary receipt is not a bounded owner-only regular file".into(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(Error::Backend(
+                    "durable receipt entry contains an unexpected object".into(),
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn valid_receipt_temporary_name(name: &str) -> bool {
+    name.strip_prefix(".receipt-")
+        .and_then(|name| name.strip_suffix(".tmp"))
+        .is_some_and(|id| validate_receipt_id(id).is_ok())
+}
+
+#[cfg(target_os = "linux")]
+fn read_private_durable_file(path: &Path, label: &str) -> Result<Vec<u8>> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|error| Error::Backend(format!("open durable receipt {label}: {error}")))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| Error::Backend(format!("inspect durable receipt {label}: {error}")))?;
+    if !metadata.file_type().is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o777 != 0o600
+        || metadata.len() > MAX_PROTOCOL_FRAME_BYTES as u64
+    {
+        return Err(Error::Backend(format!(
+            "durable receipt {label} is not a bounded owner-only regular file"
+        )));
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((MAX_PROTOCOL_FRAME_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| Error::Backend(format!("read durable receipt {label}: {error}")))?;
+    if bytes.len() > MAX_PROTOCOL_FRAME_BYTES {
+        return Err(Error::Backend(format!(
+            "durable receipt {label} exceeds its size bound"
+        )));
+    }
+    Ok(bytes)
+}
+
+#[cfg(target_os = "linux")]
+fn rename_directory_noreplace(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let source = std::ffi::CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| Error::Backend("durable receipt source path contains NUL".into()))?;
+    let destination = std::ffi::CString::new(destination.as_os_str().as_bytes())
+        .map_err(|_| Error::Backend("durable receipt destination path contains NUL".into()))?;
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(Error::Backend(format!(
+            "atomically acknowledge durable receipt: {}",
+            std::io::Error::last_os_error()
+        )))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn cleanup_acked_entry(entry: &Path) -> Result<()> {
+    ensure_private_directory(entry, false)?;
+    validate_durable_entry_contents(entry)?;
+    let files = std::fs::read_dir(entry)
+        .map_err(|error| Error::Backend(format!("enumerate acknowledged receipt: {error}")))?
+        .take(MAX_DURABLE_ENTRY_FILES + 1)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| Error::Backend(format!("read acknowledged receipt: {error}")))?;
+    if files.len() > MAX_DURABLE_ENTRY_FILES {
+        return Err(Error::Backend(
+            "acknowledged receipt exceeds bounded cleanup file limit".into(),
+        ));
+    }
+    for file in files {
+        std::fs::remove_file(file.path()).map_err(|error| {
+            Error::Backend(format!("remove acknowledged receipt file: {error}"))
+        })?;
+    }
+    std::fs::remove_dir(entry)
+        .map_err(|error| Error::Backend(format!("remove acknowledged receipt entry: {error}")))
 }
 
 #[cfg(target_os = "linux")]
@@ -2268,6 +3571,7 @@ mod tests {
             generation_count: 1,
             captured_generation_count: 1,
             incomplete_reasons: Vec::new(),
+            durable_receipts: Vec::new(),
         }
     }
 
@@ -2282,8 +3586,11 @@ mod tests {
             receipt_path: runtime_dir.path().join("receipt.json"),
             expected_nonce: "a".repeat(32),
             expected_unit: "agent-bridge-agent-test.scope".into(),
+            durable_manifest: None,
             supervisor_pidfd: None,
-            _runtime_dir: runtime_dir,
+            _state_directory: StateDirectoryLease::Transient {
+                _directory: runtime_dir,
+            },
         })
     }
 
@@ -2295,6 +3602,55 @@ mod tests {
             .open(path)
             .expect("create private fixture");
         file.write_all(bytes).expect("write fixture");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn durable_fixture(root: &Path, span_id: &str) -> (PathBuf, DurableReceiptManifest) {
+        set_mode(root, 0o700).expect("private durable root");
+        let (entry, _lease, manifest) = prepare_durable_receipt_entry_at(
+            root,
+            "test-runtime",
+            span_id,
+            "agent-bridge-agent-durabletest.scope",
+            &"d".repeat(32),
+        )
+        .expect("prepare durable fixture");
+        (entry, manifest)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn durable_nonlock_entry_count(root: &Path) -> usize {
+        std::fs::read_dir(root)
+            .expect("read durable root")
+            .map(|entry| entry.expect("durable root entry"))
+            .filter(|entry| entry.file_name() != std::ffi::OsStr::new(SPOOL_LOCK_FILE))
+            .count()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn write_durable_fixture_receipt(
+        entry: &Path,
+        manifest: &DurableReceiptManifest,
+        snapshot: WorkloadResourceSnapshot,
+    ) -> DurableWorkloadReceiptRef {
+        write_receipt_atomic(
+            &entry.join(RECEIPT_FILE),
+            &Receipt {
+                schema: DURABLE_RECEIPT_SCHEMA,
+                receipt_id: Some(manifest.receipt_id.clone()),
+                span_id: Some(manifest.span_id.clone()),
+                nonce: manifest.nonce.clone(),
+                unit: manifest.unit.clone(),
+                resources: snapshot,
+            },
+        )
+        .expect("write durable terminal receipt");
+        let (_, receipt) = inspect_durable_entry(entry, &manifest.receipt_id)
+            .expect("inspect durable terminal receipt");
+        DurableWorkloadReceiptRef {
+            receipt_id: manifest.receipt_id.clone(),
+            sha256: receipt.expect("terminal receipt").sha256,
+        }
     }
 
     #[test]
@@ -2326,6 +3682,424 @@ mod tests {
         assert!(merged.complete_for_cpu_memory_workload_tree);
         assert!(!merged.complete_for_pids_workload_tree);
         assert_eq!(merged.pids_peak, Some(3));
+    }
+
+    #[test]
+    fn merge_deduplicates_and_sorts_durable_receipt_refs() {
+        let first_ref = DurableWorkloadReceiptRef {
+            receipt_id: "a".repeat(32),
+            sha256: format!("sha256:{}", "1".repeat(64)),
+        };
+        let second_ref = DurableWorkloadReceiptRef {
+            receipt_id: "b".repeat(32),
+            sha256: format!("sha256:{}", "2".repeat(64)),
+        };
+        let mut first = complete_snapshot(3, 4, 1);
+        first.durable_receipts = vec![second_ref.clone(), first_ref.clone()];
+        let mut second = complete_snapshot(5, 6, 2);
+        second.durable_receipts = vec![first_ref.clone()];
+        let merged = merge_snapshots(
+            &[
+                generation_with_cached(first),
+                generation_with_cached(second),
+            ],
+            2,
+            0,
+        );
+        assert_eq!(merged.durable_receipts, vec![first_ref, second_ref]);
+
+        let mut conflicting = complete_snapshot(1, 1, 1);
+        conflicting.durable_receipts = vec![DurableWorkloadReceiptRef {
+            receipt_id: "a".repeat(32),
+            sha256: format!("sha256:{}", "9".repeat(64)),
+        }];
+        let mut original = complete_snapshot(1, 1, 1);
+        original.durable_receipts = vec![DurableWorkloadReceiptRef {
+            receipt_id: "a".repeat(32),
+            sha256: format!("sha256:{}", "1".repeat(64)),
+        }];
+        let merged = merge_snapshots(
+            &[
+                generation_with_cached(original),
+                generation_with_cached(conflicting),
+            ],
+            2,
+            0,
+        );
+        assert_eq!(merged.status, WorkloadResourceStatus::Partial);
+        assert!(!merged.complete_for_cpu_memory_workload_tree);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_restart_scan_and_digest_bound_ack_are_idempotent() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = tempfile::tempdir().expect("durable root");
+        let (entry, manifest) = durable_fixture(root.path(), "agent-spawn-durable");
+        let entry_metadata = std::fs::symlink_metadata(&entry).unwrap();
+        assert_eq!(entry_metadata.mode() & 0o777, 0o700);
+        let manifest_metadata = std::fs::symlink_metadata(entry.join(MANIFEST_FILE)).unwrap();
+        assert_eq!(manifest_metadata.mode() & 0o777, 0o600);
+        let expected_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(17, 23, 2));
+
+        let scan = scan_durable_workload_receipts_at(root.path()).expect("restart scan");
+        assert!(scan.unresolved.is_empty(), "{:?}", scan.unresolved);
+        assert!(scan.issues.is_empty(), "{:?}", scan.issues);
+        assert_eq!(scan.receipts.len(), 1);
+        assert_eq!(scan.receipts[0].receipt_ref, expected_ref);
+        assert_eq!(scan.receipts[0].span_id, "agent-spawn-durable");
+        assert_eq!(
+            scan.receipts[0].resources.durable_receipts,
+            vec![expected_ref.clone()]
+        );
+        assert!(expected_ref.sha256.starts_with("sha256:"));
+        assert_eq!(expected_ref.sha256.len(), 71);
+
+        assert!(
+            acknowledge_durable_workload_receipt_at(root.path(), &expected_ref).expect("first ACK")
+        );
+        assert!(
+            !acknowledge_durable_workload_receipt_at(root.path(), &expected_ref)
+                .expect("ACK replay")
+        );
+        assert_eq!(durable_nonlock_entry_count(root.path()), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_missing_terminal_is_commit_unknown_and_cannot_be_acked() {
+        let root = tempfile::tempdir().expect("durable root");
+        let (_entry, manifest) = durable_fixture(root.path(), "agent-spawn-pending");
+        let scan = scan_durable_workload_receipts_at(root.path()).expect("restart scan");
+        assert!(scan.receipts.is_empty());
+        assert!(scan.issues.is_empty());
+        assert_eq!(scan.unresolved.len(), 1);
+        assert_eq!(scan.unresolved[0].state, "receipt_commit_unknown");
+        assert!(acknowledge_durable_workload_receipt_at(
+            root.path(),
+            &DurableWorkloadReceiptRef {
+                receipt_id: manifest.receipt_id,
+                sha256: format!("sha256:{}", "0".repeat(64)),
+            },
+        )
+        .is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_manifest_tamper_mode_and_symlink_fail_closed() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = tempfile::tempdir().expect("durable root");
+        let (entry, manifest) = durable_fixture(root.path(), "agent-spawn-original");
+        write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(7, 8, 1));
+
+        let mut tampered = manifest.clone();
+        tampered.span_id = "agent-spawn-tampered".into();
+        std::fs::remove_file(entry.join(MANIFEST_FILE)).unwrap();
+        write_private(
+            &entry.join(MANIFEST_FILE),
+            &serde_json::to_vec(&tampered).unwrap(),
+        );
+        let scan = scan_durable_workload_receipts_at(root.path()).unwrap();
+        assert!(scan.receipts.is_empty());
+        assert_eq!(scan.issues.len(), 1);
+
+        std::fs::set_permissions(
+            entry.join(MANIFEST_FILE),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        let scan = scan_durable_workload_receipts_at(root.path()).unwrap();
+        assert_eq!(scan.issues.len(), 1);
+
+        std::fs::remove_file(entry.join(MANIFEST_FILE)).unwrap();
+        let external = tempfile::tempdir().expect("external symlink target");
+        let target = external.path().join("manifest");
+        write_private(&target, b"{}");
+        symlink(&target, entry.join(MANIFEST_FILE)).unwrap();
+        let scan = scan_durable_workload_receipts_at(root.path()).unwrap();
+        assert!(scan.receipts.is_empty());
+        assert_eq!(scan.issues.len(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_ack_rejects_changed_digest_and_scanner_collects_acked_tombstone() {
+        let root = tempfile::tempdir().expect("durable root");
+        let (entry, manifest) = durable_fixture(root.path(), "agent-spawn-digest");
+        let original_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(9, 10, 1));
+        std::fs::remove_file(entry.join(RECEIPT_FILE)).unwrap();
+        let replacement_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(11, 12, 2));
+        assert_ne!(original_ref.sha256, replacement_ref.sha256);
+        assert!(
+            acknowledge_durable_workload_receipt_at(root.path(), &original_ref).is_err(),
+            "stale digest must not ACK replacement content"
+        );
+
+        let tombstone = root
+            .path()
+            .join(format!(".acked-{}", replacement_ref.receipt_id));
+        rename_directory_noreplace(&entry, &tombstone).expect("simulate committed ACK rename");
+        sync_directory(root.path()).unwrap();
+        let scan = scan_durable_workload_receipts_at(root.path()).expect("tombstone cleanup scan");
+        assert!(scan.receipts.is_empty());
+        assert!(scan.unresolved.is_empty());
+        assert!(scan.issues.is_empty(), "{:?}", scan.issues);
+        assert_eq!(durable_nonlock_entry_count(root.path()), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_pre_start_drop_cleans_only_unstarted_entry() {
+        use std::sync::atomic::Ordering;
+
+        let root = tempfile::tempdir().expect("durable root");
+        set_mode(root.path(), 0o700).unwrap();
+        let (entry_path, entry, manifest) = prepare_durable_receipt_entry_at(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-pre-start",
+            "agent-bridge-agent-prestart.scope",
+            &"e".repeat(32),
+        )
+        .expect("prepare pre-START entry");
+        let socket_path = entry_path.join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        set_mode(&socket_path, 0o600).unwrap();
+        let start_authorized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let prepared = Arc::new(PreparedInner {
+            listener: Mutex::new(Some(listener)),
+            socket_path,
+            receipt_path: entry_path.join(RECEIPT_FILE),
+            nonce: manifest.nonce.clone(),
+            unit: manifest.unit.clone(),
+            durable_manifest: Some(manifest),
+            state_directory: StateDirectoryLease::Durable {
+                _entry: Arc::new(entry),
+            },
+            start_authorized: start_authorized.clone(),
+        });
+        drop(prepared);
+        assert!(!entry_path.exists());
+        assert_eq!(durable_nonlock_entry_count(root.path()), 0);
+
+        let (started_path, started_entry, started_manifest) = prepare_durable_receipt_entry_at(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-started",
+            "agent-bridge-agent-started.scope",
+            &"f".repeat(32),
+        )
+        .expect("prepare START-authorized entry");
+        let started_socket = started_path.join("supervisor.sock");
+        let started_listener = std::os::unix::net::UnixListener::bind(&started_socket).unwrap();
+        set_mode(&started_socket, 0o600).unwrap();
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let prepared = Arc::new(PreparedInner {
+            listener: Mutex::new(Some(started_listener)),
+            socket_path: started_socket,
+            receipt_path: started_path.join(RECEIPT_FILE),
+            nonce: started_manifest.nonce.clone(),
+            unit: started_manifest.unit.clone(),
+            durable_manifest: Some(started_manifest),
+            state_directory: StateDirectoryLease::Durable {
+                _entry: Arc::new(started_entry),
+            },
+            start_authorized: started.clone(),
+        });
+        started.store(true, Ordering::Release);
+        drop(prepared);
+        assert!(
+            started_path.is_dir(),
+            "START-authorized entry must survive Drop"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_scanner_skips_active_producer_then_imports_after_release() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::MetadataExt;
+
+        let root = tempfile::tempdir().expect("durable root");
+        set_mode(root.path(), 0o700).unwrap();
+        let (entry, producer, manifest) = prepare_durable_receipt_entry_at(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-active",
+            "agent-bridge-agent-active.scope",
+            &"a".repeat(32),
+        )
+        .expect("prepare active producer");
+        let lock_metadata = std::fs::symlink_metadata(entry.join(PRODUCER_LOCK_FILE)).unwrap();
+        assert_eq!(lock_metadata.mode() & 0o777, 0o600);
+        assert_ne!(
+            unsafe { libc::fcntl(producer._producer_lease._file.as_raw_fd(), libc::F_GETFD) }
+                & libc::FD_CLOEXEC,
+            0
+        );
+        let expected_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(21, 34, 3));
+
+        let active_scan = scan_durable_workload_receipts_at(root.path()).unwrap();
+        assert!(active_scan.receipts.is_empty());
+        assert!(active_scan.issues.is_empty(), "{:?}", active_scan.issues);
+        assert_eq!(active_scan.unresolved.len(), 1);
+        assert_eq!(active_scan.unresolved[0].state, "producer_active");
+        assert!(acknowledge_durable_workload_receipt_at(root.path(), &expected_ref).is_err());
+
+        drop(producer);
+        let released_scan = scan_durable_workload_receipts_at(root.path()).unwrap();
+        assert!(released_scan.unresolved.is_empty());
+        assert!(
+            released_scan.issues.is_empty(),
+            "{:?}",
+            released_scan.issues
+        );
+        assert_eq!(released_scan.receipts.len(), 1);
+        assert_eq!(released_scan.receipts[0].receipt_ref, expected_ref);
+        assert!(acknowledge_durable_workload_receipt_at(root.path(), &expected_ref).unwrap());
+        assert_eq!(durable_nonlock_entry_count(root.path()), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_scanner_finishes_partially_cleaned_acked_tombstone() {
+        let root = tempfile::tempdir().expect("durable root");
+        set_mode(root.path(), 0o700).unwrap();
+        let (entry, producer, manifest) = prepare_durable_receipt_entry_at(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-acked-cleanup",
+            "agent-bridge-agent-acked-cleanup.scope",
+            &"c".repeat(32),
+        )
+        .expect("prepare durable entry");
+        let receipt_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(13, 21, 2));
+        drop(producer);
+
+        let acknowledged = root
+            .path()
+            .join(format!(".acked-{}", receipt_ref.receipt_id));
+        rename_directory_noreplace(&entry, &acknowledged).expect("linearize ACK tombstone");
+        std::fs::remove_file(acknowledged.join(PRODUCER_LOCK_FILE))
+            .expect("simulate interrupted tombstone cleanup");
+
+        let scan = scan_durable_workload_receipts_at(root.path()).expect("resume cleanup");
+        assert!(scan.receipts.is_empty());
+        assert!(scan.unresolved.is_empty());
+        assert!(scan.issues.is_empty(), "{:?}", scan.issues);
+        assert!(!acknowledged.exists());
+        assert_eq!(durable_nonlock_entry_count(root.path()), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_snapshot_guard_holds_and_owner_acknowledges_exact_digest() {
+        let root = tempfile::tempdir().expect("durable root");
+        set_mode(root.path(), 0o700).unwrap();
+        let (entry, producer, manifest) = prepare_durable_receipt_entry_at(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-handoff",
+            "agent-bridge-agent-handoff.scope",
+            &"b".repeat(32),
+        )
+        .expect("prepare guarded producer");
+        let receipt_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(55, 89, 5));
+        let mut cached = complete_snapshot(55, 89, 5);
+        cached.durable_receipts = vec![receipt_ref.clone()];
+        let generation = WorkloadGeneration {
+            state: Arc::new(GenerationState {
+                snapshot: Mutex::new(GenerationSnapshotState {
+                    cached,
+                    receipt_loaded: true,
+                }),
+                control: Mutex::new(None),
+                receipt_path: entry.join(RECEIPT_FILE),
+                expected_nonce: manifest.nonce.clone(),
+                expected_unit: manifest.unit.clone(),
+                durable_manifest: Some(manifest),
+                supervisor_pidfd: None,
+                _state_directory: StateDirectoryLease::Durable {
+                    _entry: Arc::new(producer),
+                },
+            }),
+        };
+        let custody = WorkloadCustody::new(1, None, None, Some(generation));
+        let (snapshot, guard) = custody.snapshot_with_lease();
+        assert_eq!(snapshot.durable_receipts, vec![receipt_ref.clone()]);
+        assert!(!guard.is_empty());
+        assert!(guard.covers(&receipt_ref));
+        assert!(guard.covers_all(std::slice::from_ref(&receipt_ref)));
+        assert_eq!(guard.receipt_ids(), vec![receipt_ref.receipt_id.clone()]);
+        let mut wrong_digest = receipt_ref.clone();
+        wrong_digest.sha256 = format!("sha256:{}", "0".repeat(64));
+        assert!(!guard.covers(&wrong_digest));
+        assert!(!guard.covers_all(std::slice::from_ref(&wrong_digest)));
+        assert!(guard.acknowledge(&wrong_digest).is_err());
+
+        drop(custody);
+        let active_scan = scan_durable_workload_receipts_at(root.path()).unwrap();
+        assert_eq!(active_scan.unresolved.len(), 1);
+        assert_eq!(active_scan.unresolved[0].state, "producer_active");
+        assert!(guard.acknowledge(&receipt_ref).unwrap());
+        assert!(!guard.acknowledge(&receipt_ref).unwrap());
+        assert_eq!(durable_nonlock_entry_count(root.path()), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_allocation_is_capacity_admitted_under_root_lock() {
+        let root = tempfile::tempdir().expect("durable root");
+        set_mode(root.path(), 0o700).unwrap();
+        let first = prepare_durable_receipt_entry_at_with_limit(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-capacity-one",
+            "agent-bridge-agent-capacity1.scope",
+            &"1".repeat(32),
+            1,
+        )
+        .expect("first entry fits capacity");
+        assert!(prepare_durable_receipt_entry_at_with_limit(
+            root.path(),
+            "test-runtime",
+            "agent-spawn-capacity-two",
+            "agent-bridge-agent-capacity2.scope",
+            &"2".repeat(32),
+            1,
+        )
+        .is_err());
+        assert_eq!(durable_nonlock_entry_count(root.path()), 1);
+        drop(first);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn durable_directory_sync_and_root_security_fail_closed() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = tempfile::tempdir().expect("durable root");
+        set_mode(root.path(), 0o700).unwrap();
+        sync_directory(root.path()).expect("directory fsync");
+
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(ensure_private_directory(root.path(), false).is_err());
+        set_mode(root.path(), 0o700).unwrap();
+
+        let parent = tempfile::tempdir().expect("symlink parent");
+        let link = parent.path().join("spool-link");
+        symlink(root.path(), &link).unwrap();
+        assert!(ensure_private_directory(&link, false).is_err());
+        assert!(sync_directory(&link).is_err());
     }
 
     #[test]
@@ -2412,14 +4186,16 @@ mod tests {
             &path,
             &Receipt {
                 schema: 1,
+                receipt_id: None,
+                span_id: None,
                 nonce: nonce.clone(),
                 unit: unit.into(),
                 resources: complete_snapshot(10, 20, 2),
             },
         )
         .expect("write receipt");
-        assert!(read_receipt(&path, &nonce, unit).is_ok());
-        assert!(read_receipt(&path, &"c".repeat(32), unit).is_err());
+        assert!(read_receipt(&path, &nonce, unit, None).is_ok());
+        assert!(read_receipt(&path, &"c".repeat(32), unit, None).is_err());
 
         let oversized = dir.path().join("oversized.json");
         let file = std::fs::OpenOptions::new()
@@ -2430,7 +4206,7 @@ mod tests {
             .expect("oversized fixture");
         file.set_len((MAX_PROTOCOL_FRAME_BYTES + 1) as u64)
             .expect("size oversized fixture");
-        assert!(read_receipt(&oversized, &nonce, unit).is_err());
+        assert!(read_receipt(&oversized, &nonce, unit, None).is_err());
 
         let inconsistent = dir.path().join("inconsistent.json");
         let mut snapshot = complete_snapshot(1, 2, 1);
@@ -2439,13 +4215,15 @@ mod tests {
             &inconsistent,
             &serde_json::to_vec(&Receipt {
                 schema: 1,
+                receipt_id: None,
+                span_id: None,
                 nonce,
                 unit: unit.into(),
                 resources: snapshot,
             })
             .expect("encode inconsistent receipt"),
         );
-        assert!(read_receipt(&inconsistent, &"b".repeat(32), unit).is_err());
+        assert!(read_receipt(&inconsistent, &"b".repeat(32), unit, None).is_err());
     }
 
     #[cfg(target_os = "linux")]
@@ -2459,6 +4237,8 @@ mod tests {
             &receipt_path,
             &Receipt {
                 schema: 1,
+                receipt_id: None,
+                span_id: None,
                 nonce: nonce.clone(),
                 unit: unit.into(),
                 resources: complete_snapshot(3, 4, 1),
@@ -2481,8 +4261,11 @@ mod tests {
                 receipt_path,
                 expected_nonce: nonce,
                 expected_unit: unit.into(),
+                durable_manifest: None,
                 supervisor_pidfd: None,
-                _runtime_dir: runtime_dir,
+                _state_directory: StateDirectoryLease::Transient {
+                    _directory: runtime_dir,
+                },
             }),
         };
         let custody = WorkloadCustody::direct(0, None, None);

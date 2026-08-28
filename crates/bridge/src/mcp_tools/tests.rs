@@ -22608,6 +22608,22 @@ fn workspace_runtime_request_rejects_unknown_capabilities() {
 }
 
 #[test]
+fn workspace_runtime_request_rejects_user_supplied_receipt_binding() {
+    let runtime = MockRuntime {
+        id: "local-mock".to_string(),
+        fail: false,
+    };
+    let mut cfg = SpawnConfig::default();
+    cfg.env.insert(
+        ab_agent::workload_cgroup::RECEIPT_BINDING_ENV.to_string(),
+        "forged-span-binding".to_string(),
+    );
+    let error = validate_workspace_runtime_request(&runtime, &cfg)
+        .expect_err("receipt binding must be reserved to the Bridge");
+    assert!(error.contains("reserved workload receipt binding"));
+}
+
+#[test]
 fn workspace_runtime_request_rejects_incompatible_source_kind() {
     struct ShellRuntime;
     #[async_trait]

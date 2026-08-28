@@ -1,7 +1,7 @@
 # AB interoception: delegated cgroup workload custody
 
 Date: 2026-08-27
-Status: implemented; current-node local one-shot admitted; PTY tree custody live-proven with foreground-terminal admission still pending
+Status: base cgroup organ implemented and current-node one-shot admitted; R9 durable-v1 source candidate not deployed; PTY foreground-terminal admission still pending
 Scope: local Agent runtimes on Linux cgroup v2
 
 ## Decision
@@ -99,8 +99,10 @@ directory is owned by the effective user with mode `0700`, and the socket is
 not a public AB endpoint. The internal supervisor connects after systemd has
 migrated and executed it. The parent validates `SO_PEERCRED`, a bounded fresh
 nonce, and the expected protocol version before accepting READY. The socket is
-unlinked after the READY/START exchange; the private runtime directory and
-receipt live only as long as the in-process custody handle.
+unlinked after the READY/START exchange. Non-body launches retain the original
+process-local receipt directory. Body-bound launches instead bind the same
+private terminal receipt to a durable manifest/outbox and producer lease; see
+`INTEROCEPTION_DURABLE_WORKLOAD_RECEIPTS_2026_08_27.md`.
 
 The protocol deliberately does not depend on inheriting an extra descriptor
 through `systemd-run`. Although that worked in the current-node probe, it is a
@@ -131,8 +133,9 @@ The implemented v0 lifecycle is:
 6. **TERMINAL** — workload `cgroup.events` reports `populated 0`; metrics are
    read after this observation.
 7. **RECEIPT** — supervisor atomically writes one bounded, nonce/unit-bound
-   receipt in the private runtime directory and mirrors the payload exit.
-   The owning custody handle validates and projects that file.
+   receipt in the selected private receipt directory and mirrors the payload
+   exit. The owning custody handle validates and projects that file; for a
+   body-bound launch, Store commit authorizes durable outbox acknowledgement.
 
 There is no transparent retry after START permission or any ambiguous
 activation state. The prepared launch either owns the one execution or fails
@@ -280,16 +283,18 @@ handling and a hard `RuntimeMaxSec` are mandatory. The runtime ceiling only
 prevents an eternal orphan; if it kills the supervisor, accounting remains
 unavailable.
 
-The v0 receipt uses create-new `0600` temporary output, file sync, and atomic
-rename inside the private runtime directory. This prevents a live reader from
-accepting a truncated receipt, but the directory belongs to the process-local
-custody handle and there is no ACK or restart reconciliation. The parent must
-not publish a Verified body event until it has committed the projected
-receipt. A future cross-daemon guarantee needs
-`RECEIPT -> durable commit -> ACK -> supervisor exit`, an atomic supervisor
-spool, or a restart-reconciliation ledger. Until that exists, restart recovery
-must state `receipt_commit_unknown`; it cannot reconstruct Complete from the
-absence of a scope.
+The original v0 receipt used create-new `0600` temporary output, file sync, and
+atomic rename inside the process-local runtime directory. Body-bound local
+launches now supersede that lifetime with the persistent manifest/outbox and
+idempotent Store ACK protocol in
+`INTEROCEPTION_DURABLE_WORKLOAD_RECEIPTS_2026_08_27.md`. The supervisor still
+exits immediately after sealing; Store commit, restart reconciliation, and
+collection happen out of band so session reaping cannot deadlock on ACK.
+
+Launches without a trusted body-span binding retain the v0 process-local
+receipt lifetime and make no cross-restart claim. For every mode, absence of a
+scope or terminal file remains insufficient evidence: restart recovery must
+state `receipt_commit_unknown`, never reconstruct Complete from disappearance.
 
 ## Environment and stdio
 
@@ -333,7 +338,8 @@ implemented.
 | required policy finds the platform unavailable | fail the request before spawn |
 | delegation, private listener, peer credential, nonce, or READY/START fails after wrapping | kill the prepared scope and fail the request; no automatic direct re-execution |
 | pre-exec migration or target exec fails | fail the one generation; no automatic direct re-execution |
-| START permission was accepted but terminal receipt is lost | no re-execution; terminal accounting unavailable |
+| START permission was accepted but no valid receipt was durably published | no re-execution; terminal accounting unavailable |
+| receipt was durably sealed but Bridge stopped before semantic commit | R9 durable-v1 restart reconciliation may commit standalone accounting; it never reconstructs the live body span |
 | final `populated 0` or metric read not proven | preserve known values as partial; whole-workload completeness false |
 | PTY before conformance admission, Oz cloud, or remote execution | no public tree claim; PTY may be admitted only by its dedicated tests, and local evidence is never relabelled as cloud/remote evidence |
 
@@ -363,17 +369,21 @@ such a host lifecycle policy needs separate owner authorization.
 
 All probe units and cgroups were removed after the audit.
 
-## Implementation and live acceptance
+## Base-organ implementation and historical live acceptance
 
-The implementation landed across the shared Agent launch layer, every local
+The base cgroup implementation landed across the shared Agent launch layer, every local
 runtime, PTY lifecycle ownership, and the Bridge body-span projection. The
-public projection is schema `agent_bridge.task_workload_resources.v0`; Bridge
+public projection is schema `agent_bridge.task_workload_resources.v1`; Bridge
 independently rechecks its source, scope, controller set, generation counts,
 terminal emptiness, required metric presence, IO status, and trust boundary
-before allowing it to satisfy whole-workload CPU/memory capture.
+before allowing it to satisfy whole-workload CPU/memory capture. The R9
+durable-v1 source candidate additionally requires one opaque, content-addressed
+durable receipt reference per captured generation before the delegated workload
+can satisfy the Verified gate; that extension is not installed or admitted by
+the historical evidence below.
 
-Current-node MCP acceptance on 2026-08-27 produced these durable terminal
-receipts from the debug build before deployment:
+Before R9, current-node MCP acceptance on 2026-08-27 produced these terminal
+cgroup-accounting receipts from the debug build before deployment:
 
 | Probe | Result |
 | --- | --- |
@@ -392,7 +402,7 @@ The two Verified events used
 complete cgroup receipt never promoted an incomplete body before/after sample
 to Verified.
 
-Final pre-deployment regression evidence was `143/143` Agent library tests,
+Historical pre-R9 regression evidence was `143/143` Agent library tests,
 `cargo check -p ab-agent --all-targets`, the exact Bridge delegated-receipt
 gate/redaction test, and `git diff --check`. The low-risk remaining test gap is
 a separately controllable abort-during-activation regression for one-shot and

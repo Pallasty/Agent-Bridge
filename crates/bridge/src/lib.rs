@@ -197,6 +197,7 @@ pub mod trigger_recall_opt_in;
 pub mod warp_actions;
 pub mod warp_scheme;
 pub mod workflow_feedback;
+pub mod workload_receipt_reconciliation;
 pub mod world_tools;
 
 pub use hub::Hub;

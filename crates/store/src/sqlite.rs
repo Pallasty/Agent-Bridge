@@ -1490,6 +1490,28 @@ CREATE INDEX IF NOT EXISTS idx_body_operation_receipts_body
     ON body_operation_receipts(body_id, recorded_at DESC);
 "#;
 
+// Immutable source of truth for delegated-workload receipts. Semantic events
+// remain a bounded projection; these rows are never removed by Event Spine's
+// FIFO pruning. Version-less additive DDL is required because schema_meta v43
+// is owned by the temporal-evidence migration family.
+const SCHEMA_WORKLOAD_RECEIPT_COMMITS: &str = r#"
+CREATE TABLE IF NOT EXISTS workload_receipt_commits (
+    schema_version      TEXT NOT NULL CHECK (schema_version = 'agent_bridge.workload_receipt_commit.v1'),
+    receipt_id          TEXT PRIMARY KEY,
+    span_id             TEXT NOT NULL,
+    recorded_at         INTEGER NOT NULL,
+    receipt_sha256      TEXT NOT NULL,
+    commit_kind         TEXT NOT NULL CHECK (commit_kind IN
+        ('live_body_span','startup_reconciliation')),
+    redacted_facts_json TEXT NOT NULL,
+    record_sha256       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workload_receipt_commits_recorded_at
+    ON workload_receipt_commits(recorded_at DESC, receipt_id);
+CREATE INDEX IF NOT EXISTS idx_workload_receipt_commits_span
+    ON workload_receipt_commits(span_id, recorded_at DESC, receipt_id);
+"#;
+
 type LedgerColumnShape = (&'static str, &'static str, bool, i64);
 type LedgerIndexShape = (&'static str, &'static [&'static str]);
 
@@ -1547,6 +1569,43 @@ const BODY_OPERATION_RECEIPT_INDEX_SHAPE: &[LedgerIndexShape] = &[
     (
         "idx_body_operation_receipts_body",
         &["body_id", "recorded_at"],
+    ),
+];
+
+const WORKLOAD_RECEIPT_COMMIT_COLUMN_SHAPE: &[LedgerColumnShape] = &[
+    ("schema_version", "TEXT", true, 0),
+    ("receipt_id", "TEXT", false, 1),
+    ("span_id", "TEXT", true, 0),
+    ("recorded_at", "INTEGER", true, 0),
+    ("receipt_sha256", "TEXT", true, 0),
+    ("commit_kind", "TEXT", true, 0),
+    ("redacted_facts_json", "TEXT", true, 0),
+    ("record_sha256", "TEXT", true, 0),
+];
+
+const WORKLOAD_RECEIPT_COMMIT_INDEX_SHAPE: &[LedgerIndexShape] = &[
+    (
+        "idx_workload_receipt_commits_recorded_at",
+        &["recorded_at", "receipt_id"],
+    ),
+    (
+        "idx_workload_receipt_commits_span",
+        &["span_id", "recorded_at", "receipt_id"],
+    ),
+];
+
+const WORKLOAD_RECEIPT_COMMIT_INDEX_ORDER: &[(&str, &[(&str, bool)])] = &[
+    (
+        "idx_workload_receipt_commits_recorded_at",
+        &[("recorded_at", true), ("receipt_id", false)],
+    ),
+    (
+        "idx_workload_receipt_commits_span",
+        &[
+            ("span_id", false),
+            ("recorded_at", true),
+            ("receipt_id", false),
+        ],
     ),
 ];
 
@@ -1611,6 +1670,125 @@ fn verify_ledger_table_shape(
         if actual_index_columns.as_slice() != *expected_index_columns {
             return Err(rusqlite::Error::InvalidParameterName(format!(
                 "incompatible {table} index {index}: expected {expected_index_columns:?}, found {actual_index_columns:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn verify_workload_receipt_commit_shape(
+    connection: &rusqlite::Connection,
+) -> RusqliteResult<()> {
+    const TABLE: &str = "workload_receipt_commits";
+    verify_ledger_table_shape(
+        connection,
+        TABLE,
+        WORKLOAD_RECEIPT_COMMIT_COLUMN_SHAPE,
+        WORKLOAD_RECEIPT_COMMIT_INDEX_SHAPE,
+    )?;
+
+    // `table_info` deliberately omits generated/hidden columns and does not
+    // expose defaults, so close those two shape gaps with `table_xinfo`.
+    let mut statement = connection.prepare("PRAGMA table_xinfo('workload_receipt_commits')")?;
+    let extended_columns = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if extended_columns.len() != WORKLOAD_RECEIPT_COMMIT_COLUMN_SHAPE.len()
+        || extended_columns
+            .iter()
+            .any(|(_, default_value, hidden)| default_value.is_some() || *hidden != 0)
+    {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "incompatible {TABLE} extended column shape: found {extended_columns:?}"
+        )));
+    }
+
+    // CHECK constraints are not represented by PRAGMA table_info. Require
+    // the two closed-set constraints in the durable table's deployed SQL.
+    let table_sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+        [TABLE],
+        |row| row.get(0),
+    )?;
+    let compact_sql = table_sql
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .map(|character| character.to_ascii_lowercase())
+        .collect::<String>();
+    for required in [
+        "check(schema_version='agent_bridge.workload_receipt_commit.v1')",
+        "check(commit_kindin('live_body_span','startup_reconciliation'))",
+    ] {
+        if !compact_sql.contains(required) {
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "incompatible {TABLE} constraints: missing {required}"
+            )));
+        }
+    }
+
+    // Fail closed on replacement, partial, unique, extra, or direction-drifted
+    // application indexes. The implicit primary-key autoindex is ignored.
+    let mut statement = connection.prepare("PRAGMA index_list('workload_receipt_commits')")?;
+    let application_indexes = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? != 0,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)? != 0,
+            ))
+        })?
+        .filter_map(|row| match row {
+            Ok((name, unique, origin, partial)) if origin == "c" => {
+                Some(Ok((name, (unique, partial))))
+            }
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<std::result::Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let expected_indexes = WORKLOAD_RECEIPT_COMMIT_INDEX_ORDER
+        .iter()
+        .map(|(name, _)| ((*name).to_string(), (false, false)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if application_indexes != expected_indexes {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "incompatible {TABLE} application indexes: expected {expected_indexes:?}, found {application_indexes:?}"
+        )));
+    }
+    for (index, expected_columns) in WORKLOAD_RECEIPT_COMMIT_INDEX_ORDER {
+        let mut statement = connection.prepare(&format!("PRAGMA index_xinfo('{index}')"))?;
+        let actual_columns = statement
+            .query_map([], |row| {
+                let is_key = row.get::<_, i64>(5)? != 0;
+                Ok(is_key.then(|| {
+                    (
+                        row.get::<_, String>(2),
+                        row.get::<_, i64>(3).map(|value| value != 0),
+                    )
+                }))
+            })?
+            .filter_map(|row| match row {
+                Ok(Some((name, descending))) => Some(match (name, descending) {
+                    (Ok(name), Ok(descending)) => Ok((name, descending)),
+                    (Err(error), _) | (_, Err(error)) => Err(error),
+                }),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let expected_columns = expected_columns
+            .iter()
+            .map(|(name, descending)| ((*name).to_string(), *descending))
+            .collect::<Vec<_>>();
+        if actual_columns != expected_columns {
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "incompatible {TABLE} index {index} order: expected {expected_columns:?}, found {actual_columns:?}"
             )));
         }
     }
@@ -2659,6 +2837,7 @@ impl SqliteStore {
             c.execute_batch(SCHEMA_AGENT_WORLD_CAPTURE)?;
             c.execute_batch(SCHEMA_AGENT_TASK_OUTCOMES)?;
             c.execute_batch(SCHEMA_BODY_OPERATION_RECEIPTS)?;
+            c.execute_batch(SCHEMA_WORKLOAD_RECEIPT_COMMITS)?;
             verify_ledger_table_shape(
                 c,
                 "agent_task_outcomes",
@@ -2671,6 +2850,7 @@ impl SqliteStore {
                 BODY_OPERATION_RECEIPT_COLUMN_SHAPE,
                 BODY_OPERATION_RECEIPT_INDEX_SHAPE,
             )?;
+            verify_workload_receipt_commit_shape(c)?;
             // SEPL P0/P1A0: additive lineage plus AGENT.md path binding.
             // StateStore remains read-only; baseline admission is an explicit
             // inherent SqliteStore method with no runtime command surface.
@@ -7209,6 +7389,287 @@ fn ledger_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
 }
 
+const WORKLOAD_RECEIPT_COMMIT_BATCH_MAX: usize = 64;
+const WORKLOAD_RECEIPT_REDACTED_FACTS_MAX_BYTES: usize = 65_536;
+const WORKLOAD_RECEIPT_REDACTED_MAX_DEPTH: usize = 16;
+const WORKLOAD_RECEIPT_REDACTED_MAX_NODES: usize = 4_096;
+const WORKLOAD_RECEIPT_REDACTED_MAX_CONTAINER_LEN: usize = 256;
+const WORKLOAD_RECEIPT_REDACTED_MAX_KEY_BYTES: usize = 128;
+const WORKLOAD_RECEIPT_REDACTED_MAX_STRING_BYTES: usize = 4_096;
+
+fn workload_receipt_sensitive_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .map(|character| match character {
+            '-' | '.' | ' ' => '_',
+            other => other.to_ascii_lowercase(),
+        })
+        .collect::<String>();
+    let tokens = normalized.split('_').filter(|token| !token.is_empty());
+    if tokens.clone().any(|token| {
+        matches!(
+            token,
+            "nonce" | "unit" | "pid" | "pidfd" | "path" | "socket" | "sock" | "fd"
+        )
+    }) {
+        return true;
+    }
+    let compact = normalized.replace('_', "");
+    compact.contains("pidfd")
+        || compact.ends_with("pid")
+        || compact.ends_with("nonce")
+        || compact.ends_with("unit")
+        || compact.ends_with("path")
+        || compact.contains("socket")
+        || matches!(
+            normalized.as_str(),
+            "start_ticks"
+                | "process_start_ticks"
+                | "runtime_dir"
+                | "private_runtime_dir"
+                | "spool_dir"
+                | "cgroup_dir"
+        )
+}
+
+fn validate_workload_receipt_redacted_value(
+    value: &serde_json::Value,
+    depth: usize,
+    nodes: &mut usize,
+) -> std::result::Result<(), String> {
+    if depth > WORKLOAD_RECEIPT_REDACTED_MAX_DEPTH {
+        return Err("redacted facts exceed the nesting bound".into());
+    }
+    *nodes = nodes.saturating_add(1);
+    if *nodes > WORKLOAD_RECEIPT_REDACTED_MAX_NODES {
+        return Err("redacted facts exceed the node bound".into());
+    }
+    match value {
+        serde_json::Value::Object(object) => {
+            if object.len() > WORKLOAD_RECEIPT_REDACTED_MAX_CONTAINER_LEN {
+                return Err("redacted facts object exceeds the member bound".into());
+            }
+            for (key, child) in object {
+                if key.is_empty()
+                    || key.len() > WORKLOAD_RECEIPT_REDACTED_MAX_KEY_BYTES
+                    || key.contains('\0')
+                {
+                    return Err("redacted facts contain an invalid key".into());
+                }
+                if workload_receipt_sensitive_key(key) {
+                    return Err(format!(
+                        "redacted facts contain forbidden private key '{key}'"
+                    ));
+                }
+                validate_workload_receipt_redacted_value(child, depth + 1, nodes)?;
+            }
+        }
+        serde_json::Value::Array(array) => {
+            if array.len() > WORKLOAD_RECEIPT_REDACTED_MAX_CONTAINER_LEN {
+                return Err("redacted facts array exceeds the element bound".into());
+            }
+            for child in array {
+                validate_workload_receipt_redacted_value(child, depth + 1, nodes)?;
+            }
+        }
+        serde_json::Value::String(text) => {
+            if text.len() > WORKLOAD_RECEIPT_REDACTED_MAX_STRING_BYTES || text.contains('\0') {
+                return Err("redacted facts string exceeds its privacy bound".into());
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_workload_receipt_commit_record(
+    record: &crate::WorkloadReceiptCommitRecord,
+) -> std::result::Result<(), String> {
+    if record.schema_version != crate::WORKLOAD_RECEIPT_COMMIT_SCHEMA_V1 {
+        return Err("unsupported schema_version".into());
+    }
+    if !ledger_identifier(&record.receipt_id) || !ledger_identifier(&record.span_id) {
+        return Err("invalid receipt_id or span_id".into());
+    }
+    if !(0..=253_402_300_799).contains(&record.recorded_at) {
+        return Err("recorded_at is out of bounds".into());
+    }
+    if !ledger_sha256(&record.receipt_sha256) || !ledger_sha256(&record.record_sha256) {
+        return Err("receipt or record digest is invalid".into());
+    }
+    if record.redacted_facts_json.is_empty()
+        || record.redacted_facts_json.len() > WORKLOAD_RECEIPT_REDACTED_FACTS_MAX_BYTES
+    {
+        return Err("redacted facts are out of bounds".into());
+    }
+    let facts: serde_json::Value = serde_json::from_str(&record.redacted_facts_json)
+        .map_err(|error| format!("parse redacted facts: {error}"))?;
+    if !facts.is_object() {
+        return Err("redacted facts must be a JSON object".into());
+    }
+    let canonical = serde_json_canonicalizer::to_vec(&facts)
+        .map_err(|error| format!("canonicalize redacted facts: {error}"))?;
+    if canonical != record.redacted_facts_json.as_bytes() {
+        return Err("redacted facts are not canonical JSON".into());
+    }
+    let mut nodes = 0usize;
+    validate_workload_receipt_redacted_value(&facts, 0, &mut nodes)?;
+    let expected =
+        crate::workload_receipt_commit_record_sha256(record).map_err(|error| error.to_string())?;
+    if expected != record.record_sha256 {
+        return Err("record_sha256 does not bind the canonical receipt claim".into());
+    }
+    Ok(())
+}
+
+fn workload_receipt_projection_error(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        message.into(),
+    )))
+}
+
+fn validate_workload_receipt_event_json(
+    raw: &str,
+    label: &str,
+    require_object: bool,
+) -> std::result::Result<serde_json::Value, String> {
+    if raw.is_empty() || raw.len() > WORKLOAD_RECEIPT_REDACTED_FACTS_MAX_BYTES {
+        return Err(format!("workload receipt event {label} is out of bounds"));
+    }
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|error| format!("parse workload receipt event {label}: {error}"))?;
+    if require_object && !value.is_object() {
+        return Err(format!(
+            "workload receipt event {label} must be a JSON object"
+        ));
+    }
+    let mut nodes = 0usize;
+    validate_workload_receipt_redacted_value(&value, 0, &mut nodes)
+        .map_err(|error| format!("workload receipt event {label}: {error}"))?;
+    Ok(value)
+}
+
+/// Validate the semantic projection that authorizes collection of newly
+/// committed receipt rows. This deliberately runs only after transaction-local
+/// conflict/duplicate classification: an all-duplicate replay performs no new
+/// write and therefore does not let a later, different projection invalidate
+/// the already durable commit.
+fn validate_workload_receipt_event_projection(
+    records: &[crate::WorkloadReceiptCommitRecord],
+    event: &mut crate::SemanticEventRecord,
+) -> std::result::Result<(), String> {
+    let Some(first) = records.first() else {
+        return Err("workload receipt projection batch is empty".into());
+    };
+    if records.iter().any(|record| record.span_id != first.span_id) {
+        return Err("workload receipt projection batch spans multiple span_id values".into());
+    }
+    if records
+        .iter()
+        .any(|record| record.redacted_facts_json != first.redacted_facts_json)
+    {
+        return Err(
+            "workload receipt projection batch contains multiple redacted projections".into(),
+        );
+    }
+    if records
+        .iter()
+        .any(|record| record.commit_kind != first.commit_kind)
+    {
+        return Err("workload receipt projection batch contains multiple commit kinds".into());
+    }
+    if event.target.as_deref() != Some(first.span_id.as_str()) {
+        return Err("workload receipt event target does not match the batch span_id".into());
+    }
+
+    let event_facts = validate_workload_receipt_event_json(&event.facts, "facts", true)?;
+    let canonical_event_facts = serde_json_canonicalizer::to_vec(&event_facts)
+        .map_err(|error| format!("canonicalize workload receipt event facts: {error}"))?;
+    if canonical_event_facts != first.redacted_facts_json.as_bytes() {
+        return Err(
+            "workload receipt event facts do not match the canonical ledger projection".into(),
+        );
+    }
+    // Persist exactly the canonical value bound into every new ledger record.
+    event.facts = first.redacted_facts_json.clone();
+
+    if event.actor.is_empty()
+        || event.actor.len() > 128
+        || event.actor.chars().any(char::is_control)
+        || event.source.is_empty()
+        || event.source.len() > 128
+        || event.source.chars().any(char::is_control)
+        || event.action.is_empty()
+        || event.action.len() > 128
+        || event.action.chars().any(char::is_control)
+        || event.verdict_method.is_empty()
+        || event.verdict_method.len() > 256
+        || event.verdict_method.chars().any(char::is_control)
+        || !matches!(
+            event.verdict_status.as_str(),
+            "verified" | "not_verified" | "unknown"
+        )
+    {
+        return Err("workload receipt event has an invalid SSB envelope".into());
+    }
+
+    let descriptor_raw = event
+        .descriptor
+        .as_deref()
+        .ok_or_else(|| "workload receipt event is missing its SSB descriptor".to_string())?;
+    let descriptor = validate_workload_receipt_event_json(descriptor_raw, "descriptor", true)?;
+    let object_type = descriptor
+        .pointer("/object/object_type")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty());
+    let source_adapter = descriptor
+        .pointer("/object/source_adapter")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty());
+    let action_type = descriptor
+        .pointer("/affordance/action_type")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty());
+    let risk_level = descriptor
+        .pointer("/affordance/risk_level")
+        .and_then(serde_json::Value::as_str);
+    let requires_gate = descriptor
+        .pointer("/affordance/requires_gate")
+        .and_then(serde_json::Value::as_bool);
+    if object_type.is_none()
+        || source_adapter != Some(event.source.as_str())
+        || action_type.is_none()
+        || !matches!(risk_level, Some("low" | "medium" | "high"))
+        || requires_gate.is_none()
+    {
+        return Err("workload receipt event has an invalid SSB descriptor".into());
+    }
+
+    if let Some(evidence) = event.evidence.as_deref() {
+        let _ = validate_workload_receipt_event_json(evidence, "evidence", false)?;
+    }
+    Ok(())
+}
+
+fn workload_receipt_commit_kind_from_str(
+    value: &str,
+    column: usize,
+) -> RusqliteResult<crate::WorkloadReceiptCommitKind> {
+    match value {
+        "live_body_span" => Ok(crate::WorkloadReceiptCommitKind::LiveBodySpan),
+        "startup_reconciliation" => Ok(crate::WorkloadReceiptCommitKind::StartupReconciliation),
+        _ => Err(rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown workload receipt commit kind '{value}'"),
+            )),
+        )),
+    }
+}
+
 fn validate_agent_task_outcome_record(
     record: &crate::AgentTaskOutcomeRecord,
 ) -> std::result::Result<(), String> {
@@ -8024,6 +8485,221 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("recent_semantic_events: {e}")))?;
         Ok(rows)
+    }
+
+    async fn commit_workload_receipt_event(
+        &self,
+        records: Vec<crate::WorkloadReceiptCommitRecord>,
+        event: crate::SemanticEventRecord,
+    ) -> Result<crate::WorkloadReceiptCommitStatus> {
+        if records.is_empty() || records.len() > WORKLOAD_RECEIPT_COMMIT_BATCH_MAX {
+            return Err(Error::Backend(format!(
+                "workload receipt commit batch must contain 1..={WORKLOAD_RECEIPT_COMMIT_BATCH_MAX} records"
+            )));
+        }
+        for record in &records {
+            validate_workload_receipt_commit_record(record).map_err(|error| {
+                Error::Backend(format!("invalid workload receipt commit: {error}"))
+            })?;
+        }
+
+        // Normalize duplicate receipt identities before opening the write
+        // transaction so one request cannot race itself. Replay identity is
+        // intentionally only receipt_id + span_id + receipt_sha256: restart
+        // reconciliation may legitimately have a later timestamp/projection.
+        // Keep the complete request separately so a batch that adds at least
+        // one new row cannot hide mixed span/projection claims behind identity
+        // normalization. All-duplicate requests intentionally skip that new-
+        // projection gate after transaction-local classification.
+        let request_records = records;
+        let mut unique: std::collections::BTreeMap<String, crate::WorkloadReceiptCommitRecord> =
+            std::collections::BTreeMap::new();
+        for record in &request_records {
+            match unique.get(&record.receipt_id) {
+                Some(existing)
+                    if existing.span_id == record.span_id
+                        && existing.receipt_sha256 == record.receipt_sha256 => {}
+                Some(_) => return Ok(crate::WorkloadReceiptCommitStatus::Conflict),
+                None => {
+                    unique.insert(record.receipt_id.clone(), record.clone());
+                }
+            }
+        }
+        let records = unique.into_values().collect::<Vec<_>>();
+
+        self.conn
+            .call(
+                move |connection| -> RusqliteResult<crate::WorkloadReceiptCommitStatus> {
+                    let transaction = connection
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                    let mut new_records = Vec::new();
+                    for record in records {
+                        let existing = transaction
+                            .query_row(
+                                "SELECT span_id, receipt_sha256
+                                   FROM workload_receipt_commits
+                                  WHERE receipt_id=?1",
+                                params![&record.receipt_id],
+                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                            )
+                            .optional()?;
+                        match existing {
+                            None => new_records.push(record),
+                            Some((span_id, receipt_sha256))
+                                if span_id == record.span_id
+                                    && receipt_sha256 == record.receipt_sha256 => {}
+                            Some(_) => {
+                                transaction.rollback()?;
+                                return Ok(crate::WorkloadReceiptCommitStatus::Conflict);
+                            }
+                        }
+                    }
+
+                    if new_records.is_empty() {
+                        transaction.commit()?;
+                        return Ok(crate::WorkloadReceiptCommitStatus::Duplicate);
+                    }
+
+                    let mut event = event;
+                    validate_workload_receipt_event_projection(&request_records, &mut event)
+                        .map_err(workload_receipt_projection_error)?;
+
+                    for record in new_records {
+                        transaction.execute(
+                            "INSERT INTO workload_receipt_commits
+                               (schema_version, receipt_id, span_id, recorded_at,
+                                receipt_sha256, commit_kind, redacted_facts_json,
+                                record_sha256)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            params![
+                                record.schema_version,
+                                record.receipt_id,
+                                record.span_id,
+                                record.recorded_at,
+                                record.receipt_sha256,
+                                record.commit_kind.as_str(),
+                                record.redacted_facts_json,
+                                record.record_sha256,
+                            ],
+                        )?;
+                    }
+
+                    transaction.execute(
+                        "INSERT INTO semantic_events
+                           (ts, actor, source, action, target, verdict_status,
+                            verdict_method, evidence, facts, descriptor)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![
+                            event.ts,
+                            event.actor,
+                            event.source,
+                            event.action,
+                            event.target,
+                            event.verdict_status,
+                            event.verdict_method,
+                            event.evidence,
+                            event.facts,
+                            event.descriptor,
+                        ],
+                    )?;
+                    transaction.execute(
+                        "DELETE FROM semantic_events
+                          WHERE id <= (SELECT MAX(id) FROM semantic_events) - ?1",
+                        params![crate::SEMANTIC_EVENT_RING_CAP],
+                    )?;
+                    transaction.commit()?;
+                    Ok(crate::WorkloadReceiptCommitStatus::Inserted)
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("commit_workload_receipt_event: {error}")))
+    }
+
+    async fn load_workload_receipt_commit(
+        &self,
+        receipt_id: &str,
+    ) -> Result<Option<crate::WorkloadReceiptCommitRecord>> {
+        if !ledger_identifier(receipt_id) {
+            return Err(Error::Backend("invalid workload receipt_id".into()));
+        }
+        let receipt_id = receipt_id.to_string();
+        self.conn
+            .call(
+                move |connection| -> RusqliteResult<Option<crate::WorkloadReceiptCommitRecord>> {
+                    connection
+                        .query_row(
+                            "SELECT schema_version, receipt_id, span_id, recorded_at,
+                                    receipt_sha256, commit_kind, redacted_facts_json,
+                                    record_sha256
+                               FROM workload_receipt_commits
+                              WHERE receipt_id=?1",
+                            params![receipt_id],
+                            |row| {
+                                let commit_kind: String = row.get(5)?;
+                                Ok(crate::WorkloadReceiptCommitRecord {
+                                    schema_version: row.get(0)?,
+                                    receipt_id: row.get(1)?,
+                                    span_id: row.get(2)?,
+                                    recorded_at: row.get(3)?,
+                                    receipt_sha256: row.get(4)?,
+                                    commit_kind: workload_receipt_commit_kind_from_str(
+                                        &commit_kind,
+                                        5,
+                                    )?,
+                                    redacted_facts_json: row.get(6)?,
+                                    record_sha256: row.get(7)?,
+                                })
+                            },
+                        )
+                        .optional()
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("load_workload_receipt_commit: {error}")))
+    }
+
+    async fn recent_workload_receipt_commits(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::WorkloadReceiptCommitRecord>> {
+        let cutoff = now_secs().saturating_sub(window_secs.clamp(60, 31_536_000));
+        let limit = limit.clamp(1, 2_000) as i64;
+        self.conn
+            .call(
+                move |connection| -> RusqliteResult<Vec<crate::WorkloadReceiptCommitRecord>> {
+                    let mut statement = connection.prepare(
+                        "SELECT schema_version, receipt_id, span_id, recorded_at,
+                                receipt_sha256, commit_kind, redacted_facts_json,
+                                record_sha256
+                           FROM workload_receipt_commits
+                          WHERE recorded_at >= ?1
+                          ORDER BY recorded_at DESC, receipt_id ASC
+                          LIMIT ?2",
+                    )?;
+                    let rows = statement
+                        .query_map(params![cutoff, limit], |row| {
+                            let commit_kind: String = row.get(5)?;
+                            Ok(crate::WorkloadReceiptCommitRecord {
+                                schema_version: row.get(0)?,
+                                receipt_id: row.get(1)?,
+                                span_id: row.get(2)?,
+                                recorded_at: row.get(3)?,
+                                receipt_sha256: row.get(4)?,
+                                commit_kind: workload_receipt_commit_kind_from_str(
+                                    &commit_kind,
+                                    5,
+                                )?,
+                                redacted_facts_json: row.get(6)?,
+                                record_sha256: row.get(7)?,
+                            })
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("recent_workload_receipt_commits: {error}")))
     }
 
     async fn record_agent_task_outcome(
