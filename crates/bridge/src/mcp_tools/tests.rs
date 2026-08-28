@@ -33640,6 +33640,27 @@ fn session_finalize_schema_advertises_outcome_gated_optin() {
         props["task_outcome"]["additionalProperties"],
         json!(false)
     );
+    let evidence = &props["task_outcome"]["properties"]["evidence_sha256"];
+    assert_eq!(
+        evidence["items"]["pattern"],
+        json!("^sha256:[0-9a-f]{64}$")
+    );
+    assert!(
+        evidence["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("bare 64-character hex digest is invalid")),
+        "task outcome evidence schema must explain the observed bare-digest failure"
+    );
+    assert!(
+        evidence["items"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("sha256:<64 lowercase hex>")),
+        "task outcome evidence items must advertise the canonical prefixed form"
+    );
+    assert_eq!(
+        evidence["items"]["examples"][0],
+        json!(format!("sha256:{}", "0".repeat(64)))
+    );
 }
 
 #[tokio::test]

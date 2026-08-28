@@ -44777,7 +44777,13 @@ impl McpTool for SessionFinalizeTool {
                             "environment_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
                             "evidence_sha256": {
                                 "type": "array", "maxItems": 16, "uniqueItems": true,
-                                "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+                                "description": "Canonical evidence digests. Every entry MUST include the literal sha256: prefix followed by exactly 64 lowercase hexadecimal characters; a bare 64-character hex digest is invalid.",
+                                "items": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$",
+                                    "description": "Canonical SHA-256 digest in sha256:<64 lowercase hex> form; do not omit the sha256: prefix.",
+                                    "examples": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"]
+                                }
                             },
                             "counts": {
                                 "type": "object",
