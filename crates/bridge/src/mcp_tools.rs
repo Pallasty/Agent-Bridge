@@ -44943,9 +44943,18 @@ impl McpTool for SessionFinalizeTool {
                 Err(_) => return Ok(ToolResult::error("invalid task_outcome schema")),
             };
             if let Err(violations) = claim.validate_agent_reported_admission() {
+                let digest_format_hint = violations
+                    .iter()
+                    .any(|violation| violation.code == "invalid_sha256_digest")
+                    .then_some(
+                        "; expected evidence_sha256 entries in \
+                         sha256:<64 lowercase hex> form; a bare 64-character hex digest is invalid",
+                    )
+                    .unwrap_or_default();
                 return Ok(ToolResult::error(format!(
-                    "task_outcome is not admissible on the agent-reported finalize route: {}",
-                    serde_json::to_string(&violations).unwrap_or_else(|_| "[]".into())
+                    "task_outcome is not admissible on the agent-reported finalize route: {}{}",
+                    serde_json::to_string(&violations).unwrap_or_else(|_| "[]".into()),
+                    digest_format_hint,
                 )));
             }
             let record = match claim.to_store_record(dispatch_now_secs()) {
