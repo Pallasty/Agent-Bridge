@@ -444,6 +444,57 @@ class SourceAndCopyTests(unittest.TestCase):
 
 
 class GateAndEnvironmentTests(unittest.TestCase):
+    def test_body_prime_requires_only_the_first_cpu_delta_to_be_unknown(self) -> None:
+        payload = {
+            "schema_version": "agent_bridge.body_status.v1",
+            "enabled": True,
+            "mode": "shadow_only",
+            "read_only": True,
+            "persists_raw_samples": False,
+            "status": "partial",
+            "coverage": {
+                "status": "partial",
+                "required_fresh": 5,
+                "required_total": 6,
+                "unknown_required": ["host_cpu"],
+            },
+            "collector": {
+                "min_sample_interval_ms": HARNESS.BODY_SAMPLE_INTERVAL_MS,
+                "sample_reused": False,
+            },
+            "freshness": {"status": "fresh"},
+            "sample": {"sequence": 0},
+        }
+        HARNESS.validate_initial_body_prime(payload)
+        payload["coverage"]["unknown_required"] = [
+            "host_cpu",
+            "root_storage_available",
+        ]
+        with self.assertRaises(HARNESS.HarnessError) as raised:
+            HARNESS.validate_initial_body_prime(payload)
+        self.assertEqual(raised.exception.code, "body_prime_invalid")
+
+    def test_work_root_keeps_durable_supervisor_socket_within_sun_path(self) -> None:
+        root_44_bytes = pathlib.Path("/" + "x" * 43)
+        root_45_bytes = pathlib.Path("/" + "x" * 44)
+        self.assertEqual(len(os.fsencode(root_44_bytes)), 44)
+        self.assertEqual(len(os.fsencode(root_45_bytes)), 45)
+        self.assertTrue(HARNESS._supervisor_socket_path_fits(root_44_bytes))
+        self.assertFalse(HARNESS._supervisor_socket_path_fits(root_45_bytes))
+
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = pathlib.Path(temp)
+            preflight = {
+                "runtime_dir": runtime,
+                "runtime_dev": runtime.stat().st_dev,
+            }
+            root = HARNESS.create_work_root(preflight)
+            try:
+                self.assertTrue(root.name.startswith(HARNESS.WORK_ROOT_PREFIX))
+                self.assertTrue(HARNESS._supervisor_socket_path_fits(root))
+            finally:
+                root.rmdir()
+
     def test_spawn_identities_require_canonical_lowercase_uuid_v4(self) -> None:
         self.assertEqual(
             HARNESS._validate_spawn_payload(spawn_payload_fixture()),
@@ -537,6 +588,10 @@ class GateAndEnvironmentTests(unittest.TestCase):
             self.assertNotIn("AGENT_BRIDGE_WORKLOAD_RECEIPT_BINDING", env)
             self.assertEqual(env["AGENT_BRIDGE_CGROUP_CUSTODY"], "on")
             self.assertEqual(env["AGENT_BRIDGE_CLAUDE_BIN"], "/bin/sh")
+            self.assertEqual(
+                env["AGENT_BRIDGE_BODY_MIN_SAMPLE_INTERVAL_MS"],
+                str(HARNESS.BODY_SAMPLE_INTERVAL_MS),
+            )
             self.assertEqual(env["AB_ALLOW_AGENT_SPAWN"], "true")
             self.assertEqual(env["AB_ALLOW_SHELL_EXEC"], "false")
             for name in ("home", "tmp", "xdg-data", "xdg-config", "xdg-cache", "xdg-state", "workspace", "spool"):
@@ -867,6 +922,25 @@ class ScopeCleanupProvenanceTests(unittest.TestCase):
 
 
 class McpClientProtocolTests(unittest.TestCase):
+    def test_tool_errors_are_phase_specific_without_exposing_tool_content(self) -> None:
+        client = object.__new__(HARNESS.McpClient)
+        client._rpc = mock.Mock(
+            return_value={
+                "isError": True,
+                "content": [{"type": "text", "text": "/private/tool/error"}],
+            }
+        )
+        with self.assertRaises(HARNESS.HarnessError) as raised:
+            client.call_tool("agent_spawn", {}, HARNESS.Deadline(1))
+        self.assertEqual(raised.exception.code, "mcp_agent_spawn_error")
+        self.assertNotIn("private", raised.exception.safe_message)
+
+        client._rpc.reset_mock()
+        with self.assertRaises(HARNESS.HarnessError) as raised:
+            client.call_tool("memory_save", {}, HARNESS.Deadline(1))
+        self.assertEqual(raised.exception.code, "mcp_tool_name_invalid")
+        client._rpc.assert_not_called()
+
     def test_fake_stdio_server_exercises_initialize_tools_and_clean_eof(self) -> None:
         payload = b'''#!/usr/bin/python3
 # agent_bridge.workload_receipt_commit.v1
@@ -881,7 +955,7 @@ for line in sys.stdin:
     if method == "initialize":
         result = {"serverInfo": {"name": "agent-bridge", "version": "test"}}
     elif method == "tools/list":
-        result = {"tools": [{"name": "agent_spawn"}, {"name": "agent_session_wait"}]}
+        result = {"tools": [{"name": "body_status"}, {"name": "agent_spawn"}, {"name": "agent_session_wait"}]}
     elif method == "tools/call":
         result = {
             "content": [{"type": "text", "text": "{\\"ok\\":true}"}],

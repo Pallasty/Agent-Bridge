@@ -47,7 +47,10 @@ STARTUP_RECONCILIATION_LOG = (
     "durable workload receipt startup reconciliation completed"
 )
 STANDIN_ATTEMPT_TOKEN = b"r9-standin-attempt-v1\n"
-WORK_ROOT_PREFIX = "agent-bridge-r9-receipt-restart-"
+WORK_ROOT_PREFIX = "ab-r9-"
+MAX_UNIX_SOCKET_PATH_BYTES = 107
+BODY_SAMPLE_INTERVAL_MS = 250
+BODY_SAMPLE_SETTLE_SECONDS = 0.30
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_JSON_BYTES = 64 * 1024
 MAX_PROTOCOL_LINE_BYTES = 1024 * 1024
@@ -102,6 +105,7 @@ MCP_ENV_KEYS = frozenset(
         "AGENT_BRIDGE_STATE_DIR",
         "AGENT_BRIDGE_REPO",
         "AGENT_BRIDGE_BODY_TELEMETRY",
+        "AGENT_BRIDGE_BODY_MIN_SAMPLE_INTERVAL_MS",
         "AGENT_BRIDGE_CGROUP_CUSTODY",
         "AGENT_BRIDGE_CGROUP_RUNTIME_MAX_SEC",
         "AGENT_BRIDGE_CGROUP_RECEIPT_DIR",
@@ -410,6 +414,13 @@ def _mkdir_private(path: pathlib.Path) -> None:
         raise HarnessError("private_directory_failed", "a private trial directory was not secured")
 
 
+def _supervisor_socket_path_fits(root: pathlib.Path) -> bool:
+    # Linux sockaddr_un.sun_path is 108 bytes including the trailing NUL.  The
+    # durable entry name is `receipt-` plus a fixed 32 lowercase-hex id.
+    candidate = root / "spool" / ("receipt-" + "0" * 32) / "supervisor.sock"
+    return len(os.fsencode(candidate)) <= MAX_UNIX_SOCKET_PATH_BYTES
+
+
 def create_work_root(preflight: Mapping[str, Any]) -> pathlib.Path:
     runtime_dir = pathlib.Path(preflight["runtime_dir"])
     try:
@@ -428,6 +439,17 @@ def create_work_root(preflight: Mapping[str, Any]) -> pathlib.Path:
         or metadata.st_dev != preflight["runtime_dev"]
     ):
         raise HarnessError("work_root_invalid", "the isolated trial root failed validation")
+    if not _supervisor_socket_path_fits(root):
+        try:
+            root.rmdir()
+        except OSError as error:
+            raise HarnessError(
+                "work_root_cleanup_failed", "an unusable isolated trial root could not be removed"
+            ) from error
+        raise HarnessError(
+            "work_root_socket_path_too_long",
+            "the isolated trial root cannot fit the private supervisor socket",
+        )
     return root
 
 
@@ -570,6 +592,7 @@ def build_isolated_environment(
         "AGENT_BRIDGE_STATE_DIR": str(paths["state"]),
         "AGENT_BRIDGE_REPO": str(paths["workspace"]),
         "AGENT_BRIDGE_BODY_TELEMETRY": "1",
+        "AGENT_BRIDGE_BODY_MIN_SAMPLE_INTERVAL_MS": str(BODY_SAMPLE_INTERVAL_MS),
         "AGENT_BRIDGE_CGROUP_CUSTODY": "on",
         "AGENT_BRIDGE_CGROUP_RUNTIME_MAX_SEC": "60",
         "AGENT_BRIDGE_CGROUP_RECEIPT_DIR": str(paths["spool"]),
@@ -648,6 +671,7 @@ fi
 while [ ! -f "$AB_R9_RELEASE_FILE" ]; do
     /bin/sleep 0.05
 done
+/bin/sleep 0.35
 exit 0
 """
     _write_private_file(path, payload, 0o700)
@@ -906,15 +930,19 @@ class McpClient:
             for row in tools
             if isinstance(tools, list) and isinstance(row, dict)
         } if isinstance(tools, list) else set()
-        if not {"agent_spawn", "agent_session_wait"}.issubset(names):
+        if not {"body_status", "agent_spawn", "agent_session_wait"}.issubset(names):
             raise HarnessError("mcp_tools_missing", "required MCP tools were not exposed")
 
     def call_tool(self, name: str, arguments: Mapping[str, Any], deadline: Deadline) -> dict[str, Any]:
+        if name not in {"body_status", "agent_spawn", "agent_session_wait"}:
+            raise HarnessError("mcp_tool_name_invalid", "an unexpected MCP tool was requested")
         result = self._rpc(
             "tools/call", {"name": name, "arguments": dict(arguments)}, deadline
         )
         if result.get("isError") is True:
-            raise HarnessError("mcp_tool_error", "a required MCP tool returned an error")
+            raise HarnessError(
+                f"mcp_{name}_error", f"the required {name} MCP tool returned an error"
+            )
         content = result.get("content")
         if not isinstance(content, list) or len(content) != 1:
             raise HarnessError("mcp_tool_result_invalid", "an MCP tool result was malformed")
@@ -1824,13 +1852,35 @@ def _validate_terminal_event(
         or event["source"] != "body_telemetry"
         or event["action"] != "task_span_closed"
         or event["target"] != manifest["span_id"]
-        or event["verdict_status"] != "verified"
-        or event["verdict_method"]
-        != "before_after_body_observation_with_delegated_cpu_memory_workload_tree"
-        or not _typed_json_equal(evidence, expected_evidence)
-        or not _typed_json_equal(event_facts, facts)
     ):
-        raise HarnessError("live_event_invalid", "the live body event projection was invalid")
+        raise HarnessError(
+            "live_event_identity_invalid", "the live body event identity was invalid"
+        )
+    if event["verdict_status"] != "verified":
+        raise HarnessError(
+            "live_event_status_not_verified", "the live body event was not verified"
+        )
+    if (
+        event["verdict_method"]
+        != "before_after_body_observation_with_delegated_cpu_memory_workload_tree"
+    ):
+        method = event["verdict_method"]
+        code = (
+            "live_event_delegated_proof_missing"
+            if method == "before_after_body_observation"
+            else "live_event_verdict_method_invalid"
+        )
+        raise HarnessError(
+            code, "the live body event verdict method was invalid"
+        )
+    if not _typed_json_equal(evidence, expected_evidence):
+        raise HarnessError(
+            "live_event_evidence_invalid", "the live body event evidence was invalid"
+        )
+    if not _typed_json_equal(event_facts, facts):
+        raise HarnessError(
+            "live_event_facts_invalid", "the live body event facts were invalid"
+        )
     _assert_no_sensitive_keys(evidence, "live_event_private")
     _assert_no_sensitive_keys(event_facts, "live_event_private")
     _validate_descriptor(
@@ -2254,6 +2304,37 @@ def _wait_for_initial_empty_snapshot(
         return snapshot
 
 
+def validate_initial_body_prime(payload: Mapping[str, Any]) -> None:
+    coverage = payload.get("coverage")
+    collector = payload.get("collector")
+    freshness = payload.get("freshness")
+    sample = payload.get("sample")
+    if (
+        payload.get("schema_version") != "agent_bridge.body_status.v1"
+        or payload.get("enabled") is not True
+        or payload.get("mode") != "shadow_only"
+        or payload.get("read_only") is not True
+        or payload.get("persists_raw_samples") is not False
+        or payload.get("status") != "partial"
+        or not isinstance(coverage, dict)
+        or coverage.get("status") != "partial"
+        or coverage.get("required_fresh") != 5
+        or coverage.get("required_total") != 6
+        or coverage.get("unknown_required") != ["host_cpu"]
+        or not isinstance(collector, dict)
+        or collector.get("min_sample_interval_ms") != BODY_SAMPLE_INTERVAL_MS
+        or collector.get("sample_reused") is not False
+        or not isinstance(freshness, dict)
+        or freshness.get("status") != "fresh"
+        or not isinstance(sample, dict)
+        or not _is_strict_int(sample.get("sequence"), minimum=0, maximum=MAX_U64)
+    ):
+        raise HarnessError(
+            "body_prime_invalid",
+            "the initial read-only body sample could not establish a verified follow-up baseline",
+        )
+
+
 def _validate_spawn_payload(payload: Mapping[str, Any]) -> tuple[str, str]:
     session_id = payload.get("id")
     runtime_id = payload.get("runtime_id")
@@ -2405,6 +2486,8 @@ def execute_acceptance(
         mcp1 = McpClient(binary, env, expected_sha256, fingerprint, deadline)
         clients.append(mcp1)
         _wait_for_initial_empty_snapshot(database, deadline)
+        validate_initial_body_prime(mcp1.call_tool("body_status", {}, deadline))
+        deadline.sleep(BODY_SAMPLE_SETTLE_SECONDS)
         scope_baseline = capture_matching_scope_baseline(
             pathlib.Path(preflight["systemctl"]), env, deadline
         )
