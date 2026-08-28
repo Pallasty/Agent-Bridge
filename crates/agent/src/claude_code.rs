@@ -582,8 +582,11 @@ mod tests {
             .await
             .expect("spawn fake claude");
         let custody = session.process_custody().expect("custody");
-        assert_eq!(runtime.live_count(), 1);
 
+        // The deliberately fast leader may already have been reaped before
+        // `spawn` returns from its initial Store acknowledgement. Either
+        // ordering is valid; the invariant is that its live PID clears while
+        // the inherited descendant pipe still keeps finalisation open.
         let pid_cleared = wait_for(2_000, 10, || runtime.live_count() == 0).await;
         assert!(
             pid_cleared,
