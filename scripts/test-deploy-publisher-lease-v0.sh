@@ -7,8 +7,13 @@ DEPLOY="$SCRIPT_DIR/deploy_from_master.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ab-publisher-lease-v0.XXXXXX")"
 TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
 TEST_TEMP_BASE="$(cd -P "${TMPDIR:-/tmp}" && pwd -P)"
+DESCENDANT_PIDS=""
 
 cleanup() {
+    local descendant_pid
+    for descendant_pid in $DESCENDANT_PIDS; do
+        kill -9 "$descendant_pid" 2>/dev/null || true
+    done
     case "$TEST_ROOT" in
         "$TEST_TEMP_BASE"/ab-publisher-lease-v0.*)
             find "$TEST_ROOT" -mindepth 1 -depth -delete 2>/dev/null || true
@@ -137,6 +142,8 @@ run_lease() {
     AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE="$fresh_probe" \
     AGENT_BRIDGE_DEPLOY_LEASE_TEST_LIVE_FRESH_MCP="$live_fresh_probe" \
     AGENT_BRIDGE_DEPLOY_LEASE_TEST_HOLD_AFTER_FRESH_MCP_SETTLED="$hold_after_settled" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_TIMEOUT_SECONDS="${FRESH_MCP_TEST_TIMEOUT_SECONDS:-}" \
+    AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_STDOUT_LIMIT_BYTES="${FRESH_MCP_TEST_STDOUT_LIMIT_BYTES:-}" \
         "$DEPLOY" --yes
 }
 
@@ -163,16 +170,43 @@ write_live_mcp_executable() {
     cat > "$path" <<PY
 #!/usr/bin/env python3
 import json
+import os
+import subprocess
 import sys
+import time
 
 BUILD_SHA = "$build_sha"
 MODE = "$mode"
+DESCENDANT_MARKER = "$path.descendant.pid"
 TOOLS = [
     {"name": "capabilities", "description": "test", "inputSchema": {"type": "object"}},
 ] + [
     {"name": f"essential_test_{index}", "description": "test", "inputSchema": {"type": "object"}}
     for index in range(109)
 ]
+
+def spawn_descendant():
+    child_code = (
+        "import os,signal,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "open(sys.argv[1], 'w').write(str(os.getpid())); "
+        "time.sleep(300)"
+    )
+    subprocess.Popen(
+        [sys.executable, "-c", child_code, DESCENDANT_MARKER],
+        close_fds=True,
+    )
+    deadline = time.monotonic() + 5
+    while not os.path.exists(DESCENDANT_MARKER):
+        if time.monotonic() >= deadline:
+            raise SystemExit("descendant marker was not published")
+        time.sleep(0.01)
+
+if MODE.startswith("descendant-"):
+    spawn_descendant()
+if MODE == "descendant-stderr-limit":
+    sys.stderr.write("e" * (512 * 1024))
+    sys.stderr.flush()
 
 for line in sys.stdin:
     request = json.loads(line)
@@ -186,22 +220,124 @@ for line in sys.stdin:
             "capabilities": {"tools": {}},
             "serverInfo": {"name": "agent-bridge", "version": "0.14.0-test"},
         }
+        if MODE == "oversized-output":
+            result["serverInfo"]["version"] = "x" * (2 * 1024 * 1024)
     elif method == "tools/list":
         result = {"tools": TOOLS}
+        if MODE == "next-cursor":
+            result["nextCursor"] = "unexpected-page"
     elif method == "tools/call":
-        capabilities = {
-            "build": {"git_sha": BUILD_SHA},
-            "mcp": {"toolset": "codex-essential", "exposed_tool_count": len(TOOLS)},
-        }
-        result = {"content": [{"type": "text", "text": json.dumps(capabilities)}]}
+        if MODE == "duplicate-capabilities-key":
+            capabilities_text = (
+                '{"build":{"git_sha":' + json.dumps(BUILD_SHA) + '},'
+                '"build":{"git_sha":' + json.dumps(BUILD_SHA) + '},'
+                '"mcp":{"toolset":"codex-essential","exposed_tool_count":' +
+                str(len(TOOLS)) + '}}'
+            )
+        else:
+            capabilities = {
+                "build": {"git_sha": BUILD_SHA},
+                "mcp": {"toolset": "codex-essential", "exposed_tool_count": len(TOOLS)},
+            }
+            capabilities_text = json.dumps(capabilities)
+        result = {"content": [{"type": "text", "text": capabilities_text}]}
+        if MODE == "is-error":
+            result["isError"] = True
+        elif MODE == "extra-content":
+            result["content"].append({"type": "text", "text": "unexpected"})
     else:
         continue
     response = {"jsonrpc": "2.0", "id": request_id, "result": result}
-    print(json.dumps(response), flush=True)
-    if MODE == "duplicate-tools-list" and request_id == 2:
+    if MODE == "wrong-jsonrpc":
+        response["jsonrpc"] = "1.0"
+    elif MODE == "boolean-id":
+        response["id"] = True
+    elif MODE == "wrong-id":
+        response["id"] = "publisher-admission-unrelated-id"
+    elif MODE in ("slow", "descendant-timeout") and method == "initialize":
+        time.sleep(60)
+    if MODE == "duplicate-object-id":
+        response_text = (
+            '{"jsonrpc":"2.0","id":' + json.dumps(response["id"]) +
+            ',"id":' + json.dumps(response["id"]) +
+            ',"result":' + json.dumps(response["result"]) + '}'
+        )
+    elif MODE == "duplicate-object-result":
+        response_text = (
+            '{"jsonrpc":"2.0","id":' + json.dumps(response["id"]) +
+            ',"result":{},"result":' + json.dumps(response["result"]) + '}'
+        )
+    else:
+        response_text = json.dumps(response)
+    print(response_text, flush=True)
+    if MODE == "duplicate-tools-list" and method == "tools/list":
+        print(json.dumps(response), flush=True)
+    if MODE == "unknown-id" and method == "tools/list":
+        response["id"] = "publisher-admission-unknown-id"
         print(json.dumps(response), flush=True)
 PY
     chmod 755 "$path"
+}
+
+assert_live_probe_rejected() {
+    local case_name="$1" candidate="$2" mode="$3" reason="$4"
+    local root pending_sha output status
+    new_case "$case_name"; root="$CASE_ROOT"
+    chmod 755 "$root/bin/agent-bridge.real"
+    write_live_mcp_executable "$root/payload-a" "${candidate:0:12}" "$mode"
+    run_lease "$root" install "$candidate" >/dev/null
+    pending_sha="$(sha256_fixture "$root/state/pending-admission.meta")"
+    set +e
+    output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "" 1 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "fresh MCP live probe accepted $reason"
+    case "$output" in *"fresh MCP admission probe failed"*) ;; *)
+        fail "fresh MCP $reason rejection reason missing" ;;
+    esac
+    [ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] ||
+        fail "fresh MCP $reason rejection changed pending state"
+    [ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] ||
+        fail "fresh MCP $reason rejection published an admission intent"
+}
+
+assert_descendant_reaped() {
+    local marker="$1" label="$2" attempt=0 pid command
+    while [ ! -f "$marker" ] && [ "$attempt" -lt 200 ]; do
+        sleep 0.02
+        attempt=$((attempt + 1))
+    done
+    [ -f "$marker" ] || fail "$label did not publish a descendant PID marker"
+    pid="$(cat "$marker")"
+    case "$pid" in ''|*[!0-9]*) fail "$label published an invalid descendant PID" ;; esac
+    DESCENDANT_PIDS="$DESCENDANT_PIDS $pid"
+    attempt=0
+    while [ "$attempt" -lt 200 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+        case "$command" in *"$marker"*) ;; *) return 0 ;; esac
+        sleep 0.02
+        attempt=$((attempt + 1))
+    done
+    fail "$label left descendant process $pid alive"
+}
+
+write_hostile_python_environment() {
+    local root="$1"
+    mkdir -p "$root/hostile-bin" "$root/hostile-pythonpath"
+    cat > "$root/hostile-bin/python3" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' path-python-ran >> "${HOSTILE_PYTHON_MARKER:?}"
+exec /usr/bin/python3 "$@"
+SH
+    chmod 755 "$root/hostile-bin/python3"
+    cat > "$root/hostile-pythonpath/sitecustomize.py" <<'PY'
+import os
+with open(os.environ["HOSTILE_PYTHON_MARKER"], "a", encoding="utf-8") as marker:
+    marker.write("sitecustomize-ran\n")
+PY
 }
 
 fresh_admission_receipt() {
@@ -1112,7 +1248,9 @@ output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2
 status=$?
 set -e
 [ "$status" -ne 0 ] || fail "fresh MCP admission accepted an invalid evidence digest"
-case "$output" in *"probe receipt is invalid"*) ;; *) fail "fresh MCP invalid-evidence reason missing" ;; esac
+case "$output" in *"probe fixture is invalid"*|*"probe receipt is invalid"*) ;; *)
+    fail "fresh MCP invalid-evidence reason missing" ;;
+esac
 [ "$(sha256_fixture "$root/state/pending-admission.meta")" = "$pending_sha" ] || fail "fresh MCP invalid-evidence failure changed pending state"
 
 # 34. SIGKILL after receipt/pending settlement but before lease release is
@@ -1145,5 +1283,163 @@ set -e
 case "$output" in *"not a physical directory"*|*"must not traverse a symlink"*) ;; *)
     fail "publisher state symlink fail-closed reason missing" ;;
 esac
+
+# 36. The live parser accepts only exact JSON-RPC 2.0 responses for the three
+# nonce-derived request ids. Booleans are not integers here; wrong, unknown,
+# and duplicate ids cannot be spliced into the transcript.
+assert_live_probe_rejected fresh-mcp-live-wrong-jsonrpc \
+    5555555555555555555555555555555555555555 wrong-jsonrpc "non-2.0 jsonrpc"
+assert_live_probe_rejected fresh-mcp-live-boolean-id \
+    6666666666666666666666666666666666666666 boolean-id "boolean response id"
+assert_live_probe_rejected fresh-mcp-live-wrong-id \
+    7777777777777777777777777777777777777777 wrong-id "wrong response id"
+assert_live_probe_rejected fresh-mcp-live-unknown-id \
+    8888888888888888888888888888888888888888 unknown-id "unknown response id"
+assert_live_probe_rejected fresh-mcp-live-duplicate-nonce-id \
+    9999999999999999999999999999999999999999 duplicate-tools-list "duplicate response id"
+
+# 37. A JSON-RPC success envelope is not enough: capabilities must not report
+# isError, content must be exactly one text block, and v0 fails closed instead
+# of silently admitting a partial tools/list page.
+assert_live_probe_rejected fresh-mcp-live-is-error \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab is-error "capabilities isError result"
+assert_live_probe_rejected fresh-mcp-live-extra-content \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac extra-content "extra capabilities content"
+assert_live_probe_rejected fresh-mcp-live-next-cursor \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad next-cursor "paginated tools/list result"
+
+# 38. The admission controller must use the fixed trusted interpreter in
+# isolated mode and give the child a minimal environment. A PATH-resolved
+# python shim and PYTHONPATH/sitecustomize payload must never execute.
+new_case fresh-mcp-hostile-python-environment; root="$CASE_ROOT"
+candidate=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae
+marker="$root/hostile-python.marker"
+write_hostile_python_environment "$root"
+chmod 755 "$root/bin/agent-bridge.real"
+write_live_mcp_executable "$root/payload-a" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+PATH="$root/hostile-bin:$PATH" \
+PYTHONPATH="$root/hostile-pythonpath" \
+HOSTILE_PYTHON_MARKER="$marker" \
+    run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "" 1 >/dev/null
+[ ! -e "$marker" ] || fail "hostile PATH/PYTHONPATH executed during fresh MCP admission"
+receipt="$(fresh_admission_receipt "$root")" || fail "isolated-interpreter admission receipt missing"
+[ "$(meta_field "$receipt" probe_method)" = independent_stdio_private_exact_binary_copy ] ||
+    fail "isolated-interpreter receipt did not record private exact-copy method"
+[ "$(meta_field "$receipt" probe_copied_binary_sha256)" = "$(meta_field "$receipt" installed_binary_sha256)" ] ||
+    fail "private probe copy is not bound to the installed binary digest"
+
+# 39. Output and wall-clock bounds fail closed before intent publication. The
+# timeout override is test-only; the production limit remains fixed in the
+# admission implementation.
+FRESH_MCP_TEST_STDOUT_LIMIT_BYTES=1024 assert_live_probe_rejected fresh-mcp-live-oversized-output \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaf oversized-output "oversized MCP output"
+unset FRESH_MCP_TEST_STDOUT_LIMIT_BYTES
+FRESH_MCP_TEST_TIMEOUT_SECONDS=1 assert_live_probe_rejected fresh-mcp-live-timeout \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaba slow "MCP response timeout"
+unset FRESH_MCP_TEST_TIMEOUT_SECONDS
+
+# 40. A deterministic settled-intent archive is itself replay-idempotent when
+# its physical mode-600 content is exact. Conflicts and symlinks remain durable
+# fail-closed states rather than causing the canonical intent to disappear.
+new_case fresh-mcp-settled-intent-replay; root="$CASE_ROOT"
+candidate=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb
+probe="$root/fresh-probe.meta"
+write_fresh_mcp_probe_fixture "$probe" "${candidate:0:12}"
+run_lease "$root" install "$candidate" >/dev/null
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" >/dev/null
+settled_intent="$(fresh_admission_settled_intent "$root")" || fail "settled-intent replay fixture missing"
+settled_sha="$(sha256_fixture "$settled_intent")"
+cp "$settled_intent" "$root/state/fresh-mcp-admission-intent.meta"
+chmod 600 "$root/state/fresh-mcp-admission-intent.meta"
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" >/dev/null
+[ ! -e "$root/state/fresh-mcp-admission-intent.meta" ] || fail "exact settled-intent replay left canonical intent"
+[ "$(sha256_fixture "$settled_intent")" = "$settled_sha" ] || fail "exact settled-intent replay changed archive"
+
+# A nonce or pending-context edit must invalidate the intent's complete
+# admission binding; neither edit may be accepted as a display-only change.
+for tampered_key in probe_nonce pending_challenge; do
+    awk -F= -v key="$tampered_key" '
+        BEGIN { OFS="=" }
+        $1 == key { $2="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+        { print }
+    ' "$settled_intent" > "$root/intent.tampered"
+    chmod 600 "$root/intent.tampered"
+    mv "$root/intent.tampered" "$root/state/fresh-mcp-admission-intent.meta"
+    set +e
+    output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "fresh MCP intent accepted tampered $tampered_key binding context"
+    [ -f "$root/state/fresh-mcp-admission-intent.meta" ] || fail "tampered $tampered_key intent was retired"
+    rm "$root/state/fresh-mcp-admission-intent.meta"
+done
+
+cp "$settled_intent" "$root/state/fresh-mcp-admission-intent.meta"
+printf '%s\n' conflict >> "$settled_intent"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "conflicting settled-intent archive was accepted"
+case "$output" in *"settled-intent target conflicts with canonical intent"*) ;; *)
+    fail "settled-intent conflict fail-closed reason missing" ;;
+esac
+[ -f "$root/state/fresh-mcp-admission-intent.meta" ] || fail "settled-intent conflict lost canonical intent"
+rm "$settled_intent"
+ln -s "$root/state/fresh-mcp-admission-intent.meta" "$settled_intent"
+set +e
+output="$(run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "$probe" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "symlinked settled-intent archive was accepted"
+case "$output" in *"settled-intent target is not an exact physical mode-600 file"*) ;; *)
+    fail "settled-intent symlink fail-closed reason missing" ;;
+esac
+[ -f "$root/state/fresh-mcp-admission-intent.meta" ] || fail "settled-intent symlink lost canonical intent"
+
+# 41. The durable receipt binds the random probe transcript to both publisher
+# lease contexts and the complete pending/install fingerprint, not merely to a
+# display summary of MCP identity.
+receipt="$(fresh_admission_receipt "$root")" || fail "binding receipt fixture missing"
+for key in pending_lease_id pending_challenge candidate_commit installed_binary_sha256 \
+        installed_binary_inode installed_binary_mode installed_assets_sha256 \
+        admission_lease_id admission_challenge probe_nonce probe_started_at probe_finished_at \
+        probe_copied_binary_sha256 probe_evidence_sha256 admission_binding_sha256 receipt_binding_sha256; do
+    [ -n "$(meta_field "$receipt" "$key")" ] || fail "fresh MCP receipt omitted binding field $key"
+done
+[ "$(meta_field "$receipt" probe_copied_binary_sha256)" = "$(meta_field "$receipt" installed_binary_sha256)" ] ||
+    fail "fresh MCP receipt copy digest is not exact-installed bound"
+
+# 42. JSON text with duplicate object keys is ambiguous even when both values
+# are identical. Reject duplicate envelope id/result keys and recursively reject
+# duplicate keys inside the capabilities text payload.
+assert_live_probe_rejected fresh-mcp-live-duplicate-object-id \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabc duplicate-object-id "duplicate JSON object id key"
+assert_live_probe_rejected fresh-mcp-live-duplicate-object-result \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabd duplicate-object-result "duplicate JSON object result key"
+assert_live_probe_rejected fresh-mcp-live-duplicate-capabilities-key \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabe duplicate-capabilities-key "duplicate capabilities payload key"
+
+# 43. Process-group custody includes descendants. Whether the direct MCP parent
+# exits normally, times out, or exceeds stderr bounds, its same-group child must
+# be gone before the admission controller returns. Markers and PIDs live only in
+# this case's disposable test root, and the suite cleanup is a final safety net.
+new_case fresh-mcp-descendant-normal-exit; root="$CASE_ROOT"
+candidate=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabf
+write_live_mcp_executable "$root/payload-a" "${candidate:0:12}" descendant-normal
+run_lease "$root" install "$candidate" >/dev/null
+run_lease "$root" admit-fresh-mcp ignored "$root/payload-a" "" 1 >/dev/null
+assert_descendant_reaped "$root/payload-a.descendant.pid" "normal MCP parent exit"
+fresh_admission_receipt "$root" >/dev/null || fail "normal parent exit with descendant was not admitted"
+
+FRESH_MCP_TEST_TIMEOUT_SECONDS=1 assert_live_probe_rejected fresh-mcp-descendant-timeout \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacb descendant-timeout "MCP descendant timeout"
+unset FRESH_MCP_TEST_TIMEOUT_SECONDS
+assert_descendant_reaped "$CASE_ROOT/payload-a.descendant.pid" "timed-out MCP parent"
+
+assert_live_probe_rejected fresh-mcp-descendant-stderr-limit \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacc descendant-stderr-limit "MCP descendant stderr overflow"
+assert_descendant_reaped "$CASE_ROOT/payload-a.descendant.pid" "stderr-over-limit MCP parent"
 
 printf '%s\n' publisher-lease-v0-ok

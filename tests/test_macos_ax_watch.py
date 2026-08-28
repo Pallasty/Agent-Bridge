@@ -2,6 +2,7 @@ import copy
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -12,6 +13,7 @@ from macos_ax_watch import (
     compare_state_sequence,
     desktop_state,
     diff_samples,
+    _sample,
     watch,
 )
 
@@ -84,6 +86,35 @@ class MacosAxWatchTests(unittest.TestCase):
         after["source_window_count"] = 2
         self.assertEqual(diff_samples(before, after, 2.0), [])
 
+    def test_native_ambiguous_identity_does_not_look_like_disappearance(self):
+        before = sample()
+        after = sample()
+        duplicate = copy.deepcopy(after["windows"][0])
+        duplicate["index"] = 1
+        for window in (after["windows"][0], duplicate):
+            window["identity"] = {
+                "kind": "ambiguous_ax_identifier",
+                "value": "main",
+                "stable_across_samples": False,
+                "unique_in_sample": False,
+            }
+        after["windows"].append(duplicate)
+        after["source_window_count"] = 2
+        self.assertEqual(diff_samples(before, after, 2.0), [])
+        values = iter([before, after])
+        result = watch(
+            sample_count=2,
+            interval_secs=0.1,
+            max_windows=8,
+            max_events=8,
+            jxa_timeout_secs=1.0,
+            include_samples=False,
+            sampler=lambda: next(values),
+            sleeper=lambda _: None,
+        )
+        self.assertEqual(result["coverage"]["sample_local_window_observations"], 0)
+        self.assertEqual(result["coverage"]["ambiguous_ax_identifier_observations"], 2)
+
     def test_truncated_sample_does_not_claim_lifecycle(self):
         before = sample(identifier="old")
         after = sample(identifier="new")
@@ -132,6 +163,56 @@ class MacosAxWatchTests(unittest.TestCase):
             "same_process_complete_samples_unique_ax_identifier",
         )
         self.assertNotIn("samples", result)
+
+    def test_complete_sample_local_windows_support_state_without_lifecycle(self):
+        before = sample(sampled_at=1.0)
+        after = sample(sampled_at=2.0)
+        for value in (before, after):
+            value["sample_id"] = f"sample-{value['sampled_at']}"
+            value["windows"][0]["ax_identifier"] = None
+            value["windows"][0]["identity"] = {
+                "kind": "sample_index",
+                "value": "0",
+                "stable_across_samples": False,
+                "unique_in_sample": False,
+            }
+        values = iter([before, after])
+        result = watch(
+            sample_count=2,
+            interval_secs=0.1,
+            max_windows=8,
+            max_events=8,
+            jxa_timeout_secs=1.0,
+            include_samples=False,
+            sampler=lambda: next(values),
+            sleeper=lambda _: None,
+        )
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["event_count"], 0)
+        self.assertEqual(result["evidence_verification"]["verdict"], "verified")
+        self.assertEqual(result["drift"]["decision"]["verdict"], "unchanged")
+        self.assertEqual(result["current_state"]["coverage"]["sources"], ["ax", "native_ax"])
+        self.assertEqual(result["coverage"]["sample_local_window_observations"], 2)
+
+    def test_default_sampler_uses_native_probe_payload(self):
+        payload = sample(sampled_at=12.5)
+        payload.update(
+            schema="macos_ax_probe/v0",
+            captured_at_unix_ms=12_500,
+            sample_id="sample-12500",
+            limits={"max_windows": 8, "truncated": False, "include_windows": True},
+            source={
+                "adapter": "native_ax",
+                "uses_system_events": False,
+                "uses_apple_events": False,
+            },
+        )
+        with mock.patch("macos_ax_watch.native_probe_sample", return_value=(payload, None)) as native:
+            observed = _sample(8, 1.0)
+        native.assert_called_once_with(8, 1.0, include_windows=True)
+        self.assertEqual(observed["sample_id"], "sample-12500")
+        self.assertEqual(observed["sampled_at"], 12.5)
+        self.assertEqual(observed["status"], "ready")
 
     def test_budget_exhaustion_is_not_verified(self):
         before = sample(pid=7, identifier="notes")

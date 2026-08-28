@@ -96,6 +96,18 @@ atomic no-overwrite link. Repeating the exact candidate is idempotent; a
 different report at the same deterministic ID fails closed. Preview creates
 neither the directory nor a receipt.
 
+Continuity hardening adds a separate 0700 `m2-shadow-report-anchors`
+directory. Every newly recorded report receives one 0600 no-replace anchor
+binding its report ID and stable state-root-local `ledger_id` to the SHA-256 of
+the exact report bytes. The ledger identity itself is a 0600 atomic no-replace
+receipt, and read-only review exposes it. History and review require a
+one-to-one report/anchor set and fail closed when either side is missing, an
+extra anchor exists, the ledger identity differs, or the digest differs. An exact idempotent
+`--record` replay may backfill the anchor for a pre-anchor report after
+revalidating its schema, deterministic ID, owner basis, and exact bytes; it
+does not rewrite the report. This detects local ledger discontinuity but does
+not merge state roots or claim cross-node continuity.
+
 ## Explicit non-capabilities
 
 This slice has no daemon, scheduler, timer, service, hook, autostart, event
@@ -152,15 +164,18 @@ action, runtime, or memory authority. The command acquires no writer lease and
 does not create, rewrite, relabel, or touch report files.
 
 Source tests and mechanics reports prove mechanics, not unattended-wake value.
-The first genuine natural report now records a real worktree-continuity
-recovery that was correctly suppressed because the owner session was active.
-The complete ledger has one natural and two mechanics reports: natural
-suppression evidence exists, while the minimum report count, second trigger
-kind, and natural `would_wake=true` criteria remain unmet. The next gate still
-requires the remaining natural real-task evidence above, owner review of its
-counterfactual decisions, and a separate decision on candidate-source,
-frequency, quiet-hour, cost, and stop controls. Until then, adding discovery,
-a timer, a scheduler, or any real provider invocation is prohibited.
+The 2026-08-25 worktree-continuity recovery remains a documented natural
+observation, but its original report bytes and state root are no longer
+available for current-ledger review and no `ledger_id` was captured. It therefore does not count toward the
+durable threshold. The current macOS ledger is anchored under a stable
+`ledger_id`. It contains one legacy mechanics report and one durable natural
+failure report produced by an unplanned wrapper-bypass configuration failure
+in the real replay workflow. That natural report was suppressed because the
+owner session was active, so the natural-suppression criterion is satisfied.
+Collection still needs two more genuine natural reports, a second natural
+trigger kind, and one natural `would_wake=true` decision. Until the frozen
+threshold is met, adding discovery, a timer, a scheduler, or any real provider
+invocation is prohibited.
 
 Two increments without observed use-value refreeze the lane. Any stop label,
 raw-content persistence, unexpected provider/tool event, wake creation,

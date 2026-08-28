@@ -4,6 +4,12 @@
 **Date:** 2026-06-07
 **Parent roadmap:** [Semantic System Bus Roadmap](SEMANTIC_SYSTEM_BUS_ROADMAP_2026_06_07.md)
 
+> Runtime update (2026-08-26): the tool/schema remain compatible, but Darwin
+> window observation now uses the sibling native Swift
+> `NSWorkspace + AXUIElement` sampler. The former default System Events/JXA
+> backend is superseded; see
+> [macOS Native Semantic Observation v1](MACOS_NATIVE_SEMANTIC_OBSERVATION_V1_2026_08_26.md).
+
 ## 0. Purpose
 
 SSB-9 adds the first local macOS runtime probe for the semantic system bus.

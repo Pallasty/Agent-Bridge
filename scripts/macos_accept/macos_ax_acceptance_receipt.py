@@ -24,6 +24,7 @@ EXPECTED_CHECK_IDS = (
     "bounded_windows",
     "window_identity_declared",
     "verify_probe_dependency_matches",
+    "native_probe_dependency_present",
     "trust_verified",
     "frontmost_app_verified",
     "window_presence_verified",
@@ -170,7 +171,13 @@ def _verify_evidence_admissible(
             and all(
                 isinstance(error, dict)
                 and error.get("stage")
-                in {"system_events_windows", "system_events_window_count"}
+                in {
+                    "system_events_windows",
+                    "system_events_window_count",
+                    "native_ax_windows",
+                    "native_ax_window_count",
+                    "native_ax_window_attributes",
+                }
                 for error in errors
             )
         )
@@ -289,9 +296,13 @@ def _receipt_evidence_checks(receipt: dict[str, Any]) -> dict[str, bool]:
     probe_script = scripts.get("probe")
     verify_script = scripts.get("verify")
     dependency = scripts.get("verify_probe_dependency")
+    native_dependency = scripts.get("native_probe")
     probe_script = probe_script if isinstance(probe_script, dict) else {}
     verify_script = verify_script if isinstance(verify_script, dict) else {}
     dependency = dependency if isinstance(dependency, dict) else {}
+    native_dependency = (
+        native_dependency if isinstance(native_dependency, dict) else {}
+    )
 
     def valid_sha256(value: Any) -> bool:
         return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
@@ -322,6 +333,12 @@ def _receipt_evidence_checks(receipt: dict[str, Any]) -> dict[str, bool]:
         ),
         "window_identity_declared": identities_complete,
         "verify_probe_dependency_matches": dependency_matches,
+        "native_probe_dependency_present": bool(
+            valid_sha256(native_dependency.get("sha256"))
+            and str(native_dependency.get("path", "")).endswith(
+                "macos_ax_native_probe.swift"
+            )
+        ),
         "trust_verified": _verify_evidence_admissible(
             trust_verify, "ax_trusted_is", probe_pid
         ),
@@ -390,6 +407,7 @@ def build_receipt(
         and limits.get("include_windows") is True
     )
     verify_probe_dependency = verify_script.with_name("macos_ax_probe.py")
+    native_probe_dependency = probe_script.with_name("macos_ax_native_probe.swift")
     dependency_matches = bool(
         verify_probe_dependency.is_file()
         and probe_script.is_file()
@@ -440,6 +458,12 @@ def build_receipt(
     )
     _check(
         checks,
+        "native_probe_dependency_present",
+        native_probe_dependency.is_file(),
+        {"path": str(native_probe_dependency)},
+    )
+    _check(
+        checks,
         "trust_verified",
         _verify_evidence_admissible(trust_verify, "ax_trusted_is", probe_pid),
         trust_verify,
@@ -472,6 +496,12 @@ def build_receipt(
                     if verify_probe_dependency.is_file()
                     else None,
                 },
+                "native_probe": {
+                    "path": str(native_probe_dependency),
+                    "sha256": _sha256(native_probe_dependency)
+                    if native_probe_dependency.is_file()
+                    else None,
+                },
             },
         },
         "environment": {
@@ -483,7 +513,7 @@ def build_receipt(
         "channels": {
             "selected": [
                 "ax_trust",
-                "system_events_frontmost_application",
+                "native_ax_frontmost_application",
                 "bounded_ax_window_observation",
                 "read_only_postcondition_verification",
             ],

@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, Callable
 
-from macos_ax_probe import _annotate_window_identities, _ax_is_trusted, _frontmost_jxa
+from macos_ax_probe import native_probe_sample
 
 SCHEMA_VERSION = "macos_ax_watch/v0"
 STATE_SCHEMA_VERSION = "agent_bridge.desktop_state.v0"
@@ -212,7 +212,7 @@ def desktop_state(sample: dict[str, Any], *, token_max_age_ms: int) -> dict[str,
             "truncated": sample.get("truncated") is True,
             "errors": list(sample.get("errors") or []),
             "incomplete_reasons": reasons,
-            "sources": ["ax", "system_events"],
+            "sources": ["ax", "native_ax"],
             "enumerated_window_count": len(windows),
             "source_window_count": sample.get("source_window_count"),
             "stable_window_count": identity_counts["stable"],
@@ -381,13 +381,18 @@ def _stable_window_partition(
         return {}, 0, set()
     candidates: dict[tuple[int, str], list[dict[str, Any]]] = {}
     for window in sample.get("windows") or []:
-        identity = window.get("identity") if isinstance(window, dict) else None
-        if not isinstance(identity, dict) or identity.get("stable_across_samples") is not True:
+        if not isinstance(window, dict):
             continue
-        value = identity.get("value")
-        if isinstance(value, str) and value:
-            candidates.setdefault((pid, value), []).append(window)
-    unique = {key: values[0] for key, values in candidates.items() if len(values) == 1}
+        value = window.get("ax_identifier")
+        if isinstance(value, str) and value.strip():
+            candidates.setdefault((pid, value.strip()), []).append(window)
+    unique = {
+        key: values[0]
+        for key, values in candidates.items()
+        if len(values) == 1
+        and isinstance(values[0].get("identity"), dict)
+        and values[0]["identity"].get("stable_across_samples") is True
+    }
     ambiguous = sum(len(values) for values in candidates.values() if len(values) > 1)
     ambiguous_keys = {key for key, values in candidates.items() if len(values) > 1}
     return unique, ambiguous, ambiguous_keys
@@ -478,27 +483,45 @@ def diff_samples(before: dict[str, Any], after: dict[str, Any], observed_at: flo
 
 
 def _sample(max_windows: int, jxa_timeout_secs: float) -> dict[str, Any]:
-    trusted, trust_error = _ax_is_trusted()
-    payload, jxa_error = (None, None)
-    if trusted:
-        payload, jxa_error = _frontmost_jxa(max_windows, jxa_timeout_secs)
-    windows = _annotate_window_identities((payload or {}).get("windows", []))
-    source_count = (payload or {}).get("window_count")
-    windows_read_ok = (payload or {}).get("windows_read_ok")
-    errors = [error for error in (trust_error, jxa_error) if error]
-    if payload and windows_read_ok is not True:
-        errors.append("window enumeration failed")
-    return {
-        "sampled_at": time.time(),
-        "status": "ready" if trusted and payload and payload.get("frontmost_app") and windows_read_ok is True else "degraded",
-        "permission": {"ax_trusted": trusted, "prompted": False},
-        "frontmost_app": (payload or {}).get("frontmost_app"),
-        "windows": windows,
-        "source_window_count": source_count,
-        "windows_read_ok": windows_read_ok,
-        "truncated": bool(source_count is not None and len(windows) < source_count),
-        "errors": errors,
-    }
+    payload, native_error = native_probe_sample(
+        max_windows,
+        jxa_timeout_secs,
+        include_windows=True,
+    )
+    if not isinstance(payload, dict):
+        return {
+            "sampled_at": time.time(),
+            "status": "degraded",
+            "permission": {"ax_trusted": None, "prompted": False},
+            "frontmost_app": None,
+            "windows": [],
+            "source_window_count": None,
+            "windows_read_ok": None,
+            "truncated": False,
+            "errors": [native_error or "native probe unavailable"],
+            "source": {
+                "adapter": "native_ax",
+                "uses_system_events": False,
+                "uses_apple_events": False,
+            },
+        }
+    sample = dict(payload)
+    captured_ms = sample.get("captured_at_unix_ms")
+    captured_secs = sample.get("captured_at")
+    if isinstance(captured_ms, (int, float)) and not isinstance(captured_ms, bool):
+        sampled_at = float(captured_ms) / 1_000.0
+    elif isinstance(captured_secs, (int, float)) and not isinstance(captured_secs, bool):
+        sampled_at = float(captured_secs)
+    else:
+        sampled_at = time.time()
+    sample["sampled_at"] = sampled_at
+    sample["truncated"] = (sample.get("limits") or {}).get("truncated") is True
+    if native_error:
+        errors = list(sample.get("errors") or [])
+        errors.append(native_error)
+        sample["errors"] = errors
+        sample["status"] = "degraded"
+    return sample
 
 
 def watch(
@@ -537,7 +560,9 @@ def watch(
         1
         for sample in samples
         for window in sample.get("windows") or []
-        if (window.get("identity") or {}).get("stable_across_samples") is False
+        if (window.get("identity") or {}).get("kind") == "sample_index"
+        or not isinstance(window.get("ax_identifier"), str)
+        or not window["ax_identifier"].strip()
     )
     states = [desktop_state(sample, token_max_age_ms=max_token_age_ms) for sample in samples]
     ready = bool(states) and all(state["coverage"]["complete"] for state in states)
@@ -573,6 +598,7 @@ def watch(
             "max_windows_per_sample": max_windows,
             "max_events": max_events,
             "jxa_timeout_secs": jxa_timeout_secs,
+            "native_timeout_secs": jxa_timeout_secs,
         },
         "coverage": {
             "samples_completed": len(samples),

@@ -1,0 +1,12 @@
+{
+  "schema": "agent_bridge.ag_ui_readonly_projection_request.v1",
+  "protocol": {"name": "ag-ui", "core_version": "0.0.57"},
+  "source": {"adapter_id": "openbot-fixture", "agent_id_hash": "sha256:openbot-agent"},
+  "events": [
+    {"type": "RUN_STARTED", "threadId": "thread-openbot", "runId": "run-openbot"},
+    {"type": "TOOL_CALL_START", "toolCallId": "call-openbot", "toolCallName": "computer"},
+    {"type": "TOOL_CALL_ARGS", "toolCallId": "call-openbot", "delta": "{\"q\":\"x\"}"},
+    {"type": "TOOL_CALL_END", "toolCallId": "call-openbot"},
+    {"type": "RUN_FINISHED", "threadId": "thread-openbot", "runId": "run-openbot"}
+  ]
+}

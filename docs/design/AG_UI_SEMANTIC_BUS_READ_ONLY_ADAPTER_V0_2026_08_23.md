@@ -7,6 +7,10 @@
 - Reference consumer: `CopilotKit/OpenBot@2251ad266406ec8212235adba365d2c478437a0c`
 - Proposed schema: `agent_bridge.ag_ui_readonly_projection.v0`
 
+> Version note (2026-08-26): v0 remains frozen with its original conservative completeness
+> behavior. The opt-in v1 completeness split is specified in
+> `AG_UI_OPENBOT_REQUEST_COMPLETENESS_V1_D6_2026_08_26.md`.
+
 ## Purpose
 
 Define a bounded compatibility seam that explains an AG-UI event stream using Agent-Bridge Semantic

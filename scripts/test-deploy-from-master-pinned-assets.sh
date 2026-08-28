@@ -37,6 +37,7 @@ TARGET_ROOT="$TEST_ROOT/target"
 LAUNCHCTL_LOG="$TEST_ROOT/launchctl.log"
 LSOF_COUNT="$TEST_ROOT/lsof.count"
 CURL_COUNT="$TEST_ROOT/curl.count"
+CURL_LOG="$TEST_ROOT/curl.log"
 
 mkdir -p "$FAKE_BIN" "$ISOLATED_HOME" "$INSTALL_DIR" "$STATE_DIR"
 CANONICAL_REAL_PATH="$(cd "$INSTALL_DIR" && pwd -P)/agent-bridge.real"
@@ -53,7 +54,7 @@ for asset in deploy_from_master.sh audio_embody.py app_control.py app-control-re
     app-control-recovery-hint-dedupe.py desktop_action.py \
     desktop_confirm_store.py desktop_grant.py desktop_invoke.py \
     desktop_snapshot.py desktop_steer.py desktop_verify.py \
-    macos_ax_focus_window.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
+    macos_ax_focus_window.swift macos_ax_native_probe.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
     vision_grounding_ocr.py omnivoice_mac_remote_synth.py \
     omnivoice_onnx_bundle_synth.py omnivoice_onnx_official_decode.py \
     omnivoice_tts_synth.py qwen3_lan_remote_synth.py qwen3_tts_rust_gate.py qwen3_tts_synth.py \
@@ -97,24 +98,38 @@ cat > "$FAKE_BIN/launchctl" <<'FAKE_LAUNCHCTL'
 set -euo pipefail
 case "$1" in
     print)
+        if [ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" = palace_missing ]; then
+            case "$2" in
+                *palace)
+                    printf 'Could not find service "%s" in domain for user\n' "$2" >&2
+                    exit 113
+                    ;;
+            esac
+        fi
         program="$AB_DEPLOY_SERVICE_TEST_WRAPPER"
         [ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" = unrelated ] && program=/usr/bin/true
         case "$2" in
-            *daemon-http) mode=daemon-http ;;
-            *) mode=daemon ;;
+            *daemon-http) mode=daemon-http; pid=4242 ;;
+            *palace) mode=palace; pid=4243 ;;
+            *) mode=daemon; pid=4241 ;;
         esac
         printf 'program = %s\n' "$program"
-        malformed=0
-        if [ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" = malformed_second ]; then
-            case "$2" in *daemon-http) malformed=1 ;; esac
+        printf 'arguments = {\n'
+        printf '\t%s\n' "$program"
+        printf '\t%s\n' "$mode"
+        if [ "$mode" = palace ]; then
+            printf '\t%s\n' serve
+            printf '\t%s\n' --host
+            printf '\t%s\n' 127.0.0.1
+            printf '\t%s\n' --port
+            if [ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" = malformed_palace_port ]; then
+                printf '\t%s\n' 7980
+            else
+                printf '\t%s\n' 7979
+            fi
         fi
-        if [ "$malformed" -eq 0 ]; then
-            printf 'arguments = {\n'
-            printf '\t%s\n' "$program"
-            printf '\t%s\n' "$mode"
-            printf '}\n'
-        fi
-        printf 'pid = 4242\n'
+        printf '}\n'
+        printf 'pid = %s\n' "$pid"
         ;;
     kickstart)
         printf '%s\n' "$3" >> "$AB_DEPLOY_SERVICE_TEST_LOG"
@@ -127,16 +142,31 @@ chmod +x "$FAKE_BIN/launchctl"
 cat > "$FAKE_BIN/lsof" <<'FAKE_LSOF'
 #!/usr/bin/env bash
 set -euo pipefail
-case " $* " in
-    *" -iTCP:7878 "*) printf 'p4242\n'; exit 0 ;;
+pid=""
+previous=""
+for arg in "$@"; do
+    if [ "$previous" = -p ]; then
+        pid="$arg"
+        break
+    fi
+    previous="$arg"
+done
+[ -n "$pid" ] || exit 2
+case "$pid:$*" in
+    4242:*"-iTCP:7878"*|4243:*"-iTCP:7979"*)
+        printf 'p%s\n' "$pid"
+        exit 0
+        ;;
+    *" -iTCP:"*) exit 1 ;;
 esac
 count=0
-[ ! -f "$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT" ] || count="$(cat "$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT")"
+count_file="$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT.$pid"
+[ ! -f "$count_file" ] || count="$(cat "$count_file")"
 count=$((count + 1))
-printf '%s\n' "$count" > "$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT"
-[ "$count" -gt 1 ] || exit 1
+printf '%s\n' "$count" > "$count_file"
 inode="$(stat -f %i "$AB_DEPLOY_SERVICE_TEST_REAL" 2>/dev/null || stat -c %i "$AB_DEPLOY_SERVICE_TEST_REAL")"
-printf 'p4242\nftxt\ni999\nn/tmp/not-the-agent-bridge-binary\nftxt\ni%s\nn%s\n' "$inode" "$AB_DEPLOY_SERVICE_TEST_REAL"
+[ "$count" -gt 1 ] || inode=999
+printf 'p%s\nftxt\ni999\nn/tmp/not-the-agent-bridge-binary\nftxt\ni%s\nn%s\n' "$pid" "$inode" "$AB_DEPLOY_SERVICE_TEST_REAL"
 FAKE_LSOF
 chmod +x "$FAKE_BIN/lsof"
 
@@ -147,8 +177,16 @@ count=0
 [ ! -f "$AB_DEPLOY_SERVICE_TEST_CURL_COUNT" ] || count="$(cat "$AB_DEPLOY_SERVICE_TEST_CURL_COUNT")"
 count=$((count + 1))
 printf '%s\n' "$count" > "$AB_DEPLOY_SERVICE_TEST_CURL_COUNT"
-[ "${!#}" = "http://127.0.0.1:7878/healthz" ] || exit 2
+[ -z "${AB_DEPLOY_SERVICE_TEST_CURL_LOG:-}" ] || printf '%s\n' "${!#}" >> "$AB_DEPLOY_SERVICE_TEST_CURL_LOG"
+case "${!#}" in
+    http://127.0.0.1:7878/healthz|http://127.0.0.1:7979/healthz) ;;
+    *) exit 2 ;;
+esac
 [ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" != never_healthy ] || exit 22
+if [ "${AB_DEPLOY_SERVICE_TEST_CASE:-success}" = palace_never_healthy ] &&
+        [ "${!#}" = "http://127.0.0.1:7979/healthz" ]; then
+    exit 22
+fi
 [ "$count" -gt 4 ] || exit 22
 printf 'ok\n'
 FAKE_CURL
@@ -179,8 +217,12 @@ AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
 AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
 AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
 AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CURL_LOG="$CURL_LOG" \
     "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
-[ "$(cat "$CURL_COUNT")" -ge 12 ] || fail "daemon-http health recovery was not polled to stability"
+[ "$(grep -c '^http://127.0.0.1:7878/healthz$' "$CURL_LOG")" -ge 8 ] ||
+    fail "daemon-http health recovery was not polled to stability"
+[ "$(grep -c '^http://127.0.0.1:7979/healthz$' "$CURL_LOG")" -ge 8 ] ||
+    fail "Palace health recovery was not polled to stability"
 
 expected="$TEST_ROOT/expected"
 git -C "$REPO" show origin/master:scripts/audio_embody.py > "$expected"
@@ -203,7 +245,7 @@ for asset in app_control.py app-control-recovery-candidates.py \
     app-control-recovery-hint-dedupe.py \
     desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
-    macos_ax_focus_window.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
+    macos_ax_focus_window.swift macos_ax_native_probe.swift macos_ax_probe.py macos_ax_verify.py macos_ax_watch.py \
     vision_grounding_ocr.py; do
     git -C "$REPO" show "origin/master:scripts/$asset" > "$expected"
     cmp -s "$expected" "$RUNTIME_ASSET_DIR/$asset" ||
@@ -221,12 +263,39 @@ grep -q 'agent_bridge.app_control.track_settlement.v0' "$RUNTIME_ASSET_DIR/app_c
 grep -q 'agent_bridge.app_control.wrapper_contract.v1' "$RUNTIME_ASSET_DIR/app_control.py" ||
     fail "wrapper/runtime handshake marker missing from deployed app_control"
 
-[ "$(wc -l < "$LAUNCHCTL_LOG" | tr -d ' ')" = 2 ] ||
-    fail "expected daemon and daemon-http launchd refreshes"
+[ "$(wc -l < "$LAUNCHCTL_LOG" | tr -d ' ')" = 3 ] ||
+    fail "expected daemon, daemon-http, and Palace launchd refreshes"
 grep -qx 'gui/'"$(id -u)"'/com.pallasting.agent-bridge.daemon' "$LAUNCHCTL_LOG" ||
     fail "daemon launchd refresh missing"
 grep -qx 'gui/'"$(id -u)"'/com.pallasting.agent-bridge.daemon-http' "$LAUNCHCTL_LOG" ||
     fail "daemon-http launchd refresh missing"
+grep -qx 'gui/'"$(id -u)"'/com.pallasting.agent-bridge.palace' "$LAUNCHCTL_LOG" ||
+    fail "Palace launchd refresh missing"
+
+# A host without the optional Palace LaunchAgent must still deploy the two core
+# jobs. The missing job is a skip, not a partial-refresh failure.
+: > "$LAUNCHCTL_LOG"
+HOME="$ISOLATED_HOME" \
+PATH="$FAKE_BIN:$PATH" \
+CARGO_TARGET_DIR="$TARGET_ROOT" \
+AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
+AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
+AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
+AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
+AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
+AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
+AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CASE=palace_missing \
+AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 \
+AGENT_BRIDGE_DEPLOY_FORCE_REASON=pinned-assets-palace-missing-regression \
+    "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
+[ "$(wc -l < "$LAUNCHCTL_LOG" | tr -d ' ')" = 2 ] ||
+    fail "missing Palace did not preserve the two core refreshes"
+grep -q 'agent-bridge.palace' "$LAUNCHCTL_LOG" &&
+    fail "missing Palace LaunchAgent was restarted"
 
 # An alternate install root must not restart jobs bound to another executable.
 : > "$LAUNCHCTL_LOG"
@@ -249,8 +318,8 @@ AGENT_BRIDGE_DEPLOY_FORCE_REASON=pinned-assets-unrelated-service-regression \
     "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
 [ ! -s "$LAUNCHCTL_LOG" ] || fail "unrelated launchd program was restarted"
 
-# Both matching jobs are preflighted before mutation. A malformed second job
-# must fail closed without restarting the already-valid first job.
+# Every matching job is preflighted before service mutation. A Palace endpoint
+# drift must fail closed without restarting either already-valid core job.
 : > "$LAUNCHCTL_LOG"
 set +e
 malformed_output="$({
@@ -267,7 +336,7 @@ malformed_output="$({
     AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
     AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
     AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
-    AB_DEPLOY_SERVICE_TEST_CASE=malformed_second \
+    AB_DEPLOY_SERVICE_TEST_CASE=malformed_palace_port \
     AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 \
     AGENT_BRIDGE_DEPLOY_FORCE_REASON=pinned-assets-malformed-service-regression \
         "$REPO/scripts/deploy_from_master.sh" --yes
@@ -277,7 +346,7 @@ set -e
 [ "$malformed_status" -ne 0 ] || fail "malformed launchd contract was accepted"
 [ ! -s "$LAUNCHCTL_LOG" ] || fail "a service restarted before both preflights passed"
 case "$malformed_output" in
-    *"launchd service argument program mismatch"*) ;;
+    *"launchd service argument mismatch"*) ;;
     *) fail "malformed launchd failure reason missing" ;;
 esac
 # A process with the deployed inode but no healthy HTTP endpoint must fail
@@ -293,7 +362,7 @@ unhealthy_output="$({
     AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
     AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
     AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
-    AGENT_BRIDGE_SERVICE_VERIFY_ATTEMPTS=3 \
+    AGENT_BRIDGE_SERVICE_VERIFY_ATTEMPTS=12 \
     AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
     AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
     AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
@@ -331,6 +400,59 @@ AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
 AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
 AGENT_BRIDGE_DEPLOY_RECOVERY=roll_forward \
 AGENT_BRIDGE_DEPLOY_RECOVERY_REASON=pinned-assets-post-health-recovery \
+    "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
+
+# Palace has its own listener contract. A healthy daemon-http must not mask a
+# Palace process that adopted the binary but never opened port 7979.
+: > "$LAUNCHCTL_LOG"
+set +e
+palace_unhealthy_output="$({
+    HOME="$ISOLATED_HOME" \
+    PATH="$FAKE_BIN:$PATH" \
+    CARGO_TARGET_DIR="$TARGET_ROOT" \
+    AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+    AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
+    AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+    AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
+    AGENT_BRIDGE_SERVICE_VERIFY_ATTEMPTS=12 \
+    AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
+    AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
+    AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
+    AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
+    AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+    AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
+    AB_DEPLOY_SERVICE_TEST_CASE=palace_never_healthy \
+    AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 \
+    AGENT_BRIDGE_DEPLOY_FORCE_REASON=pinned-assets-palace-health-regression \
+        "$REPO/scripts/deploy_from_master.sh" --yes
+} 2>&1)"
+palace_unhealthy_status=$?
+set -e
+[ "$palace_unhealthy_status" -ne 0 ] || fail "unhealthy Palace was accepted"
+case "$palace_unhealthy_output" in
+    *"did not become stable and healthy: com.pallasting.agent-bridge.palace"*) ;;
+    *)
+        printf '%s\n' "$palace_unhealthy_output" >&2
+        fail "unhealthy Palace failure reason missing"
+        ;;
+esac
+
+# Settle the Palace health failure through the same governed roll-forward path.
+HOME="$ISOLATED_HOME" \
+PATH="$FAKE_BIN:$PATH" \
+CARGO_TARGET_DIR="$TARGET_ROOT" \
+AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
+AGENT_BRIDGE_DEPLOY_STATE_DIR="$STATE_DIR" \
+AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
+AB_DEPLOY_PINNED_ASSETS_CC="$(command -v cc)" \
+AB_DEPLOY_SERVICE_TEST_WRAPPER="$INSTALL_DIR/agent-bridge" \
+AB_DEPLOY_SERVICE_TEST_REAL="$CANONICAL_REAL_PATH" \
+AB_DEPLOY_SERVICE_TEST_LOG="$LAUNCHCTL_LOG" \
+AB_DEPLOY_SERVICE_TEST_LSOF_COUNT="$LSOF_COUNT" \
+AB_DEPLOY_SERVICE_TEST_CURL_COUNT="$CURL_COUNT" \
+AGENT_BRIDGE_DEPLOY_RECOVERY=roll_forward \
+AGENT_BRIDGE_DEPLOY_RECOVERY_REASON=pinned-assets-post-palace-health-recovery \
     "$REPO/scripts/deploy_from_master.sh" --yes >/dev/null
 
 # A live deploy owner must block a second invocation before any launchd job is

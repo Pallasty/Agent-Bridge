@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Real macOS AX read-only acceptance. It never clicks, types, or mutates UI;
-# System Events is attempted only after the shared best-effort no-ask preflight.
+# The default probe is native NSWorkspace + AXUIElement; the jxa timeout flag is
+# retained only as a backward-compatible timeout alias and does not select JXA.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/../.." && pwd)"

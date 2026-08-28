@@ -2,9 +2,18 @@
 
 Date: 2026-08-25 (America/Los_Angeles)
 
-Status: one genuine real-task recovery candidate recorded and complete-ledger
-read-only review passed. Evidence remains `collecting`; M2 runtime is not
-admitted.
+Status: historical observation retained, but superseded as durable threshold
+evidence by the 2026-08-27 continuity audit. The original report bytes and
+state root are not available in the current ledger, so this sample does not
+count toward owner-review readiness. M2 runtime remains unadmitted.
+
+> Continuity correction (2026-08-27): this report accurately records the
+> invocation-local three-report review observed at the time. It did not bind
+> that review to a retained state-root identity or an independent report
+> anchor. The current macOS production directory metadata proves the two later
+> reports were never written there, and no retained copy was found on aio2.
+> Treat the result below as historical task evidence, not current durable-ledger
+> evidence. See `2026-08-27-r7-shadow-evidence-continuity-audit.md`.
 
 ## Why this is natural evidence
 
@@ -106,18 +115,19 @@ ready_for_owner_review=false
 m2_admitted=false
 ```
 
-The first natural sample removes only the
-`missing_natural_suppression` blocker. Three blockers remain:
+At invocation time this sample removed only the
+`missing_natural_suppression` blocker. It no longer removes that blocker from
+the current durable ledger. The current ledger has four blockers:
 
 - fewer than three natural reports;
 - fewer than two natural trigger kinds; and
-- no natural `would_wake=true` report.
+- no natural `would_wake=true` report; and
+- no retained natural suppression report.
 
 ## Next gate
 
-Continue ordinary work and record only genuinely observed candidates. The next
-useful sample must not be manufactured to satisfy a counter: it may supply a
-second trigger kind or an eligible inactive-foreground decision only when that
-situation actually occurs. No candidate discovery, timer, scheduler,
-background loop, provider call, or real M2 wake is admitted.
-
+First deploy the report-anchor hardening and anchor the surviving legacy
+mechanics report through exact idempotent replay. Then continue ordinary work
+and record only genuinely observed candidates in that same anchored state
+root. No historical receipt is reconstructed, and no candidate discovery,
+timer, scheduler, background loop, provider call, or real M2 wake is admitted.

@@ -1,30 +1,48 @@
 # AG-UI Read-Only MCP Wrapper v0
 
 - Date: 2026-08-25
-- Status: D5 runtime gate authorized; integration candidate not yet published or activated
+- Status: deployed and active; macOS read-only observation profile extension source admission PASS, publication pending
 - Pure projector: `agent_bridge.ag_ui_readonly_projection.v0`
 - Tool: `ag_ui_readonly_project`
 - External wire pin: `@ag-ui/core@0.0.57`
 - Related design: `AG_UI_SEMANTIC_BUS_READ_ONLY_ADAPTER_V0_2026_08_23.md`
 
+> Version note (2026-08-26): this v0 contract remains supported unchanged. The same fieldless tool's
+> opt-in v1 request/projection behavior is specified in
+> `AG_UI_OPENBOT_REQUEST_COMPLETENESS_V1_D6_2026_08_26.md`.
+>
+> Toolset note (2026-08-26): the deployed `codex-ag-ui-readonly` surface contains the Codex lean
+> base plus the projector. The current source candidate extends that explicit profile with
+> `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch`; it does not add
+> `macos_ax_action_admission`, `embodiment_lease`, or `macos_ax_focus_transaction`. This changes
+> profile composition, not the AG-UI projection contract or authority.
+>
+> Runtime-boundary note (2026-08-26): those three observation tools expose no caller-level
+> `script_path` or `cwd`. Their request objects are closed in both schema and execution, production
+> assets must canonicalize inside one runtime directory and match the binary's embedded SHA-256
+> bytes, and only private test constructors may inject fixture scripts. Each tool advertises the MCP
+> read-only annotation; this hint supplements rather than replaces the enforced runtime boundary.
+
 ## Decision summary
 
-The source candidate contains a fieldless MCP wrapper that accepts one caller-supplied bounded AG-UI
-batch and returns the existing pure, content-minimized projection. The wrapper owns no `Hub`, store,
-transport, process, browser, mobile, policy, lease, filesystem, or environment handle. Its execution
-body calls only `project_ag_ui_readonly` and formats that result for MCP.
+The deployed implementation contains a fieldless MCP wrapper that accepts one caller-supplied
+bounded AG-UI batch and returns the existing pure, content-minimized projection. The wrapper owns no
+`Hub`, store, transport, process, browser, mobile, policy, lease, filesystem, or environment handle.
+Its execution body calls only `project_ag_ui_readonly` and formats that result for MCP.
 
 The tool is default-off. It may be exposed only by an explicit named toolset or the already
 explicit `all-dev` surface. It must remain absent from the default profile, `essential`, `standard`,
 `codex-essential`, `codex-lean`, Claude standard, Gemini lean, ChatGPT read/collab, and hook
 lifecycle surfaces.
 
-`codex-ag-ui-readonly` means that the added AG-UI projector is read-only; it is otherwise the
-existing `codex-lean` toolset, whose other tools retain their normal per-tool authority. The name is
-not a claim that every tool in that toolset is read-only.
+In the profile-extension candidate, `codex-ag-ui-readonly` means that its added AG-UI projector and
+macOS semantic observation triad are read-only; it is otherwise the existing `codex-lean` toolset,
+whose other tools retain their normal per-tool authority. The name is not a claim that every tool in
+that toolset is read-only.
 
-This document does not authorize remote publication, merge, deployment, MCP reconnection, runtime
-activation, or AG-UI transport.
+This document did not itself authorize the now-completed projector publication and activation; the
+gate record below records those later facts. It does not authorize publication, deployment, or
+activation of the current macOS profile-extension candidate, nor any AG-UI transport.
 
 ## Context
 
@@ -164,10 +182,13 @@ behavior over the earlier design table's name-hash wording.
 
 ## Exposure policy
 
-The eventual registration design introduces a named `codex-ag-ui-readonly` toolset containing the
-bounded Codex lean read surface plus `ag_ui_readonly_project`. The tool remains `Tier::Niche`, so the
-normal profile-based default and standard surfaces do not gain it. `all-dev` may include it because
-that surface is already an explicit broad development opt-in.
+The deployed registration uses a named `codex-ag-ui-readonly` toolset containing the bounded Codex
+lean surface plus `ag_ui_readonly_project`. This profile-extension candidate adds the native macOS
+read-only observation triad `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch`. The projector
+remains `Tier::Niche`, so the normal profile-based default and standard surfaces do not gain it.
+`all-dev` may include it because that surface is already an explicit broad development opt-in. The
+action-side tools `macos_ax_action_admission`, `embodiment_lease`, and
+`macos_ax_focus_transaction` remain absent.
 
 Required registry assertions:
 
@@ -269,7 +290,7 @@ server-side request forgery concerns that are deliberately outside v0.
 
 - AG-UI compatibility becomes inspectable through MCP without gaining action authority.
 - The wrapper remains small enough for static dependency and call-boundary tests.
-- Default tool surfaces and current runtime behavior remain unchanged.
+- Default tool surfaces remain unchanged; activation requires the explicit named toolset.
 - Content minimization and AB-native verification semantics survive the transport boundary.
 
 ### Negative
@@ -277,8 +298,8 @@ server-side request forgery concerns that are deliberately outside v0.
 - Callers must provide complete bounded batches; live streams are not supported.
 - The explicit toolset and reconnect requirement add activation ceremony.
 - Name/source omission prevents extension-type correlation beyond aggregate counts.
-- The named toolset needs explicit documentation because only the projector, not the full
-  `codex-lean` base surface, is read-only.
+- The named toolset needs explicit documentation because only its added projector and observation
+  tools, not the full `codex-lean` base surface, are read-only.
 
 ## Performance budget
 
@@ -295,16 +316,21 @@ server-side request forgery concerns that are deliberately outside v0.
    source-only.
 3. **D2 — dormant wrapper:** complete at `3e25f583578f7d737f671eea9da9339a69f5d0e2`.
 4. **D3 — source registration:** complete at `1574541b389318059a6628473878afce2196c6a5`;
-   the tool remains default-off and undeployed.
+   the tool remained default-off pending the later runtime gate.
 5. **D4 — independent review:** complete with `CHANGES_REQUIRED` for runtime enforcement of the
    closed request envelope plus toolset-authority and document clarification.
-6. **D4.1 — source remediation:** verified in this candidate; focused projection/wrapper tests,
-   registry regression, all-target compilation, formatting, and content-minimization review pass.
-7. **D5 — runtime gate:** authorized 2026-08-26; reconcile the shared remotes,
-   merge/build/install, reconnect MCP, and verify the exact fresh-process tool list and projection
-   behavior. Runtime acceptance remains process-bound evidence outside this source document.
+6. **D4.1 — source remediation:** complete; focused projection/wrapper tests, registry regression,
+   all-target compilation, formatting, and content-minimization review passed before deployment.
+7. **D5 — runtime gate:** complete. The current installed `8c913594d0bf` build exposes the
+   projector only through the explicit `codex-ag-ui-readonly` opt-in (and broad development
+   surfaces); fresh MCP confirms that deployed boundary.
+8. **macOS observation profile extension:** source candidate verified. It adds only
+   `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch` to that explicit toolset; publication,
+   deployment, and fresh installed-process acceptance remain later gates. The production wrappers
+   reject caller runtime overrides and unknown request fields, validate binary-bound runtime assets,
+   and carry explicit read-only annotations.
 
-Current verdict: `D5_AUTHORIZED_INTEGRATION_CANDIDATE_PENDING_RUNTIME_VERIFICATION`.
+Current verdict: `PROJECTOR_DEPLOYED_MACOS_READONLY_PROFILE_EXTENSION_SOURCE_PASS`.
 
-This verdict records authorization but does not claim that publication, deployment, MCP
-reconnection, or runtime verification has completed.
+This verdict records the projector's deployed state without claiming that the macOS profile
+extension has been merged, published, deployed, or accepted through a fresh installed MCP process.

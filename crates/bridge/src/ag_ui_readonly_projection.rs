@@ -3,7 +3,9 @@
 //! The projector accepts only caller-supplied JSON and returns in-memory JSON.
 //! It deliberately owns no transport, store, process, browser, mobile, lease,
 //! policy, or MCP registration handle. AG-UI lifecycle events are observations;
-//! none of them can establish a verified external effect.
+//! none of them can establish a verified external effect. The v0 contract is
+//! preserved exactly; v1 additionally separates run-structure completeness
+//! from tool-result observation completeness.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,6 +15,8 @@ use thiserror::Error;
 
 pub const REQUEST_SCHEMA: &str = "agent_bridge.ag_ui_readonly_projection_request.v0";
 pub const PROJECTION_SCHEMA: &str = "agent_bridge.ag_ui_readonly_projection.v0";
+pub const REQUEST_SCHEMA_V1: &str = "agent_bridge.ag_ui_readonly_projection_request.v1";
+pub const PROJECTION_SCHEMA_V1: &str = "agent_bridge.ag_ui_readonly_projection.v1";
 pub const PROTOCOL_NAME: &str = "ag-ui";
 pub const CORE_VERSION: &str = "0.0.57";
 pub const MAX_EVENTS: usize = 500;
@@ -133,8 +137,42 @@ impl ToolCallStatus {
         }
     }
 
-    fn is_open(self) -> bool {
-        self != Self::ResultObserved
+    fn is_request_open(self) -> bool {
+        matches!(self, Self::Started | Self::ArgsObserved)
+    }
+
+    fn result_observation_complete(self) -> bool {
+        self == Self::ResultObserved
+    }
+
+    fn is_open_for_contract(self, contract: ProjectionContract) -> bool {
+        match contract {
+            ProjectionContract::V0 => !self.result_observation_complete(),
+            ProjectionContract::V1 => self.is_request_open(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ProjectionContract {
+    #[default]
+    V0,
+    V1,
+}
+
+impl ProjectionContract {
+    fn request_schema(self) -> &'static str {
+        match self {
+            Self::V0 => REQUEST_SCHEMA,
+            Self::V1 => REQUEST_SCHEMA_V1,
+        }
+    }
+
+    fn projection_schema(self) -> &'static str {
+        match self {
+            Self::V0 => PROJECTION_SCHEMA,
+            Self::V1 => PROJECTION_SCHEMA_V1,
+        }
     }
 }
 
@@ -212,6 +250,7 @@ struct Counters {
 
 #[derive(Debug, Default)]
 struct ProjectionState {
+    contract: ProjectionContract,
     counters: Counters,
     runs: BTreeMap<String, RunProjection>,
     tool_calls: BTreeMap<String, ToolCallProjection>,
@@ -222,6 +261,7 @@ struct ProjectionState {
 }
 
 struct ProjectionContext<'a> {
+    contract: ProjectionContract,
     counters: &'a mut Counters,
     runs: &'a mut BTreeMap<String, RunProjection>,
     tool_calls: &'a mut BTreeMap<String, ToolCallProjection>,
@@ -258,6 +298,7 @@ impl Counters {
 impl ProjectionState {
     fn context(&mut self) -> ProjectionContext<'_> {
         ProjectionContext {
+            contract: self.contract,
             counters: &mut self.counters,
             runs: &mut self.runs,
             tool_calls: &mut self.tool_calls,
@@ -270,7 +311,7 @@ impl ProjectionState {
 
     fn finish(&mut self, event_count: usize) {
         for call in self.tool_calls.values() {
-            if call.status.is_open() {
+            if call.status.is_open_for_contract(self.contract) {
                 self.violations.push(Violation {
                     index: event_count,
                     code: "open_tool_call_at_batch_end",
@@ -285,17 +326,61 @@ impl ProjectionState {
         }
     }
 
-    fn stream_complete(&self) -> bool {
+    fn run_stream_complete(&self) -> bool {
         self.counters.unknown_event_types == 0
             && self.violations.is_empty()
             && !self.runs.is_empty()
             && self.runs.values().all(|run| run.status.is_terminal())
-            && self.tool_calls.values().all(|call| !call.status.is_open())
+            && self
+                .tool_calls
+                .values()
+                .all(|call| !call.status.is_request_open())
             && self.open_steps.is_empty()
     }
 
+    fn tool_result_observation_complete(&self) -> bool {
+        self.tool_calls
+            .values()
+            .all(|call| call.status.result_observation_complete())
+    }
+
+    fn stream_complete(&self) -> bool {
+        match self.contract {
+            ProjectionContract::V0 => {
+                self.counters.unknown_event_types == 0
+                    && self.violations.is_empty()
+                    && !self.runs.is_empty()
+                    && self.runs.values().all(|run| run.status.is_terminal())
+                    && self
+                        .tool_calls
+                        .values()
+                        .all(|call| call.status.result_observation_complete())
+                    && self.open_steps.is_empty()
+            }
+            ProjectionContract::V1 => {
+                self.run_stream_complete() && self.tool_result_observation_complete()
+            }
+        }
+    }
+
     fn into_json(self, input_events: usize) -> Value {
+        let run_stream_complete = self.run_stream_complete();
+        let tool_result_observation_complete = self.tool_result_observation_complete();
         let stream_complete = self.stream_complete();
+        let claims = match self.contract {
+            ProjectionContract::V0 => json!({
+                "all_actions_traceable": false,
+                "external_effects_verified": false,
+                "stream_complete": stream_complete,
+            }),
+            ProjectionContract::V1 => json!({
+                "all_actions_traceable": false,
+                "external_effects_verified": false,
+                "run_stream_complete": run_stream_complete,
+                "tool_result_observation_complete": tool_result_observation_complete,
+                "stream_complete": stream_complete,
+            }),
+        };
         let runs = self
             .runs
             .values()
@@ -312,7 +397,7 @@ impl ProjectionState {
             .map(Violation::to_json)
             .collect::<Vec<_>>();
         json!({
-            "schema": PROJECTION_SCHEMA,
+            "schema": self.contract.projection_schema(),
             "read_only": true,
             "executes_actions": false,
             "writes_store": false,
@@ -333,16 +418,14 @@ impl ProjectionState {
             "tool_calls": tool_calls,
             "projected_events": self.projected_events,
             "violations": violations,
-            "claims": {
-                "all_actions_traceable": false,
-                "external_effects_verified": false,
-                "stream_complete": stream_complete,
-            }
+            "claims": claims,
         })
     }
 }
 
-fn validate_projection_request(input: &Value) -> Result<&[Value], AgUiProjectionError> {
+fn validate_projection_request(
+    input: &Value,
+) -> Result<(ProjectionContract, &[Value]), AgUiProjectionError> {
     validate_request_budget(input)?;
     let request = input
         .as_object()
@@ -356,9 +439,11 @@ fn validate_projection_request(input: &Value) -> Result<&[Value], AgUiProjection
         .get("schema")
         .and_then(Value::as_str)
         .ok_or(AgUiProjectionError::InvalidRequestField { field: "schema" })?;
-    if schema != REQUEST_SCHEMA {
-        return Err(AgUiProjectionError::UnsupportedRequestSchema);
-    }
+    let contract = match schema {
+        REQUEST_SCHEMA => ProjectionContract::V0,
+        REQUEST_SCHEMA_V1 => ProjectionContract::V1,
+        _ => return Err(AgUiProjectionError::UnsupportedRequestSchema),
+    };
 
     validate_protocol(request)?;
     let source = request
@@ -379,7 +464,8 @@ fn validate_projection_request(input: &Value) -> Result<&[Value], AgUiProjection
             max: MAX_EVENTS,
         });
     }
-    Ok(events)
+    debug_assert_eq!(schema, contract.request_schema());
+    Ok((contract, events))
 }
 
 fn validate_protocol(request: &serde_json::Map<String, Value>) -> Result<(), AgUiProjectionError> {
@@ -428,8 +514,11 @@ fn validate_closed_request_object(
 /// not match the pinned projection envelope, or contains a malformed known
 /// AG-UI 0.0.57 event.
 pub fn project_ag_ui_readonly(input: &Value) -> Result<Value, AgUiProjectionError> {
-    let events = validate_projection_request(input)?;
-    let mut state = ProjectionState::default();
+    let (contract, events) = validate_projection_request(input)?;
+    let mut state = ProjectionState {
+        contract,
+        ..ProjectionState::default()
+    };
     process_events(events, &mut state)?;
     state.finish(events.len());
     Ok(state.into_json(events.len()))
@@ -1464,6 +1553,7 @@ fn handle_run_finished(
     omitted_bytes: &mut usize,
 ) -> Result<(), AgUiProjectionError> {
     let ProjectionContext {
+        contract,
         counters,
         runs,
         tool_calls,
@@ -1522,7 +1612,7 @@ fn handle_run_finished(
     }
     *current_run_hash = Some(run_hash.clone());
     if transitioned {
-        mark_terminal_open_tools(&run_hash, index, tool_calls, violations);
+        mark_terminal_open_tools(&run_hash, index, contract, tool_calls, violations);
         mark_terminal_open_steps(&run_hash, index, open_steps, violations);
         projected_events.push(ssb_event(
             index,
@@ -1551,6 +1641,7 @@ fn handle_run_error(
     omitted_bytes: &mut usize,
 ) -> Result<(), AgUiProjectionError> {
     let ProjectionContext {
+        contract,
         counters,
         runs,
         tool_calls,
@@ -1574,7 +1665,7 @@ fn handle_run_error(
             } else {
                 run.status = RunStatus::Error;
                 run.error_code_hash = code.map(|value| domain_hash("error-code", value));
-                mark_terminal_open_tools(&run_hash, index, tool_calls, violations);
+                mark_terminal_open_tools(&run_hash, index, contract, tool_calls, violations);
                 mark_terminal_open_steps(&run_hash, index, open_steps, violations);
                 projected_events.push(ssb_event(
                     index,
@@ -2373,11 +2464,12 @@ fn active_run(
 fn mark_terminal_open_tools(
     run_hash: &str,
     index: usize,
+    contract: ProjectionContract,
     tool_calls: &BTreeMap<String, ToolCallProjection>,
     violations: &mut Vec<Violation>,
 ) {
     for call in tool_calls.values() {
-        if call.run_id_hash == run_hash && call.status.is_open() {
+        if call.run_id_hash == run_hash && call.status.is_open_for_contract(contract) {
             violations.push(Violation {
                 index,
                 code: "run_terminal_with_open_tool_call",
@@ -2470,6 +2562,8 @@ mod tests {
         include_str!("../tests/fixtures/ag_ui_readonly_projection/complete_text_run.json");
     const COMPLETE_TOOL: &str =
         include_str!("../tests/fixtures/ag_ui_readonly_projection/complete_tool_run.json");
+    const OPENBOT_TOOL_REQUEST_V1: &str =
+        include_str!("../tests/fixtures/ag_ui_readonly_projection/openbot_tool_request_v1.json");
     const RUN_ERROR: &str =
         include_str!("../tests/fixtures/ag_ui_readonly_projection/run_error.json");
     const INTERRUPTED: &str =
@@ -2486,8 +2580,12 @@ mod tests {
     }
 
     fn request_with_events(events: Vec<Value>) -> Value {
+        request_with_events_for_schema(REQUEST_SCHEMA, events)
+    }
+
+    fn request_with_events_for_schema(schema: &str, events: Vec<Value>) -> Value {
         json!({
-            "schema": REQUEST_SCHEMA,
+            "schema": schema,
             "protocol": {"name": PROTOCOL_NAME, "core_version": CORE_VERSION},
             "source": {"adapter_id": "property-corpus", "agent_id_hash": "agent"},
             "events": events,
@@ -2816,6 +2914,150 @@ mod tests {
             assert_eq!(event["verdict"]["status"], "unknown");
         }
         assert_eq!(output["claims"]["external_effects_verified"], false);
+    }
+
+    #[test]
+    fn openbot_tool_request_v1_separates_structure_from_result_observation() {
+        let output =
+            project_ag_ui_readonly(&fixture(OPENBOT_TOOL_REQUEST_V1)).expect("v1 projection");
+
+        assert_eq!(output["schema"], PROJECTION_SCHEMA_V1);
+        assert!(violation_codes(&output).is_empty());
+        assert_eq!(output["tool_calls"][0]["status"], "request_closed");
+        assert_eq!(output["tool_calls"][0]["args_chunks"], 1);
+        assert_eq!(output["tool_calls"][0]["args_bytes"], 9);
+        assert_eq!(output["tool_calls"][0]["result_size_bucket"], Value::Null);
+        assert_eq!(output["claims"]["run_stream_complete"], true);
+        assert_eq!(output["claims"]["tool_result_observation_complete"], false);
+        assert_eq!(output["claims"]["stream_complete"], false);
+        assert_eq!(output["claims"]["all_actions_traceable"], false);
+        assert_eq!(output["claims"]["external_effects_verified"], false);
+        assert!(!output["projected_events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .any(|event| event["action"] == "result_observed"));
+
+        let mut values = Vec::new();
+        string_values(&output, &mut values);
+        assert!(values.iter().all(|value| value != "{\"q\":\"x\"}"));
+    }
+
+    #[test]
+    fn openbot_tool_request_does_not_silently_change_v0_semantics() {
+        let mut input = fixture(OPENBOT_TOOL_REQUEST_V1);
+        input["schema"] = json!(REQUEST_SCHEMA);
+        let output = project_ag_ui_readonly(&input).expect("v0 projection");
+
+        assert_eq!(output["schema"], PROJECTION_SCHEMA);
+        assert_eq!(output["claims"]["stream_complete"], false);
+        assert!(output["claims"].get("run_stream_complete").is_none());
+        assert_eq!(
+            violation_codes(&output),
+            vec![
+                "run_terminal_with_open_tool_call",
+                "open_tool_call_at_batch_end"
+            ]
+        );
+    }
+
+    #[test]
+    fn v1_complete_result_and_open_request_boundaries_are_explicit() {
+        let mut complete = fixture(COMPLETE_TOOL);
+        complete["schema"] = json!(REQUEST_SCHEMA_V1);
+        let complete_output = project_ag_ui_readonly(&complete).expect("complete v1 projection");
+        assert!(violation_codes(&complete_output).is_empty());
+        assert_eq!(complete_output["claims"]["run_stream_complete"], true);
+        assert_eq!(
+            complete_output["claims"]["tool_result_observation_complete"],
+            true
+        );
+        assert_eq!(complete_output["claims"]["stream_complete"], true);
+        assert_eq!(
+            complete_output["claims"]["external_effects_verified"],
+            false
+        );
+        assert_eq!(
+            complete_output["tool_calls"][0]["verdict"]["status"],
+            "unknown"
+        );
+        let result_event = complete_output["projected_events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .find(|event| event["action"] == "result_observed")
+            .expect("result observation");
+        assert_eq!(result_event["verdict"]["status"], "unknown");
+
+        let open_request = request_with_events_for_schema(
+            REQUEST_SCHEMA_V1,
+            vec![
+                run_started(),
+                json!({
+                    "type": "TOOL_CALL_START",
+                    "toolCallId": "open-call",
+                    "toolCallName": "tool"
+                }),
+                run_finished(),
+            ],
+        );
+        let open_output = project_ag_ui_readonly(&open_request).expect("open v1 projection");
+        assert_eq!(open_output["claims"]["run_stream_complete"], false);
+        assert_eq!(
+            violation_codes(&open_output),
+            vec![
+                "run_terminal_with_open_tool_call",
+                "open_tool_call_at_batch_end"
+            ]
+        );
+    }
+
+    #[test]
+    fn v1_keeps_cross_run_tool_results_closed() {
+        let input = request_with_events_for_schema(
+            REQUEST_SCHEMA_V1,
+            vec![
+                json!({"type": "RUN_STARTED", "threadId": "thread", "runId": "parent"}),
+                json!({
+                    "type": "TOOL_CALL_START",
+                    "toolCallId": "call",
+                    "toolCallName": "tool"
+                }),
+                json!({"type": "TOOL_CALL_END", "toolCallId": "call"}),
+                json!({"type": "RUN_FINISHED", "threadId": "thread", "runId": "parent"}),
+                json!({
+                    "type": "RUN_STARTED",
+                    "threadId": "thread",
+                    "runId": "child",
+                    "parentRunId": "parent"
+                }),
+                json!({
+                    "type": "TOOL_CALL_RESULT",
+                    "messageId": "message",
+                    "toolCallId": "call",
+                    "content": "cross-run-result-canary",
+                    "role": "tool"
+                }),
+                json!({"type": "RUN_FINISHED", "threadId": "thread", "runId": "child"}),
+            ],
+        );
+        let output = project_ag_ui_readonly(&input).expect("closed cross-run projection");
+
+        assert_eq!(
+            violation_codes(&output),
+            vec!["cross_run_tool_call_id_reuse"]
+        );
+        assert_eq!(output["tool_calls"][0]["status"], "request_closed");
+        assert_eq!(output["claims"]["run_stream_complete"], false);
+        assert_eq!(output["claims"]["tool_result_observation_complete"], false);
+        assert!(!output["projected_events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .any(|event| event["action"] == "result_observed"));
+        assert!(!serde_json::to_string(&output)
+            .expect("projection JSON")
+            .contains("cross-run-result-canary"));
     }
 
     #[test]
@@ -3466,6 +3708,43 @@ mod tests {
             run_finished(),
         ]);
         assert!(project_ag_ui_readonly(&input).is_ok());
+    }
+
+    #[test]
+    fn v1_protocol_passthrough_metadata_is_never_echoed() {
+        let input = request_with_events_for_schema(
+            REQUEST_SCHEMA_V1,
+            vec![
+                json!({
+                    "type": "RUN_STARTED",
+                    "threadId": "thread",
+                    "runId": "run",
+                    "futureMetadata": {
+                        "credential": "future-event-metadata-canary",
+                        "path": "/private/future-metadata-canary"
+                    }
+                }),
+                json!({
+                    "type": "TOOL_CALL_START",
+                    "toolCallId": "call",
+                    "toolCallName": "tool",
+                    "futureMetadata": "future-tool-metadata-canary"
+                }),
+                json!({"type": "TOOL_CALL_END", "toolCallId": "call"}),
+                run_finished(),
+            ],
+        );
+        let output = project_ag_ui_readonly(&input).expect("v1 future metadata projection");
+        let serialized = serde_json::to_string(&output).expect("projection JSON");
+
+        assert_eq!(output["claims"]["run_stream_complete"], true);
+        for canary in [
+            "future-event-metadata-canary",
+            "/private/future-metadata-canary",
+            "future-tool-metadata-canary",
+        ] {
+            assert!(!serialized.contains(canary), "leaked metadata: {canary}");
+        }
     }
 
     #[test]

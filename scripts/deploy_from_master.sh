@@ -22,7 +22,9 @@
 #   5. install repository-matched Python runtime assets at a stable path (the
 #      release build worktree is disposable and cannot be a runtime dependency);
 #   6. never touch the wrapper (only .real);
-#   7. remind to /mcp reconnect (a running MCP server keeps the old binary).
+#   7. refresh canonical persistent launchd jobs onto the installed binary and
+#      verify their declared health endpoints;
+#   8. remind to /mcp reconnect (a running MCP server keeps the old binary).
 #
 # Companion to scripts/wrapper/install.sh (which installs the WRAPPER; this
 # installs the BINARY). Honors the same env vars.
@@ -104,6 +106,7 @@ RUNTIME_ASSETS=(
     desktop_steer.py
     desktop_verify.py
     macos_ax_focus_window.swift
+    macos_ax_native_probe.swift
     macos_ax_probe.py
     macos_ax_verify.py
     macos_ax_watch.py
@@ -556,6 +559,8 @@ validate_lease_test_environment() {
 
 preflight_macos_launchagent() {
     local label="$1" expected_mode="$2" domain="gui/$(id -u)" target dump program arguments arg_program arg_mode
+    local expected_count observed_count expected_index expected_arg observed_arg
+    shift 2
     target="$domain/$label"
     if ! dump="$(launchctl print "$target" 2>&1)"; then
         case "$dump" in
@@ -589,12 +594,32 @@ preflight_macos_launchagent() {
         die "launchd service argument program mismatch: $label"
     [ "$arg_mode" = "$expected_mode" ] ||
         die "launchd service mode mismatch: $label (expected $expected_mode, observed ${arg_mode:-none})"
+    if [ "$#" -gt 0 ]; then
+        observed_count="$(printf '%s\n' "$arguments" | awk 'END { print NR + 0 }')"
+        expected_count=$((2 + $#))
+        [ "$observed_count" -eq "$expected_count" ] ||
+            die "launchd service argument count mismatch: $label (expected $expected_count, observed $observed_count)"
+        expected_index=3
+        for expected_arg in "$@"; do
+            observed_arg="$(printf '%s\n' "$arguments" | sed -n "${expected_index}p")"
+            [ "$observed_arg" = "$expected_arg" ] ||
+                die "launchd service argument mismatch: $label (position $expected_index, expected $expected_arg, observed ${observed_arg:-none})"
+            expected_index=$((expected_index + 1))
+        done
+    fi
     return 0
 }
 
 refresh_macos_launchagent() {
-    local label="$1" expected_inode="$2" health_url="${3:-}" domain="gui/$(id -u)" target
+    local label="$1" expected_inode="$2" health_url="${3:-}" health_port="${4:-}" domain="gui/$(id -u)" target
     local dump pid loaded_inode attempt stable_pid stable_count health_ok
+    if [ -n "$health_url" ]; then
+        case "$health_port" in ''|*[!0-9]*) die "launchd service health port is invalid: $label" ;; esac
+        [ "$health_port" -ge 1 ] && [ "$health_port" -le 65535 ] ||
+            die "launchd service health port is out of range: $label ($health_port)"
+    else
+        [ -z "$health_port" ] || die "launchd service health port requires a URL: $label"
+    fi
     target="$domain/$label"
     say ">> refreshing launchd service -> $label"
     launchctl kickstart -k "$target" || die "failed to restart launchd service: $label"
@@ -615,7 +640,7 @@ refresh_macos_launchagent() {
                 ')"
             if [ -z "$health_url" ]; then
                 health_ok=1
-            elif lsof -nP -a -p "$pid" -iTCP:7878 -sTCP:LISTEN -F p 2>/dev/null |
+            elif lsof -nP -a -p "$pid" -iTCP:"$health_port" -sTCP:LISTEN -F p 2>/dev/null |
                     grep -qx "p$pid" &&
                     curl -fsS --max-time 0.2 "$health_url" 2>/dev/null | grep -qx 'ok'; then
                 health_ok=1
@@ -1826,9 +1851,18 @@ write_pending_admission() {
     mv -f "$tmp" "$PENDING_ADMISSION"
 }
 
-read_fresh_mcp_probe() {
-    local file="$1" keys
-    [ -f "$file" ] || return 1
+domain_separated_meta_sha256() {
+    local domain="$1" file="$2" body_lines="$3"
+    case "$body_lines" in ''|*[!0-9]*) return 1 ;; esac
+    {
+        printf 'domain=%s\n' "$domain"
+        sed -n "1,${body_lines}p" "$file"
+    } | sha256_text
+}
+
+read_legacy_fresh_mcp_probe_fixture() {
+    local file="$1" keys legacy_evidence
+    [ "$LEASE_TEST_MODE" = 1 ] && [ -f "$file" ] || return 1
     keys="$(meta_keys "$file")"
     [ "$keys" = "schema,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,evidence_sha256" ] || return 1
     [ "$(wc -l < "$file" | tr -d ' ')" = 10 ] || return 1
@@ -1843,40 +1877,144 @@ read_fresh_mcp_probe() {
     F_METHOD="$(meta_value "$file" 9 probe_method)" || return 1
     F_EVIDENCE_SHA="$(meta_value "$file" 10 evidence_sha256)" || return 1
     case "$F_TOOL_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+    legacy_evidence="$({
+        sed -n '1,9p' "$file"
+    } | sha256_text)"
     [ "$F_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v0 ] &&
         [ "$F_SERVER_NAME" = agent-bridge ] &&
         [ "$F_PROTOCOL_VERSION" = 2024-11-05 ] &&
         [ "$F_CAPABILITIES_PRESENT" = true ] &&
         [ "$F_METHOD" = independent_stdio_exact_installed_binary ] &&
-        is_safe_candidate "$F_SERVER_VERSION" && is_safe_candidate "$F_TOOLSET" &&
-        is_sha256_value "$F_EVIDENCE_SHA" &&
+        is_safe_candidate "$F_SERVER_VERSION" && [ "$F_TOOLSET" = codex-essential ] &&
         printf '%s\n' "$F_BUILD_SHA" | grep -Eq '^[0-9a-f]{12}$' &&
-        [ "$(fresh_mcp_evidence_sha256 "$F_SCHEMA" "$F_SERVER_NAME" "$F_SERVER_VERSION" \
-            "$F_PROTOCOL_VERSION" "$F_BUILD_SHA" "$F_TOOLSET" "$F_TOOL_COUNT" \
-            "$F_CAPABILITIES_PRESENT" "$F_METHOD")" = "$F_EVIDENCE_SHA" ]
+        [ "$legacy_evidence" = "$F_EVIDENCE_SHA" ]
 }
 
-fresh_mcp_evidence_sha256() {
-    [ "$#" -eq 9 ] || return 1
+read_fresh_mcp_probe_observation() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,probe_nonce,probe_started_at,probe_finished_at,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,copied_binary_sha256" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 13 ] || return 1
+    F_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    F_NONCE="$(meta_value "$file" 2 probe_nonce)" || return 1
+    F_STARTED_AT="$(meta_value "$file" 3 probe_started_at)" || return 1
+    F_FINISHED_AT="$(meta_value "$file" 4 probe_finished_at)" || return 1
+    F_SERVER_NAME="$(meta_value "$file" 5 server_name)" || return 1
+    F_SERVER_VERSION="$(meta_value "$file" 6 server_version)" || return 1
+    F_PROTOCOL_VERSION="$(meta_value "$file" 7 protocol_version)" || return 1
+    F_BUILD_SHA="$(meta_value "$file" 8 build_git_sha)" || return 1
+    F_TOOLSET="$(meta_value "$file" 9 toolset)" || return 1
+    F_TOOL_COUNT="$(meta_value "$file" 10 tool_count)" || return 1
+    F_CAPABILITIES_PRESENT="$(meta_value "$file" 11 capabilities_tool_present)" || return 1
+    F_METHOD="$(meta_value "$file" 12 probe_method)" || return 1
+    F_COPY_SHA="$(meta_value "$file" 13 copied_binary_sha256)" || return 1
+    case "$F_TOOL_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$F_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v1 ] && is_sha256_value "$F_NONCE" &&
+        [ -n "$F_STARTED_AT" ] && [ -n "$F_FINISHED_AT" ] &&
+        [ "$F_SERVER_NAME" = agent-bridge ] && [ "$F_PROTOCOL_VERSION" = 2024-11-05 ] &&
+        [ "$F_CAPABILITIES_PRESENT" = true ] &&
+        [ "$F_METHOD" = independent_stdio_private_exact_binary_copy ] &&
+        is_safe_candidate "$F_SERVER_VERSION" && [ "$F_TOOLSET" = codex-essential ] &&
+        is_sha256_value "$F_COPY_SHA" &&
+        printf '%s\n' "$F_BUILD_SHA" | grep -Eq '^[0-9a-f]{12}$'
+}
+
+write_bound_fresh_mcp_probe() {
+    local target="$1" tmp digest
+    tmp="$target.bound.$$.$RANDOM"
     {
-        printf 'schema=%s\n' "$1"
-        printf 'server_name=%s\n' "$2"
-        printf 'server_version=%s\n' "$3"
-        printf 'protocol_version=%s\n' "$4"
-        printf 'build_git_sha=%s\n' "$5"
-        printf 'toolset=%s\n' "$6"
-        printf 'tool_count=%s\n' "$7"
-        printf 'capabilities_tool_present=%s\n' "$8"
-        printf 'probe_method=%s\n' "$9"
-    } | sha256_text
+        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_probe.v1
+        printf 'probe_nonce=%s\n' "$F_NONCE"
+        printf 'probe_started_at=%s\n' "$F_STARTED_AT"
+        printf 'probe_finished_at=%s\n' "$F_FINISHED_AT"
+        printf 'server_name=%s\n' "$F_SERVER_NAME"
+        printf 'server_version=%s\n' "$F_SERVER_VERSION"
+        printf 'protocol_version=%s\n' "$F_PROTOCOL_VERSION"
+        printf 'build_git_sha=%s\n' "$F_BUILD_SHA"
+        printf 'toolset=%s\n' "$F_TOOLSET"
+        printf 'tool_count=%s\n' "$F_TOOL_COUNT"
+        printf 'capabilities_tool_present=%s\n' "$F_CAPABILITIES_PRESENT"
+        printf 'probe_method=%s\n' "$F_METHOD"
+        printf 'copied_binary_sha256=%s\n' "$F_COPY_SHA"
+        printf 'pending_sha256=%s\n' "$PENDING_PROBE_SHA"
+        printf 'pending_lease_id=%s\n' "$P_LEASE_ID"
+        printf 'pending_challenge=%s\n' "$P_CHALLENGE"
+        printf 'candidate_commit=%s\n' "$P_CANDIDATE"
+        printf 'real_path=%s\n' "$P_REAL_PATH"
+        printf 'shared_targets=%s\n' "$P_SHARED_TARGETS"
+        printf 'installed_binary_sha256=%s\n' "$P_SHA"
+        printf 'installed_binary_inode=%s\n' "$P_INODE"
+        printf 'installed_binary_mode=%s\n' "$P_MODE"
+        printf 'installed_assets_sha256=%s\n' "$P_ASSETS_SHA"
+        printf 'pending_installed_at=%s\n' "$P_INSTALLED_AT"
+        printf 'admission_lease_id=%s\n' "$LEASE_ID"
+        printf 'admission_challenge=%s\n' "$LEASE_CHALLENGE"
+    } > "$tmp"
+    digest="$(domain_separated_meta_sha256 agent_bridge.publisher_fresh_mcp_probe_evidence.v1 "$tmp" 26)"
+    printf 'evidence_sha256=%s\n' "$digest" >> "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$target"
+}
+
+read_fresh_mcp_probe() {
+    local file="$1" keys
+    [ -f "$file" ] || return 1
+    keys="$(meta_keys "$file")"
+    [ "$keys" = "schema,probe_nonce,probe_started_at,probe_finished_at,server_name,server_version,protocol_version,build_git_sha,toolset,tool_count,capabilities_tool_present,probe_method,copied_binary_sha256,pending_sha256,pending_lease_id,pending_challenge,candidate_commit,real_path,shared_targets,installed_binary_sha256,installed_binary_inode,installed_binary_mode,installed_assets_sha256,pending_installed_at,admission_lease_id,admission_challenge,evidence_sha256" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 27 ] || return 1
+    F_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
+    F_NONCE="$(meta_value "$file" 2 probe_nonce)" || return 1
+    F_STARTED_AT="$(meta_value "$file" 3 probe_started_at)" || return 1
+    F_FINISHED_AT="$(meta_value "$file" 4 probe_finished_at)" || return 1
+    F_SERVER_NAME="$(meta_value "$file" 5 server_name)" || return 1
+    F_SERVER_VERSION="$(meta_value "$file" 6 server_version)" || return 1
+    F_PROTOCOL_VERSION="$(meta_value "$file" 7 protocol_version)" || return 1
+    F_BUILD_SHA="$(meta_value "$file" 8 build_git_sha)" || return 1
+    F_TOOLSET="$(meta_value "$file" 9 toolset)" || return 1
+    F_TOOL_COUNT="$(meta_value "$file" 10 tool_count)" || return 1
+    F_CAPABILITIES_PRESENT="$(meta_value "$file" 11 capabilities_tool_present)" || return 1
+    F_METHOD="$(meta_value "$file" 12 probe_method)" || return 1
+    F_COPY_SHA="$(meta_value "$file" 13 copied_binary_sha256)" || return 1
+    F_PENDING_SHA="$(meta_value "$file" 14 pending_sha256)" || return 1
+    F_PENDING_LEASE_ID="$(meta_value "$file" 15 pending_lease_id)" || return 1
+    F_PENDING_CHALLENGE="$(meta_value "$file" 16 pending_challenge)" || return 1
+    F_CANDIDATE="$(meta_value "$file" 17 candidate_commit)" || return 1
+    F_REAL_PATH="$(meta_value "$file" 18 real_path)" || return 1
+    F_SHARED_TARGETS="$(meta_value "$file" 19 shared_targets)" || return 1
+    F_INSTALLED_SHA="$(meta_value "$file" 20 installed_binary_sha256)" || return 1
+    F_INSTALLED_INODE="$(meta_value "$file" 21 installed_binary_inode)" || return 1
+    F_INSTALLED_MODE="$(meta_value "$file" 22 installed_binary_mode)" || return 1
+    F_INSTALLED_ASSETS_SHA="$(meta_value "$file" 23 installed_assets_sha256)" || return 1
+    F_PENDING_INSTALLED_AT="$(meta_value "$file" 24 pending_installed_at)" || return 1
+    F_ADMISSION_LEASE_ID="$(meta_value "$file" 25 admission_lease_id)" || return 1
+    F_ADMISSION_CHALLENGE="$(meta_value "$file" 26 admission_challenge)" || return 1
+    F_EVIDENCE_SHA="$(meta_value "$file" 27 evidence_sha256)" || return 1
+    case "$F_TOOL_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+    case "$F_INSTALLED_INODE" in ''|*[!0-9]*) return 1 ;; esac
+    case "$F_INSTALLED_MODE" in ''|*[!0-7]*) return 1 ;; esac
+    [ "$F_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v1 ] && is_sha256_value "$F_NONCE" &&
+        [ -n "$F_STARTED_AT" ] && [ -n "$F_FINISHED_AT" ] && [ "$F_SERVER_NAME" = agent-bridge ] &&
+        [ "$F_PROTOCOL_VERSION" = 2024-11-05 ] && [ "$F_CAPABILITIES_PRESENT" = true ] &&
+        [ "$F_METHOD" = independent_stdio_private_exact_binary_copy ] &&
+        is_safe_candidate "$F_SERVER_VERSION" && [ "$F_TOOLSET" = codex-essential ] &&
+        printf '%s\n' "$F_BUILD_SHA" | grep -Eq '^[0-9a-f]{12}$' &&
+        is_sha256_value "$F_COPY_SHA" && is_sha256_value "$F_PENDING_SHA" &&
+        is_safe_id "$F_PENDING_LEASE_ID" && is_sha256_value "$F_PENDING_CHALLENGE" &&
+        printf '%s\n' "$F_CANDIDATE" | grep -Eq '^[0-9a-f]{40}$' &&
+        case "$F_REAL_PATH" in /*) true ;; *) false ;; esac && [ -n "$F_SHARED_TARGETS" ] &&
+        is_sha256_value "$F_INSTALLED_SHA" && is_sha256_value "$F_INSTALLED_ASSETS_SHA" &&
+        is_safe_id "$F_ADMISSION_LEASE_ID" && is_sha256_value "$F_ADMISSION_CHALLENGE" &&
+        is_sha256_value "$F_EVIDENCE_SHA" &&
+        [ "$F_EVIDENCE_SHA" = "$(domain_separated_meta_sha256 agent_bridge.publisher_fresh_mcp_probe_evidence.v1 "$file" 26)" ]
 }
 
 read_fresh_mcp_admission_intent() {
     local file="$1" keys
     [ -f "$file" ] || return 1
     keys="$(meta_keys "$file")"
-    [ "$keys" = "schema,pending_lease_id,pending_challenge,candidate_commit,real_path,shared_targets,pending_sha256,receipt_path,quarantine_path,probe_schema,probe_server_name,probe_server_version,probe_protocol_version,probe_build_git_sha,probe_toolset,probe_tool_count,probe_capabilities_tool_present,probe_method,probe_evidence_sha256" ] || return 1
-    [ "$(wc -l < "$file" | tr -d ' ')" = 19 ] || return 1
+    [ "$keys" = "schema,pending_lease_id,pending_challenge,candidate_commit,real_path,shared_targets,pending_sha256,installed_binary_sha256,installed_binary_inode,installed_binary_mode,installed_assets_sha256,pending_installed_at,admission_lease_id,admission_challenge,receipt_path,quarantine_path,probe_schema,probe_nonce,probe_started_at,probe_finished_at,probe_server_name,probe_server_version,probe_protocol_version,probe_build_git_sha,probe_toolset,probe_tool_count,probe_capabilities_tool_present,probe_method,probe_copied_binary_sha256,probe_evidence_sha256,admission_binding_sha256" ] || return 1
+    [ "$(wc -l < "$file" | tr -d ' ')" = 31 ] || return 1
     A_SCHEMA="$(meta_value "$file" 1 schema)" || return 1
     A_PENDING_LEASE_ID="$(meta_value "$file" 2 pending_lease_id)" || return 1
     A_PENDING_CHALLENGE="$(meta_value "$file" 3 pending_challenge)" || return 1
@@ -1884,55 +2022,80 @@ read_fresh_mcp_admission_intent() {
     A_REAL_PATH="$(meta_value "$file" 5 real_path)" || return 1
     A_SHARED_TARGETS="$(meta_value "$file" 6 shared_targets)" || return 1
     A_PENDING_SHA="$(meta_value "$file" 7 pending_sha256)" || return 1
-    A_RECEIPT_PATH="$(meta_value "$file" 8 receipt_path)" || return 1
-    A_QUARANTINE_PATH="$(meta_value "$file" 9 quarantine_path)" || return 1
-    A_PROBE_SCHEMA="$(meta_value "$file" 10 probe_schema)" || return 1
-    A_PROBE_SERVER_NAME="$(meta_value "$file" 11 probe_server_name)" || return 1
-    A_PROBE_SERVER_VERSION="$(meta_value "$file" 12 probe_server_version)" || return 1
-    A_PROBE_PROTOCOL_VERSION="$(meta_value "$file" 13 probe_protocol_version)" || return 1
-    A_PROBE_BUILD_SHA="$(meta_value "$file" 14 probe_build_git_sha)" || return 1
-    A_PROBE_TOOLSET="$(meta_value "$file" 15 probe_toolset)" || return 1
-    A_PROBE_TOOL_COUNT="$(meta_value "$file" 16 probe_tool_count)" || return 1
-    A_PROBE_CAPABILITIES_PRESENT="$(meta_value "$file" 17 probe_capabilities_tool_present)" || return 1
-    A_PROBE_METHOD="$(meta_value "$file" 18 probe_method)" || return 1
-    A_PROBE_EVIDENCE_SHA="$(meta_value "$file" 19 probe_evidence_sha256)" || return 1
+    A_INSTALLED_SHA="$(meta_value "$file" 8 installed_binary_sha256)" || return 1
+    A_INSTALLED_INODE="$(meta_value "$file" 9 installed_binary_inode)" || return 1
+    A_INSTALLED_MODE="$(meta_value "$file" 10 installed_binary_mode)" || return 1
+    A_INSTALLED_ASSETS_SHA="$(meta_value "$file" 11 installed_assets_sha256)" || return 1
+    A_PENDING_INSTALLED_AT="$(meta_value "$file" 12 pending_installed_at)" || return 1
+    A_ADMISSION_LEASE_ID="$(meta_value "$file" 13 admission_lease_id)" || return 1
+    A_ADMISSION_CHALLENGE="$(meta_value "$file" 14 admission_challenge)" || return 1
+    A_RECEIPT_PATH="$(meta_value "$file" 15 receipt_path)" || return 1
+    A_QUARANTINE_PATH="$(meta_value "$file" 16 quarantine_path)" || return 1
+    A_PROBE_SCHEMA="$(meta_value "$file" 17 probe_schema)" || return 1
+    A_PROBE_NONCE="$(meta_value "$file" 18 probe_nonce)" || return 1
+    A_PROBE_STARTED_AT="$(meta_value "$file" 19 probe_started_at)" || return 1
+    A_PROBE_FINISHED_AT="$(meta_value "$file" 20 probe_finished_at)" || return 1
+    A_PROBE_SERVER_NAME="$(meta_value "$file" 21 probe_server_name)" || return 1
+    A_PROBE_SERVER_VERSION="$(meta_value "$file" 22 probe_server_version)" || return 1
+    A_PROBE_PROTOCOL_VERSION="$(meta_value "$file" 23 probe_protocol_version)" || return 1
+    A_PROBE_BUILD_SHA="$(meta_value "$file" 24 probe_build_git_sha)" || return 1
+    A_PROBE_TOOLSET="$(meta_value "$file" 25 probe_toolset)" || return 1
+    A_PROBE_TOOL_COUNT="$(meta_value "$file" 26 probe_tool_count)" || return 1
+    A_PROBE_CAPABILITIES_PRESENT="$(meta_value "$file" 27 probe_capabilities_tool_present)" || return 1
+    A_PROBE_METHOD="$(meta_value "$file" 28 probe_method)" || return 1
+    A_PROBE_COPY_SHA="$(meta_value "$file" 29 probe_copied_binary_sha256)" || return 1
+    A_PROBE_EVIDENCE_SHA="$(meta_value "$file" 30 probe_evidence_sha256)" || return 1
+    A_BINDING_SHA="$(meta_value "$file" 31 admission_binding_sha256)" || return 1
     case "$A_PROBE_TOOL_COUNT" in ''|*[!0-9]*) return 1 ;; esac
-    [ "$A_SCHEMA" = agent_bridge.publisher_fresh_mcp_admission_intent.v0 ] &&
+    case "$A_INSTALLED_INODE" in ''|*[!0-9]*) return 1 ;; esac
+    case "$A_INSTALLED_MODE" in ''|*[!0-7]*) return 1 ;; esac
+    [ "$A_SCHEMA" = agent_bridge.publisher_fresh_mcp_admission_intent.v1 ] &&
         is_safe_id "$A_PENDING_LEASE_ID" && is_sha256_value "$A_PENDING_CHALLENGE" &&
         printf '%s\n' "$A_CANDIDATE" | grep -Eq '^[0-9a-f]{40}$' &&
         case "$A_REAL_PATH" in /*) true ;; *) false ;; esac && [ -n "$A_SHARED_TARGETS" ] &&
-        is_sha256_value "$A_PENDING_SHA" &&
-        [ "$A_PROBE_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v0 ] &&
+        is_sha256_value "$A_PENDING_SHA" && is_sha256_value "$A_INSTALLED_SHA" &&
+        is_sha256_value "$A_INSTALLED_ASSETS_SHA" &&
+        is_safe_id "$A_ADMISSION_LEASE_ID" && is_sha256_value "$A_ADMISSION_CHALLENGE" &&
+        [ "$A_PROBE_SCHEMA" = agent_bridge.publisher_fresh_mcp_probe.v1 ] &&
+        is_sha256_value "$A_PROBE_NONCE" && [ -n "$A_PROBE_STARTED_AT" ] && [ -n "$A_PROBE_FINISHED_AT" ] &&
         [ "$A_PROBE_SERVER_NAME" = agent-bridge ] &&
         is_safe_candidate "$A_PROBE_SERVER_VERSION" &&
         [ "$A_PROBE_PROTOCOL_VERSION" = 2024-11-05 ] &&
         [ "$A_PROBE_BUILD_SHA" = "${A_CANDIDATE:0:12}" ] &&
         [ "$A_PROBE_TOOLSET" = codex-essential ] &&
         [ "$A_PROBE_CAPABILITIES_PRESENT" = true ] &&
-        [ "$A_PROBE_METHOD" = independent_stdio_exact_installed_binary ] &&
-        is_sha256_value "$A_PROBE_EVIDENCE_SHA" &&
-        [ "$(fresh_mcp_evidence_sha256 "$A_PROBE_SCHEMA" "$A_PROBE_SERVER_NAME" \
-            "$A_PROBE_SERVER_VERSION" "$A_PROBE_PROTOCOL_VERSION" "$A_PROBE_BUILD_SHA" \
-            "$A_PROBE_TOOLSET" "$A_PROBE_TOOL_COUNT" "$A_PROBE_CAPABILITIES_PRESENT" \
-            "$A_PROBE_METHOD")" = "$A_PROBE_EVIDENCE_SHA" ]
+        [ "$A_PROBE_METHOD" = independent_stdio_private_exact_binary_copy ] &&
+        is_sha256_value "$A_PROBE_COPY_SHA" && [ "$A_PROBE_COPY_SHA" = "$A_INSTALLED_SHA" ] &&
+        is_sha256_value "$A_PROBE_EVIDENCE_SHA" && is_sha256_value "$A_BINDING_SHA" &&
+        [ "$A_BINDING_SHA" = "$(domain_separated_meta_sha256 agent_bridge.publisher_fresh_mcp_admission_intent.v1 "$file" 30)" ]
 }
 
 write_fresh_mcp_admission_intent() {
-    local pending_sha="$1" receipt="$2" quarantine="$3" tmp
+    local pending_sha="$1" receipt="$2" quarantine="$3" tmp binding
     [ ! -e "$FRESH_MCP_ADMISSION_INTENT" ] && [ ! -L "$FRESH_MCP_ADMISSION_INTENT" ] ||
         die "an unsettled fresh MCP admission intent already exists"
     tmp="$FRESH_MCP_ADMISSION_INTENT.tmp.$$.$RANDOM"
     {
-        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_admission_intent.v0
+        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_admission_intent.v1
         printf 'pending_lease_id=%s\n' "$P_LEASE_ID"
         printf 'pending_challenge=%s\n' "$P_CHALLENGE"
         printf 'candidate_commit=%s\n' "$P_CANDIDATE"
         printf 'real_path=%s\n' "$P_REAL_PATH"
         printf 'shared_targets=%s\n' "$P_SHARED_TARGETS"
         printf 'pending_sha256=%s\n' "$pending_sha"
+        printf 'installed_binary_sha256=%s\n' "$P_SHA"
+        printf 'installed_binary_inode=%s\n' "$P_INODE"
+        printf 'installed_binary_mode=%s\n' "$P_MODE"
+        printf 'installed_assets_sha256=%s\n' "$P_ASSETS_SHA"
+        printf 'pending_installed_at=%s\n' "$P_INSTALLED_AT"
+        printf 'admission_lease_id=%s\n' "$LEASE_ID"
+        printf 'admission_challenge=%s\n' "$LEASE_CHALLENGE"
         printf 'receipt_path=%s\n' "$receipt"
         printf 'quarantine_path=%s\n' "$quarantine"
         printf 'probe_schema=%s\n' "$F_SCHEMA"
+        printf 'probe_nonce=%s\n' "$F_NONCE"
+        printf 'probe_started_at=%s\n' "$F_STARTED_AT"
+        printf 'probe_finished_at=%s\n' "$F_FINISHED_AT"
         printf 'probe_server_name=%s\n' "$F_SERVER_NAME"
         printf 'probe_server_version=%s\n' "$F_SERVER_VERSION"
         printf 'probe_protocol_version=%s\n' "$F_PROTOCOL_VERSION"
@@ -1941,8 +2104,11 @@ write_fresh_mcp_admission_intent() {
         printf 'probe_tool_count=%s\n' "$F_TOOL_COUNT"
         printf 'probe_capabilities_tool_present=%s\n' "$F_CAPABILITIES_PRESENT"
         printf 'probe_method=%s\n' "$F_METHOD"
+        printf 'probe_copied_binary_sha256=%s\n' "$F_COPY_SHA"
         printf 'probe_evidence_sha256=%s\n' "$F_EVIDENCE_SHA"
     } > "$tmp"
+    binding="$(domain_separated_meta_sha256 agent_bridge.publisher_fresh_mcp_admission_intent.v1 "$tmp" 30)"
+    printf 'admission_binding_sha256=%s\n' "$binding" >> "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" "$FRESH_MCP_ADMISSION_INTENT" ||
         die "cannot atomically publish fresh MCP admission intent"
@@ -1953,7 +2119,7 @@ write_fresh_mcp_admission_intent() {
 }
 
 settle_fresh_mcp_admission_intent() {
-    local source prepared receipt_leaf quarantine_leaf
+    local source prepared receipt_leaf quarantine_leaf receipt_binding
     FRESH_MCP_ADMISSION_SETTLED=0
     [ -e "$FRESH_MCP_ADMISSION_INTENT" ] || [ -L "$FRESH_MCP_ADMISSION_INTENT" ] || return 0
     [ ! -L "$FRESH_MCP_ADMISSION_INTENT" ] || die "fresh MCP admission intent must not be a symlink"
@@ -1986,14 +2152,17 @@ settle_fresh_mcp_admission_intent() {
     read_pending_admission "$source" || die "fresh MCP pending admission is corrupt"
     [ "$P_LEASE_ID" = "$A_PENDING_LEASE_ID" ] && [ "$P_CHALLENGE" = "$A_PENDING_CHALLENGE" ] &&
         [ "$P_CANDIDATE" = "$A_CANDIDATE" ] && [ "$P_REAL_PATH" = "$A_REAL_PATH" ] &&
-        [ "$P_SHARED_TARGETS" = "$A_SHARED_TARGETS" ] ||
+        [ "$P_SHARED_TARGETS" = "$A_SHARED_TARGETS" ] &&
+        [ "$P_SHA" = "$A_INSTALLED_SHA" ] && [ "$P_INODE" = "$A_INSTALLED_INODE" ] &&
+        [ "$P_MODE" = "$A_INSTALLED_MODE" ] && [ "$P_ASSETS_SHA" = "$A_INSTALLED_ASSETS_SHA" ] &&
+        [ "$P_INSTALLED_AT" = "$A_PENDING_INSTALLED_AT" ] ||
         die "fresh MCP pending admission identity does not match its completion intent"
     pending_fingerprint_matches ||
         die "fresh MCP admitted binary/assets no longer match the completion intent"
 
     prepared="$A_RECEIPT_PATH.prepared.$$.$RANDOM"
     {
-        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_admission.v0
+        printf 'schema=%s\n' agent_bridge.publisher_fresh_mcp_admission.v1
         printf 'pending_lease_id=%s\n' "$P_LEASE_ID"
         printf 'pending_challenge=%s\n' "$P_CHALLENGE"
         printf 'candidate_commit=%s\n' "$P_CANDIDATE"
@@ -2004,8 +2173,13 @@ settle_fresh_mcp_admission_intent() {
         printf 'installed_binary_mode=%s\n' "$P_MODE"
         printf 'installed_assets_sha256=%s\n' "$P_ASSETS_SHA"
         printf 'pending_installed_at=%s\n' "$P_INSTALLED_AT"
+        printf 'admission_lease_id=%s\n' "$A_ADMISSION_LEASE_ID"
+        printf 'admission_challenge=%s\n' "$A_ADMISSION_CHALLENGE"
         printf 'fresh_mcp=%s\n' verified
         printf 'probe_schema=%s\n' "$A_PROBE_SCHEMA"
+        printf 'probe_nonce=%s\n' "$A_PROBE_NONCE"
+        printf 'probe_started_at=%s\n' "$A_PROBE_STARTED_AT"
+        printf 'probe_finished_at=%s\n' "$A_PROBE_FINISHED_AT"
         printf 'probe_server_name=%s\n' "$A_PROBE_SERVER_NAME"
         printf 'probe_server_version=%s\n' "$A_PROBE_SERVER_VERSION"
         printf 'probe_protocol_version=%s\n' "$A_PROBE_PROTOCOL_VERSION"
@@ -2014,8 +2188,12 @@ settle_fresh_mcp_admission_intent() {
         printf 'probe_tool_count=%s\n' "$A_PROBE_TOOL_COUNT"
         printf 'probe_capabilities_tool_present=%s\n' "$A_PROBE_CAPABILITIES_PRESENT"
         printf 'probe_method=%s\n' "$A_PROBE_METHOD"
+        printf 'probe_copied_binary_sha256=%s\n' "$A_PROBE_COPY_SHA"
         printf 'probe_evidence_sha256=%s\n' "$A_PROBE_EVIDENCE_SHA"
+        printf 'admission_binding_sha256=%s\n' "$A_BINDING_SHA"
     } > "$prepared"
+    receipt_binding="$(domain_separated_meta_sha256 agent_bridge.publisher_fresh_mcp_admission_receipt.v1 "$prepared" 29)"
+    printf 'receipt_binding_sha256=%s\n' "$receipt_binding" >> "$prepared"
     chmod 600 "$prepared"
     publish_exact_receipt "$prepared" "$A_RECEIPT_PATH"
 
@@ -2034,55 +2212,168 @@ retire_fresh_mcp_admission_intent() {
     local retired
     [ "$FRESH_MCP_ADMISSION_SETTLED" -eq 1 ] || die "fresh MCP admission intent is not settled"
     retired="$LEASE_QUARANTINE_DIR/$A_PENDING_LEASE_ID.$A_PENDING_CHALLENGE.fresh-mcp-admission-intent.settled.meta"
-    [ ! -e "$retired" ] && [ ! -L "$retired" ] ||
-        die "fresh MCP admission settled-intent target already exists"
+    if [ -e "$retired" ] || [ -L "$retired" ]; then
+        [ ! -L "$retired" ] && [ -f "$retired" ] && [ "$(file_mode "$retired")" = 600 ] ||
+            die "fresh MCP admission settled-intent target is not an exact physical mode-600 file"
+        cmp -s "$FRESH_MCP_ADMISSION_INTENT" "$retired" ||
+            die "fresh MCP admission settled-intent target conflicts with canonical intent"
+        rm -f "$FRESH_MCP_ADMISSION_INTENT" ||
+            die "cannot retire replayed fresh MCP admission intent"
+        return 0
+    fi
     mv "$FRESH_MCP_ADMISSION_INTENT" "$retired" ||
         die "cannot retire the settled fresh MCP admission intent"
 }
 
 run_fresh_mcp_probe() {
-    local probe_root probe_meta probe_stderr
+    local pending_sha="$1" probe_root probe_meta probe_stderr fixture probe_binary copy_sha
+    local python_owner python_mode python_mode_value probe_timeout=45 probe_stdout_limit=1048576
+    local probe_stderr_limit=262144
     probe_root="$(mktemp -d "$DEPLOY_TMPDIR/ab-publisher-fresh-mcp.XXXXXX")"
-    chmod 700 "$probe_root" 2>/dev/null || true
+    chmod 700 "$probe_root" || die "cannot protect fresh MCP probe root"
     CLEANUP_FRESH_MCP_TMP="$probe_root"
     probe_meta="$probe_root/probe.meta"
     probe_stderr="$probe_root/probe.stderr"
+    PENDING_PROBE_SHA="$pending_sha"
 
     if [ "$LEASE_TEST_MODE" = 1 ] && [ "$LEASE_TEST_LIVE_FRESH_MCP" != 1 ]; then
         [ -f "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE:-}" ] ||
             die "lease test fresh MCP probe fixture missing"
-        cp "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE" "$probe_meta"
+        fixture="$probe_root/legacy-probe-fixture.meta"
+        /bin/cp "$AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_PROBE" "$fixture" ||
+            die "cannot copy lease test fresh MCP probe fixture"
+        read_legacy_fresh_mcp_probe_fixture "$fixture" ||
+            die "lease test fresh MCP probe fixture is invalid"
+        F_SCHEMA=agent_bridge.publisher_fresh_mcp_probe.v1
+        F_NONCE="$(printf '%s\n' "$LEASE_CHALLENGE|$P_CHALLENGE|$RANDOM|fixture" | sha256_text)"
+        F_STARTED_AT="$(utc_now)"
+        F_FINISHED_AT="$F_STARTED_AT"
+        F_METHOD=independent_stdio_private_exact_binary_copy
+        F_COPY_SHA="$P_SHA"
+        write_bound_fresh_mcp_probe "$probe_meta"
     else
-        command -v python3 >/dev/null 2>&1 || die "python3 is required for fresh MCP admission"
-        if ! python3 - "$P_REAL_PATH" "$P_CANDIDATE" "$probe_root" >"$probe_meta" 2>"$probe_stderr" <<'PY'
+        [ -x /usr/bin/python3 ] && [ -f /usr/bin/python3 ] && [ ! -L /usr/bin/python3 ] ||
+            die "trusted physical /usr/bin/python3 is required for fresh MCP admission"
+        python_owner="$(stat -f %u /usr/bin/python3 2>/dev/null || stat -c %u /usr/bin/python3 2>/dev/null)"
+        python_mode="$(file_mode /usr/bin/python3)"
+        case "$python_owner:$python_mode" in 0:[0-7][0-7][0-7]) ;; *) die "trusted /usr/bin/python3 ownership or mode is invalid" ;; esac
+        python_mode_value=$((8#$python_mode))
+        [ $((python_mode_value & 0022)) -eq 0 ] || die "trusted /usr/bin/python3 is group/world writable"
+
+        if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_TIMEOUT_SECONDS:-}" ]; then
+            [ "$LEASE_TEST_MODE" = 1 ] || die "fresh MCP timeout override is test-only"
+            probe_timeout="$AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_TIMEOUT_SECONDS"
+            case "$probe_timeout" in ''|*[!0-9]*) die "invalid lease test fresh MCP timeout" ;; esac
+            [ "$probe_timeout" -ge 1 ] && [ "$probe_timeout" -le 45 ] || die "lease test fresh MCP timeout must be within 1..45 seconds"
+        fi
+        if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_STDOUT_LIMIT_BYTES:-}" ]; then
+            [ "$LEASE_TEST_MODE" = 1 ] || die "fresh MCP stdout limit override is test-only"
+            probe_stdout_limit="$AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_STDOUT_LIMIT_BYTES"
+            case "$probe_stdout_limit" in ''|*[!0-9]*) die "invalid lease test fresh MCP stdout limit" ;; esac
+            [ "$probe_stdout_limit" -ge 1024 ] && [ "$probe_stdout_limit" -le 1048576 ] ||
+                die "lease test fresh MCP stdout limit must be within 1024..1048576 bytes"
+        fi
+
+        mkdir -p "$probe_root/home" "$probe_root/xdg/data" "$probe_root/xdg/config" \
+            "$probe_root/xdg/cache" "$probe_root/xdg/state" "$probe_root/private-state" "$probe_root/tmp"
+        chmod 700 "$probe_root/home" "$probe_root/xdg" "$probe_root/xdg/data" \
+            "$probe_root/xdg/config" "$probe_root/xdg/cache" "$probe_root/xdg/state" \
+            "$probe_root/private-state" "$probe_root/tmp" || die "cannot protect fresh MCP private environment"
+        probe_binary="$probe_root/agent-bridge.probe"
+        /bin/cp "$P_REAL_PATH" "$probe_binary" || die "cannot create fresh MCP private binary copy"
+        chmod 700 "$probe_binary" || die "cannot protect fresh MCP private binary copy"
+        copy_sha="$(sha256_file "$probe_binary")"
+        [ "$copy_sha" = "$P_SHA" ] || die "fresh MCP private binary copy does not match pending installed SHA"
+
+        if ! /usr/bin/env -i \
+            HOME="$probe_root/home" \
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            TMPDIR="$probe_root/tmp" \
+            XDG_DATA_HOME="$probe_root/xdg/data" \
+            XDG_CONFIG_HOME="$probe_root/xdg/config" \
+            XDG_CACHE_HOME="$probe_root/xdg/cache" \
+            XDG_STATE_HOME="$probe_root/xdg/state" \
+            AGENT_BRIDGE_STATE_DIR="$probe_root/private-state" \
+            AGENT_BRIDGE_TOOLSET=codex-essential \
+            AGENT_BRIDGE_TERMINAL=pty \
+            AGENT_BRIDGE_CLIENT=publisher-admission-probe \
+            AGENT_BRIDGE_MCP_SOURCE=publisher-admission-probe \
+            /usr/bin/python3 -I - "$probe_binary" "$P_CANDIDATE" "$copy_sha" "$probe_root" \
+                "$probe_timeout" "$probe_stdout_limit" "$probe_stderr_limit" \
+                >"$probe_meta" 2>"$probe_stderr" <<'PY'
 import hashlib
 import json
 import os
 import re
+import secrets
+import selectors
+import signal
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
-binary, expected_commit, probe_root = sys.argv[1:]
+binary, expected_commit, expected_binary_sha, probe_root, timeout_raw, stdout_limit_raw, stderr_limit_raw = sys.argv[1:]
 if not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
     raise SystemExit("pending candidate is not an authoritative commit")
+if not re.fullmatch(r"[0-9a-f]{64}", expected_binary_sha):
+    raise SystemExit("pending binary SHA is invalid")
+timeout_seconds = int(timeout_raw)
+stdout_limit = int(stdout_limit_raw)
+stderr_limit = int(stderr_limit_raw)
 
-env = os.environ.copy()
-for key in list(env):
-    if key.startswith("AGENT_BRIDGE_DEPLOY_"):
-        env.pop(key, None)
-env.update({
-    "XDG_DATA_HOME": os.path.join(probe_root, "xdg"),
+def digest_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+if digest_file(binary) != expected_binary_sha:
+    raise SystemExit("private probe binary changed before launch")
+
+def now_utc():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def reject_duplicate_object_keys(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON object key")
+        value[key] = item
+    return value
+
+def strict_json_loads(raw):
+    return json.loads(raw, object_pairs_hook=reject_duplicate_object_keys)
+
+probe_started_at = now_utc()
+nonce = secrets.token_hex(32)
+initialize_id = "ab-init-" + nonce
+tools_list_id = "ab-tools-" + nonce
+capabilities_id = "ab-capabilities-" + nonce
+
+env = {
+    "HOME": os.path.join(probe_root, "home"),
+    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "TMPDIR": os.path.join(probe_root, "tmp"),
+    "XDG_DATA_HOME": os.path.join(probe_root, "xdg", "data"),
+    "XDG_CONFIG_HOME": os.path.join(probe_root, "xdg", "config"),
+    "XDG_CACHE_HOME": os.path.join(probe_root, "xdg", "cache"),
+    "XDG_STATE_HOME": os.path.join(probe_root, "xdg", "state"),
     "AGENT_BRIDGE_STATE_DIR": os.path.join(probe_root, "private-state"),
     "AGENT_BRIDGE_TOOLSET": "codex-essential",
     "AGENT_BRIDGE_TERMINAL": "pty",
     "AGENT_BRIDGE_CLIENT": "publisher-admission-probe",
     "AGENT_BRIDGE_MCP_SOURCE": "publisher-admission-probe",
-})
+}
 
 messages = [
     {
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": initialize_id,
         "method": "initialize",
         "params": {
             "protocolVersion": "2024-11-05",
@@ -2091,64 +2382,156 @@ messages = [
         },
     },
     {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
-    {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    {"jsonrpc": "2.0", "id": tools_list_id, "method": "tools/list", "params": {}},
     {
         "jsonrpc": "2.0",
-        "id": 3,
+        "id": capabilities_id,
         "method": "tools/call",
         "params": {"name": "capabilities", "arguments": {"compact": True}},
     },
 ]
-payload = "".join(json.dumps(item, separators=(",", ":")) + "\n" for item in messages)
-completed = subprocess.run(
-    [binary, "mcp"],
-    input=payload,
-    text=True,
-    capture_output=True,
-    env=env,
-    timeout=45,
-    check=False,
-)
-if completed.returncode != 0:
+payload = "".join(json.dumps(item, separators=(",", ":")) + "\n" for item in messages).encode()
+stdout_bytes = bytearray()
+stderr_bytes = bytearray()
+process = None
+selector = None
+group_cleanup_attempted = False
+parent_returncode = None
+
+def kill_probe_group():
+    global group_cleanup_attempted
+    if process is None or group_cleanup_attempted:
+        return
+    group_cleanup_attempted = True
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+try:
+    process = subprocess.Popen(
+        [binary, "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env, close_fds=True, start_new_session=True,
+    )
+    process.stdin.write(payload)
+    process.stdin.close()
+    os.set_blocking(process.stdout.fileno(), False)
+    os.set_blocking(process.stderr.fileno(), False)
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, ("stdout", stdout_bytes, stdout_limit))
+    selector.register(process.stderr, selectors.EVENT_READ, ("stderr", stderr_bytes, stderr_limit))
+    deadline = time.monotonic() + timeout_seconds
+    while selector.get_map() or process.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SystemExit("fresh MCP process timed out")
+        for key, _ in selector.select(min(remaining, 0.1)):
+            label, accumulator, limit = key.data
+            read_size = min(65536, limit - len(accumulator) + 1)
+            chunk = os.read(key.fileobj.fileno(), read_size)
+            if chunk:
+                accumulator.extend(chunk)
+                if len(accumulator) > limit:
+                    raise SystemExit(f"fresh MCP {label} exceeded its admission limit")
+            else:
+                selector.unregister(key.fileobj)
+                key.fileobj.close()
+        if process.poll() is not None:
+            parent_returncode = process.returncode
+            # A conforming stdio MCP has no reason to retain descendants once
+            # its parent exits. Kill the private process group immediately so
+            # a descendant cannot hold pipes/state beyond this admission.
+            kill_probe_group()
+    parent_returncode = process.wait(timeout=2)
+finally:
+    if selector is not None:
+        selector.close()
+    kill_probe_group()
+    if process is not None:
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            group_cleanup_attempted = False
+            kill_probe_group()
+            process.wait(timeout=2)
+
+if parent_returncode != 0:
     raise SystemExit("fresh MCP process failed")
+if digest_file(binary) != expected_binary_sha:
+    raise SystemExit("private probe binary changed during execution")
+stdout_text = bytes(stdout_bytes).decode("utf-8", errors="strict")
 
 responses = {}
-response_counts = {}
-for line in completed.stdout.splitlines():
-    value = json.loads(line)
-    if value.get("id") is not None:
-        response_counts[value["id"]] = response_counts.get(value["id"], 0) + 1
-        responses[value["id"]] = value
-if set(responses) != {1, 2, 3} or any(response_counts.get(idx) != 1 for idx in (1, 2, 3)):
+expected_ids = {initialize_id, tools_list_id, capabilities_id}
+for line in stdout_text.splitlines():
+    if not line:
+        raise SystemExit("fresh MCP emitted an empty response line")
+    value = strict_json_loads(line)
+    if type(value) is not dict or value.get("jsonrpc") != "2.0":
+        raise SystemExit("fresh MCP returned a non-JSON-RPC-2.0 response")
+    response_id = value.get("id")
+    if type(response_id) is not str or response_id not in expected_ids:
+        raise SystemExit("fresh MCP returned an unknown or mistyped response id")
+    if response_id in responses:
+        raise SystemExit("fresh MCP returned a duplicate response id")
+    if set(value) not in ({"jsonrpc", "id", "result"}, {"jsonrpc", "id", "error"}):
+        raise SystemExit("fresh MCP response envelope is not strict")
+    responses[response_id] = value
+if set(responses) != expected_ids:
     raise SystemExit("fresh MCP response set is incomplete")
-if any("error" in responses[idx] for idx in (1, 2, 3)):
+if any("error" in responses[idx] for idx in expected_ids):
     raise SystemExit("fresh MCP returned a protocol error")
 
-init = responses[1]["result"]
+init = responses[initialize_id]["result"]
+if type(init) is not dict or type(init.get("serverInfo")) is not dict:
+    raise SystemExit("fresh MCP initialize result is malformed")
 server = init["serverInfo"]
-if server.get("name") != "agent-bridge" or init.get("protocolVersion") != "2024-11-05":
+if type(server.get("name")) is not str or type(server.get("version")) is not str:
+    raise SystemExit("fresh MCP server identity types are malformed")
+if server["name"] != "agent-bridge" or init.get("protocolVersion") != "2024-11-05":
     raise SystemExit("fresh MCP identity mismatch")
 
-tools = responses[2]["result"]["tools"]
-tool_names = [tool.get("name") for tool in tools]
+tools_result = responses[tools_list_id]["result"]
+if type(tools_result) is not dict or set(tools_result) != {"tools"}:
+    raise SystemExit("fresh MCP tools/list pagination or shape is unsupported")
+tools = tools_result["tools"]
+if type(tools) is not list or any(type(tool) is not dict or type(tool.get("name")) is not str for tool in tools):
+    raise SystemExit("fresh MCP tool manifest is malformed")
+tool_names = [tool["name"] for tool in tools]
 if tool_names.count("capabilities") != 1:
     raise SystemExit("capabilities tool is not exposed exactly once")
 
-result = responses[3]["result"]
-text_blocks = [block.get("text") for block in result.get("content", []) if block.get("type") == "text"]
-if len(text_blocks) != 1:
+result = responses[capabilities_id]["result"]
+if type(result) is not dict or type(result.get("content")) is not list:
+    raise SystemExit("capabilities result is malformed")
+if "isError" in result and type(result["isError"]) is not bool:
+    raise SystemExit("capabilities isError type is malformed")
+if result.get("isError", False) is not False:
+    raise SystemExit("capabilities tool reported an application error")
+content = result["content"]
+if len(content) != 1 or type(content[0]) is not dict or set(content[0]) != {"type", "text"}:
     raise SystemExit("capabilities result is not a single structured text block")
-capabilities = json.loads(text_blocks[0])
+if content[0]["type"] != "text" or type(content[0]["text"]) is not str:
+    raise SystemExit("capabilities result text block is malformed")
+capabilities = strict_json_loads(content[0]["text"])
+if type(capabilities) is not dict or type(capabilities.get("build")) is not dict or type(capabilities.get("mcp")) is not dict:
+    raise SystemExit("capabilities payload is malformed")
 build_sha = capabilities["build"]["git_sha"]
 toolset = capabilities["mcp"]["toolset"]
 exposed_count = capabilities["mcp"]["exposed_tool_count"]
+if type(build_sha) is not str or type(toolset) is not str or type(exposed_count) is not int:
+    raise SystemExit("capabilities payload types are malformed")
 if build_sha != expected_commit[:12]:
     raise SystemExit("fresh MCP build does not match pending candidate")
 if toolset != "codex-essential" or exposed_count != len(tools):
     raise SystemExit("fresh MCP tool manifest mismatch")
 
-evidence = {
-    "schema": "agent_bridge.publisher_fresh_mcp_probe.v0",
+probe_finished_at = now_utc()
+observation = {
+    "schema": "agent_bridge.publisher_fresh_mcp_probe.v1",
+    "probe_nonce": nonce,
+    "probe_started_at": probe_started_at,
+    "probe_finished_at": probe_finished_at,
     "server_name": server["name"],
     "server_version": server["version"],
     "protocol_version": init["protocolVersion"],
@@ -2156,32 +2539,41 @@ evidence = {
     "toolset": toolset,
     "tool_count": len(tools),
     "capabilities_tool_present": True,
-    "probe_method": "independent_stdio_exact_installed_binary",
+    "probe_method": "independent_stdio_private_exact_binary_copy",
+    "copied_binary_sha256": expected_binary_sha,
 }
 ordered_keys = (
-    "schema", "server_name", "server_version", "protocol_version", "build_git_sha",
-    "toolset", "tool_count", "capabilities_tool_present", "probe_method",
+    "schema", "probe_nonce", "probe_started_at", "probe_finished_at", "server_name",
+    "server_version", "protocol_version", "build_git_sha", "toolset", "tool_count",
+    "capabilities_tool_present", "probe_method", "copied_binary_sha256",
 )
-evidence_lines = []
 for key in ordered_keys:
-    value = evidence[key]
+    value = observation[key]
     if isinstance(value, bool):
         value = str(value).lower()
-    evidence_lines.append(f"{key}={value}")
-digest = hashlib.sha256(("\n".join(evidence_lines) + "\n").encode()).hexdigest()
-for line in evidence_lines:
-    print(line)
-print(f"evidence_sha256={digest}")
+    print(f"{key}={value}")
 PY
         then
             die "fresh MCP admission probe failed; diagnostic details intentionally suppressed"
         fi
+        read_fresh_mcp_probe_observation "$probe_meta" ||
+            die "fresh MCP admission probe observation is invalid"
+        [ "$F_COPY_SHA" = "$copy_sha" ] || die "fresh MCP probe reported a different private binary SHA"
+        write_bound_fresh_mcp_probe "$probe_meta"
     fi
 
-    chmod 600 "$probe_meta" 2>/dev/null || true
+    chmod 600 "$probe_meta" || die "cannot protect fresh MCP admission probe receipt"
     read_fresh_mcp_probe "$probe_meta" || die "fresh MCP admission probe receipt is invalid"
     [ "$F_BUILD_SHA" = "${P_CANDIDATE:0:12}" ] ||
         die "fresh MCP admission probe build does not match pending candidate"
+    [ "$F_PENDING_SHA" = "$pending_sha" ] && [ "$F_PENDING_LEASE_ID" = "$P_LEASE_ID" ] &&
+        [ "$F_PENDING_CHALLENGE" = "$P_CHALLENGE" ] && [ "$F_CANDIDATE" = "$P_CANDIDATE" ] &&
+        [ "$F_REAL_PATH" = "$P_REAL_PATH" ] && [ "$F_SHARED_TARGETS" = "$P_SHARED_TARGETS" ] &&
+        [ "$F_INSTALLED_SHA" = "$P_SHA" ] && [ "$F_INSTALLED_INODE" = "$P_INODE" ] &&
+        [ "$F_INSTALLED_MODE" = "$P_MODE" ] && [ "$F_INSTALLED_ASSETS_SHA" = "$P_ASSETS_SHA" ] &&
+        [ "$F_PENDING_INSTALLED_AT" = "$P_INSTALLED_AT" ] &&
+        [ "$F_ADMISSION_LEASE_ID" = "$LEASE_ID" ] && [ "$F_ADMISSION_CHALLENGE" = "$LEASE_CHALLENGE" ] ||
+        die "fresh MCP admission probe evidence is not bound to the exact pending/admission context"
 }
 
 admit_pending_fresh_mcp() {
@@ -2199,7 +2591,7 @@ admit_pending_fresh_mcp() {
 
     LEASE_CANDIDATE="$P_CANDIDATE"
     lease_phase_update prepared
-    run_fresh_mcp_probe
+    run_fresh_mcp_probe "$pending_sha"
 
     [ "$(sha256_file "$PENDING_ADMISSION")" = "$pending_sha" ] ||
         die "pending admission changed during the fresh MCP probe"
@@ -2625,18 +3017,23 @@ lease_phase_update services_verifying
 if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
     refresh_daemon=0
     refresh_daemon_http=0
+    refresh_palace=0
     if preflight_macos_launchagent "com.pallasting.agent-bridge.daemon" "daemon"; then
         refresh_daemon=1
     fi
     if preflight_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "daemon-http"; then
         refresh_daemon_http=1
     fi
-    if [ "$refresh_daemon" -eq 1 ] || [ "$refresh_daemon_http" -eq 1 ]; then
+    if preflight_macos_launchagent "com.pallasting.agent-bridge.palace" "palace" \
+        "serve" "--host" "127.0.0.1" "--port" "7979"; then
+        refresh_palace=1
+    fi
+    if [ "$refresh_daemon" -eq 1 ] || [ "$refresh_daemon_http" -eq 1 ] || [ "$refresh_palace" -eq 1 ]; then
         command -v lsof >/dev/null 2>&1 ||
             die "lsof is required to verify refreshed launchd service inodes"
-        if [ "$refresh_daemon_http" -eq 1 ]; then
+        if [ "$refresh_daemon_http" -eq 1 ] || [ "$refresh_palace" -eq 1 ]; then
             command -v curl >/dev/null 2>&1 ||
-                die "curl is required to verify daemon-http health"
+                die "curl is required to verify launchd service health"
         fi
         deployed_inode="$(file_inode "$REAL_PATH")" ||
             die "cannot read deployed binary inode for launchd verification: $REAL_PATH"
@@ -2644,7 +3041,10 @@ if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
             refresh_macos_launchagent "com.pallasting.agent-bridge.daemon" "$deployed_inode"
         [ "$refresh_daemon_http" -eq 0 ] ||
             refresh_macos_launchagent "com.pallasting.agent-bridge.daemon-http" "$deployed_inode" \
-                "http://127.0.0.1:7878/healthz"
+                "http://127.0.0.1:7878/healthz" "7878"
+        [ "$refresh_palace" -eq 0 ] ||
+            refresh_macos_launchagent "com.pallasting.agent-bridge.palace" "$deployed_inode" \
+                "http://127.0.0.1:7979/healthz" "7979"
     fi
     say "launchd service refresh: $SERVICE_REFRESHED service(s) adopted the deployed binary"
 fi
