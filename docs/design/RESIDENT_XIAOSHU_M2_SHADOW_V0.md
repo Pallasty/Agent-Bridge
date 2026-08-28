@@ -167,12 +167,15 @@ Source tests and mechanics reports prove mechanics, not unattended-wake value.
 The 2026-08-25 worktree-continuity recovery remains a documented natural
 observation, but its original report bytes and state root are no longer
 available for current-ledger review and no `ledger_id` was captured. It therefore does not count toward the
-durable threshold. The current macOS ledger contains one pre-anchor mechanics
-report and zero durable natural reports. The next gate first requires source
-publication, deployment, and exact replay to anchor that existing report;
-afterward only new genuine real-task reports retained in that same anchored
-ledger may count. Until the frozen threshold is met, adding discovery, a timer,
-a scheduler, or any real provider invocation is prohibited.
+durable threshold. The current macOS ledger is anchored under a stable
+`ledger_id`. It contains one legacy mechanics report and one durable natural
+failure report produced by an unplanned wrapper-bypass configuration failure
+in the real replay workflow. That natural report was suppressed because the
+owner session was active, so the natural-suppression criterion is satisfied.
+Collection still needs two more genuine natural reports, a second natural
+trigger kind, and one natural `would_wake=true` decision. Until the frozen
+threshold is met, adding discovery, a timer, a scheduler, or any real provider
+invocation is prohibited.
 
 Two increments without observed use-value refreeze the lane. Any stop label,
 raw-content persistence, unexpected provider/tool event, wake creation,
