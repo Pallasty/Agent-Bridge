@@ -1,6 +1,6 @@
 # macOS Native Semantic Observation v1
 
-Status: deployed at `8c913594d0bff02b341f526db089803e542c2093` with live read-only acceptance PASS; read-only profile extension source admission PASS, publication pending
+Status: native observation deployed at `8c913594d0bff02b341f526db089803e542c2093`; read-only profile extension landed at `daca14b9aea11831c11a11bdcc42317893bcb832` and passed fresh installed-MCP acceptance on 2026-08-27
 
 Date: 2026-08-26
 
@@ -100,5 +100,13 @@ can execute only a canonical same-directory asset set whose bytes match the
 binary's embedded SHA-256 values. Production execution uses a cleared
 environment and fixed system Python/Swift launch paths; fixture script injection
 exists only through private test constructors. Probe, verify, and watch each
-publish `ToolAnnotations::read_only()`. Publication, deployment, and
-fresh-process verification remain later gates.
+publish `ToolAnnotations::read_only()`.
+
+The profile extension landed at `daca14b9aea1`, was published to both remote
+`master` branches, and was included in the installed `db7203f2c048` build. On
+2026-08-27 a fresh Codex MCP reported `codex-ag-ui-readonly` with the projector
+and the three macOS observers as its only profile extras. A live probe returned
+a complete `native_ax` sample, reported no Apple Events or System Events use,
+and kept sample-local windows action-ineligible. This closes publication,
+deployment, and fresh-process verification without admitting action authority.
+See `docs/reports/goal-c-u/2026-08-27-r8-readonly-profile-live-closure.md`.
