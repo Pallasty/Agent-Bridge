@@ -181,12 +181,36 @@ if [ "$ADMIT_FRESH_MCP" -eq 1 ]; then
 fi
 
 file_inode() {
-    stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %i "$1" 2>/dev/null ;;
+        Linux) stat -c %i "$1" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
 }
 
 file_mode() {
     [ -e "$1" ] || { printf '%s\n' absent; return 0; }
-    stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1" 2>/dev/null
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %Lp "$1" 2>/dev/null ;;
+        Linux) stat -c %a "$1" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+file_owner_uid() {
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %u "$1" 2>/dev/null ;;
+        Linux) stat -c %u "$1" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+file_size() {
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %z "$1" 2>/dev/null ;;
+        Linux) stat -c %s "$1" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
 }
 
 sha256_file() {
@@ -535,7 +559,7 @@ validate_lease_test_environment() {
         ab-publisher-lease-v0.*|ab-deploy-pinned-assets.*|ab-deploy-postbuild-race.*|ab-deploy-audio-parity.*) ;;
         *) die "publisher lease test root has an invalid name" ;;
     esac
-    mode="$(stat -f %Lp "$root" 2>/dev/null || stat -c %a "$root" 2>/dev/null)"
+    mode="$(file_mode "$root")"
     [ "$mode" = 700 ] || die "publisher lease test root mode must be 700"
     TEST_PHYSICAL_ROOT="$root"
     canonical_contained_test_path "$HOME" "$root" HOME >/dev/null
@@ -866,7 +890,7 @@ fi
 case "$PUBLISHER_LOCK_HOLDER" in ''|*[!0-9]*) die "invalid publisher kernel lock-holder marker" ;; esac
 [ "$$" = "$PUBLISHER_LOCK_HOLDER" ] || die "publisher kernel lock-holder marker does not match this process"
 [ -e /dev/fd/9 ] || die "publisher process did not inherit kernel mutex fd 9"
-[ "$(file_inode /dev/fd/9 2>/dev/null || printf '%s\n' unavailable)" = "$(file_inode "$KERNEL_LOCK_FILE")" ] ||
+[ /dev/fd/9 -ef "$KERNEL_LOCK_FILE" ] ||
     die "publisher kernel mutex fd 9 does not identify the fixed lock file"
 set +e
 if [ "$HOST_KERNEL_OS" = Darwin ]; then
@@ -2227,7 +2251,7 @@ retire_fresh_mcp_admission_intent() {
 
 run_fresh_mcp_probe() {
     local pending_sha="$1" probe_root probe_meta probe_stderr fixture probe_binary copy_sha
-    local python_owner python_mode python_mode_value probe_timeout=45 probe_stdout_limit=1048576
+    local python_bin python_owner python_mode python_mode_value probe_timeout=45 probe_stdout_limit=1048576
     local probe_stderr_limit=262144
     probe_root="$(mktemp -d "$DEPLOY_TMPDIR/ab-publisher-fresh-mcp.XXXXXX")"
     chmod 700 "$probe_root" || die "cannot protect fresh MCP probe root"
@@ -2252,13 +2276,19 @@ run_fresh_mcp_probe() {
         F_COPY_SHA="$P_SHA"
         write_bound_fresh_mcp_probe "$probe_meta"
     else
-        [ -x /usr/bin/python3 ] && [ -f /usr/bin/python3 ] && [ ! -L /usr/bin/python3 ] ||
-            die "trusted physical /usr/bin/python3 is required for fresh MCP admission"
-        python_owner="$(stat -f %u /usr/bin/python3 2>/dev/null || stat -c %u /usr/bin/python3 2>/dev/null)"
-        python_mode="$(file_mode /usr/bin/python3)"
-        case "$python_owner:$python_mode" in 0:[0-7][0-7][0-7]) ;; *) die "trusted /usr/bin/python3 ownership or mode is invalid" ;; esac
+        python_bin="$(/usr/bin/readlink -f -- /usr/bin/python3 2>/dev/null)" ||
+            die "cannot resolve the trusted /usr/bin/python3 target for fresh MCP admission"
+        case "$python_bin" in
+            /usr/bin/python3|/usr/bin/python3.[0-9]|/usr/bin/python3.[0-9][0-9]) ;;
+            *) die "trusted /usr/bin/python3 resolves outside the allowed system interpreter path" ;;
+        esac
+        [ -x "$python_bin" ] && [ -f "$python_bin" ] && [ ! -L "$python_bin" ] ||
+            die "trusted /usr/bin/python3 target is not a physical executable"
+        python_owner="$(file_owner_uid "$python_bin")"
+        python_mode="$(file_mode "$python_bin")"
+        case "$python_owner:$python_mode" in 0:[0-7][0-7][0-7]) ;; *) die "trusted python3 target ownership or mode is invalid" ;; esac
         python_mode_value=$((8#$python_mode))
-        [ $((python_mode_value & 0022)) -eq 0 ] || die "trusted /usr/bin/python3 is group/world writable"
+        [ $((python_mode_value & 0022)) -eq 0 ] || die "trusted python3 target is group/world writable"
 
         if [ -n "${AGENT_BRIDGE_DEPLOY_LEASE_TEST_FRESH_MCP_TIMEOUT_SECONDS:-}" ]; then
             [ "$LEASE_TEST_MODE" = 1 ] || die "fresh MCP timeout override is test-only"
@@ -2298,7 +2328,7 @@ run_fresh_mcp_probe() {
             AGENT_BRIDGE_TERMINAL=pty \
             AGENT_BRIDGE_CLIENT=publisher-admission-probe \
             AGENT_BRIDGE_MCP_SOURCE=publisher-admission-probe \
-            /usr/bin/python3 -I - "$probe_binary" "$P_CANDIDATE" "$copy_sha" "$probe_root" \
+            "$python_bin" -I - "$probe_binary" "$P_CANDIDATE" "$copy_sha" "$probe_root" \
                 "$probe_timeout" "$probe_stdout_limit" "$probe_stderr_limit" \
                 >"$probe_meta" 2>"$probe_stderr" <<'PY'
 import hashlib
@@ -2871,8 +2901,8 @@ say "new binary markers present:"; printf '  + %s\n' $new_markers
 lease_phase_update prepared
 
 # ---- 4. plan summary ----
-new_size="$(stat -c %s "$NEW_BIN" 2>/dev/null || stat -f %z "$NEW_BIN")"
-cur_size="$( [ -f "$REAL_PATH" ] && (stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH") || echo 0 )"
+new_size="$(file_size "$NEW_BIN")"
+cur_size="$( [ -f "$REAL_PATH" ] && file_size "$REAL_PATH" || echo 0 )"
 say
 say "=== deploy plan ==="
 say "  source     : $PROVENANCE"
@@ -2991,7 +3021,7 @@ CLEANUP_BINARY_STAGE="$binary_stage"
 [ ! -e "$binary_stage" ] || die "binary activation stage already exists: $binary_stage"
 cp "$NEW_BIN" "$binary_stage"
 chmod +x "$binary_stage"
-staged_size="$(stat -c %s "$binary_stage" 2>/dev/null || stat -f %z "$binary_stage")"
+staged_size="$(file_size "$binary_stage")"
 [ "$staged_size" = "$new_size" ] || die "staged binary size $staged_size != built $new_size"
 is_native_exe "$binary_stage" || die "staged binary is no longer a native executable"
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -3001,11 +3031,11 @@ if [ "$(uname -s)" = "Darwin" ]; then
     say ">> ad-hoc signed and verified staged macOS binary"
 fi
 "$binary_stage" --version >/dev/null 2>&1 || die "staged binary failed its execution check"
-new_size="$(stat -c %s "$binary_stage" 2>/dev/null || stat -f %z "$binary_stage")"
+new_size="$(file_size "$binary_stage")"
 mv -f "$binary_stage" "$REAL_PATH" || die "atomic binary activation failed"
 CLEANUP_BINARY_STAGE=""
 say ">> atomically deployed -> $REAL_PATH"
-copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+copied_size="$(file_size "$REAL_PATH")"
 [ "$copied_size" = "$new_size" ] || die "deployed size $copied_size != staged $new_size"
 
 # Replacing a Mach-O does not refresh long-lived launchd processes: they keep
@@ -3052,7 +3082,7 @@ fi
 # ---- 7. post-deploy verification ----
 say
 say "=== post-deploy verification ==="
-dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
+dep_size="$(file_size "$REAL_PATH")"
 [ "$dep_size" = "$new_size" ] || die "deployed size $dep_size != built $new_size (copy failed?)"
 cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "post-deploy audio adapter parity check failed"

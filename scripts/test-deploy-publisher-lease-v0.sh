@@ -33,6 +33,22 @@ sha256_fixture() {
     fi
 }
 
+inode_fixture() {
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %i "$1" ;;
+        Linux) stat -c %i "$1" ;;
+        *) return 1 ;;
+    esac
+}
+
+mode_fixture() {
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+        Darwin) stat -f %Lp "$1" ;;
+        Linux) stat -c %a "$1" ;;
+        *) return 1 ;;
+    esac
+}
+
 mutation_count() {
     if [ -f "$1/mutations.log" ]; then
         wc -l < "$1/mutations.log" | tr -d ' '
@@ -394,7 +410,10 @@ start_holder() {
         sleep 0.02
         attempt=$((attempt + 1))
     done
-    [ -f "$ready" ] || fail "holder did not become ready ($phase)"
+    if [ ! -f "$ready" ]; then
+        sed -n '1,160p' "$root/holder.log" >&2 || true
+        fail "holder did not become ready ($phase)"
+    fi
     HOLDER_CHILD_PID="$(cat "$ready")"
 }
 
@@ -452,7 +471,7 @@ write_release_intent_fixture() {
     shared_targets="$(meta_field "$meta" shared_targets)"
     meta_sha="$(sha256_fixture "$meta")"
     current_sha="$(sha256_fixture "$real_path")"
-    current_inode="$(stat -f %i "$real_path" 2>/dev/null || stat -c %i "$real_path")"
+    current_inode="$(inode_fixture "$real_path")"
     receipt="$root/state/receipts/$lease_id.$challenge.test_release_settled.release-completed.meta"
     {
         printf 'schema=%s\n' agent_bridge.publisher_release_intent.v0
@@ -620,7 +639,7 @@ case "$output" in *"pending-admission fingerprint no longer matches"*) ;; *) fai
 new_case pending-binary-mode-mismatch; root="$CASE_ROOT"
 run_lease "$root" install candidate-a "$root/payload-a" >/dev/null
 binary="$root/bin/agent-bridge.real"
-binary_mode="$(stat -f %Lp "$binary" 2>/dev/null || stat -c %a "$binary")"
+binary_mode="$(mode_fixture "$binary")"
 case "$binary_mode" in
     700) chmod 755 "$binary" ;;
     *) chmod 700 "$binary" ;;

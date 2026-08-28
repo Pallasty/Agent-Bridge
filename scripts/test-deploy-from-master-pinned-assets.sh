@@ -164,7 +164,11 @@ count_file="$AB_DEPLOY_SERVICE_TEST_LSOF_COUNT.$pid"
 [ ! -f "$count_file" ] || count="$(cat "$count_file")"
 count=$((count + 1))
 printf '%s\n' "$count" > "$count_file"
-inode="$(stat -f %i "$AB_DEPLOY_SERVICE_TEST_REAL" 2>/dev/null || stat -c %i "$AB_DEPLOY_SERVICE_TEST_REAL")"
+case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
+    Darwin) inode="$(stat -f %i "$AB_DEPLOY_SERVICE_TEST_REAL")" ;;
+    Linux) inode="$(stat -c %i "$AB_DEPLOY_SERVICE_TEST_REAL")" ;;
+    *) exit 2 ;;
+esac
 [ "$count" -gt 1 ] || inode=999
 printf 'p%s\nftxt\ni999\nn/tmp/not-the-agent-bridge-binary\nftxt\ni%s\nn%s\n' "$pid" "$inode" "$AB_DEPLOY_SERVICE_TEST_REAL"
 FAKE_LSOF
