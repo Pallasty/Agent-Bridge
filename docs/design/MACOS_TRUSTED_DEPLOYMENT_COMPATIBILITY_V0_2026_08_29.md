@@ -1,6 +1,6 @@
 # macOS Trusted Deployment Compatibility V0
 
-Status: **DESIGN GATE ACCEPTED / IMPLEMENTATION NOT STARTED / NO DEPLOYMENT**
+Status: **D1 READ-ONLY PREFLIGHT ACCEPTED / HOST HOLD OBSERVED / NO DEPLOYMENT**
 
 Date: 2026-08-29
 
@@ -188,6 +188,20 @@ It performs zero writes and does not request permissions.
 
 Acceptance requires deterministic JSON, macOS synthetic fixtures, one real
 read-only run on this Mac, and unchanged binary/service/state inodes.
+
+The D1 source candidate is `scripts/preflight-macos-trusted-deployment.py`.
+It has no mutation subcommand: absent roots, services, binaries, and state are
+reported as facts or blockers and are never created or repaired. Source tests
+must close before the real-Mac zero-change proof advances this increment.
+
+The 2026-08-29 real-Mac run returned `HOLD`, as expected before root birth. It
+reported the absent trusted root, the currently valid signed installed binary,
+all three loaded launchd surfaces, and the active legacy SQLite WAL/SHM plus
+open-descriptor inventory. Before/after stat identity for the installed binary
+and state database was exact, and launchd PID/program/plist observations were
+unchanged. The synthetic D1 suite passed 6/6 under both the system Python and
+the repository's uv Python runtime. This accepts the read-only preflight, not
+root provisioning, migration, service adoption, deployment, or release.
 
 ### D2 — isolated root provisioner
 
