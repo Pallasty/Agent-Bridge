@@ -311,8 +311,8 @@ production migration, systemd adoption, or live admission.
 
 ## Current production truth
 
-Production remains `HOLD`. Authenticated GitLab publication still fails at
-public-key authentication; an independent private deployment root, trusted
+Production remains `HOLD`. A current-boot gcr agent identity authenticates the
+operator publication step; an independent private deployment root, trusted
 toolchain, minimal machine configuration, and credentials are not provisioned;
 the existing `/Data/.agent-bridge-state` body-state source cannot double as the
 new root; the active unit path remains on the unsafe HOME boundary; and all

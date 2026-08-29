@@ -180,8 +180,10 @@ migrated, adopted, restarted, healthy, or visible through a fresh MCP.
 
 ## Current production truth
 
-Production remains `HOLD`. GitLab SSH still fails with `Permission denied
-(publickey)`. The current development worktrees live beneath the euid-owned
+Production remains `HOLD`. A current-boot gcr agent identity now proves GitLab
+access for operator publication, correcting the earlier inherited-environment
+false negative. It is not the persistent file credential required by this
+root contract. The current development worktrees live beneath the euid-owned
 mode-`0777` `/Data/CascadeProjects` boundary and use linked-worktree Git
 metadata, so they are intentionally ineligible as a provisioning seed. The
 current Rust toolchain is beneath the root-owned mode-`0777` HOME/FUSE boundary

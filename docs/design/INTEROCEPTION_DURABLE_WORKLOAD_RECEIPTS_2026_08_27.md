@@ -428,8 +428,8 @@ drift is expected and binder replay must fail closed; the installed verifier,
 not migration replay, owns steady-state acceptance. The binder starts no
 service in either migration path.
 
-Production remains `HOLD`. Authenticated GitLab publication is blocked by
-public-key authentication; the private root/toolchain/minimal configuration/
+Production remains `HOLD`. A current-boot gcr agent identity authenticates the
+operator publication step; the private root/toolchain/minimal configuration/
 credentials are absent; the real `UnitPath` remains unsafe; and the three
 long-running services still execute deleted old binary inodes. This increment
 has not changed any production DB, state leaf, unit, service, timer, credential,
@@ -473,7 +473,8 @@ cannot silently select a different body. R9-M2 v1 does not provide in-place
 key, credential, machine-config, or toolchain rotation; that requires a future
 governed reseal/update contract or a fresh root.
 
-Current production remains `HOLD`: GitLab authentication is unavailable; the
+Current production remains `HOLD`: current-boot operator GitLab authentication
+is available, but the durable fixed-file credential is not; the
 development worktree ancestor and HOME toolchain boundary are mode `0777` and
 therefore ineligible; no private inputs or target root were created; and the
 R9-M1 Yama/quiescence gate remains unchanged. See

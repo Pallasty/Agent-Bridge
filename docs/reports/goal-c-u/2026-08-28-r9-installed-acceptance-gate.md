@@ -250,9 +250,11 @@ custody before R9-M2 may consume it. CI was deliberately not introduced or
 run for this increment.
 
 The isolated publication/seed harness is `4/4 PASS` and the updated R9-M2
-provisioning harness remains `10/10 PASS`. The real GitLab SSH probe remains
-denied, so these results are local source evidence—not publication or seed
-evidence—and production remains `HOLD`.
+provisioning harness remains `10/10 PASS`. Correction measured 2026-08-29: an
+owned mode-`0600` gcr agent socket authenticates GitLab as `@pallasting` and
+reads authoritative master. The earlier denial reflected a missing inherited
+`SSH_AUTH_SOCK`, not absence of a usable local identity. Publication and seed
+remain distinct evidence, and production remains `HOLD`.
 
 ## R9-M4 GitLab deploy credential ceremony source-ready implementation
 
@@ -264,8 +266,10 @@ and independent verification. The receipt says `local_key_not_enrolled`; no
 local action is allowed to infer GitLab write authority.
 
 R9-M4 `4/4`, R9-M3 `4/4`, and R9-M2 `10/10` targeted harnesses pass. CI was
-explicitly skipped. No real key was generated or enrolled and the actual
-GitLab SSH path remains denied, so production remains `HOLD`.
+explicitly skipped. No real key was generated or enrolled; because the
+current operator can use the agent-only identity, R9-M4 is an optional durable
+credential route rather than a publication prerequisite. Production remains
+`HOLD`.
 
 ## Verification ledger
 
@@ -338,10 +342,10 @@ the trusted boundary:
 - `/Data` has about 12 GiB free at 96% use. The root filesystem backing the
   intended `/var/tmp` production build cache has about 59 GiB free; production
   migration still needs an explicit capacity margin and rollback copy budget.
-- Authenticated GitLab publication is unavailable from this session because
-  public-key authentication is not provisioned. The safe clone, deploy key,
-  known-hosts file, trusted toolchain, minimal machine file, and credentials
-  file are absent.
+- Current-boot GitLab operator authentication is available through the
+  mode-`0600` gcr agent socket. A safe clone, persistent deploy key suitable
+  for the trusted root, trusted toolchain, minimal machine file, and credentials
+  file are still absent.
 - Yama currently hides descriptor tables for several non-manager same-UID
   session processes, including the SSH agent and Waydroid components. The
   strict migration gate intentionally blocks until those processes are
@@ -431,9 +435,9 @@ capacity stops admission. It must not be reported as a partial PASS.
 | Earlier isolated restart exercise | `PASS` at source candidate `9bc924a2...` | Durable receipt reconciliation behavior only; must repeat after authoritative install. |
 | R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
 | R9-M2 provisioning implementation | `SOURCE_READY` at `55954e2458eefae261ae761e3035b88536fcc782` | Zero-write plan, exact-confirm provision, fixed-path verification, and consumer gates are green; no live root was created. |
-| R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; real GitLab authentication remains blocked. |
-| R9-M4 credential ceremony | `SOURCE_READY` at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI skipped | Local key/host ceremony fixtures are green; no key was generated or enrolled and no GitLab authority exists. |
-| Authoritative GitLab publication | `BLOCKED` | Authenticated publisher identity/path is unavailable. |
+| R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; current-boot gcr agent authentication is verified. |
+| R9-M4 credential ceremony | `SOURCE_READY` at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI skipped | Optional persistent-key route; no new key was generated or enrolled. |
+| Authoritative GitLab publication | `IN_PROGRESS` | Agent identity and remote read are verified; integrated fast-forward candidate is under final local verification. |
 | Private root provisioning | `NOT_DONE` | The birth organ is source-ready, but eligible private seed/config/toolchain inputs and the live root are absent. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
 | Real systemd current-boot adoption | `NOT_DONE` | Current HOME `UnitPath` and drop-ins fail closed; fake-manager tests are not live proof. |

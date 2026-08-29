@@ -59,9 +59,10 @@ manifest, unsafe private-input modes, existing seed, and post-clone tamper:
 `4/4 PASS` with warnings as errors. The updated R9-M2 provisioning harness is
 `10/10 PASS`, proving the birth receipt now binds the R9-M3 orchestrator.
 
-The node's actual GitLab probe still returns `Permission denied (publickey)`.
-Therefore no real plan can become ready and no publication or seed acquisition
-occurred. The next live step requires the release owner to provision a reviewed
-mode-`0600` GitLab key and known-hosts file outside unsafe HOME ancestry, then
-run plan, inspect the candidate and remote identities, and explicitly supply
-the emitted confirmation.
+Correction measured 2026-08-29: the Codex process had not inherited
+`SSH_AUTH_SOCK`, but the current desktop session exposes an owned mode-`0600`
+gcr agent socket at `/run/user/1000/gcr/.ssh`. Its agent-only ED25519 identity
+authenticates GitLab as `@pallasting`, and a clean-environment `ls-remote`
+reads authoritative master. A new key is not required for the current operator
+publication. This current-boot identity does not automatically satisfy the
+durable fixed-file key contract used by R9-M2 and unattended publication.

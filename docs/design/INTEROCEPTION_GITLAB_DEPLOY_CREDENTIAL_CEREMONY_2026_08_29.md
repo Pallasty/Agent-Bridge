@@ -9,9 +9,13 @@ production remains `HOLD`**.
 
 ## Missing organ
 
-R9-M3 can publish and independently acquire a seed only after it receives a
-physical mode-`0600` GitLab private key and verified known-hosts. The node has
-neither. Old gate fixtures cannot be promoted into publication authority.
+R9-M3's file-key mode can publish and independently acquire a seed only after
+it receives a physical mode-`0600` GitLab private key and verified known-hosts.
+Correction measured 2026-08-29: the node also has a usable current-boot
+agent-only identity behind `/run/user/1000/gcr/.ssh`; it authenticates GitLab
+as `@pallasting`. R9-M4 is optional for the current operator push, not a
+prerequisite. It remains relevant only if the release owner chooses a
+separately governed persistent deploy key for R9-M2/unattended publication.
 
 R9-M4 provides a bounded local credential ceremony:
 
@@ -63,9 +67,9 @@ overwritten.
 
 ## Authority boundary and verification
 
-Local generation is not enrollment. Only the later authenticated R9-M3
+Local generation is not enrollment. Only later authenticated GitLab
 `ls-remote`/fast-forward publication path can prove that GitLab accepts the
-key. The operator must register the public key on
+key. If this optional route is selected, the operator must register the public key on
 `pallasting/agent-bridge` with write repository access and retain an independent
 GitLab-side audit record. CI is outside this lane and was explicitly skipped.
 
