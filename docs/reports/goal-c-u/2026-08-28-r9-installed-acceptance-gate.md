@@ -2,8 +2,8 @@
 
 Date: 2026-08-28
 
-Status: trusted deployment-root framework and R9-M1 trusted runtime-state
-migration source-ready locally at
+Status: trusted deployment-root framework, R9-M1 trusted runtime-state
+migration, and R9-M2 trusted-root provisioning source-ready locally; R9-M1 is at
 `eda927d1837b50c6680ce3ea337456a79e52a965`; not published, provisioned,
 installed, migrated, restarted, or live-admitted; production remains `HOLD`
 and the current installation remains `FAIL_CLOSED`
@@ -28,6 +28,18 @@ the split-brain risk between the legacy HOME database/body-state tree and the
 new trusted-root database/body-state tree. Its source-ready implementation is
 `eda927d1837b50c6680ce3ea337456a79e52a965`; this identity is local source
 evidence, not publication or production-adoption authority.
+
+R9-M2 closes the next bounded gap: creation of the deployment root itself. Its
+source-ready implementation adds a zero-write plan, an exact-digest-confirmed
+atomic provision operation, and an independent fixed-path verifier. The
+resulting birth receipt is required by both wrapper and publisher before their
+first build/install mutation and is rechecked while they hold the shared
+publisher lock. A provisioned local seed is explicitly not publication
+authority.
+
+The R9-M2 implementation identity is
+`55954e2458eefae261ae761e3035b88536fcc782`. It is local source evidence only,
+not an authoritative publication or live provisioning receipt.
 
 No production file, service, unit, database, credential, or workload-receipt
 spool was changed in this increment. No service was stopped, restarted, or
@@ -198,6 +210,34 @@ service, timer, unit, credential, drop-in, or migration receipt was changed.
 The detailed contract is in
 `docs/design/INTEROCEPTION_TRUSTED_RUNTIME_STATE_MIGRATION_2026_08_28.md`.
 
+## R9-M2 trusted deployment-root provisioning source-ready implementation
+
+The provisioning tool accepts only a clean, standalone, exact-candidate seed
+with the authoritative GitLab remote and strictly private physical custody.
+It separately binds the GitLab key, known-hosts, minimal machine file,
+credentials, and a bounded Cargo/rustc toolchain by digest and inode-safe
+inventory. Source, toolchain, target, and legacy inventory roots may not
+overlap. Unsafe writable ancestry, linked worktrees, symlinks, special files,
+hard links, Git alternates/grafts, capacity shortfall, and input drift fail
+closed before target creation.
+
+`plan` is byte-passive and emits a canonical manifest plus confirmation token.
+`provision` requires that exact token, constructs one private sibling stage,
+clones without local-object or hard-link borrowing, copies and normalizes the
+bounded inputs, creates the publisher lock and canonical birth receipt, fsyncs
+the tree, and activates only by same-parent rename into an absent root.
+`verify` is read-only and accepts the birth candidate or a clean published
+descendant while independently rebinding the fixed inputs, receipt, source
+configuration, critical scripts, and optional inherited publisher-lock file
+descriptor. The publisher additionally requires the fetched authoritative
+master to equal the provisioning verifier's current source candidate.
+
+Version 1 deliberately has no in-place key, credential, machine-file, or
+toolchain rotation. A crash at the final activation durability boundary is an
+operator-recovery residual, not a license to reuse a partial stage or infer
+success. The detailed contract is in
+`docs/design/INTEROCEPTION_TRUSTED_DEPLOYMENT_ROOT_PROVISIONING_2026_08_28.md`.
+
 ## Verification ledger
 
 The baseline rows below preserve earlier durable-receipt and trusted-root
@@ -222,6 +262,7 @@ build or production path was used.
 | Trusted systemd binder adversarial suite | `systemd-trusted-daemon-root-ok`; final implementation also passed repeated worker runs |
 | Changed shell syntax, Python AST, and staged whitespace | `PASS`; no Rust source changed |
 | R9-M1 migration harness | `15/15 PASS` with warnings as errors |
+| R9-M2 provisioning harness | `10/10 PASS` with warnings as errors |
 | Migration-aware binder handoff | `systemd-trusted-daemon-root-ok`; receipt/quiescence gates exercised at initial, pre-activation, and post-reload boundaries |
 | Independent adversarial review | `APPROVED WITH RESIDUALS`; no reproducible blocker, major, or minor defect |
 
@@ -246,7 +287,10 @@ the trusted boundary:
   deployment root, so this path cannot double as the new root. A separate
   private root with source/config/toolchain/bin/publisher/runtime layout and
   publication credentials must be independently provisioned; none was created
-  here.
+  here. The current development worktrees are mode `0777` and use linked Git
+  metadata, while the HOME toolchain inherits the unsafe mode-`0777` FUSE
+  boundary; R9-M2 correctly rejects both as provisioning inputs. A separate
+  private seed and toolchain are still required.
 - The legacy machine file is on the unsafe HOME mount, contains a secret-like
   key, many settings outside the bounded service allowlist, legacy writable
   state paths, HOME resources, and development-tree assets. It must not be
@@ -293,24 +337,22 @@ failures.
 The release owner must preserve this order. A later step cannot repair or
 substitute for a missing earlier authority boundary.
 
-1. Publish one clean descendant containing R9-M1 implementation
+1. Publish one clean descendant containing R9-M1 and R9-M2 implementation
    `eda927d1837b50c6680ce3ea337456a79e52a965` (and therefore trusted-root
    implementation `a4f4f4e153a5a824f28e6f1486c670af38c15ea5`) to authoritative GitLab
    `master` with an authenticated publisher identity. Record the exact 40-hex
    commit; a local commit, file remote, GitHub mirror, or copied binary is not a
    substitute.
-2. Provision a new private deployment root, physically separate from every
-   legacy inventory source including `/Data/.agent-bridge-state`, plus the
-   fixed safe clone, exact GitLab deploy key and known-hosts file, trusted
-   Cargo/rustc toolchain, build-cache base, minimal allowlisted machine file,
-   and credentials. Never bootstrap them by copying unsafe HOME files or
+2. Prepare, outside the absent target and every legacy inventory source, one
+   eligible standalone private seed at the published commit plus separately
+   provisioned exact GitLab key/known-hosts, bounded toolchain, minimal machine
+   file, and credentials. Never bootstrap them from unsafe HOME files or
    secret-bearing output.
 3. Through an outer clean launcher (`env -i`, fixed system PATH, and
-   `/bin/bash --noprofile --norc`), fetch and advance the dedicated safe clone
-   so both HEAD and `refs/remotes/gitlab/master` equal the published commit.
-   Reapply its frozen private custody modes after checkout: source directories
-   `0700`, deploy/migration/systemd orchestrators `0700`, and wrapper
-   installer/template/example `0600`.
+   `/bin/bash --noprofile --norc`), run the exact R9-M2 `plan`, inspect its
+   canonical manifest, invoke `provision` with its exact confirmation token,
+   and run the fixed-path independent `verify`. Preserve the birth receipt;
+   do not manually assemble or repair the root in place.
 4. Invoke the exact trusted wrapper installer through that same clean outer
    launcher. This forms and locks publisher custody but does not install a
    caller binary or import HOME credentials.
@@ -359,16 +401,17 @@ capacity stops admission. It must not be reported as a partial PASS.
 | Trusted-root implementation | `SOURCE_READY` at `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` | Local code and adversarial fixtures are green; not publication authority. |
 | Earlier isolated restart exercise | `PASS` at source candidate `9bc924a2...` | Durable receipt reconciliation behavior only; must repeat after authoritative install. |
 | R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
+| R9-M2 provisioning implementation | `SOURCE_READY` at `55954e2458eefae261ae761e3035b88536fcc782` | Zero-write plan, exact-confirm provision, fixed-path verification, and consumer gates are green; no live root was created. |
 | Authoritative GitLab publication | `BLOCKED` | Authenticated publisher identity/path is unavailable. |
-| Private root provisioning | `NOT_DONE` | Candidate parent is safe; source/config/toolchain/bin/publisher/runtime layout is absent. |
+| Private root provisioning | `NOT_DONE` | The birth organ is source-ready, but eligible private seed/config/toolchain inputs and the live root are absent. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
 | Real systemd current-boot adoption | `NOT_DONE` | Current HOME `UnitPath` and drop-ins fail closed; fake-manager tests are not live proof. |
 | Independent current-installed verifier | `FAIL_CLOSED` | Unsafe owner boundary, absent receipt root, and three deleted executables block admission. |
 | R9 deployed/live-admitted | `NO` | No deployed/PASS claim is permitted. |
 
-Until publication, provisioning, complete-writer quiescence, R9-M1 migration
+Until publication, R9-M2 provisioning, complete-writer quiescence, R9-M1 migration
 and receipt verification, current-boot binding, explicit adoption, isolated
 exercise, installed verification, and fresh-MCP admission are all bound to one
 authoritative candidate and green, the truthful status is: trusted-root
-framework and R9-M1 source-ready locally; production remains on hold; current
+framework, R9-M1, and R9-M2 source-ready locally; production remains on hold; current
 installation failed closed; R9 not published or deployed.

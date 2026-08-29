@@ -3,7 +3,8 @@
 Status: R9 durable-v1 plus trusted deployment-root framework source-ready;
 R9-M1 trusted runtime-state migration source-ready locally at
 `eda927d1837b50c6680ce3ea337456a79e52a965`; not published or deployed;
-production remains `HOLD`
+R9-M2 trusted-root provisioning `SOURCE_READY` locally at
+`55954e2458eefae261ae761e3035b88536fcc782`; production remains `HOLD`
 Scope: body-bound local Agent workloads on Linux cgroup v2
 Depends on: `INTEROCEPTION_CGROUP_WORKLOAD_CUSTODY_2026_08_27.md`
 
@@ -438,3 +439,42 @@ drop-in/unit archival plus current-boot binding, ordered adoption, isolated
 restart harness and installed verifier, then fresh MCP admission. See
 `INTEROCEPTION_TRUSTED_RUNTIME_STATE_MIGRATION_2026_08_28.md` for the exact
 contract.
+
+## 2026-08-28 R9-M2 trusted-root provisioning
+
+R9-M2 closes the bootstrap gap before the trusted wrapper and publisher. The
+previous framework correctly required a pre-existing private root, private
+source, Git key/known-hosts, toolchain, configuration, credentials, and shared
+lock, but provided no bounded creator for those objects. The new provisioner
+uses a default read-only plan, an exact candidate plus complete-input snapshot
+confirmation, one private stage, and one atomic absent-root activation. It
+never repairs, merges, overwrites, or deletes an existing root.
+
+The bootstrap seed must be a standalone, private, completely clean repository
+whose `HEAD` and `gitlab/master` equal the declared published candidate. Its
+local Git config is exact; grafts, attributes overrides, alternates, gitlinks,
+untracked content, unsafe inode types, and replaceable ancestors block. The
+toolchain and all four explicit input files are freshly hashed; the private key
+and credentials are never printed. Source/toolchain limits and a fixed 2 GiB
+post-copy reserve are part of the confirmation.
+
+The provisioned receipt binds the new root inode, canonical manifest/plan,
+initial candidate/tree and manifests, installed key/known-hosts/toolchain/
+machine/credential facts, and publisher lock inode. Current source may advance
+only to a clean exact `HEAD == gitlab/master` descendant whose critical
+orchestrators match the Git candidate; fixed bootstrap inputs remain bound.
+This receipt proves custody only. It does not replace the publisher's later
+authenticated GitLab fetch or grant migration/adoption authority.
+
+Wrapper and publisher now verify provisioning before mutation and again after
+owning the same pre-provisioned mutex. The publisher additionally refuses a
+fetched master different from the verified source candidate, so a remote race
+cannot silently select a different body. R9-M2 v1 does not provide in-place
+key, credential, machine-config, or toolchain rotation; that requires a future
+governed reseal/update contract or a fresh root.
+
+Current production remains `HOLD`: GitLab authentication is unavailable; the
+development worktree ancestor and HOME toolchain boundary are mode `0777` and
+therefore ineligible; no private inputs or target root were created; and the
+R9-M1 Yama/quiescence gate remains unchanged. See
+`INTEROCEPTION_TRUSTED_DEPLOYMENT_ROOT_PROVISIONING_2026_08_28.md`.
