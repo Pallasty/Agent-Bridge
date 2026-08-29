@@ -890,6 +890,12 @@ def clone_source(prepared: Prepared, target: str, home: str) -> tuple[str, str, 
         path = os.path.join(target, relative)
         require_file(path, f"trusted source {relative}")
         os.chmod(path, required_mode)
+    if git_run(
+        target,
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        home=home,
+    ).strip():
+        fail("copied source repository is not clean after custody normalization")
     head = git_value(target, ("rev-parse", "--verify", "HEAD^{commit}"), home)
     remote = git_value(
         target,

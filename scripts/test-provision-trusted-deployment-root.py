@@ -326,12 +326,48 @@ class ProvisioningTests(unittest.TestCase):
         self.assertEqual(verified.returncode, 0, verified.stderr)
         packet = json.loads(verified.stdout)
         self.assertEqual(packet["status"], "verified_provisioning_custody")
+        self.assertEqual(
+            run_git(self.fixture.root / "source/agent-bridge", "status", "--porcelain=v1"),
+            "",
+        )
         self.assertNotIn("fixture-private-data", provisioned.__repr__())
         self.assertNotIn("fixture-private-data", verified.stdout)
         self.assertEqual(
             stat.S_IMODE((self.fixture.root / "publisher-state/deploy/publisher.kernel.lock").stat().st_mode),
             0o600,
         )
+
+    def test_custody_normalization_may_not_dirty_source_before_activation(self) -> None:
+        migration = self.fixture.seed / "scripts/migrate-trusted-runtime-state.py"
+        run_git(
+            self.fixture.seed,
+            "update-index",
+            "--chmod=-x",
+            "scripts/migrate-trusted-runtime-state.py",
+        )
+        os.chmod(migration, 0o600)
+        run_git(self.fixture.seed, "commit", "-q", "-m", "non-executable orchestrator")
+        self.fixture.candidate = run_git(self.fixture.seed, "rev-parse", "HEAD")
+        run_git(
+            self.fixture.seed,
+            "update-ref",
+            "refs/remotes/gitlab/master",
+            self.fixture.candidate,
+        )
+        self.assertEqual(run_git(self.fixture.seed, "status", "--porcelain=v1"), "")
+        self.fixture.write_manifest()
+
+        plan = self.fixture.plan()
+        rejected = self.fixture.run(
+            "provision", confirm=str(plan["confirmation"])
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn(
+            "copied source repository is not clean after custody normalization",
+            rejected.stderr,
+        )
+        self.assertFalse(self.fixture.root.exists())
+        self.assertEqual(list(self.base.glob(".trusted-root.provision-stage.*")), [])
 
     def test_agent_authentication_provisions_no_private_key_and_verifies_offline(self) -> None:
         process, socket_path, public_key, fingerprint = start_test_agent(self.base)
