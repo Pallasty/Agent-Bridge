@@ -3378,9 +3378,10 @@ else
         die "configured deploy remote does not exist: $DEPLOY_REMOTE"
     say ">> fetching $DEPLOY_REMOTE/master ..."
     if [ "$LEASE_TEST_MODE" = 1 ]; then
-        deploy_git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+        deploy_git -C "$REPO" fetch --no-auto-maintenance \
+            "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
     else
-        deploy_git -C "$REPO" fetch "$AUTHORITATIVE_REMOTE_URL" \
+        deploy_git -C "$REPO" fetch --no-auto-maintenance "$AUTHORITATIVE_REMOTE_URL" \
             "+refs/heads/master:$MASTER_REF" --quiet
     fi
     MASTER_SHA="$(deploy_git -C "$REPO" rev-parse --verify "$MASTER_REF")"
@@ -3617,9 +3618,10 @@ if [ -z "$USE_BINARY" ]; then
     say ">> rechecking $DEPLOY_REMOTE/master after build ..."
     [ "$LEASE_TEST_MODE" = 1 ] || validate_trusted_git_configuration
     if [ "$LEASE_TEST_MODE" = 1 ]; then
-        deploy_git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+        deploy_git -C "$REPO" fetch --no-auto-maintenance \
+            "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
     else
-        deploy_git -C "$REPO" fetch "$AUTHORITATIVE_REMOTE_URL" \
+        deploy_git -C "$REPO" fetch --no-auto-maintenance "$AUTHORITATIVE_REMOTE_URL" \
             "+refs/heads/master:$MASTER_REF" --quiet
     fi
     CURRENT_MASTER_SHA="$(deploy_git -C "$REPO" rev-parse --verify "$MASTER_REF")"

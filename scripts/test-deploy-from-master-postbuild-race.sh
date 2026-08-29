@@ -40,6 +40,7 @@ ISOLATED_HOME="$TEST_ROOT/home"
 INSTALL_DIR="$TEST_ROOT/install"
 STATE_DIR="$TEST_ROOT/state"
 TARGET_DIR="$TEST_ROOT/target"
+GIT_TRACE_FILE="$TEST_ROOT/deploy-git.trace"
 if [ -x /usr/bin/true ]; then
     NATIVE_TRUE=/usr/bin/true
 else
@@ -116,6 +117,7 @@ output="$({
     AB_DEPLOY_RACE_TEST_ROOT="$TEST_ROOT" \
     AB_DEPLOY_RACE_TEST_REMOTE="$REMOTE" \
     AB_DEPLOY_RACE_TEST_CC="$(command -v cc)" \
+    GIT_TRACE="$GIT_TRACE_FILE" \
     "$REPO/scripts/deploy_from_master.sh" --yes
 } 2>&1)"
 status=$?
@@ -135,5 +137,11 @@ backup="$(find "$INSTALL_DIR" -maxdepth 1 -name 'agent-bridge.real.bak-deploy-*'
 
 staging="$(find "$TEST_ROOT" -maxdepth 1 -name '.ab-deploy-build.*' -print -quit)"
 [ -z "$staging" ] || fail "staging worktree leaked: $staging"
+
+fetch_count="$(grep -c 'built-in: git fetch ' "$GIT_TRACE_FILE" || true)"
+[ "$fetch_count" -eq 2 ] || fail "expected two traced deploy fetches, observed $fetch_count"
+if grep 'built-in: git fetch ' "$GIT_TRACE_FILE" | grep -qv -- '--no-auto-maintenance'; then
+    fail "a deploy fetch can still mutate the trusted source through automatic maintenance"
+fi
 
 printf '%s\n' "postbuild-master-race-gate-ok"
