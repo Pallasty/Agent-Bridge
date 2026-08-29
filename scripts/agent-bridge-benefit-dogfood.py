@@ -11,7 +11,6 @@ import math
 import os
 import re
 import stat
-import sys
 import time
 import uuid
 from pathlib import Path
@@ -99,18 +98,31 @@ class DogfoodError(Exception):
         self.code = code
 
 
-def default_log_path() -> Path:
-    explicit = os.environ.get("AGENT_BRIDGE_STATE_DIR")
-    if explicit:
-        root = Path(explicit).expanduser()
-    elif sys.platform == "darwin":
-        root = Path.home() / "Library/Application Support/agent-bridge"
-    else:
-        root = (
-            Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
-            / "agent-bridge"
-        )
-    return root / "dogfood" / "benefit-v1.jsonl"
+def resolve_log_path(explicit: Path | None) -> Path:
+    """Resolve one deliberate ledger path without guessing a platform fallback."""
+
+    try:
+        if explicit is not None:
+            path = explicit.expanduser()
+        else:
+            state_dir = os.environ.get("AGENT_BRIDGE_STATE_DIR")
+            if not state_dir:
+                raise DogfoodError("LOG_PATH_REQUIRED")
+            state_root = Path(state_dir).expanduser()
+            if not state_root.is_absolute():
+                raise DogfoodError("LOG_PATH_NOT_ABSOLUTE")
+            if state_root.anchor != os.sep or ".." in state_root.parts:
+                raise DogfoodError("LOG_PATH_NOT_NORMALIZED")
+            if state_root.resolve(strict=False) == Path(os.sep):
+                raise DogfoodError("LOG_PATH_TOO_BROAD")
+            path = state_root / "dogfood" / "benefit-v1.jsonl"
+    except (OSError, RuntimeError) as exc:
+        raise DogfoodError("INVALID_LOG_PATH") from exc
+    if not path.is_absolute():
+        raise DogfoodError("LOG_PATH_NOT_ABSOLUTE")
+    if path.anchor != os.sep or ".." in path.parts:
+        raise DogfoodError("LOG_PATH_NOT_NORMALIZED")
+    return path
 
 
 def _exact_keys(value: Any, expected: set[str], code: str) -> dict[str, Any]:
@@ -316,10 +328,10 @@ def _decode_rows(raw: bytes) -> list[dict[str, Any]]:
 
 
 def read_ledger(path: Path) -> tuple[list[dict[str, Any]], bytes]:
-    if not os.path.lexists(path):
-        return [], b""
     try:
         fd = os.open(path, _open_flags(write=False))
+    except FileNotFoundError:
+        return [], b""
     except OSError as exc:
         raise DogfoodError("LEDGER_OPEN_FAILED") from exc
     try:
@@ -821,7 +833,14 @@ def _add_attestation(parser: argparse.ArgumentParser) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--log", type=Path, default=default_log_path())
+    parser.add_argument(
+        "--log",
+        type=Path,
+        help=(
+            "absolute owner-local ledger path; when omitted, derive it only from "
+            "AGENT_BRIDGE_STATE_DIR"
+        ),
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     continuity = commands.add_parser("record-continuity")
@@ -874,6 +893,7 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _parser().parse_args()
     try:
+        log_path = resolve_log_path(args.log)
         if args.command == "record-continuity":
             row = _new_event(
                 "continuity",
@@ -885,7 +905,7 @@ def main() -> int:
                     "recovery_seconds": args.recovery_seconds,
                 },
             )
-            _emit(record_event(args.log, row))
+            _emit(record_event(log_path, row))
             return 0
         if args.command == "record-avatar":
             receipt, digest = _read_receipt(args.receipt)
@@ -895,7 +915,7 @@ def main() -> int:
                 owner_rating=args.owner_rating,
                 physical_display_confirmed=args.physical_display_confirmed,
             )
-            _emit(record_event(args.log, row))
+            _emit(record_event(log_path, row))
             return 0
         if args.command == "record-embodied":
             row = _new_event(
@@ -916,7 +936,7 @@ def main() -> int:
                     "cleanup_verified": args.cleanup_verified,
                 },
             )
-            _emit(record_event(args.log, row))
+            _emit(record_event(log_path, row))
             return 0
         if args.command == "record-voice":
             receipt, digest = _read_receipt(args.receipt)
@@ -926,10 +946,10 @@ def main() -> int:
                 worker_state=args.worker_state,
                 audible_confirmed=args.audible_confirmed,
             )
-            _emit(record_event(args.log, row))
+            _emit(record_event(log_path, row))
             return 0
 
-        rows, ledger_bytes = read_ledger(args.log)
+        rows, ledger_bytes = read_ledger(log_path)
         if args.command == "report":
             _emit(build_report(rows))
             return 0
