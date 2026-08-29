@@ -15,6 +15,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).with_name("provision-trusted-deployment-root.py").resolve()
+PUBLICATION_SCRIPT = Path(__file__).with_name("publish-and-acquire-trusted-seed.py").resolve()
 PYTHON = "/usr/bin/python3"
 REMOTE = "git@gitlab.com:pallasting/agent-bridge.git"
 MIN_FREE = 2 * 1024 * 1024 * 1024
@@ -79,6 +80,7 @@ class Fixture:
     def _write_seed(self) -> None:
         paths = {
             "scripts/provision-trusted-deployment-root.py": SCRIPT.read_bytes(),
+            "scripts/publish-and-acquire-trusted-seed.py": PUBLICATION_SCRIPT.read_bytes(),
             "scripts/deploy_from_master.sh": b"#!/bin/sh\nexit 0\n",
             "scripts/migrate-trusted-runtime-state.py": b"#!/usr/bin/python3\n",
             "scripts/systemd/install-trusted-daemon-root.sh": b"#!/bin/sh\nexit 0\n",
@@ -93,6 +95,7 @@ class Fixture:
             target.write_bytes(content)
         for relative in (
             "scripts/provision-trusted-deployment-root.py",
+            "scripts/publish-and-acquire-trusted-seed.py",
             "scripts/deploy_from_master.sh",
             "scripts/migrate-trusted-runtime-state.py",
             "scripts/systemd/install-trusted-daemon-root.sh",

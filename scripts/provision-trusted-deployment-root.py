@@ -48,6 +48,7 @@ MIN_FREE_AFTER_FLOOR = 2 * 1024 * 1024 * 1024
 
 ORCHESTRATOR_MODES = {
     "scripts/deploy_from_master.sh": 0o700,
+    "scripts/publish-and-acquire-trusted-seed.py": 0o700,
     "scripts/provision-trusted-deployment-root.py": 0o700,
     "scripts/migrate-trusted-runtime-state.py": 0o700,
     "scripts/systemd/install-trusted-daemon-root.sh": 0o700,
