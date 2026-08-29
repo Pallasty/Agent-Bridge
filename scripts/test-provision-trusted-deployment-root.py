@@ -4,17 +4,26 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("provision-trusted-deployment-root.py").resolve()
+SPEC = importlib.util.spec_from_file_location("trusted_root_provisioning", SCRIPT)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
 PUBLICATION_SCRIPT = Path(__file__).with_name("publish-and-acquire-trusted-seed.py").resolve()
 CREDENTIAL_SCRIPT = Path(__file__).with_name("prepare-gitlab-deploy-credential.py").resolve()
 PYTHON = "/usr/bin/python3"
@@ -65,6 +74,50 @@ def private_tree(path: Path) -> None:
             os.chmod(target, 0o700 if mode & 0o100 else 0o600)
 
 
+def start_test_agent(base: Path) -> tuple[subprocess.Popen[bytes], Path, Path, str]:
+    private_key = base / "agent-identity"
+    subprocess.run(
+        ["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private_key)],
+        check=True,
+    )
+    public_key = Path(str(private_key) + ".pub")
+    os.chmod(public_key, 0o600)
+    socket_path = base / "agent.sock"
+    process = subprocess.Popen(
+        ["/usr/bin/ssh-agent", "-D", "-a", str(socket_path)],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(base), "LANG": "C", "LC_ALL": "C"},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(200):
+        if socket_path.exists():
+            break
+        if process.poll() is not None:
+            raise AssertionError("test ssh-agent exited before creating its socket")
+        time.sleep(0.01)
+    else:
+        process.terminate()
+        raise AssertionError("test ssh-agent did not create its socket")
+    os.chmod(socket_path, 0o600)
+    env = {
+        "PATH": "/usr/bin:/bin", "HOME": str(base), "LANG": "C", "LC_ALL": "C",
+        "SSH_AUTH_SOCK": str(socket_path),
+    }
+    subprocess.run(
+        ["/usr/bin/ssh-add", str(private_key)], env=env,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        check=True,
+    )
+    fingerprint = subprocess.run(
+        ["/usr/bin/ssh-keygen", "-E", "sha256", "-lf", str(public_key)],
+        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, check=True,
+    ).stdout.split()[1]
+    return process, socket_path, public_key, fingerprint
+
+
 class Fixture:
     def __init__(self, base: Path) -> None:
         self.base = base
@@ -88,7 +141,7 @@ class Fixture:
             "scripts/systemd/install-trusted-daemon-root.sh": b"#!/bin/sh\nexit 0\n",
             "scripts/wrapper/install.sh": b"#!/bin/sh\nexit 0\n",
             "scripts/wrapper/agent-bridge-wrapper.sh": b"#!/bin/sh\nexit 0\n",
-            "scripts/wrapper/credentials.example": b"# Agent-Bridge Primary\n",
+            "scripts/wrapper/creds.example": b"# Agent-Bridge Primary\n",
             "README.md": b"fixture\n",
         }
         for relative, content in paths.items():
@@ -106,7 +159,7 @@ class Fixture:
             os.chmod(self.seed / relative, 0o700)
         os.chmod(self.seed / "scripts/wrapper/install.sh", 0o600)
         os.chmod(self.seed / "scripts/wrapper/agent-bridge-wrapper.sh", 0o600)
-        os.chmod(self.seed / "scripts/wrapper/credentials.example", 0o600)
+        os.chmod(self.seed / "scripts/wrapper/creds.example", 0o600)
         subprocess.run(
             ["/usr/bin/git", "init", "-q", "-b", "master", str(self.seed)],
             check=True,
@@ -280,6 +333,72 @@ class ProvisioningTests(unittest.TestCase):
             0o600,
         )
 
+    def test_agent_authentication_provisions_no_private_key_and_verifies_offline(self) -> None:
+        process, socket_path, public_key, fingerprint = start_test_agent(self.base)
+        try:
+            payload = self.fixture.payload()
+            inputs = payload["inputs"]
+            assert isinstance(inputs, dict)
+            inputs.pop("gitlab_deploy_key")
+            inputs["gitlab_authentication"] = {
+                "mode": "agent_socket",
+                "socket_path": str(socket_path),
+                "public_key": {"path": str(public_key), "sha256": sha256(public_key)},
+                "public_key_fingerprint": fingerprint,
+            }
+            self.fixture.write_manifest(payload)
+            provisioned = self.fixture.provision()
+            self.assertEqual(provisioned["status"], "provisioned_bootstrap")
+            git_config = self.fixture.root / "config/git"
+            self.assertFalse((git_config / "gitlab_deploy_key").exists())
+            self.assertTrue((git_config / "gitlab_agent_key.pub").is_file())
+            descriptor = json.loads((git_config / "authentication.json").read_text())
+            self.assertEqual(descriptor["mode"], "agent_socket")
+            self.assertEqual(descriptor["public_key_fingerprint"], fingerprint)
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+        verified = self.fixture.run("verify", copied=True)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        descriptor_path = self.fixture.root / "config/git/authentication.json"
+        descriptor_path.write_bytes(
+            descriptor_path.read_bytes().replace(b"agent_socket", b"tampered", 1)
+        )
+        os.chmod(descriptor_path, 0o600)
+        rejected = self.fixture.run("verify", copied=True)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("installed gitlab_authentication drifted", rejected.stderr)
+
+    def test_agent_authentication_requires_the_exact_loaded_identity(self) -> None:
+        process, socket_path, public_key, fingerprint = start_test_agent(self.base)
+        try:
+            subprocess.run(
+                ["/usr/bin/ssh-add", "-D"],
+                env={
+                    "PATH": "/usr/bin:/bin", "HOME": str(self.base), "LANG": "C", "LC_ALL": "C",
+                    "SSH_AUTH_SOCK": str(socket_path),
+                },
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                check=True,
+            )
+            payload = self.fixture.payload()
+            inputs = payload["inputs"]
+            assert isinstance(inputs, dict)
+            inputs.pop("gitlab_deploy_key")
+            inputs["gitlab_authentication"] = {
+                "mode": "agent_socket",
+                "socket_path": str(socket_path),
+                "public_key": {"path": str(public_key), "sha256": sha256(public_key)},
+                "public_key_fingerprint": fingerprint,
+            }
+            self.fixture.write_manifest(payload)
+            rejected = self.fixture.run("plan")
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("identity is absent", rejected.stderr)
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+
     def test_clean_descendant_source_advance_remains_admissible(self) -> None:
         self.fixture.provision()
         source = self.fixture.root / "source/agent-bridge"
@@ -449,6 +568,19 @@ class ProvisioningTests(unittest.TestCase):
         self.assertNotEqual(capacity.returncode, 0)
         self.assertIn("insufficient capacity", capacity.stderr)
 
+    def test_tree_file_hashing_uses_the_explicit_tree_byte_bound(self) -> None:
+        tree = self.base / "large-tree-contract"
+        tree.mkdir(mode=0o700)
+        item = tree / "model.onnx"
+        item.write_bytes(b"fixture")
+        os.chmod(item, 0o600)
+        admitted = MODULE.MAX_FILE_BYTES + 512 * 1024 * 1024
+        with mock.patch.object(
+            MODULE, "sha256_file", return_value=("0" * 64, len(b"fixture"))
+        ) as digest:
+            MODULE.tree_manifest(tree, max_files=1, max_bytes=admitted)
+        digest.assert_called_once_with(str(item), maximum=admitted)
+
     def test_existing_deterministic_stage_is_never_cleaned_or_reused(self) -> None:
         plan = self.fixture.plan()
         stage = self.base / f".trusted-root.provision-stage.{str(plan['plan_digest'])[:24]}"
@@ -461,6 +593,21 @@ class ProvisioningTests(unittest.TestCase):
         self.assertIn("stage already exists", rejected.stderr)
         self.assertEqual(marker.read_text(), "retain\n")
         self.assertFalse(self.fixture.root.exists())
+
+    def test_atomic_activation_never_replaces_an_appearing_root(self) -> None:
+        source = self.base / "activation-stage"
+        destination = self.base / "appearing-root"
+        source.mkdir(mode=0o700)
+        destination.mkdir(mode=0o700)
+        marker = destination / "owner-marker"
+        marker.write_text("retain\n")
+        os.chmod(marker, 0o600)
+        with self.assertRaisesRegex(
+            MODULE.ProvisionError, "deployment root appeared during atomic activation"
+        ):
+            MODULE.rename_noreplace(str(source), str(destination))
+        self.assertTrue(source.is_dir())
+        self.assertEqual(marker.read_text(), "retain\n")
 
     def test_verify_rejects_receipt_input_source_toolchain_and_lock_tampering(self) -> None:
         cases = ("receipt", "input", "source", "toolchain", "lock")

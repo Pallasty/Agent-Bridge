@@ -639,6 +639,48 @@ verify_owned_regular_mode() {
     [ "$mode" = "$expected_mode" ] || die "$label mode must be $expected_mode: $path (mode $mode)"
 }
 
+verify_owned_socket_mode() {
+    local path="$1" expected_mode="$2" label="$3" euid owner mode
+    [ -S "$path" ] && [ ! -L "$path" ] || die "$label is not a physical socket: $path"
+    euid="$(id -u)"
+    owner="$(file_owner_uid "$path")" || die "cannot inspect $label owner: $path"
+    [ "$owner" = "$euid" ] || die "$label must be owned by euid $euid: $path"
+    mode="$(file_mode "$path")" || die "cannot inspect $label mode: $path"
+    [ "$mode" = "$expected_mode" ] || die "$label mode must be $expected_mode: $path (mode $mode)"
+}
+
+validate_trusted_agent_socket_path() {
+    local path="$1" label="$2" euid owner mode numeric ancestor
+    case "$path" in
+        /*) ;;
+        *) die "$label path must be absolute: $path" ;;
+    esac
+    case "$path" in
+        *[!A-Za-z0-9._/-]*|*//*|*/./*|*/../*|*/.|*/..|*/)
+            die "$label path is not canonical and shell-safe: $path"
+            ;;
+    esac
+    ! path_has_symlink_component "$path" || die "$label path must not traverse a symlink: $path"
+    verify_owned_socket_mode "$path" 600 "$label"
+    euid="$(id -u)"
+    ancestor="$(dirname "$path")"
+    while :; do
+        [ -d "$ancestor" ] && [ ! -L "$ancestor" ] ||
+            die "$label ancestor is not a physical directory: $ancestor"
+        owner="$(file_owner_uid "$ancestor")" || die "cannot inspect $label ancestor owner: $ancestor"
+        [ "$owner" = "$euid" ] || [ "$owner" = 0 ] ||
+            die "$label ancestor has an untrusted owner: $ancestor"
+        mode="$(file_mode "$ancestor")" || die "cannot inspect $label ancestor mode: $ancestor"
+        numeric="$(mode_value "$mode")" || die "cannot parse $label ancestor mode: $ancestor"
+        if [ $((numeric & 0022)) -ne 0 ]; then
+            [ "$owner" = 0 ] && [ $((numeric & 01000)) -ne 0 ] ||
+                die "$label ancestor is replaceable: $ancestor (mode $mode)"
+        fi
+        [ "$ancestor" = / ] && break
+        ancestor="$(dirname "$ancestor")"
+    done
+}
+
 ensure_physical_directory_path() {
     local path="$1" rest part current=""
     case "$path" in /*) rest="${path#/}" ;; *) die "physical directory path must be absolute: $path" ;; esac
@@ -792,14 +834,80 @@ print(value["candidate_commit"])
 }
 
 validate_trusted_git_configuration() {
+    local parsed observed_fingerprint inventory
     TRUSTED_GIT_CONFIG_DIR="$DEPLOY_ROOT/config/git"
     TRUSTED_GIT_KEY="$TRUSTED_GIT_CONFIG_DIR/gitlab_deploy_key"
+    TRUSTED_GIT_AUTH="$TRUSTED_GIT_CONFIG_DIR/authentication.json"
+    TRUSTED_GIT_AGENT_PUBLIC_KEY="$TRUSTED_GIT_CONFIG_DIR/gitlab_agent_key.pub"
     TRUSTED_GIT_KNOWN_HOSTS="$TRUSTED_GIT_CONFIG_DIR/known_hosts"
     verify_owned_directory_mode "$DEPLOY_ROOT/config" 700 "trusted configuration root"
     verify_owned_directory_mode "$TRUSTED_GIT_CONFIG_DIR" 700 "trusted Git configuration"
-    verify_owned_regular_mode "$TRUSTED_GIT_KEY" 600 "trusted GitLab deploy key"
     verify_owned_regular_mode "$TRUSTED_GIT_KNOWN_HOSTS" 600 "trusted GitLab known-hosts file"
-    TRUSTED_GIT_SSH_COMMAND="/usr/bin/ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=$TRUSTED_GIT_KEY -o UserKnownHostsFile=$TRUSTED_GIT_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+    if [ -e "$TRUSTED_GIT_KEY" ] || [ -L "$TRUSTED_GIT_KEY" ]; then
+        [ ! -e "$TRUSTED_GIT_AUTH" ] && [ ! -L "$TRUSTED_GIT_AUTH" ] &&
+            [ ! -e "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] && [ ! -L "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] ||
+            die "trusted Git configuration mixes file and agent authentication"
+        verify_owned_regular_mode "$TRUSTED_GIT_KEY" 600 "trusted GitLab deploy key"
+        TRUSTED_GIT_AUTH_MODE=file
+        TRUSTED_GIT_SSH_COMMAND="/usr/bin/ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=$TRUSTED_GIT_KEY -o UserKnownHostsFile=$TRUSTED_GIT_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+        return
+    fi
+    [ -f "$TRUSTED_GIT_AUTH" ] && [ ! -L "$TRUSTED_GIT_AUTH" ] &&
+        [ -f "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] && [ ! -L "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] ||
+        die "trusted Git configuration has no exact authentication contract"
+    verify_owned_regular_mode "$TRUSTED_GIT_AUTH" 600 "trusted GitLab authentication descriptor"
+    verify_owned_regular_mode "$TRUSTED_GIT_AGENT_PUBLIC_KEY" 600 "trusted GitLab agent public key"
+    parsed="$(/usr/bin/python3 -I -B -c '
+import json, os, re, sys
+def pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError
+        result[key] = value
+    return result
+try:
+    with open(sys.argv[1], "rb") as handle:
+        raw = handle.read(65537)
+    if not raw or len(raw) > 65536:
+        raise ValueError
+    value = json.loads(raw.decode("ascii"), object_pairs_hook=pairs)
+except Exception:
+    raise SystemExit(1)
+if set(value) != {"schema", "mode", "socket_path", "public_key_fingerprint", "public_key_path"}:
+    raise SystemExit(1)
+socket_path = value["socket_path"]
+fingerprint = value["public_key_fingerprint"]
+if value["schema"] != "agent_bridge.gitlab_agent_authentication.v1" or value["mode"] != "agent_socket":
+    raise SystemExit(1)
+if value["public_key_path"] != "gitlab_agent_key.pub":
+    raise SystemExit(1)
+if not isinstance(socket_path, str) or os.path.normpath(socket_path) != socket_path:
+    raise SystemExit(1)
+if not re.fullmatch(r"/[A-Za-z0-9._/-]+", socket_path):
+    raise SystemExit(1)
+if not isinstance(fingerprint, str) or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint):
+    raise SystemExit(1)
+print(socket_path + "\t" + fingerprint)
+' "$TRUSTED_GIT_AUTH")" || die "trusted GitLab authentication descriptor is invalid"
+    IFS=$'\t' read -r TRUSTED_GIT_AGENT_SOCKET TRUSTED_GIT_AGENT_FINGERPRINT <<< "$parsed"
+    [ -n "$TRUSTED_GIT_AGENT_SOCKET" ] && [ -n "$TRUSTED_GIT_AGENT_FINGERPRINT" ] ||
+        die "trusted GitLab authentication descriptor is incomplete"
+    validate_trusted_agent_socket_path "$TRUSTED_GIT_AGENT_SOCKET" "trusted GitLab agent socket"
+    observed_fingerprint="$(/usr/bin/env -i PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+        /usr/bin/ssh-keygen -E sha256 -lf "$TRUSTED_GIT_AGENT_PUBLIC_KEY" 2>/dev/null | \
+        /usr/bin/awk 'NR == 1 { print $2 }')" ||
+        die "cannot inspect trusted GitLab agent public key"
+    [ "$observed_fingerprint" = "$TRUSTED_GIT_AGENT_FINGERPRINT" ] ||
+        die "trusted GitLab agent public-key fingerprint drifted"
+    inventory="$(/usr/bin/env -i PATH=/usr/bin:/bin HOME="$DEPLOY_ROOT" LANG=C LC_ALL=C \
+        SSH_AUTH_SOCK="$TRUSTED_GIT_AGENT_SOCKET" /usr/bin/ssh-add -l 2>/dev/null)" ||
+        die "trusted GitLab agent inventory is unavailable"
+    printf '%s\n' "$inventory" | /usr/bin/awk -v expected="$TRUSTED_GIT_AGENT_FINGERPRINT" \
+        '$2 == expected { found = 1 } END { exit(found ? 0 : 1) }' ||
+        die "required trusted GitLab agent identity is absent"
+    TRUSTED_GIT_AUTH_MODE=agent_socket
+    TRUSTED_GIT_SSH_COMMAND="/usr/bin/ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile=$TRUSTED_GIT_AGENT_PUBLIC_KEY -o IdentityAgent=$TRUSTED_GIT_AGENT_SOCKET -o UserKnownHostsFile=$TRUSTED_GIT_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
 }
 
 deploy_git() {
@@ -847,8 +955,8 @@ validate_trusted_build_toolchain() {
     TRUSTED_RUSTC="$TRUSTED_TOOLCHAIN_BIN/rustc"
     verify_owned_directory_mode "$TRUSTED_TOOLCHAIN_ROOT" 700 "trusted Rust toolchain"
     verify_owned_directory_mode "$TRUSTED_TOOLCHAIN_BIN" 700 "trusted Rust toolchain bin directory"
-    verify_owned_regular_mode "$TRUSTED_CARGO" 755 "trusted Cargo executable"
-    verify_owned_regular_mode "$TRUSTED_RUSTC" 755 "trusted rustc executable"
+    verify_owned_regular_mode "$TRUSTED_CARGO" 700 "trusted Cargo executable"
+    verify_owned_regular_mode "$TRUSTED_RUSTC" 700 "trusted rustc executable"
     [ -x "$TRUSTED_CARGO" ] && [ -x "$TRUSTED_RUSTC" ] ||
         die "trusted Rust toolchain executables must be executable"
     sysroot="$(/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="$DEPLOY_ROOT" \
@@ -3265,6 +3373,7 @@ if [ -n "$USE_BINARY" ]; then
     say "WARNING: --use-binary skips the build-from-master guarantee."
     say "         Only the regression gate + backup protect this deploy."
 else
+    [ "$LEASE_TEST_MODE" = 1 ] || validate_trusted_git_configuration
     deploy_git -C "$REPO" remote get-url "$DEPLOY_REMOTE" >/dev/null 2>&1 ||
         die "configured deploy remote does not exist: $DEPLOY_REMOTE"
     say ">> fetching $DEPLOY_REMOTE/master ..."
@@ -3506,6 +3615,7 @@ is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach
 # build start. Re-check before the first live-state mutation (backup/copy).
 if [ -z "$USE_BINARY" ]; then
     say ">> rechecking $DEPLOY_REMOTE/master after build ..."
+    [ "$LEASE_TEST_MODE" = 1 ] || validate_trusted_git_configuration
     if [ "$LEASE_TEST_MODE" = 1 ]; then
         deploy_git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
     else

@@ -15,6 +15,7 @@ state is read or changed by this tool.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import errno
 import hashlib
 import json
@@ -33,6 +34,7 @@ MANIFEST_SCHEMA = "agent_bridge.trusted_deployment_root_provisioning_manifest.v1
 RECEIPT_SCHEMA = "agent_bridge.trusted_deployment_root_provisioning_receipt.v1"
 RESULT_SCHEMA = "agent_bridge.trusted_deployment_root_provisioning_result.v1"
 REMOTE_URL = "git@gitlab.com:pallasting/agent-bridge.git"
+AGENT_AUTH_SCHEMA = "agent_bridge.gitlab_agent_authentication.v1"
 PLAN_DOMAIN = b"agent-bridge/trusted-root-provisioning/plan/v1\0"
 TREE_DOMAIN = b"agent-bridge/trusted-root-provisioning/tree/v1\0"
 RECEIPT_DOMAIN = b"agent-bridge/trusted-root-provisioning/receipt/v1\0"
@@ -40,6 +42,8 @@ RECEIPT_DOMAIN = b"agent-bridge/trusted-root-provisioning/receipt/v1\0"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ROOT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+SAFE_AGENT_PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
+SSH_SHA256 = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 HARD_MAX_FILES = 1_000_000
@@ -55,7 +59,7 @@ ORCHESTRATOR_MODES = {
     "scripts/systemd/install-trusted-daemon-root.sh": 0o700,
     "scripts/wrapper/install.sh": 0o600,
     "scripts/wrapper/agent-bridge-wrapper.sh": 0o600,
-    "scripts/wrapper/credentials.example": 0o600,
+    "scripts/wrapper/creds.example": 0o600,
 }
 
 
@@ -444,7 +448,7 @@ def tree_manifest(
             continue
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
             fail("tree contains a special or multiply linked file")
-        digest, size = sha256_file(entry.path)
+        digest, size = sha256_file(entry.path, maximum=max_bytes)
         files += 1
         total += size
         if files > max_files or total > max_bytes:
@@ -502,6 +506,99 @@ def validate_private_key(path: str) -> None:
         fail("GitLab key input is not an OpenSSH private key")
 
 
+def bounded_ssh(
+    args: Sequence[str], *, socket_path: str | None = None,
+    allowed_returncodes: tuple[int, ...] = (0,),
+) -> bytes:
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LANG": "C", "LC_ALL": "C"}
+    if socket_path is not None:
+        env["SSH_AUTH_SOCK"] = socket_path
+    try:
+        result = subprocess.run(
+            list(args), env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("bounded SSH identity inspection failed")
+    if result.returncode not in allowed_returncodes:
+        fail("SSH identity inspection failed")
+    return result.stdout
+
+
+def public_key_fingerprint(path: str) -> str:
+    raw = bounded_ssh(("/usr/bin/ssh-keygen", "-E", "sha256", "-lf", path))
+    try:
+        value = raw.decode("ascii", "strict").split()[1]
+    except (UnicodeDecodeError, IndexError):
+        fail("GitLab agent public-key fingerprint is malformed")
+    if not SSH_SHA256.fullmatch(value):
+        fail("GitLab agent public-key fingerprint is invalid")
+    return value
+
+
+def agent_fingerprints(socket_path: str) -> set[str]:
+    raw = bounded_ssh(
+        ("/usr/bin/ssh-add", "-l"), socket_path=socket_path,
+        allowed_returncodes=(0, 1),
+    )
+    try:
+        result = {line.split()[1] for line in raw.decode("ascii", "strict").splitlines()}
+    except (UnicodeDecodeError, IndexError):
+        fail("SSH agent inventory is malformed")
+    return result
+
+
+def validate_agent_authentication(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not isinstance(value, dict):
+        fail("GitLab authentication input must be an object")
+    exact_keys(
+        value,
+        ("mode", "socket_path", "public_key", "public_key_fingerprint"),
+        "GitLab authentication input",
+    )
+    if value["mode"] != "agent_socket":
+        fail("GitLab authentication mode is invalid")
+    socket_path = canonical_absolute(value["socket_path"], "GitLab agent socket")
+    if not SAFE_AGENT_PATH.fullmatch(socket_path):
+        fail("GitLab agent socket path is not shell-safe")
+    validate_trusted_ancestors(socket_path, "GitLab agent socket")
+    socket_st = os.lstat(socket_path)
+    if (
+        not stat.S_ISSOCK(socket_st.st_mode)
+        or socket_st.st_uid != os.geteuid()
+        or mode_bits(socket_st) != 0o600
+    ):
+        fail("GitLab agent socket custody is invalid")
+    public_path, expected = input_spec(value["public_key"], "gitlab_agent_public_key")
+    _, digest, size = require_file(
+        public_path, "gitlab_agent_public_key", exact_mode=0o600,
+        maximum=256 * 1024,
+    )
+    if digest != expected:
+        fail("gitlab_agent_public_key input digest mismatch")
+    fingerprint = value["public_key_fingerprint"]
+    if not isinstance(fingerprint, str) or not SSH_SHA256.fullmatch(fingerprint):
+        fail("GitLab agent public-key fingerprint is invalid")
+    if public_key_fingerprint(public_path) != fingerprint:
+        fail("GitLab agent public key does not match its fingerprint")
+    if fingerprint not in agent_fingerprints(socket_path):
+        fail("required GitLab agent identity is absent")
+    authentication = {
+        "mode": "agent_socket",
+        "socket_path": socket_path,
+        "public_key_fingerprint": fingerprint,
+        "socket_identity": {
+            "dev": socket_st.st_dev,
+            "ino": socket_st.st_ino,
+            "mode": mode_bits(socket_st),
+            "uid": socket_st.st_uid,
+        },
+    }
+    public_fact = {"path": public_path, "sha256": digest, "size": size}
+    return authentication, public_fact
+
+
 @dataclass
 class Prepared:
     manifest_path: str
@@ -514,6 +611,7 @@ class Prepared:
     seed_manifest_digest: str
     seed_files: int
     seed_bytes: int
+    authentication: dict[str, Any]
     files: dict[str, dict[str, Any]]
     toolchain_manifest: list[dict[str, Any]]
     toolchain_digest: str
@@ -578,19 +676,32 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
     inputs = manifest["inputs"]
     if not isinstance(inputs, dict):
         fail("manifest inputs must be an object")
-    exact_keys(
-        inputs,
-        ("gitlab_deploy_key", "known_hosts", "toolchain", "machine_env", "credentials"),
-        "manifest inputs",
-    )
+    common_input_keys = {"known_hosts", "toolchain", "machine_env", "credentials"}
+    observed_input_keys = set(inputs)
+    file_auth_keys = common_input_keys | {"gitlab_deploy_key"}
+    agent_auth_keys = common_input_keys | {"gitlab_authentication"}
+    if observed_input_keys not in (file_auth_keys, agent_auth_keys):
+        fail("manifest inputs keys are not exact")
     files: dict[str, dict[str, Any]] = {}
-    for name in ("gitlab_deploy_key", "known_hosts", "machine_env", "credentials"):
+    for name in ("known_hosts", "machine_env", "credentials"):
         path, expected = input_spec(inputs[name], name)
         _, digest, size = require_file(path, name, exact_mode=0o600)
         if digest != expected:
             fail(f"{name} input digest mismatch")
         files[name] = {"path": path, "sha256": digest, "size": size}
-    validate_private_key(files["gitlab_deploy_key"]["path"])
+    if observed_input_keys == file_auth_keys:
+        path, expected = input_spec(inputs["gitlab_deploy_key"], "gitlab_deploy_key")
+        _, digest, size = require_file(path, "gitlab_deploy_key", exact_mode=0o600)
+        if digest != expected:
+            fail("gitlab_deploy_key input digest mismatch")
+        files["gitlab_deploy_key"] = {"path": path, "sha256": digest, "size": size}
+        validate_private_key(path)
+        authentication = {"mode": "file"}
+    else:
+        authentication, public_fact = validate_agent_authentication(
+            inputs["gitlab_authentication"]
+        )
+        files["gitlab_agent_public_key"] = public_fact
     validate_known_hosts(files["known_hosts"]["path"])
 
     tool = inputs["toolchain"]
@@ -647,6 +758,7 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
 
     input_snapshot = {
         "candidate_commit": candidate,
+        "authentication": authentication,
         "files": {name: {"sha256": fact["sha256"], "size": fact["size"]} for name, fact in files.items()},
         "manifest_sha256": manifest_digest,
         "seed": seed,
@@ -669,6 +781,7 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
         seed_manifest_digest=seed_manifest_digest,
         seed_files=seed_files,
         seed_bytes=seed_bytes,
+        authentication=authentication,
         files=files,
         toolchain_manifest=tool_manifest,
         toolchain_digest=tool_digest,
@@ -940,6 +1053,27 @@ def write_json_file(path: str, value: dict[str, Any], mode: int = 0o600) -> None
         os.close(fd)
 
 
+def rename_noreplace(source: str, destination: str) -> None:
+    try:
+        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError:
+        fail("atomic no-replace deployment-root activation is unavailable")
+    renameat2.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(-100, os.fsencode(source), -100, os.fsencode(destination), 1) == 0:
+        return
+    observed = ctypes.get_errno()
+    if observed in (errno.EEXIST, errno.ENOTEMPTY):
+        fail("deployment root appeared during atomic activation")
+    fail(f"atomic no-replace deployment-root activation failed: {os.strerror(observed)}")
+
+
 def command_provision(
     manifest_path: str, deploy_root: str, supplied_confirmation: str | None
 ) -> dict[str, Any]:
@@ -971,16 +1105,39 @@ def command_provision(
 
         installed_files: dict[str, dict[str, Any]] = {}
         targets = {
-            "gitlab_deploy_key": "config/git/gitlab_deploy_key",
             "known_hosts": "config/git/known_hosts",
             "machine_env": "config/agent-bridge/machine.env",
             "credentials": "config/agent-bridge/credentials",
         }
+        if prepared.authentication["mode"] == "file":
+            targets["gitlab_deploy_key"] = "config/git/gitlab_deploy_key"
+        else:
+            targets["gitlab_agent_public_key"] = "config/git/gitlab_agent_key.pub"
         for name, relative in targets.items():
             fact = copy_file(prepared.files[name]["path"], os.path.join(stage, relative))
             if fact["sha256"] != prepared.files[name]["sha256"]:
                 fail(f"installed {name} digest drifted")
             installed_files[name] = {"path": relative, **fact}
+        if prepared.authentication["mode"] == "agent_socket":
+            descriptor_relative = "config/git/authentication.json"
+            descriptor_path = os.path.join(stage, descriptor_relative)
+            descriptor = {
+                "schema": AGENT_AUTH_SCHEMA,
+                "mode": "agent_socket",
+                "socket_path": prepared.authentication["socket_path"],
+                "public_key_fingerprint": prepared.authentication["public_key_fingerprint"],
+                "public_key_path": "gitlab_agent_key.pub",
+            }
+            write_json_file(descriptor_path, descriptor)
+            _, descriptor_digest, descriptor_size = require_file(
+                descriptor_path, "installed gitlab_authentication", exact_mode=0o600
+            )
+            installed_files["gitlab_authentication"] = {
+                "path": descriptor_relative,
+                "mode": 0o600,
+                "sha256": descriptor_digest,
+                "size": descriptor_size,
+            }
 
         copy_toolchain(prepared, os.path.join(stage, "toolchain"))
         source_tree, source_digest, source_files, source_bytes = clone_source(
@@ -1027,7 +1184,7 @@ def command_provision(
         fsync_dir(prepared.parent)
         if os.path.lexists(prepared.root):
             fail("deployment root appeared before atomic activation")
-        os.rename(stage, prepared.root)
+        rename_noreplace(stage, prepared.root)
         created = False
         fsync_dir(prepared.parent)
         return stable_result(
@@ -1187,8 +1344,12 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
         fail("provisioned toolchain manifest drifted")
 
     installed_inputs = receipt["installed_inputs"]
-    expected_inputs = {"gitlab_deploy_key", "known_hosts", "machine_env", "credentials"}
-    if not isinstance(installed_inputs, dict) or set(installed_inputs) != expected_inputs:
+    file_inputs = {"gitlab_deploy_key", "known_hosts", "machine_env", "credentials"}
+    agent_inputs = {
+        "gitlab_agent_public_key", "gitlab_authentication",
+        "known_hosts", "machine_env", "credentials",
+    }
+    if not isinstance(installed_inputs, dict) or set(installed_inputs) not in (file_inputs, agent_inputs):
         fail("provisioning receipt installed inputs are not exact")
     for name, fact in installed_inputs.items():
         if not isinstance(fact, dict):
@@ -1200,6 +1361,43 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
         _, digest, size = require_file(path, f"installed {name}", exact_mode=0o600)
         if {"mode": 0o600, "path": fact["path"], "sha256": digest, "size": size} != fact:
             fail(f"installed {name} drifted")
+    if set(installed_inputs) == agent_inputs:
+        descriptor_path = os.path.join(root, installed_inputs["gitlab_authentication"]["path"])
+        try:
+            with open(descriptor_path, "rb") as handle:
+                descriptor = parse_json(
+                    handle.read(installed_inputs["gitlab_authentication"]["size"] + 1),
+                    "installed GitLab authentication",
+                )
+        except OSError as exc:
+            fail(f"cannot read installed GitLab authentication: {exc.strerror}")
+        exact_keys(
+            descriptor,
+            ("schema", "mode", "socket_path", "public_key_fingerprint", "public_key_path"),
+            "installed GitLab authentication",
+        )
+        if (
+            descriptor["schema"] != AGENT_AUTH_SCHEMA
+            or descriptor["mode"] != "agent_socket"
+            or descriptor["public_key_path"] != "gitlab_agent_key.pub"
+            or not isinstance(descriptor["socket_path"], str)
+            or not SAFE_AGENT_PATH.fullmatch(descriptor["socket_path"])
+            or not isinstance(descriptor["public_key_fingerprint"], str)
+            or not SSH_SHA256.fullmatch(descriptor["public_key_fingerprint"])
+        ):
+            fail("installed GitLab authentication contract is invalid")
+        manifest_auth = manifest.get("inputs", {}).get("gitlab_authentication")
+        if (
+            not isinstance(manifest_auth, dict)
+            or manifest_auth.get("mode") != "agent_socket"
+            or manifest_auth.get("socket_path") != descriptor["socket_path"]
+            or manifest_auth.get("public_key_fingerprint")
+            != descriptor["public_key_fingerprint"]
+        ):
+            fail("stored GitLab agent authentication binding drifted")
+        public_path = os.path.join(root, installed_inputs["gitlab_agent_public_key"]["path"])
+        if public_key_fingerprint(public_path) != descriptor["public_key_fingerprint"]:
+            fail("installed GitLab agent public-key identity drifted")
 
     lock_path = os.path.join(root, "publisher-state/deploy/publisher.kernel.lock")
     lock_st, lock_sha, lock_size = require_file(

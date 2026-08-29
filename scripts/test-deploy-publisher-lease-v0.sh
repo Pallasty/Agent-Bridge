@@ -677,7 +677,7 @@ write_production_toolchain_fixture() {
         printf '%s\n' '#!/bin/sh'
         printf "printf '%%s\\n' '%s'\n" "$sysroot"
     } > "$root/toolchain/bin/rustc"
-    chmod 755 "$root/toolchain/bin/cargo" "$root/toolchain/bin/rustc"
+    chmod 700 "$root/toolchain/bin/cargo" "$root/toolchain/bin/rustc"
 }
 
 run_production_checkout_fixture() {
@@ -1040,6 +1040,53 @@ assert_production_pre_mutation_rejection \
     "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
     "GitHub deploy-remote rejection"
 
+# Agent mode must select exactly one already-loaded public identity without
+# placing its private key in the deployment root. Reaching the later GitHub
+# URL rejection proves the agent descriptor, socket custody, fingerprint, and
+# live membership gates all passed first.
+agent_auth_root="$TEST_ROOT/production-agent-auth"
+write_production_checkout_fixture \
+    "$agent_auth_root" git@github.com:pallasting/agent-bridge.git
+rm "$agent_auth_root/config/git/gitlab_deploy_key"
+agent_private="$TEST_ROOT/publisher-agent-identity"
+agent_socket="$TEST_ROOT/publisher-agent.sock"
+/usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$agent_private"
+chmod 600 "$agent_private" "$agent_private.pub"
+/usr/bin/ssh-agent -D -a "$agent_socket" > /dev/null 2>&1 &
+agent_pid=$!
+DESCENDANT_PIDS="$DESCENDANT_PIDS $agent_pid"
+for _ in $(seq 1 200); do
+    [ -S "$agent_socket" ] && break
+    kill -0 "$agent_pid" 2>/dev/null || fail "publisher agent fixture exited early"
+    sleep 0.01
+done
+[ -S "$agent_socket" ] || fail "publisher agent fixture socket was not created"
+chmod 600 "$agent_socket"
+SSH_AUTH_SOCK="$agent_socket" /usr/bin/ssh-add "$agent_private" >/dev/null 2>&1
+agent_fingerprint="$(/usr/bin/ssh-keygen -E sha256 -lf "$agent_private.pub" | awk 'NR == 1 { print $2 }')"
+mv "$agent_private.pub" "$agent_auth_root/config/git/gitlab_agent_key.pub"
+chmod 600 "$agent_auth_root/config/git/gitlab_agent_key.pub"
+printf '%s\n' \
+    "{\"mode\":\"agent_socket\",\"public_key_fingerprint\":\"$agent_fingerprint\",\"public_key_path\":\"gitlab_agent_key.pub\",\"schema\":\"agent_bridge.gitlab_agent_authentication.v1\",\"socket_path\":\"$agent_socket\"}" \
+    > "$agent_auth_root/config/git/authentication.json"
+chmod 600 "$agent_auth_root/config/git/authentication.json"
+rm "$agent_private"
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" 2>&1)"
+status=$?
+set -e
+kill "$agent_pid" 2>/dev/null || true
+wait "$agent_pid" 2>/dev/null || true
+[ "$status" -ne 0 ] || fail "production agent mode accepted GitHub as authoritative"
+case "$output" in
+    *"production deploy remote must be the authenticated pallasting/agent-bridge GitLab SSH URL"*) ;;
+    *) fail "agent-mode contract did not reach authoritative URL validation" ;;
+esac
+assert_production_pre_mutation_rejection \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+    "agent-mode GitHub rejection"
+
 # Cargo and rustc are part of the production trust chain. Exact private roots
 # do not compensate for a widened executable, and neither unsafe mode may reach
 # a Git fetch, Cargo invocation, or publisher mutation.
@@ -1057,8 +1104,8 @@ for unsafe_tool in cargo rustc; do
     set -e
     [ "$status" -ne 0 ] || fail "production accepted unsafe $unsafe_tool mode"
     case "$unsafe_tool:$output" in
-        cargo:*"trusted Cargo executable mode must be 755"*) ;;
-        rustc:*"trusted rustc executable mode must be 755"*) ;;
+        cargo:*"trusted Cargo executable mode must be 700"*) ;;
+        rustc:*"trusted rustc executable mode must be 700"*) ;;
         *) fail "unsafe $unsafe_tool mode rejection reason missing" ;;
     esac
     [ "$(mode_fixture "$toolchain_root/toolchain/bin/$unsafe_tool")" = 777 ] ||
