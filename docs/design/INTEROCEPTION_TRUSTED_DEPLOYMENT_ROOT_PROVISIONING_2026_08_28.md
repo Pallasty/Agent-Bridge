@@ -2,10 +2,13 @@
 
 Date: 2026-08-28
 
-Status: **R9-M2 source at `55954e2458eefae261ae761e3035b88536fcc782`
-is published through integrated GitLab candidate
-`b09eff1fab865526c862859f17bfb381c9bae1f0`, but not provisioned, deployed, or
-live-executed; production remains `HOLD`**.
+Status: **the original R9-M2 source at
+`55954e2458eefae261ae761e3035b88536fcc782` is published; the R9-M6 exact-agent,
+large-model, and no-replace hardening is `SOURCE_READY` at
+`4643c4cad3789380f15cba9e960727c23dbd90b8`; one eligible private input bundle
+is prepared, but the final candidate-matching seed and read-only production
+plan remain pending; the root is not provisioned or deployed and production
+remains `HOLD`**.
 
 Scope: one operator-confirmed creation of a new private Agent Bridge deployment
 root before wrapper installation or publication
@@ -37,7 +40,7 @@ published candidate + separately prepared private inputs
   -> normalized physical source/toolchain/config custody
   -> publisher mutex and bootstrap receipt
   -> complete file/directory fsync
-  -> one atomic stage-to-root rename and parent fsync
+  -> one atomic no-replace stage-to-root rename and parent fsync
   -> independent fixed-path verify
   -> wrapper verifies before and after acquiring the same mutex
   -> publisher verifies before mutation and again under that mutex
@@ -68,8 +71,10 @@ The provisioning receipt is a custody statement, not publication authority.
 The source seed must already name one published candidate through exact clean
 `HEAD` and `refs/remotes/gitlab/master`, but provisioning uses a local
 `--no-local --no-hardlinks` clone and performs no network fetch. The publisher
-must later authenticate to the exact GitLab SSH URL with the installed key and
-known-hosts file. A local source, GitHub mirror, file remote, receipt, or
+must later authenticate to the exact GitLab SSH URL with either the installed
+private key or the installed public selector plus its still-live bound agent
+socket, and the installed known-hosts file. A local source, GitHub mirror, file
+remote, receipt, or
 operator confirmation cannot substitute for that fetch.
 
 The receipt therefore records
@@ -85,8 +90,10 @@ The exact mode-`0600`, euid-owned manifest binds:
 
 - schema, one 40-hex candidate, canonical absent target root, exact GitLab SSH
   URL, and the canonical bootstrap source repository;
-- exact path and SHA-256 for the GitLab private key, known-hosts file,
-  `machine.env`, and credentials file;
+- exact path and SHA-256 for known-hosts, `machine.env`, and credentials plus
+  exactly one Git authentication form: either the original private-key file,
+  or an owned mode-`0600` agent socket with its inode facts, exact public-key
+  selector bytes/fingerprint, and live membership;
 - one physical private toolchain root; and
 - maximum source/toolchain files and bytes plus at least a fixed 2 GiB
   post-copy free-space reserve.
@@ -110,8 +117,11 @@ All Git operations use the system binary with global/system config disabled,
 hooks disabled, object replacements disabled, prompting disabled, and a fixed
 environment.
 
-The key must be a mode-`0600` OpenSSH private-key file. The known-hosts input
-may contain only `gitlab.com` or hashed host entries. Neither value is printed.
+File mode requires a mode-`0600` OpenSSH private key. Agent mode never exports
+that private key: it binds the exact public selector, socket custody, and live
+membership, and installs only the selector plus a canonical authentication
+descriptor. The known-hosts input may contain only `gitlab.com` or hashed host
+entries. No credential value is printed.
 The machine and credential files are copied byte-for-byte and receipt-bound;
 their semantic admission remains the wrapper/binder's job. R9-M2 v1 provides
 no in-place credential, machine-config, or toolchain rotation. Such a change
@@ -123,7 +133,9 @@ rewrite this birth receipt.
 Provisioning creates only a new private sibling stage. It forms:
 
 - `source/agent-bridge` as a non-local, non-hardlinked clone of the seed;
-- `config/git/{gitlab_deploy_key,known_hosts}`;
+- `config/git/{gitlab_deploy_key,known_hosts}` in file mode, or
+  `config/git/{gitlab_agent_key.pub,authentication.json,known_hosts}` in agent
+  mode;
 - `config/agent-bridge/{machine.env,credentials}`;
 - a normalized `toolchain` containing executable `bin/cargo` and `bin/rustc`;
 - private `build-cache`, `publisher-state/deploy`, and `provisioning`
@@ -152,9 +164,11 @@ advancement without turning the birth receipt into a mutable source snapshot.
 The key, known-hosts, toolchain, machine config, credentials, root identity,
 and publisher lock remain byte/inode bound.
 
-All staged regular files and directories are synced before the one target
-rename; the parent is synced after it. A pre-rename caught failure removes only
-the exact deterministic private stage after proving it contains no unsafe
+All staged regular files and directories are synced before one Linux
+`renameat2(RENAME_NOREPLACE)` activation; the parent is synced after it. A
+target appearing during the final race window is preserved and causes a
+fail-closed rejection. A pre-rename caught failure removes only the exact
+deterministic private stage after proving it contains no unsafe
 inode. A pre-existing stage is never reused or cleaned. A process/power loss
 around activation remains fail-closed/manual-recovery territory; R9-M2 does
 not claim unattended crash recovery or deletion authority over an ambiguous
@@ -181,16 +195,19 @@ migrated, adopted, restarted, healthy, or visible through a fresh MCP.
 
 ## Current production truth
 
-Production remains `HOLD`. A current-boot gcr agent identity now proves GitLab
-access for operator publication, correcting the earlier inherited-environment
-false negative. It is not the persistent file credential required by this
-root contract. The current development worktrees live beneath the euid-owned
+Production remains `HOLD`. R9-M6 now permits the already-enrolled current-boot
+gcr agent as an exact root authentication input without copying its private
+key. This is not an unattended credential claim: publication fails before Git
+fetch whenever that exact agent identity is unavailable. The current
+development worktrees live beneath the euid-owned
 mode-`0777` `/Data/CascadeProjects` boundary and use linked-worktree Git
-metadata, so they are intentionally ineligible as a provisioning seed. The
-current Rust toolchain is beneath the root-owned mode-`0777` HOME/FUSE boundary
-and is intentionally ineligible as a trusted toolchain input. No separate
-private root, deploy key, known-hosts file, trusted toolchain, minimal machine
-file, or production credential file was created here.
+metadata, so they remain ineligible as a provisioning seed. An independent
+private seed exists for the preceding published candidate, and R9-M6 prepared
+an official Rust 1.96.1 toolchain, exact-revision GTE assets, minimal machine
+file, empty credential policy file, known-hosts, and public agent selector at
+`/Data/agent-bridge-r9-bootstrap/trusted-inputs-r9-m6`. Publication and a fresh
+independent seed at the final R9-M6 reporting candidate are still required
+before the production plan. `/Data/agent-bridge-r9` remains absent.
 
 R9-M2 does not alter the Yama decision. The later migration window must still
 quiesce ssh-agent, Waydroid, MCP, hook, CLI, and every other non-manager same-
@@ -207,12 +224,15 @@ rejection; unsafe ancestors, symlinks, hardlinks, special files, overlaps,
 capacity, stage collision, and post-provision tamper rejection; wrapper and
 publisher consumer gates; and all existing R9-M1/R9 regressions.
 
-Final implementation identity:
-`55954e2458eefae261ae761e3035b88536fcc782`.
+Original implementation identity:
+`55954e2458eefae261ae761e3035b88536fcc782`. R9-M6 compatibility and boundary
+hardening identity: `4643c4cad3789380f15cba9e960727c23dbd90b8`.
 
-Final verification: provisioning `10/10`, installed verifier/restart Python
-`62/62`, wrapper, publisher lease/recovery, R9-M1 migration `15/15`, systemd
+Current verification: provisioning `14/14`, publication/seed `6/6`, credential
+ceremony `4/4`, wrapper, publisher lease/recovery, R9-M1 migration `15/15`,
+systemd
 binder, post-build master race, pinned runtime assets, audio/runtime parity,
-shell syntax, Python AST, and whitespace gates all pass. No Rust source changed.
+GTE readiness, shell syntax, Python AST, and whitespace gates all pass. Rust
+1.96.1 built/tested `ab-core`; no Rust source changed.
 Fixture success cannot be relabeled as GitLab publication, production root
 creation, migration, systemd adoption, or live admission.

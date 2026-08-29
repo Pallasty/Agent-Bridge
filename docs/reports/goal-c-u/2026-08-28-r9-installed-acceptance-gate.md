@@ -2,12 +2,12 @@
 
 Date: 2026-08-28
 
-Status: trusted deployment-root framework and R9-M1–M4 source chain published
-through reporting GitLab candidate
-`b2d06bc385c1aa25110c7a8f579fb4da8ced1847`; R9-M5 is source-ready at
-`c38497ec8ff033f483d99d8dbb98dfacb67b8dfd`; not seeded, provisioned,
-installed, migrated, restarted, or live-admitted; production remains `HOLD`
-and the current installation remains `FAIL_CLOSED`
+Status: R9-M1–M5 source is published and independently seeded through
+`08f0bbeecf8f991f1dd37693b45aeedd310f20da`; R9-M6 is `SOURCE_READY` at
+`4643c4cad3789380f15cba9e960727c23dbd90b8` with one verified private input
+bundle; the final R9-M6 descendant is not yet published or reacquired, and the
+root is not provisioned, installed, migrated, restarted, or live-admitted;
+production remains `HOLD` and the current installation remains `FAIL_CLOSED`
 
 ## Decision boundary
 
@@ -39,9 +39,11 @@ first build/install mutation and is rechecked while they hold the shared
 publisher lock. A provisioned local seed is explicitly not publication
 authority.
 
-The R9-M2 implementation identity is
-`55954e2458eefae261ae761e3035b88536fcc782`. It is local source evidence only,
-not an authoritative publication or live provisioning receipt.
+The original R9-M2 implementation identity is
+`55954e2458eefae261ae761e3035b88536fcc782`. R9-M6 exact-agent, large-model,
+and atomic no-replace hardening is
+`4643c4cad3789380f15cba9e960727c23dbd90b8`. Neither identity is a live
+provisioning receipt.
 
 No production file, service, unit, database, credential, or workload-receipt
 spool was changed in this increment. No service was stopped, restarted, or
@@ -216,18 +218,22 @@ The detailed contract is in
 
 The provisioning tool accepts only a clean, standalone, exact-candidate seed
 with the authoritative GitLab remote and strictly private physical custody.
-It separately binds the GitLab key, known-hosts, minimal machine file,
-credentials, and a bounded Cargo/rustc toolchain by digest and inode-safe
-inventory. Source, toolchain, target, and legacy inventory roots may not
-overlap. Unsafe writable ancestry, linked worktrees, symlinks, special files,
-hard links, Git alternates/grafts, capacity shortfall, and input drift fail
-closed before target creation.
+It separately binds known-hosts, minimal machine file, credentials, and a
+bounded Cargo/rustc toolchain by digest and inode-safe inventory. Git
+authentication is an exact tagged union: either the original mode-`0600`
+private-key file or the R9-M6 mode-`0600` agent socket plus exact public
+selector/fingerprint and live membership. Agent mode never exports a private
+key. Source, toolchain, target, and legacy inventory roots may not overlap.
+Unsafe writable ancestry, linked worktrees, symlinks, special files, hard
+links, Git alternates/grafts, capacity shortfall, and input drift fail closed
+before target creation.
 
 `plan` is byte-passive and emits a canonical manifest plus confirmation token.
 `provision` requires that exact token, constructs one private sibling stage,
 clones without local-object or hard-link borrowing, copies and normalizes the
 bounded inputs, creates the publisher lock and canonical birth receipt, fsyncs
-the tree, and activates only by same-parent rename into an absent root.
+the tree, and activates only by same-parent Linux atomic no-replace rename into
+an absent root.
 `verify` is read-only and accepts the birth candidate or a clean published
 descendant while independently rebinding the fixed inputs, receipt, source
 configuration, critical scripts, and optional inherited publisher-lock file
@@ -292,16 +298,46 @@ CI remains deliberately skipped. This source milestone does not generate or
 export a private key, provision the trusted deployment root, mutate services,
 or relax production `HOLD`.
 
+## R9-M6 trusted inputs and exact-agent root compatibility
+
+R9-M6 is source-ready at
+`4643c4cad3789380f15cba9e960727c23dbd90b8`. It lets R9-M2 and the production
+publisher consume the exact current-boot agent identity already proven by
+R9-M5 while retaining fixed-private-key compatibility. The root stores only a
+mode-`0600` public selector and canonical authentication descriptor; every Git
+operation requires the same safe socket and loaded fingerprint again. Offline
+receipt verification binds the durable public facts without claiming the
+agent is permanently available.
+
+The private bundle at
+`/Data/agent-bridge-r9-bootstrap/trusted-inputs-r9-m6` contains a SHA-verified
+official Rust 1.96.1 standalone toolchain, exact-revision GTE multilingual
+model assets, GitLab known-hosts, the public selector, a four-key minimal
+machine file, and an explicit no-persistent-provider-credentials file. It has
+177 physical singly linked files, no special nodes or symlinks, exact private
+modes, and 1,916,000,745 logical bytes. The prior unsafe HOME toolchain and
+machine file were not copied.
+
+R9-M6 also makes root activation `renameat2(RENAME_NOREPLACE)`, aligns trusted
+Cargo/rustc modes at `0700`, corrects the critical `creds.example` source leaf,
+and makes tree-file hashing honor the explicit bounded tree-byte limit so the
+1,255,502,649-byte model is admissible. Provisioning is `14/14 PASS`; the
+publisher, R9-M3/M5 `6/6`, R9-M4 `4/4`, R9-M1 `15/15`, wrapper, systemd,
+remote-race, pinned-asset, audio parity, and GTE readiness gates pass. CI was
+explicitly skipped. `/Data/agent-bridge-r9` remains absent.
+
 ## Verification ledger
 
 The baseline rows below preserve earlier durable-receipt and trusted-root
-evidence. This increment reran Python `62/62`, wrapper, publisher, post-build
-race, pinned-assets, runtime/audio parity, systemd binder, and syntax/whitespace
-gates against the R9-M1 tree; the unchanged Rust `157` and wrapper-Rust `4/4`
-rows remain prior evidence because no Rust source changed. The migration and
-migration-aware binder rows establish local source readiness only. All
-verification used debug/test artifacts and private fixtures; no release test
-build or production path was used.
+evidence. R9-M6 reran the provisioning, publication/seed, credential,
+migration, wrapper, publisher, post-build race, pinned-assets, runtime/audio,
+GTE readiness, systemd binder, and syntax/whitespace gates. The unchanged Rust
+`157` and wrapper-Rust `4/4` rows remain prior evidence because no Rust source
+changed; the trusted Rust 1.96.1 toolchain separately built and tested
+`ab-core` offline. A full workspace run reached the final large debug link but
+stopped for `/Data` capacity, not a failed assertion, and its generated target
+was removed. All verification used debug/test artifacts and private fixtures;
+no production path was used.
 
 | Gate | Result |
 |---|---|
@@ -316,7 +352,10 @@ build or production path was used.
 | Trusted systemd binder adversarial suite | `systemd-trusted-daemon-root-ok`; final implementation also passed repeated worker runs |
 | Changed shell syntax, Python AST, and staged whitespace | `PASS`; no Rust source changed |
 | R9-M1 migration harness | `15/15 PASS` with warnings as errors |
-| R9-M2 provisioning harness | `10/10 PASS` with warnings as errors |
+| R9-M2/M6 provisioning and agent-auth harness | `14/14 PASS` with warnings as errors |
+| R9-M3/M5 publication and seed harness | `6/6 PASS` |
+| R9-M4 optional credential harness | `4/4 PASS` |
+| Trusted Rust 1.96.1 smoke | `ab-core` build/test and doc-test PASS offline; full workspace capacity-limited at final debug link |
 | Migration-aware binder handoff | `systemd-trusted-daemon-root-ok`; receipt/quiescence gates exercised at initial, pre-activation, and post-reload boundaries |
 | Independent adversarial review | `APPROVED WITH RESIDUALS`; no reproducible blocker, major, or minor defect |
 
@@ -340,16 +379,17 @@ the trusted boundary:
   body-state source. R9-M1 forbids inventory sources from residing inside the
   deployment root, so this path cannot double as the new root. A separate
   private root with source/config/toolchain/bin/publisher/runtime layout and
-  publication credentials must be independently provisioned; none was created
-  here. The current development worktrees are mode `0777` and use linked Git
-  metadata, while the HOME toolchain inherits the unsafe mode-`0777` FUSE
-  boundary; R9-M2 correctly rejects both as provisioning inputs. A separate
-  private seed and toolchain are still required.
-- The legacy machine file is on the unsafe HOME mount, contains a secret-like
-  key, many settings outside the bounded service allowlist, legacy writable
-  state paths, HOME resources, and development-tree assets. It must not be
-  copied. Each required non-secret setting needs an explicit retain/default/
-  retire decision; secrets must be provisioned separately.
+  authentication must still be provisioned; no root was created here. The
+  current development worktrees are mode `0777` and use linked Git metadata,
+  while the HOME toolchain inherits the unsafe mode-`0777` FUSE boundary;
+  R9-M2 correctly rejects both. R9-M6 instead prepared a private standalone
+  input bundle and R9-M5 acquired a private seed at `08f0bbee`; a fresh seed at
+  the final R9-M6 candidate is still required.
+- The legacy machine file is on the unsafe HOME mount and contains a HOME model
+  path plus settings outside the bounded service allowlist. It was not copied.
+  R9-M6 retained four reviewed non-secret settings in a minimal private file.
+  Current daemon, daemon-http, and Palace environments expose no secret-like
+  keys, so no persistent external-provider credential was admitted.
 - Existing SQLite plus WAL state remains on the unsafe mount. Migration must
   quiesce the complete service/timer/oneshot writer set and reject external
   MCP/hook/manual-process database descriptors before using SQLite checkpoint,
@@ -360,13 +400,16 @@ the trusted boundary:
   plan into `$ROOT/runtime-state` because the hardened units make the rest of
   `$ROOT` read-only. Unknown entries or unsafe inode/collision states stop the
   migration.
-- `/Data` has about 12 GiB free at 96% use. The root filesystem backing the
+- `/Data` has about 8 GiB free at 97% use after preparing the trusted bundle.
+  The root filesystem backing the
   intended `/var/tmp` production build cache has about 59 GiB free; production
   migration still needs an explicit capacity margin and rollback copy budget.
 - Current-boot GitLab operator authentication is available through the
-  mode-`0600` gcr agent socket. A safe clone, persistent deploy key suitable
-  for the trusted root, trusted toolchain, minimal machine file, and credentials
-  file are still absent.
+  mode-`0600` gcr agent socket. R9-M6 binds it without exporting a private key,
+  but this remains current-boot rather than unattended authority. The official
+  toolchain, model assets, minimal machine file, known-hosts, public selector,
+  and empty persistent-credential policy are prepared; final publication,
+  fresh seed acquisition, and the read-only production plan remain pending.
 - Yama currently hides descriptor tables for several non-manager same-UID
   session processes, including the SSH agent and Waydroid components. The
   strict migration gate intentionally blocks until those processes are
@@ -391,17 +434,14 @@ failures.
 The release owner must preserve this order. A later step cannot repair or
 substitute for a missing earlier authority boundary.
 
-1. Publish one clean descendant containing R9-M1 and R9-M2 implementation
-   `eda927d1837b50c6680ce3ea337456a79e52a965` (and therefore trusted-root
-   implementation `a4f4f4e153a5a824f28e6f1486c670af38c15ea5`) to authoritative GitLab
-   `master` with an authenticated publisher identity. Record the exact 40-hex
-   commit; a local commit, file remote, GitHub mirror, or copied binary is not a
-   substitute.
-2. Prepare, outside the absent target and every legacy inventory source, one
-   eligible standalone private seed at the published commit plus separately
-   provisioned exact GitLab key/known-hosts, bounded toolchain, minimal machine
-   file, and credentials. Never bootstrap them from unsafe HOME files or
-   secret-bearing output.
+1. Publish the final clean R9-M6 descendant to authoritative GitLab `master`
+   with the exact authenticated agent identity and `ci.skip`. Record the exact
+   40-hex commit; a local commit, file remote, GitHub mirror, or copied binary
+   is not a substitute.
+2. Independently reacquire a new private seed at that exact commit. Pair it
+   with the already-verified private R9-M6 bundle outside the absent target and
+   every legacy inventory source. Reverify all digests, socket membership, and
+   capacity; never substitute unsafe HOME inputs or secret-bearing output.
 3. Through an outer clean launcher (`env -i`, fixed system PATH, and
    `/bin/bash --noprofile --norc`), run the exact R9-M2 `plan`, inspect its
    canonical manifest, invoke `provision` with its exact confirmation token,
@@ -450,17 +490,18 @@ capacity stops admission. It must not be reported as a partial PASS.
 
 ## Evidence ledger
 
-| Evidence | State on 2026-08-28 | Admission meaning |
+| Evidence | State through 2026-08-29 | Admission meaning |
 |---|---|---|
 | Trusted-root implementation | `SOURCE_READY` at `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` | Local code and adversarial fixtures are green; not publication authority. |
 | Earlier isolated restart exercise | `PASS` at source candidate `9bc924a2...` | Durable receipt reconciliation behavior only; must repeat after authoritative install. |
 | R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
-| R9-M2 provisioning implementation | `SOURCE_READY` at `55954e2458eefae261ae761e3035b88536fcc782` | Zero-write plan, exact-confirm provision, fixed-path verification, and consumer gates are green; no live root was created. |
+| R9-M2 provisioning implementation | original source published; R9-M6 hardening `SOURCE_READY` at `4643c4cad3789380f15cba9e960727c23dbd90b8` | Zero-write plan, exact-confirm provision, fixed-path verification, exact agent compatibility, and atomic no-replace activation are green; no live root was created. |
 | R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; current-boot gcr agent authentication is verified. |
 | R9-M4 credential ceremony | `SOURCE_READY` at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI skipped | Optional persistent-key route; no new key was generated or enrolled. |
-| R9-M5 existing-agent seed extension | `SOURCE_READY` at `c38497ec8ff033f483d99d8dbb98dfacb67b8dfd`; CI skipped | Exact current-boot agent identity and atomic no-replace seed activation pass `6/6`; live seed acquisition remains separate evidence. |
+| R9-M5 existing-agent seed extension | `PASS` at reporting/seed candidate `08f0bbeecf8f991f1dd37693b45aeedd310f20da`; CI skipped | Exact current-boot agent identity published and independently acquired one private seed. |
+| R9-M6 trusted inputs and root agent compatibility | `SOURCE_READY` at `4643c4cad3789380f15cba9e960727c23dbd90b8`; inputs prepared; CI skipped | Private toolchain/model/config/public-auth inputs are verified; final publication, fresh seed, and read-only R9-M2 plan remain pending. |
 | Authoritative GitLab publication | `PASS` at reporting candidate `b2d06bc385c1aa25110c7a8f579fb4da8ced1847`; CI skipped | GitLab master was independently reread after a non-force fast-forward push. This proves source publication only. |
-| Private root provisioning | `NOT_DONE` | The birth organ is source-ready, but eligible private seed/config/toolchain inputs and the live root are absent. |
+| Private root provisioning | `NOT_DONE` | The birth organ and private inputs are ready, but the final candidate-matching seed and plan are pending; the live root is absent. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
 | Real systemd current-boot adoption | `NOT_DONE` | Current HOME `UnitPath` and drop-ins fail closed; fake-manager tests are not live proof. |
 | Independent current-installed verifier | `FAIL_CLOSED` | Unsafe owner boundary, absent receipt root, and three deleted executables block admission. |
@@ -469,7 +510,7 @@ capacity stops admission. It must not be reported as a partial PASS.
 Until R9-M2 provisioning, complete-writer quiescence, R9-M1 migration
 and receipt verification, current-boot binding, explicit adoption, isolated
 exercise, installed verification, and fresh-MCP admission are all bound to one
-authoritative candidate and green, the truthful status is: trusted-root
-framework and R9-M1–M4 source published, with R9-M5 source-ready; production
-remains on hold; current
-installation failed closed; R9 not seeded, provisioned, or deployed.
+authoritative candidate and green, the truthful status is: R9-M1–M5 source is
+published and seeded through `08f0bbee`; R9-M6 source and private inputs are
+ready but not yet finally published, reacquired, planned, or provisioned;
+production remains on hold; the current installation remains failed closed.
