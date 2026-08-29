@@ -2,11 +2,10 @@
 
 Date: 2026-08-29
 
-Status: **R9-M6 `SOURCE_READY` at implementation commit
-`4643c4cad3789380f15cba9e960727c23dbd90b8`; one private input bundle is
-prepared and verified outside the absent target root; final publication,
-candidate-matching seed acquisition, and the R9-M2 production plan remain
-pending; production remains `HOLD`**.
+Status: **R9-M6 private inputs remain verified; the first R9-M2 production
+root was rejected before consumer use, source-mode correction
+`0e445333da0d4d2c3159d49aaed861b163146082` is `SOURCE_READY`, and a fresh
+publication/seed/root retry is pending; production remains `HOLD`**.
 
 Scope: close the last truthful input-custody gap before R9-M2 can plan the
 birth of `/Data/agent-bridge-r9`, without generating or exporting another
@@ -136,7 +135,7 @@ the large-model exception does not broaden their admission.
 
 ## Verification evidence
 
-- R9-M2 provisioning and agent authentication: `14/14 PASS` with warnings as
+- R9-M2 provisioning and agent authentication: `15/15 PASS` with warnings as
   errors;
 - R9-M3/M5 publication and seed: `6/6 PASS`;
 - R9-M4 optional credential ceremony: `4/4 PASS`;
@@ -157,19 +156,30 @@ CI was explicitly skipped.
 
 ## Handoff boundary
 
-R9-M6 does not create `/Data/agent-bridge-r9`, install a wrapper or binary,
-stop or restart a service, migrate SQLite/body state, write a unit, or claim
-installed admission. The target root remains absent.
+The R9-M6 preparation increment did not create `/Data/agent-bridge-r9`, install
+a wrapper or binary, stop or restart a service, migrate SQLite/body state,
+write a unit, or claim installed admission. Its later first R9-M2 provision
+was rejected as described below, before any consumer action.
 
-The next bounded sequence is:
+The corrected retry sequence is:
 
 ```text
-publish the final R9-M6 reporting candidate with ci.skip
+publish the source-mode correction and this failure record with ci.skip
   -> acquire and verify a new independent seed at that exact candidate
-  -> write the external mode-0600 R9-M2 manifest from the verified bundle
+  -> archive the rejected receipt and retire only its deterministic copied root
+  -> update the external mode-0600 R9-M2 manifest from the verified bundle
   -> run the read-only R9-M2 plan and inspect its exact confirmation
-  -> stop before provision so root birth remains its own reviewed goal
+  -> provision once with that exact confirmation
+  -> run immediate fixed-path verification before any consumer
 ```
 
 Only after an exact candidate-matching plan is green may R9-M2 create the
 trusted root. Until then production remains `HOLD`.
+
+The first provision at reporting candidate `5faac795...` subsequently proved
+the fixed-path verifier's fail-closed value: it rejected a sole Git mode drift
+on the migration orchestrator before any consumer ran. Correction
+`0e445333da0d4d2c3159d49aaed861b163146082` aligns the candidate executable
+bit with private production custody and adds a pre-activation clean-tree gate.
+The failed receipt is evidence, not admission; the copied root will be retired
+rather than repaired before a fresh candidate-bound retry.

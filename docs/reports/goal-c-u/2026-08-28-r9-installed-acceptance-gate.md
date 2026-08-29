@@ -321,10 +321,21 @@ machine file were not copied.
 R9-M6 also makes root activation `renameat2(RENAME_NOREPLACE)`, aligns trusted
 Cargo/rustc modes at `0700`, corrects the critical `creds.example` source leaf,
 and makes tree-file hashing honor the explicit bounded tree-byte limit so the
-1,255,502,649-byte model is admissible. Provisioning is `14/14 PASS`; the
+1,255,502,649-byte model is admissible. Provisioning is now `15/15 PASS`; the
 publisher, R9-M3/M5 `6/6`, R9-M4 `4/4`, R9-M1 `15/15`, wrapper, systemd,
 remote-race, pinned-asset, audio parity, and GTE readiness gates pass. CI was
-explicitly skipped. `/Data/agent-bridge-r9` remains absent.
+explicitly skipped. At that R9-M6 preparation checkpoint,
+`/Data/agent-bridge-r9` was absent.
+
+The first later production provision at published candidate `5faac795...`
+created receipt digest `7afcbf150c...`, but its immediate fixed-path verify
+correctly rejected one source mode drift: the migration orchestrator was
+tracked as `100644` and normalized to private executable `0700`. No consumer,
+service, unit, or database mutation followed. Correction
+`0e445333da0d4d2c3159d49aaed861b163146082` records Git mode `100755` and adds
+a pre-activation clean-tree gate, so the same mismatch now stops in the stage
+before root activation. The failed root is not accepted or repaired in place;
+its receipt is archived before deterministic retirement and a fresh retry.
 
 ## Verification ledger
 
@@ -352,7 +363,7 @@ no production path was used.
 | Trusted systemd binder adversarial suite | `systemd-trusted-daemon-root-ok`; final implementation also passed repeated worker runs |
 | Changed shell syntax, Python AST, and staged whitespace | `PASS`; no Rust source changed |
 | R9-M1 migration harness | `15/15 PASS` with warnings as errors |
-| R9-M2/M6 provisioning and agent-auth harness | `14/14 PASS` with warnings as errors |
+| R9-M2/M6 provisioning and agent-auth harness | `15/15 PASS` with warnings as errors |
 | R9-M3/M5 publication and seed harness | `6/6 PASS` |
 | R9-M4 optional credential harness | `4/4 PASS` |
 | Trusted Rust 1.96.1 smoke | `ab-core` build/test and doc-test PASS offline; full workspace capacity-limited at final debug link |
@@ -495,13 +506,13 @@ capacity stops admission. It must not be reported as a partial PASS.
 | Trusted-root implementation | `SOURCE_READY` at `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` | Local code and adversarial fixtures are green; not publication authority. |
 | Earlier isolated restart exercise | `PASS` at source candidate `9bc924a2...` | Durable receipt reconciliation behavior only; must repeat after authoritative install. |
 | R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
-| R9-M2 provisioning implementation | original source published; R9-M6 hardening `SOURCE_READY` at `4643c4cad3789380f15cba9e960727c23dbd90b8` | Zero-write plan, exact-confirm provision, fixed-path verification, exact agent compatibility, and atomic no-replace activation are green; no live root was created. |
+| R9-M2 provisioning implementation | first production attempt fail-closed; correction `SOURCE_READY` at `0e445333da0d4d2c3159d49aaed861b163146082` | Fixed-path verification rejected the first root before consumer use; the correction aligns source mode and adds a pre-activation clean-tree gate. |
 | R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; current-boot gcr agent authentication is verified. |
 | R9-M4 credential ceremony | `SOURCE_READY` at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI skipped | Optional persistent-key route; no new key was generated or enrolled. |
 | R9-M5 existing-agent seed extension | `PASS` at reporting/seed candidate `08f0bbeecf8f991f1dd37693b45aeedd310f20da`; CI skipped | Exact current-boot agent identity published and independently acquired one private seed. |
-| R9-M6 trusted inputs and root agent compatibility | `SOURCE_READY` at `4643c4cad3789380f15cba9e960727c23dbd90b8`; inputs prepared; CI skipped | Private toolchain/model/config/public-auth inputs are verified; final publication, fresh seed, and read-only R9-M2 plan remain pending. |
+| R9-M6 trusted inputs and root agent compatibility | inputs prepared; R9-M2 correction `SOURCE_READY` at `0e445333da0d4d2c3159d49aaed861b163146082`; CI skipped | Private inputs remain verified; corrected publication, seed acquisition, and absent-root retry are pending. |
 | Authoritative GitLab publication | `PASS` at reporting candidate `b2d06bc385c1aa25110c7a8f579fb4da8ced1847`; CI skipped | GitLab master was independently reread after a non-force fast-forward push. This proves source publication only. |
-| Private root provisioning | `NOT_DONE` | The birth organ and private inputs are ready, but the final candidate-matching seed and plan are pending; the live root is absent. |
+| Private root provisioning | `RETRY_REQUIRED` | The first root failed fixed-path verification and is not admitted; preserve its receipt, retire the copied root, and repeat from an absent target. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
 | Real systemd current-boot adoption | `NOT_DONE` | Current HOME `UnitPath` and drop-ins fail closed; fake-manager tests are not live proof. |
 | Independent current-installed verifier | `FAIL_CLOSED` | Unsafe owner boundary, absent receipt root, and three deleted executables block admission. |

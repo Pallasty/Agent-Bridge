@@ -2,13 +2,11 @@
 
 Date: 2026-08-28
 
-Status: **the original R9-M2 source at
-`55954e2458eefae261ae761e3035b88536fcc782` is published; the R9-M6 exact-agent,
-large-model, and no-replace hardening is `SOURCE_READY` at
-`4643c4cad3789380f15cba9e960727c23dbd90b8`; one eligible private input bundle
-is prepared, but the final candidate-matching seed and read-only production
-plan remain pending; the root is not provisioned or deployed and production
-remains `HOLD`**.
+Status: **the first production root at published candidate `5faac795...` was
+rejected by fixed-path verification before any consumer ran; source-mode
+correction `0e445333da0d4d2c3159d49aaed861b163146082` is `SOURCE_READY`, its
+adversarial harness is `15/15 PASS`, and a fresh publication/seed/root retry is
+pending; production remains `HOLD`**.
 
 Scope: one operator-confirmed creation of a new private Agent Bridge deployment
 root before wrapper installation or publication
@@ -205,9 +203,11 @@ metadata, so they remain ineligible as a provisioning seed. An independent
 private seed exists for the preceding published candidate, and R9-M6 prepared
 an official Rust 1.96.1 toolchain, exact-revision GTE assets, minimal machine
 file, empty credential policy file, known-hosts, and public agent selector at
-`/Data/agent-bridge-r9-bootstrap/trusted-inputs-r9-m6`. Publication and a fresh
-independent seed at the final R9-M6 reporting candidate are still required
-before the production plan. `/Data/agent-bridge-r9` remains absent.
+`/Data/agent-bridge-r9-bootstrap/trusted-inputs-r9-m6`. Publication, independent
+seed acquisition, and the first production plan completed at `5faac795...`.
+The resulting root remains unaccepted after the mode-drift rejection described
+below; it will be retired after evidence archival and recreated from a fresh
+corrected candidate rather than repaired.
 
 R9-M2 does not alter the Yama decision. The later migration window must still
 quiesce ssh-agent, Waydroid, MCP, hook, CLI, and every other non-manager same-
@@ -228,7 +228,36 @@ Original implementation identity:
 `55954e2458eefae261ae761e3035b88536fcc782`. R9-M6 compatibility and boundary
 hardening identity: `4643c4cad3789380f15cba9e960727c23dbd90b8`.
 
-Current verification: provisioning `14/14`, publication/seed `6/6`, credential
+## First production attempt and source-mode correction
+
+The first exact-confirm production provision at published candidate
+`5faac795af85edddad174a8a02c9d75e3fe3806b` atomically created a private root
+and receipt digest
+`7afcbf150cf7871776535d80dbbf1a9c0c85f1324134e67c2f8655c1dc1a3269`.
+Its immediate fixed-path verification then rejected the root because the
+provisioned source was not clean. No wrapper, publisher, migration, service,
+unit, or database action ran after that rejection.
+
+The one observed difference was a mode transition on
+`scripts/migrate-trusted-runtime-state.py`: the candidate tree recorded
+`100644`, while the production custody contract correctly normalized the
+orchestrator to owner-only executable mode `0700`. The root was therefore
+fail-closed, not partially accepted. It must not be repaired in place. Its
+receipt is retained as failed-attempt evidence before the deterministic copied
+root is retired and a fresh absent-root plan is formed.
+
+Correction identity `0e445333da0d4d2c3159d49aaed861b163146082` records that
+orchestrator as Git mode `100755`, preserving the installed `0700` contract.
+The provisioner also now runs a complete porcelain status check after private
+mode normalization and before receipt construction or atomic activation. Any
+future candidate whose custody normalization changes tracked or untracked
+source state is rejected while still in the private stage; the stage is
+removed and the target remains absent. An adversarial non-executable-
+orchestrator fixture proves that boundary. The corrected R9-M2 harness is
+`15/15 PASS`; publication/seed `6/6`, credential `4/4`, migration `15/15`, and
+wrapper installation gates also pass. CI remains explicitly skipped.
+
+Current verification: provisioning `15/15`, publication/seed `6/6`, credential
 ceremony `4/4`, wrapper, publisher lease/recovery, R9-M1 migration `15/15`,
 systemd
 binder, post-build master race, pinned runtime assets, audio/runtime parity,
