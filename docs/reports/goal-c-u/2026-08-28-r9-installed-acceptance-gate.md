@@ -3,9 +3,10 @@
 Date: 2026-08-28
 
 Status: trusted deployment-root framework and R9-M1–M4 source chain published
-through integrated GitLab candidate
-`b09eff1fab865526c862859f17bfb381c9bae1f0`; not seeded, provisioned, installed,
-migrated, restarted, or live-admitted; production remains `HOLD`
+through reporting GitLab candidate
+`b2d06bc385c1aa25110c7a8f579fb4da8ced1847`; R9-M5 is source-ready at
+`c38497ec8ff033f483d99d8dbb98dfacb67b8dfd`; not seeded, provisioned,
+installed, migrated, restarted, or live-admitted; production remains `HOLD`
 and the current installation remains `FAIL_CLOSED`
 
 ## Decision boundary
@@ -14,8 +15,9 @@ Implementation commit
 `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` closes the source-side gap between
 the R9 durable workload-receipt organ and a permission-capable installed body.
 It is an implementation identity, not publication authority by itself. The
-integrated descendant `b09eff1fab865526c862859f17bfb381c9bae1f0` was published
-by fast-forward to authoritative GitLab `master` with `ci.skip` on 2026-08-29.
+reporting descendant `b2d06bc385c1aa25110c7a8f579fb4da8ced1847` was
+published by fast-forward to authoritative GitLab `master` with `ci.skip` on
+2026-08-29.
 
 The earlier isolated restart exercise remains valid evidence for source
 candidate `9bc924a2c1641983ac954ee9416e18ddb5fcdf77` and local binary SHA-256
@@ -271,6 +273,25 @@ current operator can use the agent-only identity, R9-M4 is an optional durable
 credential route rather than a publication prerequisite. Production remains
 `HOLD`.
 
+## R9-M5 existing-agent independent-seed source-ready implementation
+
+R9-M5 is source-ready locally at
+`c38497ec8ff033f483d99d8dbb98dfacb67b8dfd`. It extends the existing R9-M3
+manifest without breaking fixed-file key mode: an operator may instead bind an
+owned mode-`0600` agent socket, exact public-key file, and SHA-256 fingerprint.
+The public key is passed to OpenSSH with `IdentitiesOnly=yes` as the selector
+for the matching private identity that remains inside the agent. Socket
+device/inode/mode/owner, public-key bytes/fingerprint, agent membership, and
+known-hosts bytes are checked again before every Git operation.
+
+Seed activation now fsyncs every cloned regular file and directory, uses Linux
+atomic no-replace rename, and fsyncs the private seed parent. A destination
+appearing during activation is never overwritten. The R9-M3 harness is now
+`6/6 PASS`; R9-M2 remains `10/10 PASS`; Python AST and whitespace gates pass.
+CI remains deliberately skipped. This source milestone does not generate or
+export a private key, provision the trusted deployment root, mutate services,
+or relax production `HOLD`.
+
 ## Verification ledger
 
 The baseline rows below preserve earlier durable-receipt and trusted-root
@@ -437,7 +458,8 @@ capacity stops admission. It must not be reported as a partial PASS.
 | R9-M2 provisioning implementation | `SOURCE_READY` at `55954e2458eefae261ae761e3035b88536fcc782` | Zero-write plan, exact-confirm provision, fixed-path verification, and consumer gates are green; no live root was created. |
 | R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; current-boot gcr agent authentication is verified. |
 | R9-M4 credential ceremony | `SOURCE_READY` at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI skipped | Optional persistent-key route; no new key was generated or enrolled. |
-| Authoritative GitLab publication | `PASS` at integrated candidate `b09eff1fab865526c862859f17bfb381c9bae1f0`; CI skipped | GitLab master was independently reread after a non-force fast-forward push. This proves source publication only. |
+| R9-M5 existing-agent seed extension | `SOURCE_READY` at `c38497ec8ff033f483d99d8dbb98dfacb67b8dfd`; CI skipped | Exact current-boot agent identity and atomic no-replace seed activation pass `6/6`; live seed acquisition remains separate evidence. |
+| Authoritative GitLab publication | `PASS` at reporting candidate `b2d06bc385c1aa25110c7a8f579fb4da8ced1847`; CI skipped | GitLab master was independently reread after a non-force fast-forward push. This proves source publication only. |
 | Private root provisioning | `NOT_DONE` | The birth organ is source-ready, but eligible private seed/config/toolchain inputs and the live root are absent. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
 | Real systemd current-boot adoption | `NOT_DONE` | Current HOME `UnitPath` and drop-ins fail closed; fake-manager tests are not live proof. |
@@ -448,5 +470,6 @@ Until R9-M2 provisioning, complete-writer quiescence, R9-M1 migration
 and receipt verification, current-boot binding, explicit adoption, isolated
 exercise, installed verification, and fresh-MCP admission are all bound to one
 authoritative candidate and green, the truthful status is: trusted-root
-framework and R9-M1–M4 source published; production remains on hold; current
+framework and R9-M1–M4 source published, with R9-M5 source-ready; production
+remains on hold; current
 installation failed closed; R9 not seeded, provisioned, or deployed.
