@@ -2,9 +2,10 @@
 
 Date: 2026-08-28
 
-Status: **R9-M1 source-ready locally at
-`eda927d1837b50c6680ce3ea337456a79e52a965`; not published, deployed, or
-live-executed; production remains `HOLD`**.
+Status: **R9-M1 source at `eda927d1837b50c6680ce3ea337456a79e52a965`
+is authoritatively published as an ancestor of integrated GitLab candidate
+`b09eff1fab865526c862859f17bfb381c9bae1f0`, but not deployed or live-executed;
+production remains `HOLD`**.
 
 Scope: one operator-authorized migration from the legacy HOME-bound AB body
 state into `$AGENT_BRIDGE_DEPLOY_ROOT/runtime-state`

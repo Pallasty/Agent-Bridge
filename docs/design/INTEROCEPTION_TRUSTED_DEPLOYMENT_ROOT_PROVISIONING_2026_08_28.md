@@ -2,9 +2,10 @@
 
 Date: 2026-08-28
 
-Status: **R9-M2 `SOURCE_READY` locally at
-`55954e2458eefae261ae761e3035b88536fcc782`; not published, provisioned,
-deployed, or live-executed; production remains `HOLD`**.
+Status: **R9-M2 source at `55954e2458eefae261ae761e3035b88536fcc782`
+is published through integrated GitLab candidate
+`b09eff1fab865526c862859f17bfb381c9bae1f0`, but not provisioned, deployed, or
+live-executed; production remains `HOLD`**.
 
 Scope: one operator-confirmed creation of a new private Agent Bridge deployment
 root before wrapper installation or publication

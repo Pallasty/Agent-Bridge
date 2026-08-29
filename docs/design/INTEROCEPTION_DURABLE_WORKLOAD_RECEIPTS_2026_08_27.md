@@ -1,8 +1,9 @@
 # AB interoception: durable workload receipts
 
 Status: R9 durable-v1 plus trusted deployment-root framework source-ready;
-R9-M1 trusted runtime-state migration source-ready locally at
-`eda927d1837b50c6680ce3ea337456a79e52a965`; not published or deployed;
+R9-M1 trusted runtime-state migration at
+`eda927d1837b50c6680ce3ea337456a79e52a965` is published through integrated
+GitLab candidate `b09eff1fab865526c862859f17bfb381c9bae1f0` but not deployed;
 R9-M2 trusted-root provisioning `SOURCE_READY` locally at
 `55954e2458eefae261ae761e3035b88536fcc782`; production remains `HOLD`
 Scope: body-bound local Agent workloads on Linux cgroup v2

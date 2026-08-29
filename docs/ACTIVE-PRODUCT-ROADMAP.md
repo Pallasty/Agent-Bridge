@@ -52,6 +52,8 @@ operator. See `docs/design/RESIDENT_XIAOSHU_V0.md`.
 
   - **R9-M4 — optional durable GitLab deploy credential ceremony (`SOURCE_READY` locally at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI explicitly skipped; no real key generated/enrolled):** the node already has a usable agent-only GitLab identity, so new key generation is not a prerequisite for current publication. R9-M4 remains a bounded optional route when the release owner chooses a separately governed persistent deploy key for R9-M2 and later unattended publisher fetches. Every generated output remains `local_key_not_enrolled`; enrollment and rotation require an explicit security-sensitive owner action. See `docs/design/INTEROCEPTION_GITLAB_DEPLOY_CREDENTIAL_CEREMONY_2026_08_29.md`.
 
+  - **R9 publication update — `PASS` on 2026-08-29:** integrated candidate `b09eff1fab865526c862859f17bfb381c9bae1f0` preserved GitLab `7c60a8cc` plus the complete R9-M1–M4 chain and was published by non-force fast-forward with `ci.skip`; GitLab master was independently reread at that identity. This supersedes the earlier publication-in-progress/SSH-denied wording. Source publication does not imply seed acquisition, trusted-root provisioning, migration, systemd adoption, or deployment; production remains `HOLD`.
+
 ## Admission rule for new work
 
 A new implementation lane must identify a recent real problem, a user-cost metric, a usable closure within one or two increments, and a real-task acceptance path. Source-only, fixture-only, or synthetic PASS may support safety but cannot by itself justify the next increment. Two increments without use-value evidence freeze the lane.
