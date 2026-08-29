@@ -21,6 +21,7 @@ INSTALLER_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 SOURCE_REPO="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 WRAPPER_TEMPLATE="$SCRIPT_DIR/agent-bridge-wrapper.sh"
 CREDS_TEMPLATE="$SCRIPT_DIR/creds.example"
+PROVISIONER="$SOURCE_REPO/scripts/provision-trusted-deployment-root.py"
 
 DEPLOY_ROOT_RAW="${AGENT_BRIDGE_DEPLOY_ROOT:-}"
 INSTALL_DIR="$DEPLOY_ROOT_RAW/bin"
@@ -256,6 +257,39 @@ validate_private_source_checkout() {
     validate_owned_source_file "$INSTALLER_PATH" 600 "trusted wrapper installer"
     validate_owned_source_file "$WRAPPER_TEMPLATE" 600 "trusted wrapper template"
     validate_owned_source_file "$CREDS_TEMPLATE" 600 "trusted credentials example"
+    validate_owned_source_file "$PROVISIONER" 700 "trusted root provisioner"
+}
+
+verify_provisioning_receipt() {
+    local inherited_fd="${1:-}" output
+    if [ -n "$inherited_fd" ]; then
+        output="$(/usr/bin/env -i PATH=/usr/bin:/bin HOME="$DEPLOY_ROOT" \
+            PYTHONNOUSERSITE=1 /usr/bin/python3 -I -B "$PROVISIONER" verify \
+            --deploy-root "$DEPLOY_ROOT" --inherited-lock-fd "$inherited_fd")" ||
+            fail "trusted-root provisioning receipt verification failed"
+    else
+        output="$(/usr/bin/env -i PATH=/usr/bin:/bin HOME="$DEPLOY_ROOT" \
+            PYTHONNOUSERSITE=1 /usr/bin/python3 -I -B "$PROVISIONER" verify \
+            --deploy-root "$DEPLOY_ROOT")" ||
+            fail "trusted-root provisioning receipt verification failed"
+    fi
+    printf '%s' "$output" | /usr/bin/python3 -I -B -c '
+import json, re, sys
+try:
+    value = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+if set(value) != {"candidate_commit", "command", "receipt_digest", "schema", "status"}:
+    raise SystemExit(1)
+if value["schema"] != "agent_bridge.trusted_deployment_root_provisioning_result.v1":
+    raise SystemExit(1)
+if value["command"] != "verify" or value["status"] != "verified_provisioning_custody":
+    raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{40}", value["candidate_commit"]):
+    raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{64}", value["receipt_digest"]):
+    raise SystemExit(1)
+' || fail "trusted-root provisioning verifier returned an invalid result"
 }
 
 # Heuristic: a shell wrapper is a small text file (<32 KiB) whose head
@@ -308,6 +342,7 @@ if [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
     validate_owned_safe_directory "$INSTALL_DIR" "install bin directory"
 fi
 validate_private_source_checkout
+verify_provisioning_receipt
 for existing_runtime_path in "$WRAPPER_PATH" "$REAL_PATH"; do
     if [ -e "$existing_runtime_path" ] || [ -L "$existing_runtime_path" ]; then
         case "$existing_runtime_path" in
@@ -328,6 +363,7 @@ done
 # any deployment mutation. A dry run remains strictly read-only.
 if [ "$DRY_RUN" -eq 0 ]; then
     acquire_publisher_mutex
+    verify_provisioning_receipt 9
 fi
 
 if [ "$UNINSTALL" -eq 1 ]; then

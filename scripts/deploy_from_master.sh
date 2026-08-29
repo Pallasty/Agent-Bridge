@@ -93,6 +93,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+PROVISIONING_TOOL="$REPO/scripts/provision-trusted-deployment-root.py"
 
 if [ "$LEASE_TEST_MODE" = 1 ]; then
     # The contained regression lane deliberately exercises arbitrary leaf
@@ -736,6 +737,8 @@ validate_private_source_checkout() {
         "trusted source systemd directory"
     verify_owned_regular_mode "$migration_script" 700 \
         "trusted runtime-state migration orchestrator"
+    verify_owned_regular_mode "$PROVISIONING_TOOL" 700 \
+        "trusted deployment-root provisioning orchestrator"
     verify_owned_regular_mode "$systemd_installer" 700 \
         "trusted systemd binding orchestrator"
     # `git archive` honors repository-local info attributes, while legacy
@@ -748,6 +751,44 @@ validate_private_source_checkout() {
         [ ! -e "$local_git_override" ] && [ ! -L "$local_git_override" ] ||
             die "trusted source Git override must be absent: $local_git_override"
     done
+}
+
+verify_trusted_root_provisioning() {
+    local inherited_fd="${1:-}" output candidate
+    if [ -n "$inherited_fd" ]; then
+        output="$(/usr/bin/env -i PATH=/usr/bin:/bin HOME="$DEPLOY_ROOT" \
+            PYTHONNOUSERSITE=1 /usr/bin/python3 -I -B "$PROVISIONING_TOOL" verify \
+            --deploy-root "$DEPLOY_ROOT" --inherited-lock-fd "$inherited_fd")" ||
+            die "trusted-root provisioning receipt verification failed"
+    else
+        output="$(/usr/bin/env -i PATH=/usr/bin:/bin HOME="$DEPLOY_ROOT" \
+            PYTHONNOUSERSITE=1 /usr/bin/python3 -I -B "$PROVISIONING_TOOL" verify \
+            --deploy-root "$DEPLOY_ROOT")" ||
+            die "trusted-root provisioning receipt verification failed"
+    fi
+    candidate="$(printf '%s' "$output" | /usr/bin/python3 -I -B -c '
+import json, re, sys
+try:
+    value = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+if set(value) != {"candidate_commit", "command", "receipt_digest", "schema", "status"}:
+    raise SystemExit(1)
+if value["schema"] != "agent_bridge.trusted_deployment_root_provisioning_result.v1":
+    raise SystemExit(1)
+if value["command"] != "verify" or value["status"] != "verified_provisioning_custody":
+    raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{40}", value["candidate_commit"]):
+    raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{64}", value["receipt_digest"]):
+    raise SystemExit(1)
+print(value["candidate_commit"])
+')" || die "trusted-root provisioning verifier returned an invalid result"
+    if [ -n "${PROVISIONED_SOURCE_CANDIDATE:-}" ] && \
+            [ "$candidate" != "$PROVISIONED_SOURCE_CANDIDATE" ]; then
+        die "trusted-root source candidate drifted between provisioning checks"
+    fi
+    PROVISIONED_SOURCE_CANDIDATE="$candidate"
 }
 
 validate_trusted_git_configuration() {
@@ -1186,6 +1227,7 @@ if [ "$LEASE_TEST_MODE" = 0 ]; then
     # development checkout. Production is entered only through the fixed,
     # private clone provisioned beneath the deployment root.
     validate_private_source_checkout
+    verify_trusted_root_provisioning
     [ -z "$USE_BINARY" ] ||
         die "--use-binary is disabled for production trusted-root deployment"
     DEPLOY_TARGET_ROOT=""
@@ -1368,6 +1410,9 @@ set -e
 [ "$KERNEL_LOCK_SELF_STATUS" -eq 0 ] || die "publisher process does not own its inherited kernel mutex fd"
 [ "$KERNEL_LOCK_PROBE_STATUS" -eq "$KERNEL_LOCK_EXPECTED_BUSY" ] ||
     die "publisher lock-holder marker is not backed by the expected live kernel mutex"
+if [ "$LEASE_TEST_MODE" = 0 ]; then
+    verify_trusted_root_provisioning 9
+fi
 CURRENT_BOOT_IDENTITY="$(boot_identity)" || die "cannot establish host boot identity for publisher lease"
 SHARED_TARGETS="$(clean_field "$REAL_PATH|$ADAPTER_PATH|$RUNTIME_ASSET_DIR|$WRAPPER_PATH")"
 
@@ -3231,6 +3276,8 @@ else
     fi
     MASTER_SHA="$(deploy_git -C "$REPO" rev-parse --verify "$MASTER_REF")"
     if [ "$LEASE_TEST_MODE" = 0 ]; then
+        [ "$MASTER_SHA" = "$PROVISIONED_SOURCE_CANDIDATE" ] ||
+            die "$DEPLOY_REMOTE/master differs from the verified trusted source candidate; advance the private source HEAD and gitlab/master together, then rerun provisioning verification"
         PUBLISHED_ORCHESTRATOR_SHA="$(deploy_git -C "$REPO" show \
             "$MASTER_SHA:scripts/deploy_from_master.sh" | sha256_text)" ||
             die "cannot read the deploy orchestrator from authoritative master"

@@ -552,12 +552,15 @@ write_handoff_completion_fixture() {
 }
 
 write_production_checkout_fixture() {
-    local root="$1" remote_url="$2" checkout
+    local root="$1" remote_url="$2" checkout provisioner
     checkout="$root/source/agent-bridge"
+    provisioner="$checkout/scripts/provision-trusted-deployment-root.py"
     mkdir -p \
         "$checkout/scripts/systemd" \
         "$root/config/git" \
-        "$root/build-cache"
+        "$root/build-cache" \
+        "$root/provisioning" \
+        "$root/publisher-state/deploy"
     chmod 700 \
         "$root" \
         "$root/source" \
@@ -566,7 +569,10 @@ write_production_checkout_fixture() {
         "$checkout/scripts/systemd" \
         "$root/config" \
         "$root/config/git" \
-        "$root/build-cache"
+        "$root/build-cache" \
+        "$root/provisioning" \
+        "$root/publisher-state" \
+        "$root/publisher-state/deploy"
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
         /usr/bin/git -c init.defaultBranch=master init -q "$checkout"
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
@@ -576,16 +582,55 @@ write_production_checkout_fixture() {
         "$checkout/scripts/migrate-trusted-runtime-state.py"
     cp "$SCRIPT_DIR/systemd/install-trusted-daemon-root.sh" \
         "$checkout/scripts/systemd/install-trusted-daemon-root.sh"
+    cat > "$provisioner" <<'PY'
+#!/usr/bin/python3
+import argparse
+import json
+import os
+import stat
+
+parser = argparse.ArgumentParser()
+parser.add_argument("command")
+parser.add_argument("--deploy-root", required=True)
+parser.add_argument("--inherited-lock-fd", type=int)
+args = parser.parse_args()
+if args.command != "verify":
+    raise SystemExit(2)
+receipt = os.path.join(args.deploy_root, "provisioning/current.json")
+lock = os.path.join(args.deploy_root, "publisher-state/deploy/publisher.kernel.lock")
+with open(receipt, encoding="ascii") as handle:
+    if handle.read() != "fixture-provisioning-receipt\n":
+        raise SystemExit(1)
+path = os.stat(lock, follow_symlinks=False)
+if not stat.S_ISREG(path.st_mode) or stat.S_IMODE(path.st_mode) != 0o600:
+    raise SystemExit(1)
+if args.inherited_lock_fd is not None:
+    opened = os.fstat(args.inherited_lock_fd)
+    if (opened.st_dev, opened.st_ino) != (path.st_dev, path.st_ino):
+        raise SystemExit(1)
+print(json.dumps({
+    "schema": "agent_bridge.trusted_deployment_root_provisioning_result.v1",
+    "command": "verify",
+    "status": "verified_provisioning_custody",
+    "candidate_commit": "a" * 40,
+    "receipt_digest": "b" * 64,
+}, sort_keys=True, separators=(",", ":")))
+PY
+    printf '%s\n' fixture-provisioning-receipt > "$root/provisioning/current.json"
+    : > "$root/publisher-state/deploy/publisher.kernel.lock"
     printf '%s\n' fixture-deploy-key > "$root/config/git/gitlab_deploy_key"
     printf '%s\n' fixture-known-host > "$root/config/git/known_hosts"
     chmod 700 \
         "$checkout/.git" \
         "$checkout/scripts/deploy_from_master.sh" \
+        "$provisioner" \
         "$checkout/scripts/migrate-trusted-runtime-state.py" \
         "$checkout/scripts/systemd/install-trusted-daemon-root.sh"
     chmod 600 \
         "$root/config/git/gitlab_deploy_key" \
-        "$root/config/git/known_hosts"
+        "$root/config/git/known_hosts" \
+        "$root/provisioning/current.json" \
+        "$root/publisher-state/deploy/publisher.kernel.lock"
     assert_owned_mode "$root" 700 "production fixture root"
     assert_owned_mode "$root/source" 700 "production fixture source directory"
     assert_owned_mode "$checkout" 700 "production fixture checkout"
@@ -593,6 +638,8 @@ write_production_checkout_fixture() {
     assert_owned_mode "$checkout/scripts" 700 "production fixture scripts directory"
     assert_owned_mode "$checkout/scripts/deploy_from_master.sh" 700 \
         "production fixture deploy orchestrator"
+    assert_owned_mode "$provisioner" 700 \
+        "production fixture provisioning orchestrator"
     assert_owned_mode "$checkout/scripts/migrate-trusted-runtime-state.py" 700 \
         "production fixture migration orchestrator"
     assert_owned_mode "$checkout/scripts/systemd" 700 \
@@ -605,6 +652,10 @@ write_production_checkout_fixture() {
         "production fixture GitLab key"
     assert_owned_mode "$root/config/git/known_hosts" 600 \
         "production fixture known-hosts"
+    assert_owned_mode "$root/provisioning/current.json" 600 \
+        "production fixture provisioning receipt"
+    assert_owned_mode "$root/publisher-state/deploy/publisher.kernel.lock" 600 \
+        "production fixture publisher lock"
     [ "$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
         /usr/bin/git -C "$checkout" remote get-url gitlab)" = "$remote_url" ] ||
         fail "production fixture deploy remote mismatch"
@@ -646,8 +697,13 @@ run_production_checkout_fixture() {
 
 assert_production_pre_mutation_rejection() {
     local root="$1" checkout="$2" label="$3"
-    [ ! -e "$root/publisher-state" ] && [ ! -e "$root/bin" ] ||
-        fail "$label formed publisher state/bin before rejection"
+    [ ! -e "$root/bin" ] || fail "$label formed bin before rejection"
+    [ -f "$root/publisher-state/deploy/publisher.kernel.lock" ] ||
+        fail "$label lost the provisioned publisher lock"
+    [ "$(find "$root/publisher-state" -mindepth 1 \
+        ! -path "$root/publisher-state/deploy" \
+        ! -path "$root/publisher-state/deploy/publisher.kernel.lock" -print -quit)" = "" ] ||
+        fail "$label mutated publisher state before rejection"
     [ ! -e "$checkout/.git/FETCH_HEAD" ] ||
         fail "$label reached Git fetch before rejection"
     if [ -d "$checkout/.git/refs/remotes" ]; then
@@ -846,7 +902,7 @@ esac
 # source/configuration chain. Each deliberately widened custody component must
 # fail while the checkout remains unfetched and publisher/build paths untouched.
 for private_component in \
-    source git-metadata scripts systemd-dir deploy-script migration-script systemd-installer
+    source git-metadata scripts systemd-dir deploy-script provisioner migration-script systemd-installer
 do
     private_root="$TEST_ROOT/production-private-$private_component"
     write_production_checkout_fixture \
@@ -871,6 +927,10 @@ do
         deploy-script)
             unsafe_path="$PRODUCTION_FIXTURE_DEPLOY"
             expected_rejection="trusted deploy orchestrator mode must be 700"
+            ;;
+        provisioner)
+            unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts/provision-trusted-deployment-root.py"
+            expected_rejection="trusted deployment-root provisioning orchestrator mode must be 700"
             ;;
         migration-script)
             unsafe_path="$PRODUCTION_FIXTURE_CHECKOUT/scripts/migrate-trusted-runtime-state.py"
@@ -897,6 +957,24 @@ do
         "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
         "$private_component custody rejection"
 done
+
+missing_provision_root="$TEST_ROOT/production-missing-provision-receipt"
+write_production_checkout_fixture \
+    "$missing_provision_root" git@gitlab.com:pallasting/agent-bridge.git
+rm "$missing_provision_root/provisioning/current.json"
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" use-binary 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "production publisher accepted a missing provisioning receipt"
+case "$output" in *"trusted-root provisioning receipt verification failed"*) ;; *)
+    fail "missing provisioning receipt rejection reason absent" ;;
+esac
+[ ! -e "$missing_provision_root/bin" ] ||
+    fail "missing provisioning receipt reached publisher bin mutation"
+[ ! -e "$PRODUCTION_FIXTURE_CHECKOUT/.git/FETCH_HEAD" ] ||
+    fail "missing provisioning receipt reached Git fetch"
 
 # A same-directory copy/alias must not cause the publisher to validate the
 # untouched canonical sibling while executing different bytes.

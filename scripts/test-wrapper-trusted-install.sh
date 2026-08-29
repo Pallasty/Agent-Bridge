@@ -18,20 +18,77 @@ owner_of() { stat -c %u "$1"; }
 inode_of() { stat -c %i "$1"; }
 
 prepare_root() {
-    local root="$1" repo wrapper_dir
+    local root="$1" repo wrapper_dir provisioner
     repo="$root/source/agent-bridge"
     wrapper_dir="$repo/scripts/wrapper"
-    mkdir -p "$wrapper_dir" "$repo/.git"
+    provisioner="$repo/scripts/provision-trusted-deployment-root.py"
+    mkdir -p "$wrapper_dir" "$repo/.git" \
+        "$root/provisioning" "$root/publisher-state/deploy"
     chmod 700 "$root" "$root/source" "$repo" "$repo/.git" \
-        "$repo/scripts" "$wrapper_dir"
+        "$repo/scripts" "$wrapper_dir" "$root/provisioning" \
+        "$root/publisher-state" "$root/publisher-state/deploy"
     cp "$SOURCE_INSTALLER" "$wrapper_dir/install.sh"
     cp "$SOURCE_WRAPPER" "$wrapper_dir/agent-bridge-wrapper.sh"
     cp "$SOURCE_CREDS" "$wrapper_dir/creds.example"
+    cat > "$provisioner" <<'PY'
+#!/usr/bin/python3
+import argparse
+import json
+import os
+import stat
+
+parser = argparse.ArgumentParser()
+parser.add_argument("command")
+parser.add_argument("--deploy-root", required=True)
+parser.add_argument("--inherited-lock-fd", type=int)
+args = parser.parse_args()
+if args.command != "verify":
+    raise SystemExit(2)
+receipt = os.path.join(args.deploy_root, "provisioning/current.json")
+lock = os.path.join(args.deploy_root, "publisher-state/deploy/publisher.kernel.lock")
+if open(receipt, encoding="ascii").read() != "fixture-provisioning-receipt\n":
+    raise SystemExit(1)
+path = os.stat(lock, follow_symlinks=False)
+if not stat.S_ISREG(path.st_mode) or stat.S_IMODE(path.st_mode) != 0o600:
+    raise SystemExit(1)
+if args.inherited_lock_fd is not None:
+    opened = os.fstat(args.inherited_lock_fd)
+    if (opened.st_dev, opened.st_ino) != (path.st_dev, path.st_ino):
+        raise SystemExit(1)
+print(json.dumps({
+    "schema": "agent_bridge.trusted_deployment_root_provisioning_result.v1",
+    "command": "verify",
+    "status": "verified_provisioning_custody",
+    "candidate_commit": "a" * 40,
+    "receipt_digest": "b" * 64,
+}, sort_keys=True, separators=(",", ":")))
+PY
+    printf '%s\n' fixture-provisioning-receipt > "$root/provisioning/current.json"
+    : > "$root/publisher-state/deploy/publisher.kernel.lock"
     chmod 600 "$wrapper_dir/install.sh" \
-        "$wrapper_dir/agent-bridge-wrapper.sh" "$wrapper_dir/creds.example"
+        "$wrapper_dir/agent-bridge-wrapper.sh" "$wrapper_dir/creds.example" \
+        "$root/provisioning/current.json" \
+        "$root/publisher-state/deploy/publisher.kernel.lock"
+    chmod 700 "$provisioner"
     FIXTURE_INSTALLER="$wrapper_dir/install.sh"
     FIXTURE_WRAPPER="$wrapper_dir/agent-bridge-wrapper.sh"
 }
+
+missing_receipt_root="$TEST_ROOT/missing-provisioning-receipt"
+mkdir -p "$missing_receipt_root"
+prepare_root "$missing_receipt_root"
+rm "$missing_receipt_root/provisioning/current.json"
+set +e
+missing_receipt_output="$(AGENT_BRIDGE_DEPLOY_ROOT="$missing_receipt_root" \
+    /bin/bash "$FIXTURE_INSTALLER" --dry-run 2>&1)"
+missing_receipt_status=$?
+set -e
+[ "$missing_receipt_status" -ne 0 ] || fail "installer accepted a missing provisioning receipt"
+case "$missing_receipt_output" in *"provisioning receipt verification failed"*) ;; *)
+    fail "missing provisioning receipt reason absent" ;;
+esac
+[ ! -e "$missing_receipt_root/bin" ] ||
+    fail "missing provisioning receipt reached wrapper mutation"
 
 wrong_root="$TEST_ROOT/wrong-source"
 mkdir -p "$wrong_root"
@@ -75,7 +132,7 @@ set -e
 case "$alias_output" in *"exact trusted installer path"*) ;; *)
     fail "same-directory installer alias reason missing" ;;
 esac
-[ ! -e "$alias_root/bin" ] && [ ! -e "$alias_root/publisher-state" ] ||
+[ ! -e "$alias_root/bin" ] ||
     fail "same-directory installer alias mutated the deployment root"
 
 for unsafe_kind in fifo directory; do
