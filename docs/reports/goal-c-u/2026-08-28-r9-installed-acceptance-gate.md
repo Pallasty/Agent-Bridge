@@ -254,6 +254,19 @@ provisioning harness remains `10/10 PASS`. The real GitLab SSH probe remains
 denied, so these results are local source evidence—not publication or seed
 evidence—and production remains `HOLD`.
 
+## R9-M4 GitLab deploy credential ceremony source-ready implementation
+
+R9-M4 is source-ready locally at
+`573ae19b6f530d0cfb52be9b88acb8292a5390e4`. It adds a zero-write plan,
+exact-confirm fresh Ed25519 generation, GitLab-official host-key anchors,
+public-only enrollment packet, private receipt, atomic no-replace activation,
+and independent verification. The receipt says `local_key_not_enrolled`; no
+local action is allowed to infer GitLab write authority.
+
+R9-M4 `4/4`, R9-M3 `4/4`, and R9-M2 `10/10` targeted harnesses pass. CI was
+explicitly skipped. No real key was generated or enrolled and the actual
+GitLab SSH path remains denied, so production remains `HOLD`.
+
 ## Verification ledger
 
 The baseline rows below preserve earlier durable-receipt and trusted-root
@@ -419,6 +432,7 @@ capacity stops admission. It must not be reported as a partial PASS.
 | R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
 | R9-M2 provisioning implementation | `SOURCE_READY` at `55954e2458eefae261ae761e3035b88536fcc782` | Zero-write plan, exact-confirm provision, fixed-path verification, and consumer gates are green; no live root was created. |
 | R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; real GitLab authentication remains blocked. |
+| R9-M4 credential ceremony | `SOURCE_READY` at `573ae19b6f530d0cfb52be9b88acb8292a5390e4`; CI skipped | Local key/host ceremony fixtures are green; no key was generated or enrolled and no GitLab authority exists. |
 | Authoritative GitLab publication | `BLOCKED` | Authenticated publisher identity/path is unavailable. |
 | Private root provisioning | `NOT_DONE` | The birth organ is source-ready, but eligible private seed/config/toolchain inputs and the live root are absent. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
