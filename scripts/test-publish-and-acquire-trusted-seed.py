@@ -7,10 +7,12 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).with_name("publish-and-acquire-trusted-seed.py")
 SPEC = importlib.util.spec_from_file_location("publication_seed", SCRIPT)
@@ -62,6 +64,8 @@ class Fixture:
                  "source_repository": str(self.source), "seed_path": str(self.seed),
                  "gitlab_deploy_key": str(self.key), "known_hosts": str(self.known)}
         value.update(changes)
+        if "authentication" in changes:
+            value.pop("gitlab_deploy_key")
         self.manifest.write_text(json.dumps(value, sort_keys=True))
         os.chmod(self.manifest, 0o600)
 
@@ -157,6 +161,54 @@ class PublicationSeedTests(unittest.TestCase):
         status, _, error = self.fixture.invoke("verify")
         self.assertNotEqual(status, 0)
         self.assertIn("not clean", error)
+
+    def test_agent_socket_mode_binds_exact_public_identity(self) -> None:
+        agent_key = self.base / "agent-key"
+        subprocess.run(["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(agent_key)], check=True)
+        public_key = Path(str(agent_key) + ".pub")
+        os.chmod(public_key, 0o600)
+        fingerprint = subprocess.run(
+            ["/usr/bin/ssh-keygen", "-E", "sha256", "-lf", str(public_key)],
+            check=True, stdout=subprocess.PIPE, text=True,
+        ).stdout.split()[1]
+        socket_path = self.base / "agent.sock"
+        agent_socket = socket.socket(socket.AF_UNIX)
+        agent_socket.bind(str(socket_path))
+        os.chmod(socket_path, 0o600)
+        try:
+            self.fixture.write_manifest(authentication={
+                "mode": "agent_socket", "socket_path": str(socket_path),
+                "public_key_path": str(public_key), "public_key_fingerprint": fingerprint,
+            })
+            with mock.patch.object(MODULE, "agent_fingerprints", return_value={fingerprint}):
+                status, plan, error = self.fixture.invoke("plan")
+                self.assertEqual(status, 0, error)
+                assert plan
+                self.assertEqual(self.fixture.invoke("publish", str(plan["confirmation"]))[0], 0)
+                self.assertEqual(self.fixture.invoke("acquire-seed")[0], 0)
+                self.assertEqual(self.fixture.invoke("verify")[0], 0)
+            self.fixture.seed.rename(self.base / "accepted-seed")
+            self.fixture.write_manifest(authentication={
+                "mode": "agent_socket", "socket_path": str(socket_path),
+                "public_key_path": str(public_key), "public_key_fingerprint": "SHA256:wrong",
+            })
+            rejected = self.fixture.invoke("plan")
+            self.assertNotEqual(rejected[0], 0)
+            self.assertIn("does not match", rejected[2])
+        finally:
+            agent_socket.close()
+
+    def test_atomic_seed_activation_never_replaces_a_racing_target(self) -> None:
+        source = self.base / "activation-source"
+        destination = self.base / "activation-destination"
+        source.mkdir()
+        destination.mkdir()
+        marker = destination / "owned"
+        marker.write_text("preserve\n")
+        with self.assertRaisesRegex(MODULE.Blocked, "appeared during atomic activation"):
+            MODULE.rename_noreplace(str(source), str(destination))
+        self.assertTrue(source.is_dir())
+        self.assertEqual(marker.read_text(), "preserve\n")
 
 
 if __name__ == "__main__":
