@@ -238,6 +238,22 @@ operator-recovery residual, not a license to reuse a partial stage or infer
 success. The detailed contract is in
 `docs/design/INTEROCEPTION_TRUSTED_DEPLOYMENT_ROOT_PROVISIONING_2026_08_28.md`.
 
+## R9-M3 authoritative publication and seed source-ready implementation
+
+R9-M3 is source-ready locally at
+`2107da2f0560f98c2820700f11c64093afd37783`. It binds an exact clean candidate
+and current GitLab master into a zero-write plan; performs only an explicitly
+confirmed fast-forward push with GitLab `ci.skip`; reacquires the result through
+an independent authenticated, non-local, non-hardlinked clone; and verifies
+remote, seed, tracking ref, configuration, gitlink absence, and private inode
+custody before R9-M2 may consume it. CI was deliberately not introduced or
+run for this increment.
+
+The isolated publication/seed harness is `4/4 PASS` and the updated R9-M2
+provisioning harness remains `10/10 PASS`. The real GitLab SSH probe remains
+denied, so these results are local source evidence—not publication or seed
+evidence—and production remains `HOLD`.
+
 ## Verification ledger
 
 The baseline rows below preserve earlier durable-receipt and trusted-root
@@ -402,6 +418,7 @@ capacity stops admission. It must not be reported as a partial PASS.
 | Earlier isolated restart exercise | `PASS` at source candidate `9bc924a2...` | Durable receipt reconciliation behavior only; must repeat after authoritative install. |
 | R9-M1 migration implementation | `SOURCE_READY` at `eda927d1837b50c6680ce3ea337456a79e52a965` | Local implementation, adversarial fixtures, and independent review are green; no publication or production-migration claim. |
 | R9-M2 provisioning implementation | `SOURCE_READY` at `55954e2458eefae261ae761e3035b88536fcc782` | Zero-write plan, exact-confirm provision, fixed-path verification, and consumer gates are green; no live root was created. |
+| R9-M3 publication/seed implementation | `SOURCE_READY` at `2107da2f0560f98c2820700f11c64093afd37783`; CI skipped | Fast-forward publication and independent seed fixtures are green; real GitLab authentication remains blocked. |
 | Authoritative GitLab publication | `BLOCKED` | Authenticated publisher identity/path is unavailable. |
 | Private root provisioning | `NOT_DONE` | The birth organ is source-ready, but eligible private seed/config/toolchain inputs and the live root are absent. |
 | Production state migration | `NOT_DONE` | Unsafe SQLite/WAL and split body-state organs remain unmigrated; no live migration receipt exists. |
