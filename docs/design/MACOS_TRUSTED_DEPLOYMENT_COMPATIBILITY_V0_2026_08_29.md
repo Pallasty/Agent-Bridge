@@ -1,6 +1,6 @@
 # macOS Trusted Deployment Compatibility V0
 
-Status: **D1 READ-ONLY PREFLIGHT ACCEPTED / HOST HOLD OBSERVED / NO DEPLOYMENT**
+Status: **D1 AND D2 ACCEPTED / D3 NOT STARTED / NO DEPLOYMENT**
 
 Date: 2026-08-29
 
@@ -208,6 +208,23 @@ root provisioning, migration, service adoption, deployment, or release.
 Implement the Darwin no-replace helper and a Darwin-specific manifest/receipt
 schema. Exercise plan/provision/verify only against a disposable private root.
 Do not install the production wrapper or import production state.
+
+The D2 source candidate separates the native no-replace primitive
+(`scripts/macos-rename-exclusive.c`) from the plan/provision/verify custody
+logic (`scripts/provision-macos-trusted-deployment-root.py`). Provision binds
+the exact helper digest and confirmation, stages only beneath an explicit
+owner-private parent, writes a Darwin-backend manifest and receipt, and then
+activates with `renameatx_np(RENAME_EXCL)`. A failed exclusive activation
+retains the staging tree for inspection and never repairs or replaces the
+destination.
+
+The 2026-08-30 real disposable-root proof compiled the native helper with
+warnings-as-errors, completed CLI plan/provision/verify with one stable tree
+digest and a mode-0700 root, and then exercised an existing-destination race.
+The helper returned the typed `73` refusal, preserved the destination marker,
+and retained the source staging directory. The disposable proof directory was
+moved to Trash after verification. No production root, state, binary, launchd
+service, remote, or runtime was changed. This accepts D2 only.
 
 ### D3 — publisher and signed install
 
