@@ -1,6 +1,6 @@
 # macOS Trusted Deployment Compatibility V0
 
-Status: **D1 AND D2 ACCEPTED / D3 NOT STARTED / NO DEPLOYMENT**
+Status: **D1 AND D2 ACCEPTED / D3 REDIRECTED TO EXISTING PUBLISHER / NO DEPLOYMENT**
 
 Date: 2026-08-29
 
@@ -218,6 +218,13 @@ activates with `renameatx_np(RENAME_EXCL)`. A failed exclusive activation
 retains the staging tree for inspection and never repairs or replaces the
 destination.
 
+The provisioning receipt binds an immutable custody spine, not the future
+contents of mutable namespaces. Root birth creates the exact private top-level
+layout, including `build`, `publisher`, `lib`, and `share`; verification binds
+those directory names and modes plus the immutable root manifest. Later gates
+may populate only those admitted namespaces without invalidating root custody,
+while an extra top-level namespace or manifest drift still fails closed.
+
 The 2026-08-30 real disposable-root proof compiled the native helper with
 warnings-as-errors, completed CLI plan/provision/verify with one stable tree
 digest and a mode-0700 root, and then exercised an existing-destination race.
@@ -231,6 +238,14 @@ service, remote, or runtime was changed. This accepts D2 only.
 Bind the verified Darwin root to the shared publisher lease, exact remote,
 private build cache, signed candidate, repository assets, rollback artifact,
 and pending admission receipt. Stop before service adoption.
+
+An isolated D3 implementation experiment was stopped after review showed that
+it duplicated the mature publisher lease, exact-master build, signing, asset,
+rollback, and pending-admission machinery already present in
+`scripts/deploy_from_master.sh`. D3 is therefore redirected: add only the
+smallest Darwin root/provisioning compatibility adapter to the existing
+publisher, and reuse its established receipts and recovery path. A second
+publisher implementation is explicitly out of scope.
 
 ### D4 — migration and launchd adoption
 

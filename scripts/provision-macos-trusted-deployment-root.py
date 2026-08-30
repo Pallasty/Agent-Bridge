@@ -26,7 +26,10 @@ RECEIPT_SCHEMA = "agent_bridge.darwin_trusted_root_receipt.v0"
 RESULT_SCHEMA = "agent_bridge.darwin_trusted_root_result.v0"
 BACKEND = "darwin-launchd-v0"
 RECEIPT_NAME = "receipts/root-provisioning.json"
-LAYOUT = ("bin", "config", "data", "receipts", "rollback", "source")
+LAYOUT = (
+    "bin", "build", "config", "data", "lib", "publisher", "receipts",
+    "rollback", "share", "source",
+)
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ROOT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 PLAN_DOMAIN = b"agent-bridge/darwin-trusted-root/plan/v0\0"
@@ -126,24 +129,32 @@ def build_plan(root: Path, helper: Path) -> dict[str, Any]:
     }
 
 
-def tree_digest(root: Path) -> tuple[str, list[dict[str, Any]]]:
+def custody_digest(root: Path) -> tuple[str, list[dict[str, Any]]]:
+    observed_top_level = sorted(path.name for path in root.iterdir())
+    expected_top_level = sorted((*LAYOUT,))
+    if observed_top_level != expected_top_level:
+        fail("trusted root top-level custody layout drifted")
     rows: list[dict[str, Any]] = []
-    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
-        relative = path.relative_to(root).as_posix()
-        if relative == RECEIPT_NAME:
-            continue
+    for name in LAYOUT:
+        path = root / name
         value = path.lstat()
-        if stat.S_ISLNK(value.st_mode):
-            fail("trusted root may not contain symlinks")
-        if stat.S_ISDIR(value.st_mode):
-            rows.append({"path": relative, "kind": "directory", "mode": f"{stat.S_IMODE(value.st_mode):04o}"})
-        elif stat.S_ISREG(value.st_mode) and value.st_nlink == 1:
-            rows.append({
-                "path": relative, "kind": "regular", "mode": f"{stat.S_IMODE(value.st_mode):04o}",
-                "sha256": sha256_file(path), "size": value.st_size,
-            })
-        else:
-            fail("trusted root contains an unsupported entry")
+        if not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode):
+            fail("trusted root custody namespace is not a physical directory")
+        if value.st_uid != os.geteuid() or stat.S_IMODE(value.st_mode) != 0o700:
+            fail("trusted root custody namespace owner or mode drifted")
+        rows.append({"path": name, "kind": "directory", "mode": "0700"})
+    manifest_path = root / "config/root-manifest.json"
+    manifest_value = manifest_path.lstat()
+    if (
+        not stat.S_ISREG(manifest_value.st_mode)
+        or manifest_value.st_nlink != 1
+        or stat.S_IMODE(manifest_value.st_mode) != 0o600
+    ):
+        fail("root manifest type, link count, or mode drifted")
+    rows.append({
+        "path": "config/root-manifest.json", "kind": "regular", "mode": "0600",
+        "sha256": sha256_file(manifest_path), "size": manifest_value.st_size,
+    })
     return sha256_bytes(TREE_DOMAIN + canonical_json(rows)), rows
 
 
@@ -161,7 +172,7 @@ def provision(root: Path, helper: Path, confirmation: str) -> dict[str, Any]:
         manifest_path = stage / "config/root-manifest.json"
         manifest_path.write_bytes(canonical_json(expected["manifest"]) + b"\n")
         manifest_path.chmod(0o600)
-        digest, entries = tree_digest(stage)
+        digest, entries = custody_digest(stage)
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "backend": BACKEND,
@@ -226,7 +237,7 @@ def verify(root: Path, helper: Path) -> dict[str, Any]:
         fail("root receipt schema or backend is wrong")
     if receipt.get("manifest_sha256") != sha256_bytes(canonical_json(manifest)):
         fail("root receipt manifest digest drifted")
-    digest, entries = tree_digest(root)
+    digest, entries = custody_digest(root)
     if receipt.get("tree_sha256") != digest or receipt.get("entry_count") != len(entries):
         fail("root receipt tree binding drifted")
     return {

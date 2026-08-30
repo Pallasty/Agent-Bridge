@@ -85,6 +85,21 @@ class DarwinTrustedRootProvisionerTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.ProvisionError, "receipt"):
             MODULE.verify(self.root, self.helper)
 
+    def test_mutable_namespace_content_does_not_drift_custody_spine(self) -> None:
+        plan = MODULE.build_plan(self.root, self.helper)
+        MODULE.provision(self.root, self.helper, plan["confirmation"])
+        (self.root / "build/candidate").write_bytes(b"mutable build cache")
+        (self.root / "publisher/pending.json").write_bytes(b"{}\n")
+        result = MODULE.verify(self.root, self.helper)
+        self.assertEqual(result["verdict"], "PASS")
+
+    def test_extra_top_level_namespace_fails_closed(self) -> None:
+        plan = MODULE.build_plan(self.root, self.helper)
+        MODULE.provision(self.root, self.helper, plan["confirmation"])
+        (self.root / "unadmitted").mkdir(mode=0o700)
+        with self.assertRaisesRegex(MODULE.ProvisionError, "top-level"):
+            MODULE.verify(self.root, self.helper)
+
     def test_native_helper_rejects_non_darwin_or_bad_shape_at_source_level(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn("renameatx_np", source)
