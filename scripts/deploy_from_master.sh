@@ -58,8 +58,8 @@
 #                              domains can never share a candidate executable.
 #                              Default: /var/tmp/agent-bridge-deploy-target-<uid>.
 #   AGENT_BRIDGE_DEPLOY_REMOTE SSH git remote containing the authoritative
-#                              GitLab master (default: gitlab). Production
-#                              accepts only pallasting/agent-bridge on GitLab.
+#                              governed master (default: gitlab). Production
+#                              accepts only the pinned GitLab or GitHub project.
 #   AGENT_BRIDGE_DEPLOY_FORCE_REINSTALL=1 plus AGENT_BRIDGE_DEPLOY_FORCE_REASON
 #                              re-runs an exact pending candidate intentionally
 #   AGENT_BRIDGE_DEPLOY_SUPERSEDE_PENDING=1 plus reason and the exact
@@ -835,19 +835,34 @@ print(value["candidate_commit"])
 
 validate_trusted_git_configuration() {
     local parsed observed_fingerprint inventory
+    case "$DEPLOY_REMOTE" in
+        gitlab)
+            TRUSTED_GIT_PROVIDER=gitlab
+            TRUSTED_GIT_AUTH_SCHEMA=agent_bridge.gitlab_agent_authentication.v1
+            TRUSTED_GIT_KEY_FILENAME=gitlab_deploy_key
+            TRUSTED_GIT_AGENT_PUBLIC_FILENAME=gitlab_agent_key.pub
+            ;;
+        github)
+            TRUSTED_GIT_PROVIDER=github
+            TRUSTED_GIT_AUTH_SCHEMA=agent_bridge.github_agent_authentication.v1
+            TRUSTED_GIT_KEY_FILENAME=github_deploy_key
+            TRUSTED_GIT_AGENT_PUBLIC_FILENAME=github_agent_key.pub
+            ;;
+        *) die "production deploy remote is not a governed authority" ;;
+    esac
     TRUSTED_GIT_CONFIG_DIR="$DEPLOY_ROOT/config/git"
-    TRUSTED_GIT_KEY="$TRUSTED_GIT_CONFIG_DIR/gitlab_deploy_key"
+    TRUSTED_GIT_KEY="$TRUSTED_GIT_CONFIG_DIR/$TRUSTED_GIT_KEY_FILENAME"
     TRUSTED_GIT_AUTH="$TRUSTED_GIT_CONFIG_DIR/authentication.json"
-    TRUSTED_GIT_AGENT_PUBLIC_KEY="$TRUSTED_GIT_CONFIG_DIR/gitlab_agent_key.pub"
+    TRUSTED_GIT_AGENT_PUBLIC_KEY="$TRUSTED_GIT_CONFIG_DIR/$TRUSTED_GIT_AGENT_PUBLIC_FILENAME"
     TRUSTED_GIT_KNOWN_HOSTS="$TRUSTED_GIT_CONFIG_DIR/known_hosts"
     verify_owned_directory_mode "$DEPLOY_ROOT/config" 700 "trusted configuration root"
     verify_owned_directory_mode "$TRUSTED_GIT_CONFIG_DIR" 700 "trusted Git configuration"
-    verify_owned_regular_mode "$TRUSTED_GIT_KNOWN_HOSTS" 600 "trusted GitLab known-hosts file"
+    verify_owned_regular_mode "$TRUSTED_GIT_KNOWN_HOSTS" 600 "trusted authority known-hosts file"
     if [ -e "$TRUSTED_GIT_KEY" ] || [ -L "$TRUSTED_GIT_KEY" ]; then
         [ ! -e "$TRUSTED_GIT_AUTH" ] && [ ! -L "$TRUSTED_GIT_AUTH" ] &&
             [ ! -e "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] && [ ! -L "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] ||
             die "trusted Git configuration mixes file and agent authentication"
-        verify_owned_regular_mode "$TRUSTED_GIT_KEY" 600 "trusted GitLab deploy key"
+        verify_owned_regular_mode "$TRUSTED_GIT_KEY" 600 "trusted authority deploy key"
         TRUSTED_GIT_AUTH_MODE=file
         TRUSTED_GIT_SSH_COMMAND="/usr/bin/ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=$TRUSTED_GIT_KEY -o UserKnownHostsFile=$TRUSTED_GIT_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
         return
@@ -855,8 +870,8 @@ validate_trusted_git_configuration() {
     [ -f "$TRUSTED_GIT_AUTH" ] && [ ! -L "$TRUSTED_GIT_AUTH" ] &&
         [ -f "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] && [ ! -L "$TRUSTED_GIT_AGENT_PUBLIC_KEY" ] ||
         die "trusted Git configuration has no exact authentication contract"
-    verify_owned_regular_mode "$TRUSTED_GIT_AUTH" 600 "trusted GitLab authentication descriptor"
-    verify_owned_regular_mode "$TRUSTED_GIT_AGENT_PUBLIC_KEY" 600 "trusted GitLab agent public key"
+    verify_owned_regular_mode "$TRUSTED_GIT_AUTH" 600 "trusted authority authentication descriptor"
+    verify_owned_regular_mode "$TRUSTED_GIT_AGENT_PUBLIC_KEY" 600 "trusted authority agent public key"
     parsed="$(/usr/bin/python3 -I -B -c '
 import json, os, re, sys
 def pairs(items):
@@ -878,9 +893,9 @@ if set(value) != {"schema", "mode", "socket_path", "public_key_fingerprint", "pu
     raise SystemExit(1)
 socket_path = value["socket_path"]
 fingerprint = value["public_key_fingerprint"]
-if value["schema"] != "agent_bridge.gitlab_agent_authentication.v1" or value["mode"] != "agent_socket":
+if value["schema"] != sys.argv[2] or value["mode"] != "agent_socket":
     raise SystemExit(1)
-if value["public_key_path"] != "gitlab_agent_key.pub":
+if value["public_key_path"] != sys.argv[3]:
     raise SystemExit(1)
 if not isinstance(socket_path, str) or os.path.normpath(socket_path) != socket_path:
     raise SystemExit(1)
@@ -889,23 +904,24 @@ if not re.fullmatch(r"/[A-Za-z0-9._/-]+", socket_path):
 if not isinstance(fingerprint, str) or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint):
     raise SystemExit(1)
 print(socket_path + "\t" + fingerprint)
-' "$TRUSTED_GIT_AUTH")" || die "trusted GitLab authentication descriptor is invalid"
+' "$TRUSTED_GIT_AUTH" "$TRUSTED_GIT_AUTH_SCHEMA" "$TRUSTED_GIT_AGENT_PUBLIC_FILENAME")" ||
+        die "trusted authority authentication descriptor is invalid"
     IFS=$'\t' read -r TRUSTED_GIT_AGENT_SOCKET TRUSTED_GIT_AGENT_FINGERPRINT <<< "$parsed"
     [ -n "$TRUSTED_GIT_AGENT_SOCKET" ] && [ -n "$TRUSTED_GIT_AGENT_FINGERPRINT" ] ||
-        die "trusted GitLab authentication descriptor is incomplete"
-    validate_trusted_agent_socket_path "$TRUSTED_GIT_AGENT_SOCKET" "trusted GitLab agent socket"
+        die "trusted authority authentication descriptor is incomplete"
+    validate_trusted_agent_socket_path "$TRUSTED_GIT_AGENT_SOCKET" "trusted authority agent socket"
     observed_fingerprint="$(/usr/bin/env -i PATH=/usr/bin:/bin LANG=C LC_ALL=C \
         /usr/bin/ssh-keygen -E sha256 -lf "$TRUSTED_GIT_AGENT_PUBLIC_KEY" 2>/dev/null | \
         /usr/bin/awk 'NR == 1 { print $2 }')" ||
-        die "cannot inspect trusted GitLab agent public key"
+        die "cannot inspect trusted authority agent public key"
     [ "$observed_fingerprint" = "$TRUSTED_GIT_AGENT_FINGERPRINT" ] ||
-        die "trusted GitLab agent public-key fingerprint drifted"
+        die "trusted authority agent public-key fingerprint drifted"
     inventory="$(/usr/bin/env -i PATH=/usr/bin:/bin HOME="$DEPLOY_ROOT" LANG=C LC_ALL=C \
         SSH_AUTH_SOCK="$TRUSTED_GIT_AGENT_SOCKET" /usr/bin/ssh-add -l 2>/dev/null)" ||
-        die "trusted GitLab agent inventory is unavailable"
+        die "trusted authority agent inventory is unavailable"
     printf '%s\n' "$inventory" | /usr/bin/awk -v expected="$TRUSTED_GIT_AGENT_FINGERPRINT" \
         '$2 == expected { found = 1 } END { exit(found ? 0 : 1) }' ||
-        die "required trusted GitLab agent identity is absent"
+        die "required trusted authority agent identity is absent"
     TRUSTED_GIT_AUTH_MODE=agent_socket
     TRUSTED_GIT_SSH_COMMAND="/usr/bin/ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile=$TRUSTED_GIT_AGENT_PUBLIC_KEY -o IdentityAgent=$TRUSTED_GIT_AGENT_SOCKET -o UserKnownHostsFile=$TRUSTED_GIT_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
 }
@@ -940,9 +956,10 @@ validate_authoritative_remote() {
     esac
     url="$(deploy_git -C "$REPO" remote get-url "$DEPLOY_REMOTE" 2>/dev/null)" ||
         die "configured deploy remote does not exist: $DEPLOY_REMOTE"
-    case "$url" in
-        git@gitlab.com:pallasting/agent-bridge.git|ssh://git@gitlab.com/pallasting/agent-bridge.git) ;;
-        *) die "production deploy remote must be the authenticated pallasting/agent-bridge GitLab SSH URL" ;;
+    case "$DEPLOY_REMOTE:$url" in
+        gitlab:git@gitlab.com:pallasting/agent-bridge.git|gitlab:ssh://git@gitlab.com/pallasting/agent-bridge.git) ;;
+        github:git@github.com:pallasting/Agent-Bridge.git|github:ssh://git@github.com/pallasting/Agent-Bridge.git) ;;
+        *) die "production deploy remote must be an exact governed SSH URL" ;;
     esac
     AUTHORITATIVE_REMOTE_URL="$url"
 }

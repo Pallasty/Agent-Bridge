@@ -198,6 +198,64 @@ class PublicationSeedTests(unittest.TestCase):
         finally:
             agent_socket.close()
 
+    def test_github_requires_commit_skip_and_never_uses_gitlab_push_option(self) -> None:
+        governed_remote = str(self.fixture.remote)
+        original_authority = MODULE.AUTHORITIES.get(governed_remote)
+        MODULE.AUTHORITIES[governed_remote] = {
+            "name": "github", "host": "github.com", "ci_policy": "commit_message",
+        }
+        self.fixture.known.write_text("github.com ssh-ed25519 AAAAfixture\n")
+        os.chmod(self.fixture.known, 0o600)
+
+        def governed_manifest() -> None:
+            value = {
+                "schema": MODULE.SCHEMA,
+                "candidate_commit": self.fixture.candidate,
+                "source_repository": str(self.fixture.source),
+                "seed_path": str(self.fixture.seed),
+                "authoritative_remote": governed_remote,
+                "deploy_key": str(self.fixture.key),
+                "known_hosts": str(self.fixture.known),
+            }
+            self.fixture.manifest.write_text(json.dumps(value, sort_keys=True))
+            os.chmod(self.fixture.manifest, 0o600)
+
+        try:
+            governed_manifest()
+            status, _, error = self.fixture.invoke("plan")
+            self.assertNotEqual(status, 0)
+            self.assertIn("lacks an exact workflow skip instruction", error)
+
+            run("commit", "--amend", "-q", "-m", "candidate [skip ci]", cwd=self.fixture.source)
+            self.fixture.candidate = run("rev-parse", "HEAD", cwd=self.fixture.source)
+            governed_manifest()
+            status, plan, error = self.fixture.invoke("plan")
+            self.assertEqual(status, 0, error)
+            assert plan
+            self.assertEqual(plan["ci_mechanism"], "commit_message")
+
+            observed: list[tuple[str, ...]] = []
+            original_git = MODULE.git
+
+            def recording_git(args: tuple[str, ...], **kwargs: object) -> bytes:
+                observed.append(tuple(args))
+                return original_git(args, **kwargs)
+
+            with mock.patch.object(MODULE, "git", side_effect=recording_git):
+                status, packet, error = self.fixture.invoke(
+                    "publish", str(plan["confirmation"])
+                )
+            self.assertEqual(status, 0, error)
+            assert packet
+            pushes = [args for args in observed if args and args[0] == "push"]
+            self.assertEqual(len(pushes), 1)
+            self.assertNotIn("--push-option=ci.skip", pushes[0])
+        finally:
+            if original_authority is None:
+                MODULE.AUTHORITIES.pop(governed_remote, None)
+            else:
+                MODULE.AUTHORITIES[governed_remote] = original_authority
+
     def test_atomic_seed_activation_never_replaces_a_racing_target(self) -> None:
         source = self.base / "activation-source"
         destination = self.base / "activation-destination"

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Publish one exact candidate to GitLab and acquire its independent seed.
+"""Publish one exact candidate to a governed authority and acquire its seed.
 
 ``plan`` and ``verify`` are read-only. ``publish`` is the only remote writer
 and requires an exact confirmation. ``acquire-seed`` creates only an absent
@@ -25,6 +25,14 @@ from typing import Any, NoReturn, Sequence
 SCHEMA = "agent_bridge.trusted_publication_seed_manifest.v1"
 RESULT = "agent_bridge.trusted_publication_seed_result.v1"
 REMOTE = "git@gitlab.com:pallasting/agent-bridge.git"
+AUTHORITIES = {
+    "git@gitlab.com:pallasting/agent-bridge.git": {
+        "name": "gitlab", "host": "gitlab.com", "ci_policy": "push_option",
+    },
+    "git@github.com:pallasting/Agent-Bridge.git": {
+        "name": "github", "host": "github.com", "ci_policy": "commit_message",
+    },
+}
 DOMAIN = b"agent-bridge/trusted-publication-seed/v1\0"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -102,7 +110,13 @@ def trusted_ancestors(path: str, label: str) -> None:
         current = os.path.dirname(current)
 
 
-def private_file(path: str, label: str) -> str:
+def private_file(
+    path: str,
+    label: str,
+    *,
+    private_key: bool = False,
+    known_host: str | None = None,
+) -> str:
     physical(path, label)
     trusted_ancestors(path, label)
     st = os.lstat(path)
@@ -114,12 +128,15 @@ def private_file(path: str, label: str) -> str:
         raw = handle.read(256 * 1024 + 1)
     if not raw or len(raw) > 256 * 1024 or b"\x00" in raw:
         fail(f"{label} content is invalid")
-    if label == "GitLab deploy key" and not raw.startswith(b"-----BEGIN OPENSSH PRIVATE KEY-----\n"):
-        fail("GitLab deploy key is not an OpenSSH private key")
-    if label == "GitLab known-hosts":
+    if private_key and not raw.startswith(b"-----BEGIN OPENSSH PRIVATE KEY-----\n"):
+        fail(f"{label} is not an OpenSSH private key")
+    if known_host is not None:
         lines = [line for line in raw.splitlines() if line and not line.startswith(b"#")]
-        if not lines or any(not (line.startswith(b"gitlab.com ") or line.startswith(b"|1|")) for line in lines):
-            fail("GitLab known-hosts contains a non-GitLab host")
+        prefix = known_host.encode("ascii") + b" "
+        if not lines or any(
+            not (line.startswith(prefix) or line.startswith(b"|1|")) for line in lines
+        ):
+            fail(f"{label} contains a non-{known_host} host")
     return digest(raw)
 
 
@@ -178,18 +195,23 @@ def ssh_command(value: dict[str, Any]) -> str:
               f"-o UserKnownHostsFile={known_hosts} -o GlobalKnownHostsFile=/dev/null ")
     if value["auth_mode"] == "file":
         return common + ("-o IdentitiesOnly=yes -o IdentityAgent=none "
-                         f"-o IdentityFile={value['gitlab_deploy_key']}")
+                         f"-o IdentityFile={value['deploy_key']}")
     return common + ("-o IdentitiesOnly=yes "
                      f"-o IdentityFile={value['agent_public_key']} "
                      f"-o IdentityAgent={value['agent_socket']}")
 
 
 def assert_auth_binding(value: dict[str, Any]) -> None:
-    if private_file(value["known_hosts"], "GitLab known-hosts") != value["known_hosts_sha256"]:
-        fail("GitLab known-hosts changed after planning")
+    if private_file(
+        value["known_hosts"], "authority known-hosts",
+        known_host=value["authority_host"],
+    ) != value["known_hosts_sha256"]:
+        fail("authority known-hosts changed after planning")
     if value["auth_mode"] == "file":
-        if private_file(value["gitlab_deploy_key"], "GitLab deploy key") != value["key_sha256"]:
-            fail("GitLab deploy key changed after planning")
+        if private_file(
+            value["deploy_key"], "authority deploy key", private_key=True
+        ) != value["key_sha256"]:
+            fail("authority deploy key changed after planning")
         return
     public_key = value["agent_public_key"]
     if private_file(public_key, "SSH agent public key") != value["agent_public_key_sha256"]:
@@ -226,7 +248,7 @@ def git(args: Sequence[str], *, repo: str | None, value: dict[str, Any], timeout
     except (OSError, subprocess.TimeoutExpired):
         fail("bounded Git operation failed")
     if result.returncode:
-        fail("authenticated GitLab operation failed")
+        fail("authenticated authority Git operation failed")
     return result.stdout
 
 
@@ -238,19 +260,50 @@ def load(path: str) -> dict[str, Any]:
     value, manifest_sha = strict_json(path)
     legacy_keys = {"schema", "candidate_commit", "source_repository", "seed_path", "gitlab_deploy_key", "known_hosts"}
     agent_keys = {"schema", "candidate_commit", "source_repository", "seed_path", "authentication", "known_hosts"}
+    governed_file_keys = {
+        "schema", "candidate_commit", "source_repository", "seed_path",
+        "authoritative_remote", "deploy_key", "known_hosts",
+    }
+    governed_agent_keys = {
+        "schema", "candidate_commit", "source_repository", "seed_path",
+        "authoritative_remote", "authentication", "known_hosts",
+    }
     observed_keys = set(value)
-    if observed_keys not in (legacy_keys, agent_keys):
+    if observed_keys not in (
+        legacy_keys, agent_keys, governed_file_keys, governed_agent_keys
+    ):
         fail("manifest keys are not exact")
     if value["schema"] != SCHEMA or not isinstance(value["candidate_commit"], str) or not HEX40.fullmatch(value["candidate_commit"]):
         fail("manifest schema or candidate is invalid")
     for name in ("source_repository", "known_hosts"):
         physical(value[name], name)
     physical(value["seed_path"], "seed path", exists=False)
+    remote_url = value.get("authoritative_remote", REMOTE)
+    if remote_url in AUTHORITIES:
+        authority = AUTHORITIES[remote_url]
+    elif remote_url == REMOTE:
+        # Deliberate test seam for an isolated local bare remote.
+        authority = {
+            "name": "gitlab", "host": "gitlab.com", "ci_policy": "push_option",
+        }
+    else:
+        fail("authoritative remote is not an exact governed SSH URL")
+    value["remote_url"] = remote_url
+    value["remote_name"] = authority["name"]
+    value["authority_host"] = authority["host"]
+    value["ci_policy"] = authority["ci_policy"]
     value["manifest_sha256"] = manifest_sha
-    value["known_hosts_sha256"] = private_file(value["known_hosts"], "GitLab known-hosts")
-    if observed_keys == legacy_keys:
-        physical(value["gitlab_deploy_key"], "gitlab_deploy_key")
-        value["key_sha256"] = private_file(value["gitlab_deploy_key"], "GitLab deploy key")
+    value["known_hosts_sha256"] = private_file(
+        value["known_hosts"], "authority known-hosts",
+        known_host=value["authority_host"],
+    )
+    if observed_keys in (legacy_keys, governed_file_keys):
+        key_name = "gitlab_deploy_key" if observed_keys == legacy_keys else "deploy_key"
+        value["deploy_key"] = value[key_name]
+        physical(value["deploy_key"], "deploy_key")
+        value["key_sha256"] = private_file(
+            value["deploy_key"], "authority deploy key", private_key=True
+        )
         value["auth_mode"] = "file"
     else:
         authentication = value["authentication"]
@@ -286,12 +339,15 @@ def load(path: str) -> dict[str, Any]:
 
 
 def remote_head(value: dict[str, Any]) -> str | None:
-    raw = git(("ls-remote", "--heads", REMOTE, "refs/heads/master"), repo=None, value=value)
+    raw = git(
+        ("ls-remote", "--heads", value["remote_url"], "refs/heads/master"),
+        repo=None, value=value,
+    )
     lines = raw.decode("ascii", "strict").splitlines()
     if not lines:
         return None
     if len(lines) != 1 or lines[0].split("\t")[-1] != "refs/heads/master" or not HEX40.fullmatch(lines[0].split("\t")[0]):
-        fail("GitLab master advertisement is malformed")
+        fail("authority master advertisement is malformed")
     return lines[0].split("\t")[0]
 
 
@@ -305,11 +361,26 @@ def inspect(value: dict[str, Any]) -> tuple[str | None, str]:
         fail("local source must be completely clean")
     remote = remote_head(value)
     if remote is None:
-        fail("authoritative GitLab master is absent")
+        fail("authoritative master is absent")
     if remote != candidate:
         git(("merge-base", "--is-ancestor", remote, candidate), repo=repo, value=value)
     plan = digest(DOMAIN + canonical({k: value[k] for k in sorted(value)} ) + (remote or "absent").encode())
     return remote, plan
+
+
+def require_ci_skip_contract(value: dict[str, Any]) -> None:
+    if value["ci_policy"] != "commit_message":
+        return
+    message = git(
+        ("show", "-s", "--format=%B", value["candidate_commit"]),
+        repo=value["source_repository"], value=value,
+    ).decode("utf-8", "strict").lower()
+    instructions = (
+        "[skip ci]", "[ci skip]", "[no ci]", "[skip actions]", "[actions skip]",
+        "skip-checks:true", "skip-checks: true",
+    )
+    if not any(instruction in message for instruction in instructions):
+        fail("GitHub candidate commit lacks an exact workflow skip instruction")
 
 
 def result(command: str, status_value: str, **extra: Any) -> dict[str, Any]:
@@ -365,11 +436,11 @@ def acquire(value: dict[str, Any]) -> None:
     stage = seed + ".acquire-stage"
     if os.path.lexists(stage): fail("seed acquisition stage already exists")
     try:
-        git(("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--origin", "gitlab", REMOTE, stage), repo=None,
+        git(("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--origin", value["remote_name"], value["remote_url"], stage), repo=None,
             value=value, timeout=120)
         git(("checkout", "-q", "-B", "master", value["candidate_commit"]), repo=stage,
             value=value)
-        git(("config", "branch.master.remote", "gitlab"), repo=stage, value=value)
+        git(("config", "branch.master.remote", value["remote_name"]), repo=stage, value=value)
         git(("config", "branch.master.merge", "refs/heads/master"), repo=stage, value=value)
         normalize(stage)
         durable_tree(stage)
@@ -391,16 +462,19 @@ def verify_seed(value: dict[str, Any]) -> None:
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o700:
         fail("seed root custody is invalid")
     head = git(("rev-parse", "--verify", "HEAD^{commit}"), repo=seed, value=value).decode().strip()
-    tracking = git(("rev-parse", "--verify", "refs/remotes/gitlab/master^{commit}"), repo=seed, value=value).decode().strip()
+    remote_name = value["remote_name"]
+    tracking = git(("rev-parse", "--verify", f"refs/remotes/{remote_name}/master^{{commit}}"), repo=seed, value=value).decode().strip()
     if head != value["candidate_commit"] or tracking != head or remote_head(value) != head:
         fail("remote, seed HEAD, tracking ref, and candidate are not identical")
-    url = git(("config", "--local", "--get", "remote.gitlab.url"), repo=seed,
+    url = git(("config", "--local", "--get", f"remote.{remote_name}.url"), repo=seed,
               value=value).decode().strip()
     branch_remote = git(("config", "--local", "--get", "branch.master.remote"), repo=seed,
                         value=value).decode().strip()
     branch_merge = git(("config", "--local", "--get", "branch.master.merge"), repo=seed,
                        value=value).decode().strip()
-    if (url, branch_remote, branch_merge) != (REMOTE, "gitlab", "refs/heads/master"):
+    if (url, branch_remote, branch_merge) != (
+        value["remote_url"], remote_name, "refs/heads/master"
+    ):
         fail("seed Git authority configuration drifted")
     if git(("status", "--porcelain=v1", "--untracked-files=all"), repo=seed, value=value):
         fail("seed is not clean")
@@ -430,18 +504,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         remote, plan = inspect(value)
         confirmation = f"PUBLISH:{value['candidate_commit']}:{plan}"
         if args.command == "plan":
+            require_ci_skip_contract(value)
             packet = result("plan", "ready", candidate_commit=value["candidate_commit"], remote_master=remote,
-                            plan_digest=plan, confirmation=confirmation, ci_policy="skip")
+                            plan_digest=plan, confirmation=confirmation,
+                            ci_policy="skip", ci_mechanism=value["ci_policy"])
         elif args.command == "publish":
             if args.confirm != confirmation: fail("publish confirmation is not exact")
+            require_ci_skip_contract(value)
             if remote != value["candidate_commit"]:
-                git(("push", "--porcelain", "--push-option=ci.skip", REMOTE,
-                     f"{value['candidate_commit']}:refs/heads/master"), repo=value["source_repository"],
-                    value=value, timeout=120)
-            if remote_head(value) != value["candidate_commit"]: fail("published GitLab master did not converge")
-            packet = result("publish", "published_authoritative_candidate", candidate_commit=value["candidate_commit"], ci_policy="skip")
+                push = ["push", "--porcelain"]
+                if value["ci_policy"] == "push_option":
+                    push.append("--push-option=ci.skip")
+                push += [value["remote_url"], f"{value['candidate_commit']}:refs/heads/master"]
+                git(tuple(push), repo=value["source_repository"], value=value, timeout=120)
+            if remote_head(value) != value["candidate_commit"]:
+                fail("published authority master did not converge")
+            packet = result(
+                "publish", "published_authoritative_candidate",
+                candidate_commit=value["candidate_commit"],
+                ci_policy="skip", ci_mechanism=value["ci_policy"],
+            )
         elif args.command == "acquire-seed":
-            if remote != value["candidate_commit"]: fail("candidate is not authoritative GitLab master")
+            if remote != value["candidate_commit"]:
+                fail("candidate is not authoritative master")
             acquire(value)
             verify_seed(value)
             packet = result("acquire-seed", "acquired_independent_seed", candidate_commit=value["candidate_commit"], seed_path=value["seed_path"])

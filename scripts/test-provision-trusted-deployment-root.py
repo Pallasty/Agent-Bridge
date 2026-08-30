@@ -28,6 +28,7 @@ PUBLICATION_SCRIPT = Path(__file__).with_name("publish-and-acquire-trusted-seed.
 CREDENTIAL_SCRIPT = Path(__file__).with_name("prepare-gitlab-deploy-credential.py").resolve()
 PYTHON = "/usr/bin/python3"
 REMOTE = "git@gitlab.com:pallasting/agent-bridge.git"
+GITHUB_REMOTE = "git@github.com:pallasting/Agent-Bridge.git"
 MIN_FREE = 2 * 1024 * 1024 * 1024
 
 
@@ -404,6 +405,45 @@ class ProvisioningTests(unittest.TestCase):
         rejected = self.fixture.run("verify", copied=True)
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("installed gitlab_authentication drifted", rejected.stderr)
+
+    def test_github_agent_authority_provisions_and_verifies_offline(self) -> None:
+        run_git(self.fixture.seed, "remote", "rename", "gitlab", "github")
+        run_git(self.fixture.seed, "remote", "set-url", "github", GITHUB_REMOTE)
+        private_tree(self.fixture.seed)
+        self.fixture.known.write_text("github.com ssh-ed25519 AAAAC3NzaFixture\n")
+        os.chmod(self.fixture.known, 0o600)
+        process, socket_path, public_key, fingerprint = start_test_agent(self.base)
+        try:
+            payload = self.fixture.payload()
+            payload["authoritative_remote"] = GITHUB_REMOTE
+            inputs = payload["inputs"]
+            assert isinstance(inputs, dict)
+            inputs.pop("gitlab_deploy_key")
+            inputs["github_authentication"] = {
+                "mode": "agent_socket",
+                "socket_path": str(socket_path),
+                "public_key": {"path": str(public_key), "sha256": sha256(public_key)},
+                "public_key_fingerprint": fingerprint,
+            }
+            self.fixture.write_manifest(payload)
+            provisioned = self.fixture.provision()
+            self.assertEqual(provisioned["status"], "provisioned_bootstrap")
+            git_config = self.fixture.root / "config/git"
+            self.assertFalse((git_config / "gitlab_agent_key.pub").exists())
+            self.assertTrue((git_config / "github_agent_key.pub").is_file())
+            descriptor = json.loads((git_config / "authentication.json").read_text())
+            self.assertEqual(
+                descriptor["schema"],
+                "agent_bridge.github_agent_authentication.v1",
+            )
+            self.assertEqual(descriptor["public_key_path"], "github_agent_key.pub")
+            source = self.fixture.root / "source/agent-bridge"
+            self.assertEqual(run_git(source, "remote", "get-url", "github"), GITHUB_REMOTE)
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+        verified = self.fixture.run("verify", copied=True)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
 
     def test_agent_authentication_requires_the_exact_loaded_identity(self) -> None:
         process, socket_path, public_key, fingerprint = start_test_agent(self.base)

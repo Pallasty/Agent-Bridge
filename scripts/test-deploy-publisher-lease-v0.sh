@@ -681,15 +681,17 @@ write_production_toolchain_fixture() {
 }
 
 run_production_checkout_fixture() {
-    local root="$1" deploy="$2" lane="${3:-build}"
+    local root="$1" deploy="$2" lane="${3:-build}" deploy_remote="${4:-gitlab}"
     if [ "$lane" = use-binary ]; then
         env -i HOME="$production_home" PATH=/usr/bin:/bin \
             AGENT_BRIDGE_DEPLOY_ROOT="$root" \
+            AGENT_BRIDGE_DEPLOY_REMOTE="$deploy_remote" \
             CARGO_TARGET_DIR="$root/build-cache" \
             "$deploy" --use-binary "$root/missing-binary" --yes
     else
         env -i HOME="$production_home" PATH=/usr/bin:/bin \
             AGENT_BRIDGE_DEPLOY_ROOT="$root" \
+            AGENT_BRIDGE_DEPLOY_REMOTE="$deploy_remote" \
             CARGO_TARGET_DIR="$root/build-cache" \
             "$deploy" --yes
     fi
@@ -1021,8 +1023,8 @@ for git_override in attributes grafts; do
         "local Git $git_override rejection"
 done
 
-# An authenticated-looking remote name is insufficient: its exact URL must
-# still bind to the authoritative GitLab project, never the GitHub mirror.
+# An authenticated-looking remote name is insufficient: its exact URL and
+# provider name must still bind to one governed project.
 github_remote_root="$TEST_ROOT/production-github-remote"
 write_production_checkout_fixture \
     "$github_remote_root" git@github.com:pallasting/agent-bridge.git
@@ -1031,18 +1033,42 @@ output="$(run_production_checkout_fixture \
     "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" 2>&1)"
 status=$?
 set -e
-[ "$status" -ne 0 ] || fail "production accepted GitHub as its authoritative deploy remote"
+[ "$status" -ne 0 ] || fail "production accepted a mismatched GitHub deploy remote"
 case "$output" in
-    *"production deploy remote must be the authenticated pallasting/agent-bridge GitLab SSH URL"*) ;;
-    *) fail "GitHub deploy-remote rejection reason missing" ;;
+    *"production deploy remote must be an exact governed SSH URL"*) ;;
+    *) fail "mismatched GitHub deploy-remote rejection reason missing" ;;
 esac
 assert_production_pre_mutation_rejection \
     "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
-    "GitHub deploy-remote rejection"
+    "mismatched GitHub deploy-remote rejection"
+
+# The exact GitHub authority is admitted only when the provider name, URL, and
+# authority-specific credential filename agree. Reaching the toolchain gate
+# proves the complete Git authority contract passed without fetching.
+github_authority_root="$TEST_ROOT/production-github-authority"
+write_production_checkout_fixture \
+    "$github_authority_root" git@github.com:pallasting/Agent-Bridge.git
+GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/git -C "$PRODUCTION_FIXTURE_CHECKOUT" remote rename gitlab github
+mv "$github_authority_root/config/git/gitlab_deploy_key" \
+    "$github_authority_root/config/git/github_deploy_key"
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" build github 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "GitHub authority fixture unexpectedly passed missing toolchain"
+case "$output" in
+    *"trusted Rust toolchain"*) ;;
+    *) fail "exact GitHub authority did not reach the post-authority toolchain gate: $output" ;;
+esac
+assert_production_pre_mutation_rejection \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_CHECKOUT" \
+    "exact GitHub authority post-gate rejection"
 
 # Agent mode must select exactly one already-loaded public identity without
 # placing its private key in the deployment root. Reaching the later GitHub
-# URL rejection proves the agent descriptor, socket custody, fingerprint, and
+# provider/URL rejection proves the agent descriptor, socket custody, fingerprint, and
 # live membership gates all passed first.
 agent_auth_root="$TEST_ROOT/production-agent-auth"
 write_production_checkout_fixture \
@@ -1078,9 +1104,9 @@ status=$?
 set -e
 kill "$agent_pid" 2>/dev/null || true
 wait "$agent_pid" 2>/dev/null || true
-[ "$status" -ne 0 ] || fail "production agent mode accepted GitHub as authoritative"
+[ "$status" -ne 0 ] || fail "production agent mode accepted mismatched GitHub authority"
 case "$output" in
-    *"production deploy remote must be the authenticated pallasting/agent-bridge GitLab SSH URL"*) ;;
+    *"production deploy remote must be an exact governed SSH URL"*) ;;
     *) fail "agent-mode contract did not reach authoritative URL validation" ;;
 esac
 assert_production_pre_mutation_rejection \

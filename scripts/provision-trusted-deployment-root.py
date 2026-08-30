@@ -7,7 +7,7 @@ independently validates the immutable bootstrap receipt before the trusted
 wrapper or publisher is allowed to mutate the root.
 
 This is a bootstrap-custody tool, not publication authority.  The copied Git
-repository is only a seed for the publisher's later authenticated GitLab
+repository is only a seed for the publisher's later authenticated authority
 fetch.  No service, timer, database, systemd unit, credential value, or legacy
 state is read or changed by this tool.
 """
@@ -33,8 +33,6 @@ from typing import Any, Iterator, NoReturn, Sequence
 MANIFEST_SCHEMA = "agent_bridge.trusted_deployment_root_provisioning_manifest.v1"
 RECEIPT_SCHEMA = "agent_bridge.trusted_deployment_root_provisioning_receipt.v1"
 RESULT_SCHEMA = "agent_bridge.trusted_deployment_root_provisioning_result.v1"
-REMOTE_URL = "git@gitlab.com:pallasting/agent-bridge.git"
-AGENT_AUTH_SCHEMA = "agent_bridge.gitlab_agent_authentication.v1"
 PLAN_DOMAIN = b"agent-bridge/trusted-root-provisioning/plan/v1\0"
 TREE_DOMAIN = b"agent-bridge/trusted-root-provisioning/tree/v1\0"
 RECEIPT_DOMAIN = b"agent-bridge/trusted-root-provisioning/receipt/v1\0"
@@ -49,6 +47,48 @@ MAX_FILE_BYTES = 1024 * 1024 * 1024
 HARD_MAX_FILES = 1_000_000
 HARD_MAX_BYTES = 16 * 1024 * 1024 * 1024
 MIN_FREE_AFTER_FLOOR = 2 * 1024 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class Authority:
+    name: str
+    url: str
+    host: str
+    auth_schema: str
+    deploy_key_input: str
+    authentication_input: str
+    agent_public_fact: str
+    authentication_fact: str
+    deploy_key_file: str
+    agent_public_file: str
+
+
+AUTHORITIES = {
+    "git@gitlab.com:pallasting/agent-bridge.git": Authority(
+        name="gitlab",
+        url="git@gitlab.com:pallasting/agent-bridge.git",
+        host="gitlab.com",
+        auth_schema="agent_bridge.gitlab_agent_authentication.v1",
+        deploy_key_input="gitlab_deploy_key",
+        authentication_input="gitlab_authentication",
+        agent_public_fact="gitlab_agent_public_key",
+        authentication_fact="gitlab_authentication",
+        deploy_key_file="gitlab_deploy_key",
+        agent_public_file="gitlab_agent_key.pub",
+    ),
+    "git@github.com:pallasting/Agent-Bridge.git": Authority(
+        name="github",
+        url="git@github.com:pallasting/Agent-Bridge.git",
+        host="github.com",
+        auth_schema="agent_bridge.github_agent_authentication.v1",
+        deploy_key_input="github_deploy_key",
+        authentication_input="github_authentication",
+        agent_public_fact="github_agent_public_key",
+        authentication_fact="github_authentication",
+        deploy_key_file="github_deploy_key",
+        agent_public_file="github_agent_key.pub",
+    ),
+}
 
 ORCHESTRATOR_MODES = {
     "scripts/deploy_from_master.sh": 0o700,
@@ -135,6 +175,12 @@ def parse_json(raw: bytes, label: str) -> dict[str, Any]:
 def exact_keys(value: dict[str, Any], expected: Sequence[str], label: str) -> None:
     if set(value) != set(expected):
         fail(f"{label} keys are not exact")
+
+
+def authority_for_remote(value: Any) -> Authority:
+    if not isinstance(value, str) or value not in AUTHORITIES:
+        fail("manifest authoritative remote is not exact")
+    return AUTHORITIES[value]
 
 
 def mode_bits(st: os.stat_result) -> int:
@@ -315,7 +361,7 @@ def git_value(repo: str, args: Sequence[str], home: str) -> str:
         fail("bootstrap Git result is not ASCII")
 
 
-def validate_local_git_config(repo: str, home: str) -> None:
+def validate_local_git_config(repo: str, home: str, authority: Authority) -> None:
     raw = git_run(repo, ("config", "--local", "--list"), home=home)
     try:
         lines = raw.decode("utf-8", "strict").splitlines()
@@ -334,16 +380,18 @@ def validate_local_git_config(repo: str, home: str) -> None:
         "core.bare": ["false"],
         "core.logallrefupdates": ["true"],
         "core.repositoryformatversion": ["0"],
-        "remote.gitlab.fetch": ["+refs/heads/*:refs/remotes/gitlab/*"],
-        "remote.gitlab.url": [REMOTE_URL],
-        "branch.master.remote": ["gitlab"],
+        f"remote.{authority.name}.fetch": [
+            f"+refs/heads/*:refs/remotes/{authority.name}/*"
+        ],
+        f"remote.{authority.name}.url": [authority.url],
+        "branch.master.remote": [authority.name],
         "branch.master.merge": ["refs/heads/master"],
     }
     if observed != expected:
         fail("trusted source local Git config is not exact")
 
 
-def validate_seed(repo: str, candidate: str) -> dict[str, str]:
+def validate_seed(repo: str, candidate: str, authority: Authority) -> dict[str, str]:
     canonical_absolute(repo, "bootstrap source repository")
     require_directory(repo, "bootstrap source repository", exact_mode=0o700)
     require_directory(os.path.join(repo, ".git"), "bootstrap Git metadata", exact_mode=0o700)
@@ -355,16 +403,18 @@ def validate_seed(repo: str, candidate: str) -> dict[str, str]:
     ):
         if os.path.lexists(os.path.join(repo, relative)):
             fail("bootstrap source contains a forbidden Git override")
-    validate_local_git_config(repo, repo)
+    validate_local_git_config(repo, repo, authority)
     head = git_value(repo, ("rev-parse", "--verify", "HEAD^{commit}"), repo)
     remote = git_value(
         repo,
-        ("rev-parse", "--verify", "refs/remotes/gitlab/master^{commit}"),
+        ("rev-parse", "--verify", f"refs/remotes/{authority.name}/master^{{commit}}"),
         repo,
     )
     tree = git_value(repo, ("rev-parse", "--verify", f"{candidate}^{{tree}}"), repo)
     url_lines = git_run(
-        repo, ("config", "--local", "--get-all", "remote.gitlab.url"), home=repo
+        repo,
+        ("config", "--local", "--get-all", f"remote.{authority.name}.url"),
+        home=repo,
     ).decode("ascii", "strict").splitlines()
     status_out = git_run(
         repo,
@@ -373,14 +423,14 @@ def validate_seed(repo: str, candidate: str) -> dict[str, str]:
     )
     gitlinks = git_run(repo, ("ls-tree", "-r", candidate), home=repo)
     if head != candidate or remote != candidate:
-        fail("bootstrap source HEAD and gitlab/master must equal candidate")
-    if url_lines != [REMOTE_URL]:
-        fail("bootstrap source GitLab URL is not exact")
+        fail(f"bootstrap source HEAD and {authority.name}/master must equal candidate")
+    if url_lines != [authority.url]:
+        fail(f"bootstrap source {authority.name} URL is not exact")
     if status_out:
         fail("bootstrap source repository must be completely clean")
     if any(line.split(maxsplit=2)[1:2] == [b"commit"] for line in gitlinks.splitlines()):
         fail("bootstrap source repository may not contain gitlinks")
-    return {"commit": candidate, "tree": tree, "url": REMOTE_URL}
+    return {"commit": candidate, "tree": tree, "url": authority.url}
 
 
 def reject_gitlinks(repo: str, candidate: str, home: str, label: str) -> None:
@@ -481,7 +531,7 @@ def input_spec(value: Any, label: str) -> tuple[str, str]:
     return path, expected
 
 
-def validate_known_hosts(path: str) -> None:
+def validate_known_hosts(path: str, authority: Authority) -> None:
     try:
         with open(path, "rb") as handle:
             raw = handle.read(256 * 1024 + 1)
@@ -492,18 +542,21 @@ def validate_known_hosts(path: str) -> None:
     for line in raw.splitlines():
         if not line or line.startswith(b"#"):
             continue
-        if not (line.startswith(b"gitlab.com ") or line.startswith(b"|1|")):
-            fail("known-hosts input contains a host other than gitlab.com")
+        if not (
+            line.startswith(authority.host.encode("ascii") + b" ")
+            or line.startswith(b"|1|")
+        ):
+            fail(f"known-hosts input contains a host other than {authority.host}")
 
 
-def validate_private_key(path: str) -> None:
+def validate_private_key(path: str, authority: Authority) -> None:
     try:
         with open(path, "rb") as handle:
             head = handle.read(128)
     except OSError as exc:
-        fail(f"cannot read GitLab key input: {exc.strerror}")
+        fail(f"cannot read {authority.name} key input: {exc.strerror}")
     if not head.startswith(b"-----BEGIN OPENSSH PRIVATE KEY-----\n"):
-        fail("GitLab key input is not an OpenSSH private key")
+        fail(f"{authority.name} key input is not an OpenSSH private key")
 
 
 def bounded_ssh(
@@ -549,41 +602,47 @@ def agent_fingerprints(socket_path: str) -> set[str]:
     return result
 
 
-def validate_agent_authentication(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+def validate_agent_authentication(
+    value: Any, authority: Authority
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(value, dict):
-        fail("GitLab authentication input must be an object")
+        fail(f"{authority.name} authentication input must be an object")
     exact_keys(
         value,
         ("mode", "socket_path", "public_key", "public_key_fingerprint"),
-        "GitLab authentication input",
+        f"{authority.name} authentication input",
     )
     if value["mode"] != "agent_socket":
-        fail("GitLab authentication mode is invalid")
-    socket_path = canonical_absolute(value["socket_path"], "GitLab agent socket")
+        fail(f"{authority.name} authentication mode is invalid")
+    socket_path = canonical_absolute(
+        value["socket_path"], f"{authority.name} agent socket"
+    )
     if not SAFE_AGENT_PATH.fullmatch(socket_path):
-        fail("GitLab agent socket path is not shell-safe")
-    validate_trusted_ancestors(socket_path, "GitLab agent socket")
+        fail(f"{authority.name} agent socket path is not shell-safe")
+    validate_trusted_ancestors(socket_path, f"{authority.name} agent socket")
     socket_st = os.lstat(socket_path)
     if (
         not stat.S_ISSOCK(socket_st.st_mode)
         or socket_st.st_uid != os.geteuid()
         or mode_bits(socket_st) != 0o600
     ):
-        fail("GitLab agent socket custody is invalid")
-    public_path, expected = input_spec(value["public_key"], "gitlab_agent_public_key")
+        fail(f"{authority.name} agent socket custody is invalid")
+    public_path, expected = input_spec(
+        value["public_key"], authority.agent_public_fact
+    )
     _, digest, size = require_file(
-        public_path, "gitlab_agent_public_key", exact_mode=0o600,
+        public_path, authority.agent_public_fact, exact_mode=0o600,
         maximum=256 * 1024,
     )
     if digest != expected:
-        fail("gitlab_agent_public_key input digest mismatch")
+        fail(f"{authority.agent_public_fact} input digest mismatch")
     fingerprint = value["public_key_fingerprint"]
     if not isinstance(fingerprint, str) or not SSH_SHA256.fullmatch(fingerprint):
-        fail("GitLab agent public-key fingerprint is invalid")
+        fail(f"{authority.name} agent public-key fingerprint is invalid")
     if public_key_fingerprint(public_path) != fingerprint:
-        fail("GitLab agent public key does not match its fingerprint")
+        fail(f"{authority.name} agent public key does not match its fingerprint")
     if fingerprint not in agent_fingerprints(socket_path):
-        fail("required GitLab agent identity is absent")
+        fail(f"required {authority.name} agent identity is absent")
     authentication = {
         "mode": "agent_socket",
         "socket_path": socket_path,
@@ -607,6 +666,7 @@ class Prepared:
     root: str
     parent: str
     candidate: str
+    authority: Authority
     seed: dict[str, str]
     seed_manifest_digest: str
     seed_files: int
@@ -660,8 +720,7 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
     root = canonical_absolute(deploy_root, "deployment root", must_exist=False)
     if manifest["deploy_root"] != root:
         fail("manifest deployment root does not match the command")
-    if manifest["authoritative_remote"] != REMOTE_URL:
-        fail("manifest authoritative remote is not exact")
+    authority = authority_for_remote(manifest["authoritative_remote"])
     parent, _ = validate_parent(root)
     if require_absent and os.path.lexists(root):
         fail("deployment root already exists")
@@ -671,15 +730,15 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
     validate_trusted_ancestors(source_repo, "bootstrap source repository")
     if paths_overlap(root, source_repo):
         fail("bootstrap source repository and deployment root must not overlap")
-    seed = validate_seed(source_repo, candidate)
+    seed = validate_seed(source_repo, candidate, authority)
 
     inputs = manifest["inputs"]
     if not isinstance(inputs, dict):
         fail("manifest inputs must be an object")
     common_input_keys = {"known_hosts", "toolchain", "machine_env", "credentials"}
     observed_input_keys = set(inputs)
-    file_auth_keys = common_input_keys | {"gitlab_deploy_key"}
-    agent_auth_keys = common_input_keys | {"gitlab_authentication"}
+    file_auth_keys = common_input_keys | {authority.deploy_key_input}
+    agent_auth_keys = common_input_keys | {authority.authentication_input}
     if observed_input_keys not in (file_auth_keys, agent_auth_keys):
         fail("manifest inputs keys are not exact")
     files: dict[str, dict[str, Any]] = {}
@@ -690,19 +749,27 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
             fail(f"{name} input digest mismatch")
         files[name] = {"path": path, "sha256": digest, "size": size}
     if observed_input_keys == file_auth_keys:
-        path, expected = input_spec(inputs["gitlab_deploy_key"], "gitlab_deploy_key")
-        _, digest, size = require_file(path, "gitlab_deploy_key", exact_mode=0o600)
+        path, expected = input_spec(
+            inputs[authority.deploy_key_input], authority.deploy_key_input
+        )
+        _, digest, size = require_file(
+            path, authority.deploy_key_input, exact_mode=0o600
+        )
         if digest != expected:
-            fail("gitlab_deploy_key input digest mismatch")
-        files["gitlab_deploy_key"] = {"path": path, "sha256": digest, "size": size}
-        validate_private_key(path)
+            fail(f"{authority.deploy_key_input} input digest mismatch")
+        files[authority.deploy_key_input] = {
+            "path": path,
+            "sha256": digest,
+            "size": size,
+        }
+        validate_private_key(path, authority)
         authentication = {"mode": "file"}
     else:
         authentication, public_fact = validate_agent_authentication(
-            inputs["gitlab_authentication"]
+            inputs[authority.authentication_input], authority
         )
-        files["gitlab_agent_public_key"] = public_fact
-    validate_known_hosts(files["known_hosts"]["path"])
+        files[authority.agent_public_fact] = public_fact
+    validate_known_hosts(files["known_hosts"]["path"], authority)
 
     tool = inputs["toolchain"]
     if not isinstance(tool, dict):
@@ -777,6 +844,7 @@ def prepare(manifest_path: str, deploy_root: str, *, require_absent: bool) -> Pr
         root=root,
         parent=parent,
         candidate=candidate,
+        authority=authority,
         seed=seed,
         seed_manifest_digest=seed_manifest_digest,
         seed_files=seed_files,
@@ -863,6 +931,7 @@ def copy_toolchain(prepared: Prepared, target: str) -> None:
 
 def clone_source(prepared: Prepared, target: str, home: str) -> tuple[str, str, int, int]:
     source = prepared.manifest["source_repository"]
+    authority = prepared.authority
     git_run(
         None,
         (
@@ -871,17 +940,17 @@ def clone_source(prepared: Prepared, target: str, home: str) -> tuple[str, str, 
             "--no-hardlinks",
             "--no-checkout",
             "-o",
-            "gitlab",
+            authority.name,
             source,
             target,
         ),
         home=home,
         timeout=120,
     )
-    git_run(target, ("remote", "set-url", "gitlab", REMOTE_URL), home=home)
+    git_run(target, ("remote", "set-url", authority.name, authority.url), home=home)
     git_run(
         target,
-        ("update-ref", "refs/remotes/gitlab/master", prepared.candidate),
+        ("update-ref", f"refs/remotes/{authority.name}/master", prepared.candidate),
         home=home,
     )
     git_run(target, ("checkout", "-q", "-B", "master", prepared.candidate), home=home)
@@ -899,11 +968,15 @@ def clone_source(prepared: Prepared, target: str, home: str) -> tuple[str, str, 
     head = git_value(target, ("rev-parse", "--verify", "HEAD^{commit}"), home)
     remote = git_value(
         target,
-        ("rev-parse", "--verify", "refs/remotes/gitlab/master^{commit}"),
+        ("rev-parse", "--verify", f"refs/remotes/{authority.name}/master^{{commit}}"),
         home,
     )
-    url = git_value(target, ("config", "--local", "--get", "remote.gitlab.url"), home)
-    if (head, remote, url) != (prepared.candidate, prepared.candidate, REMOTE_URL):
+    url = git_value(
+        target,
+        ("config", "--local", "--get", f"remote.{authority.name}.url"),
+        home,
+    )
+    if (head, remote, url) != (prepared.candidate, prepared.candidate, authority.url):
         fail("copied source authority drifted")
     _, digest, files, size = tree_manifest(
         target, max_files=HARD_MAX_FILES, max_bytes=HARD_MAX_BYTES
@@ -1007,7 +1080,7 @@ def build_receipt(
     receipt: dict[str, Any] = {
         "schema": RECEIPT_SCHEMA,
         "candidate_commit": prepared.candidate,
-        "authoritative_remote": REMOTE_URL,
+        "authoritative_remote": prepared.authority.url,
         "authority_state": "bootstrap_seed_not_publication_authority",
         "deploy_root": prepared.root,
         "deploy_root_identity": {
@@ -1116,9 +1189,13 @@ def command_provision(
             "credentials": "config/agent-bridge/credentials",
         }
         if prepared.authentication["mode"] == "file":
-            targets["gitlab_deploy_key"] = "config/git/gitlab_deploy_key"
+            targets[prepared.authority.deploy_key_input] = (
+                f"config/git/{prepared.authority.deploy_key_file}"
+            )
         else:
-            targets["gitlab_agent_public_key"] = "config/git/gitlab_agent_key.pub"
+            targets[prepared.authority.agent_public_fact] = (
+                f"config/git/{prepared.authority.agent_public_file}"
+            )
         for name, relative in targets.items():
             fact = copy_file(prepared.files[name]["path"], os.path.join(stage, relative))
             if fact["sha256"] != prepared.files[name]["sha256"]:
@@ -1128,17 +1205,19 @@ def command_provision(
             descriptor_relative = "config/git/authentication.json"
             descriptor_path = os.path.join(stage, descriptor_relative)
             descriptor = {
-                "schema": AGENT_AUTH_SCHEMA,
+                "schema": prepared.authority.auth_schema,
                 "mode": "agent_socket",
                 "socket_path": prepared.authentication["socket_path"],
                 "public_key_fingerprint": prepared.authentication["public_key_fingerprint"],
-                "public_key_path": "gitlab_agent_key.pub",
+                "public_key_path": prepared.authority.agent_public_file,
             }
             write_json_file(descriptor_path, descriptor)
             _, descriptor_digest, descriptor_size = require_file(
-                descriptor_path, "installed gitlab_authentication", exact_mode=0o600
+                descriptor_path,
+                f"installed {prepared.authority.authentication_input}",
+                exact_mode=0o600,
             )
-            installed_files["gitlab_authentication"] = {
+            installed_files[prepared.authority.authentication_fact] = {
                 "path": descriptor_relative,
                 "mode": 0o600,
                 "sha256": descriptor_digest,
@@ -1262,7 +1341,11 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
         fail("provisioning receipt schema mismatch")
     if receipt["authority_state"] != "bootstrap_seed_not_publication_authority":
         fail("provisioning receipt authority state is invalid")
-    if receipt["deploy_root"] != root or receipt["authoritative_remote"] != REMOTE_URL:
+    authority = authority_for_remote(receipt["authoritative_remote"])
+    if (
+        receipt["deploy_root"] != root
+        or manifest.get("authoritative_remote") != authority.url
+    ):
         fail("provisioning receipt root or remote binding drifted")
     identity = receipt["deploy_root_identity"]
     if identity != {
@@ -1283,13 +1366,17 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
     head = git_value(source, ("rev-parse", "--verify", "HEAD^{commit}"), root)
     remote = git_value(
         source,
-        ("rev-parse", "--verify", "refs/remotes/gitlab/master^{commit}"),
+        ("rev-parse", "--verify", f"refs/remotes/{authority.name}/master^{{commit}}"),
         root,
     )
-    url = git_value(source, ("config", "--local", "--get", "remote.gitlab.url"), root)
-    if head != remote or url != REMOTE_URL or not HEX40.fullmatch(head):
+    url = git_value(
+        source,
+        ("config", "--local", "--get", f"remote.{authority.name}.url"),
+        root,
+    )
+    if head != remote or url != authority.url or not HEX40.fullmatch(head):
         fail("provisioned source authority drifted")
-    validate_local_git_config(source, root)
+    validate_local_git_config(source, root, authority)
     try:
         git_run(
             source,
@@ -1350,9 +1437,14 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
         fail("provisioned toolchain manifest drifted")
 
     installed_inputs = receipt["installed_inputs"]
-    file_inputs = {"gitlab_deploy_key", "known_hosts", "machine_env", "credentials"}
+    file_inputs = {
+        authority.deploy_key_input,
+        "known_hosts",
+        "machine_env",
+        "credentials",
+    }
     agent_inputs = {
-        "gitlab_agent_public_key", "gitlab_authentication",
+        authority.agent_public_fact, authority.authentication_fact,
         "known_hosts", "machine_env", "credentials",
     }
     if not isinstance(installed_inputs, dict) or set(installed_inputs) not in (file_inputs, agent_inputs):
@@ -1368,31 +1460,37 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
         if {"mode": 0o600, "path": fact["path"], "sha256": digest, "size": size} != fact:
             fail(f"installed {name} drifted")
     if set(installed_inputs) == agent_inputs:
-        descriptor_path = os.path.join(root, installed_inputs["gitlab_authentication"]["path"])
+        descriptor_path = os.path.join(
+            root, installed_inputs[authority.authentication_fact]["path"]
+        )
         try:
             with open(descriptor_path, "rb") as handle:
                 descriptor = parse_json(
-                    handle.read(installed_inputs["gitlab_authentication"]["size"] + 1),
-                    "installed GitLab authentication",
+                    handle.read(
+                        installed_inputs[authority.authentication_fact]["size"] + 1
+                    ),
+                    f"installed {authority.name} authentication",
                 )
         except OSError as exc:
-            fail(f"cannot read installed GitLab authentication: {exc.strerror}")
+            fail(
+                f"cannot read installed {authority.name} authentication: {exc.strerror}"
+            )
         exact_keys(
             descriptor,
             ("schema", "mode", "socket_path", "public_key_fingerprint", "public_key_path"),
-            "installed GitLab authentication",
+            f"installed {authority.name} authentication",
         )
         if (
-            descriptor["schema"] != AGENT_AUTH_SCHEMA
+            descriptor["schema"] != authority.auth_schema
             or descriptor["mode"] != "agent_socket"
-            or descriptor["public_key_path"] != "gitlab_agent_key.pub"
+            or descriptor["public_key_path"] != authority.agent_public_file
             or not isinstance(descriptor["socket_path"], str)
             or not SAFE_AGENT_PATH.fullmatch(descriptor["socket_path"])
             or not isinstance(descriptor["public_key_fingerprint"], str)
             or not SSH_SHA256.fullmatch(descriptor["public_key_fingerprint"])
         ):
-            fail("installed GitLab authentication contract is invalid")
-        manifest_auth = manifest.get("inputs", {}).get("gitlab_authentication")
+            fail(f"installed {authority.name} authentication contract is invalid")
+        manifest_auth = manifest.get("inputs", {}).get(authority.authentication_input)
         if (
             not isinstance(manifest_auth, dict)
             or manifest_auth.get("mode") != "agent_socket"
@@ -1400,10 +1498,12 @@ def verify_receipt(root: str, inherited_lock_fd: int | None = None) -> dict[str,
             or manifest_auth.get("public_key_fingerprint")
             != descriptor["public_key_fingerprint"]
         ):
-            fail("stored GitLab agent authentication binding drifted")
-        public_path = os.path.join(root, installed_inputs["gitlab_agent_public_key"]["path"])
+            fail(f"stored {authority.name} agent authentication binding drifted")
+        public_path = os.path.join(
+            root, installed_inputs[authority.agent_public_fact]["path"]
+        )
         if public_key_fingerprint(public_path) != descriptor["public_key_fingerprint"]:
-            fail("installed GitLab agent public-key identity drifted")
+            fail(f"installed {authority.name} agent public-key identity drifted")
 
     lock_path = os.path.join(root, "publisher-state/deploy/publisher.kernel.lock")
     lock_st, lock_sha, lock_size = require_file(
