@@ -1133,19 +1133,30 @@ def write_json_file(path: str, value: dict[str, Any], mode: int = 0o600) -> None
 
 
 def rename_noreplace(source: str, destination: str) -> None:
-    try:
-        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
-    except AttributeError:
-        fail("atomic no-replace deployment-root activation is unavailable")
-    renameat2.argtypes = (
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        try:
+            rename = libc.renameatx_np
+        except AttributeError:
+            fail("atomic no-replace deployment-root activation is unavailable")
+        at_fdcwd = -2
+        flags = 0x00000004  # RENAME_EXCL
+    else:
+        try:
+            rename = libc.renameat2
+        except AttributeError:
+            fail("atomic no-replace deployment-root activation is unavailable")
+        at_fdcwd = -100
+        flags = 1  # RENAME_NOREPLACE
+    rename.argtypes = (
         ctypes.c_int,
         ctypes.c_char_p,
         ctypes.c_int,
         ctypes.c_char_p,
         ctypes.c_uint,
     )
-    renameat2.restype = ctypes.c_int
-    if renameat2(-100, os.fsencode(source), -100, os.fsencode(destination), 1) == 0:
+    rename.restype = ctypes.c_int
+    if rename(at_fdcwd, os.fsencode(source), at_fdcwd, os.fsencode(destination), flags) == 0:
         return
     observed = ctypes.get_errno()
     if observed in (errno.EEXIST, errno.ENOTEMPTY):

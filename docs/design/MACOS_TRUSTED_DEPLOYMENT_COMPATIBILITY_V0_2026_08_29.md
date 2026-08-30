@@ -1,6 +1,6 @@
 # macOS Trusted Deployment Compatibility V0
 
-Status: **D1 AND D2 ACCEPTED / D3 REDIRECTED TO EXISTING PUBLISHER / NO DEPLOYMENT**
+Status: **D1 AND D2 ACCEPTED / D3 EXISTING-PUBLISHER ADAPTATION STARTED / NO DEPLOYMENT**
 
 Date: 2026-08-29
 
@@ -246,6 +246,13 @@ rollback, and pending-admission machinery already present in
 smallest Darwin root/provisioning compatibility adapter to the existing
 publisher, and reuse its established receipts and recovery path. A second
 publisher implementation is explicitly out of scope.
+
+The first redirected D3 slice adds Darwin `renameatx_np(RENAME_EXCL)` dispatch
+to the existing trusted-root provisioner and publication/seed acquisition
+paths while preserving Linux `renameat2(RENAME_NOREPLACE)`. This closes native
+no-replace behavior in the mature publisher without adding a second lease,
+builder, signer, asset installer, or pending-receipt implementation. It does
+not yet admit a signed production install or service adoption.
 
 ### D4 — migration and launchd adoption
 
