@@ -121,6 +121,11 @@ class PublicationSeedTests(unittest.TestCase):
         status, packet, error = self.fixture.invoke("verify")
         self.assertEqual(status, 0, error)
         self.assertEqual(packet["status"], "verified_publication_and_seed")
+        local_config = run(
+            "-C", str(self.fixture.seed), "config", "--local", "--list", cwd=self.base
+        )
+        self.assertNotIn("core.ignorecase", local_config)
+        self.assertNotIn("core.precomposeunicode", local_config)
 
     def test_non_fast_forward_dirty_input_and_existing_seed_fail_closed(self) -> None:
         (self.fixture.source / "dirty").write_text("dirty\n")
@@ -161,6 +166,14 @@ class PublicationSeedTests(unittest.TestCase):
         status, _, error = self.fixture.invoke("verify")
         self.assertNotEqual(status, 0)
         self.assertIn("not clean", error)
+        (self.fixture.seed / "tamper").unlink()
+        run(
+            "-C", str(self.fixture.seed), "config", "filter.bad.clean", "/bin/false",
+            cwd=self.base,
+        )
+        status, _, error = self.fixture.invoke("verify")
+        self.assertNotEqual(status, 0)
+        self.assertIn("Git authority configuration drifted", error)
 
     def test_agent_socket_mode_binds_exact_public_identity(self) -> None:
         agent_key = self.base / "agent-key"

@@ -254,6 +254,13 @@ no-replace behavior in the mature publisher without adding a second lease,
 builder, signer, asset installer, or pending-receipt implementation. It does
 not yet admit a signed production install or service adoption.
 
+The next redirected slice makes native Git clone output satisfy the existing
+exact seed-config contract on macOS. The established seed acquisition and
+provisioning clone paths rebuild only their owned `core`, authority-remote, and
+branch sections, removing Darwin filesystem defaults or remote-HEAD branch
+metadata before exact validation. Unknown configuration still fails closed;
+publication, installation, and service adoption remain outside this gate.
+
 ### D4 — migration and launchd adoption
 
 Run an explicitly authorized writer freeze, migrate and verify state, install

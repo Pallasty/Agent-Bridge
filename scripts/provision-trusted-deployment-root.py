@@ -361,6 +361,47 @@ def git_value(repo: str, args: Sequence[str], home: str) -> str:
         fail("bootstrap Git result is not ASCII")
 
 
+def normalize_local_git_config(repo: str, home: str, authority: Authority) -> None:
+    filemode = git_value(
+        repo, ("config", "--local", "--get", "core.filemode"), home
+    )
+    if filemode not in ("true", "false"):
+        fail("trusted source core.filemode config is invalid")
+
+    # A native clone may add filesystem-specific keys (for example Darwin's
+    # core.ignorecase and core.precomposeunicode). Rebuild only the sections
+    # owned by this bootstrap so the result matches the exact seed contract.
+    git_run(
+        repo,
+        ("config", "--local", "branch.master.remote", authority.name),
+        home=home,
+    )
+    branch_keys = git_run(
+        repo,
+        ("config", "--local", "--name-only", "--get-regexp", r"^branch\."),
+        home=home,
+    ).decode("utf-8", "strict").splitlines()
+    branch_sections = sorted({key.rsplit(".", 1)[0] for key in branch_keys})
+    for section in ("core", f"remote.{authority.name}", *branch_sections):
+        git_run(
+            repo, ("config", "--local", "--remove-section", section), home=home
+        )
+    for key, value in (
+        ("core.repositoryformatversion", "0"),
+        ("core.filemode", filemode),
+        ("core.bare", "false"),
+        ("core.logallrefupdates", "true"),
+        (f"remote.{authority.name}.url", authority.url),
+        (
+            f"remote.{authority.name}.fetch",
+            f"+refs/heads/*:refs/remotes/{authority.name}/*",
+        ),
+        ("branch.master.remote", authority.name),
+        ("branch.master.merge", "refs/heads/master"),
+    ):
+        git_run(repo, ("config", "--local", key, value), home=home)
+
+
 def validate_local_git_config(repo: str, home: str, authority: Authority) -> None:
     raw = git_run(repo, ("config", "--local", "--list"), home=home)
     try:
@@ -954,6 +995,8 @@ def clone_source(prepared: Prepared, target: str, home: str) -> tuple[str, str, 
         home=home,
     )
     git_run(target, ("checkout", "-q", "-B", "master", prepared.candidate), home=home)
+    normalize_local_git_config(target, home, authority)
+    validate_local_git_config(target, home, authority)
     normalize_private_tree(target)
     for relative, required_mode in ORCHESTRATOR_MODES.items():
         path = os.path.join(target, relative)

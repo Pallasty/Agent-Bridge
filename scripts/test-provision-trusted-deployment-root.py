@@ -176,6 +176,9 @@ class Fixture:
         run_git(self.seed, "config", "branch.master.remote", "gitlab")
         run_git(self.seed, "config", "branch.master.merge", "refs/heads/master")
         run_git(self.seed, "update-ref", "refs/remotes/gitlab/master", self.candidate)
+        MODULE.normalize_local_git_config(
+            str(self.seed), str(self.seed), MODULE.authority_for_remote(REMOTE)
+        )
         private_tree(self.seed)
 
     def _write_toolchain(self) -> None:
