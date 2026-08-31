@@ -114,9 +114,22 @@ class PublicationSeedTests(unittest.TestCase):
         assert packet
         self.assertEqual(packet["status"], "published_authoritative_candidate")
         self.assertEqual(packet["ci_policy"], "skip")
-        status, packet, error = self.fixture.invoke("acquire-seed")
+        observed: list[tuple[str, ...]] = []
+        original_git = MODULE.git
+
+        def recording_git(args: tuple[str, ...], **kwargs: object) -> bytes:
+            observed.append(tuple(args))
+            return original_git(args, **kwargs)
+
+        with mock.patch.object(MODULE, "git", side_effect=recording_git):
+            status, packet, error = self.fixture.invoke("acquire-seed")
         self.assertEqual(status, 0, error)
         self.assertEqual(packet["status"], "acquired_independent_seed")
+        clones = [args for args in observed if args and args[0] == "clone"]
+        self.assertEqual(len(clones), 1)
+        self.assertIn("--no-tags", clones[0])
+        self.assertIn("--single-branch", clones[0])
+        self.assertEqual(clones[0][clones[0].index("--branch") + 1], "master")
         self.assertEqual(stat.S_IMODE(self.fixture.seed.stat().st_mode), 0o700)
         status, packet, error = self.fixture.invoke("verify")
         self.assertEqual(status, 0, error)

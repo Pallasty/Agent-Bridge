@@ -260,6 +260,22 @@ provisioning clone paths rebuild only their owned `core`, authority-remote, and
 branch sections, removing Darwin filesystem defaults or remote-HEAD branch
 metadata before exact validation. Unknown configuration still fails closed;
 publication, installation, and service adoption remain outside this gate.
+Independent seed acquisition is narrowed to the complete `master` branch with
+no tags; it remains a non-local, non-hardlinked, non-shallow clone and retains
+the full authoritative branch ancestry required by later descendant checks.
+
+A live macOS admission attempt on 2026-08-31 verified GitHub authority and
+read-only plan equality at `a78f1533bf717d34312e59f1111b81ec3a176884`, but
+independent seed acquisition remained `HOLD`: the current tree is about 136 MiB,
+the complete `master` pack is about 47.5 MiB, and the observed SSH transfer did
+not finish within the bounded 120-second clone window. No seed was activated.
+Shallow, filtered, locally referenced, or alternate-credential acquisition is
+not admitted by this slice; provisioning plan and production-root birth remain
+open until an independent seed completes under an explicitly accepted route.
+After both remotes advanced together, the read-only plan was repeated against
+current common master `19fe2cedca1f1a609af83fae0da1977a3a7f691c` and again
+returned `ready`; the transfer was not retried because no newly admitted
+independent acquisition route had changed the measured blocker.
 
 ### D4 — migration and launchd adoption
 

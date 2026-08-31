@@ -517,8 +517,25 @@ def acquire(value: dict[str, Any]) -> None:
     stage = seed + ".acquire-stage"
     if os.path.lexists(stage): fail("seed acquisition stage already exists")
     try:
-        git(("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--origin", value["remote_name"], value["remote_url"], stage), repo=None,
-            value=value, timeout=120)
+        git(
+            (
+                "clone",
+                "--no-local",
+                "--no-hardlinks",
+                "--no-checkout",
+                "--no-tags",
+                "--single-branch",
+                "--branch",
+                "master",
+                "--origin",
+                value["remote_name"],
+                value["remote_url"],
+                stage,
+            ),
+            repo=None,
+            value=value,
+            timeout=120,
+        )
         git(("checkout", "-q", "-B", "master", value["candidate_commit"]), repo=stage,
             value=value)
         git(("config", "branch.master.remote", value["remote_name"]), repo=stage, value=value)
