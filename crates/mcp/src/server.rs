@@ -146,6 +146,7 @@ fn tool_context_from_call_with_execution_context(
         verified_execution_context,
         authorization_meta: authorization_meta.cloned(),
         finalized_registry_dispatch: None,
+        guard_handoff: None,
     }
 }
 
@@ -159,6 +160,40 @@ pub async fn serve_stdio(
     server_name: &str,
     version: &str,
     tool_backend_id: Option<Value>,
+) {
+    serve_stdio_inner(registry, store, server_name, version, tool_backend_id, None).await;
+}
+
+/// Default-off source-canary entry point. The composition root, not the MCP
+/// caller, supplies the stdio instance id so an external test issuer can bind
+/// a signed lease to the exact child process connection.
+#[cfg(feature = "invocation-guardian-v2-canary")]
+pub async fn serve_stdio_invocation_guardian_canary(
+    registry: FinalizedToolRegistry,
+    store: Option<Arc<dyn StateStore>>,
+    server_name: &str,
+    version: &str,
+    tool_backend_id: Option<Value>,
+    server_owned_instance_id: String,
+) {
+    serve_stdio_inner(
+        registry,
+        store,
+        server_name,
+        version,
+        tool_backend_id,
+        Some(server_owned_instance_id),
+    )
+    .await;
+}
+
+async fn serve_stdio_inner(
+    registry: FinalizedToolRegistry,
+    store: Option<Arc<dyn StateStore>>,
+    server_name: &str,
+    version: &str,
+    tool_backend_id: Option<Value>,
+    server_owned_instance_id: Option<String>,
 ) {
     info!(server = server_name, "MCP stdio server starting");
 
@@ -194,6 +229,7 @@ pub async fn serve_stdio(
         server_name.to_string(),
         version.to_string(),
         tool_backend_id,
+        server_owned_instance_id,
     )
     .await;
 
@@ -219,8 +255,12 @@ async fn run_dispatch_loop(
     server_name: String,
     version: String,
     tool_backend_id: Option<Value>,
+    server_owned_instance_id: Option<String>,
 ) {
     let mut telemetry = ConnectionTelemetry::from_env();
+    if let Some(instance_id) = server_owned_instance_id {
+        telemetry.mcp_session_id = instance_id;
+    }
     let registry = Arc::new(registry);
     // request-id (as JSON string) -> AbortHandle of the in-flight tools/call task,
     // so a notifications/cancelled can abort it. Pruned of finished entries on each
@@ -1266,7 +1306,7 @@ mod tests {
             ltx.send(l).unwrap();
         }
         drop(ltx); // close input → loop ends after draining
-        run_dispatch_loop(lrx, rtx, reg, None, "test".into(), "0".into(), None).await;
+        run_dispatch_loop(lrx, rtx, reg, None, "test".into(), "0".into(), None, None).await;
         let mut out = Vec::new();
         while let Some(r) = rrx.recv().await {
             out.push(r);

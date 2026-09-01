@@ -86,6 +86,8 @@ pub mod ide;
 pub mod instinct;
 #[cfg(unix)]
 pub mod invocation_guardian_client;
+#[cfg(all(unix, feature = "invocation-guardian-v2-canary"))]
+pub mod invocation_guardian_canary;
 #[cfg(unix)]
 pub mod invocation_guardian_protocol;
 #[cfg(unix)]

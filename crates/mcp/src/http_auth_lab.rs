@@ -1556,6 +1556,7 @@ async fn dispatch_request(
                 // object inside arguments remains ordinary tool input.
                 authorization_meta: params.get("_meta").cloned(),
                 finalized_registry_dispatch: None,
+                guard_handoff: None,
             };
             match state.registry.invoke(name, args, &context).await {
                 None => McpResponse::error(id, METHOD_NOT_FOUND, format!("unknown tool: {name}")),

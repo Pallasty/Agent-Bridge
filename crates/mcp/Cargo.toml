@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+invocation-guardian-v2-canary = []
+
 [dependencies]
 ab-core.workspace = true
 ab-store.workspace = true

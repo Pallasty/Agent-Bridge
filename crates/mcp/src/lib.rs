@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub mod http_auth_lab;
 pub mod protocol;
@@ -161,18 +161,25 @@ impl VerifiedExecutionContext {
     }
 
     pub(crate) fn stdio_connection(instance_id: &str) -> Self {
-        let mut hasher = Sha256::new();
-        let domain = b"agent_bridge.mcp_stdio_connection_context.v1";
-        hasher.update((domain.len() as u64).to_be_bytes());
-        hasher.update(domain);
-        hasher.update((instance_id.len() as u64).to_be_bytes());
-        hasher.update(instance_id.as_bytes());
         Self {
             kind: "mcp_stdio_connection_v1",
-            commitment: hasher.finalize().into(),
+            commitment: stdio_connection_commitment(instance_id),
             task_identity_attested: false,
         }
     }
+}
+
+/// Deterministically derive the public commitment for a server-owned stdio
+/// instance id. Possessing the commitment does not attest control of that
+/// instance; the transport must still construct [`VerifiedExecutionContext`].
+pub fn stdio_connection_commitment(instance_id: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    let domain = b"agent_bridge.mcp_stdio_connection_context.v1";
+    hasher.update((domain.len() as u64).to_be_bytes());
+    hasher.update(domain);
+    hasher.update((instance_id.len() as u64).to_be_bytes());
+    hasher.update(instance_id.as_bytes());
+    hasher.finalize().into()
 }
 
 impl McpTransportKind {
@@ -257,6 +264,13 @@ pub struct ToolContext {
     verified_execution_context: Option<VerifiedExecutionContext>,
     authorization_meta: Option<Value>,
     finalized_registry_dispatch: Option<FinalizedRegistryDispatchEvidence>,
+    guard_handoff: Option<Arc<Mutex<Option<GuardAuthorizationHandoff>>>>,
+}
+
+#[derive(Clone)]
+struct GuardAuthorizationHandoff {
+    canonical_tool_name: Arc<str>,
+    bytes: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -308,6 +322,51 @@ impl ToolContext {
             .map(|evidence| evidence.snapshot.as_ref())
     }
 
+    /// Install one opaque, invocation-local authorization handoff for the
+    /// canonical inner tool. Only a guard running inside a finalized dispatch
+    /// receives a context containing this cell. A second install fails closed.
+    pub fn install_guard_handoff(&self, canonical_tool_name: &str, bytes: Vec<u8>) -> Result<()> {
+        let dispatch = self
+            .finalized_registry_dispatch
+            .as_ref()
+            .filter(|dispatch| dispatch.canonical_tool_name.as_ref() == canonical_tool_name)
+            .ok_or_else(|| {
+                ab_core::Error::InvalidArgument(
+                    "guard handoff is outside the canonical finalized dispatch".into(),
+                )
+            })?;
+        let cell = self.guard_handoff.as_ref().ok_or_else(|| {
+            ab_core::Error::InvalidArgument("guard handoff cell is unavailable".into())
+        })?;
+        let mut slot = cell.lock().map_err(|_| {
+            ab_core::Error::InvalidArgument("guard handoff cell is poisoned".into())
+        })?;
+        if slot.is_some() {
+            return Err(ab_core::Error::InvalidArgument(
+                "guard handoff is already installed".into(),
+            ));
+        }
+        *slot = Some(GuardAuthorizationHandoff {
+            canonical_tool_name: dispatch.canonical_tool_name.clone(),
+            bytes,
+        });
+        Ok(())
+    }
+
+    /// Consume the guard handoff exactly once from the canonical inner tool.
+    /// The handoff is unavailable to denied calls and cannot survive into a
+    /// later registry invocation.
+    pub fn take_guard_handoff(&self, canonical_tool_name: &str) -> Option<Vec<u8>> {
+        let dispatch = self
+            .finalized_registry_dispatch
+            .as_ref()
+            .filter(|dispatch| dispatch.canonical_tool_name.as_ref() == canonical_tool_name)?;
+        let cell = self.guard_handoff.as_ref()?;
+        let mut slot = cell.lock().ok()?;
+        let handoff = slot.take()?;
+        (handoff.canonical_tool_name == dispatch.canonical_tool_name).then_some(handoff.bytes)
+    }
+
     fn with_finalized_registry_dispatch(
         &self,
         snapshot: Arc<FinalizedRegistrySnapshot>,
@@ -324,6 +383,7 @@ impl ToolContext {
                 snapshot,
                 canonical_tool_name: Arc::from(canonical_tool_name),
             }),
+            guard_handoff: Some(Arc::new(Mutex::new(None))),
         }
     }
 
@@ -340,6 +400,7 @@ impl ToolContext {
             verified_execution_context: self.verified_execution_context.clone(),
             authorization_meta: None,
             finalized_registry_dispatch: self.finalized_registry_dispatch.clone(),
+            guard_handoff: self.guard_handoff.clone(),
         }
     }
 }
@@ -1145,6 +1206,54 @@ mod tests {
         seen_authorization_meta: Arc<std::sync::Mutex<Option<Value>>>,
     }
 
+    struct OneShotHandoffGuard;
+
+    #[async_trait]
+    impl ToolCallGuard for OneShotHandoffGuard {
+        async fn authorize_and_consume(
+            &self,
+            tool_name: &str,
+            _args: &Value,
+            ctx: &ToolContext,
+        ) -> Result<()> {
+            assert!(ctx.install_guard_handoff("other_tool", vec![0]).is_err());
+            ctx.install_guard_handoff(tool_name, vec![1, 2, 3])?;
+            assert!(ctx.install_guard_handoff(tool_name, vec![4]).is_err());
+            Ok(())
+        }
+
+        fn policy_snapshot(&self) -> Value {
+            json!({ "schema": "test_guard.v1", "mode": "one_shot_handoff" })
+        }
+    }
+
+    struct HandoffObservingTool {
+        observed: Arc<std::sync::Mutex<Vec<(Option<Vec<u8>>, Option<Vec<u8>>)>>>,
+    }
+
+    #[async_trait]
+    impl McpTool for HandoffObservingTool {
+        fn name(&self) -> &'static str {
+            "handoff_observer"
+        }
+
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: self.name().into(),
+                description: "observes one-shot guard handoff".into(),
+                input_schema: json!({ "type": "object" }),
+            }
+        }
+
+        async fn execute(&self, _args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+            assert_eq!(ctx.take_guard_handoff("other_tool"), None);
+            let first = ctx.take_guard_handoff(self.name());
+            let second = ctx.take_guard_handoff(self.name());
+            self.observed.lock().unwrap().push((first, second));
+            Ok(ToolResult::text("observed"))
+        }
+    }
+
     #[async_trait]
     impl ToolCallGuard for RecordingAllowGuard {
         async fn authorize_and_consume(
@@ -1270,6 +1379,7 @@ mod tests {
             )),
             authorization_meta: Some(metadata.clone()),
             finalized_registry_dispatch: None,
+            guard_handoff: None,
         };
 
         let result = registry
@@ -1298,6 +1408,38 @@ mod tests {
                 finalized_registry_digest: Some(expected_registry_digest),
                 differently_named_registry_digest: None,
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn guard_handoff_is_canonical_one_shot_and_invocation_local() {
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut builder = ToolRegistryBuilder::new();
+        builder.register(Box::new(HandoffObservingTool {
+            observed: observed.clone(),
+        }));
+        let registry = builder
+            .finalize_with(|_| RegistryFinalization::new(Arc::new(OneShotHandoffGuard), json!({})));
+
+        assert!(ToolContext::default()
+            .install_guard_handoff("handoff_observer", vec![9])
+            .is_err());
+        assert_eq!(
+            ToolContext::default().take_guard_handoff("handoff_observer"),
+            None
+        );
+
+        for _ in 0..2 {
+            let result = registry
+                .invoke("handoff_observer", json!({}), &ToolContext::default())
+                .await
+                .expect("registered tool")
+                .unwrap();
+            assert!(!result.is_error);
+        }
+        assert_eq!(
+            *observed.lock().unwrap(),
+            vec![(Some(vec![1, 2, 3]), None), (Some(vec![1, 2, 3]), None)]
         );
     }
 

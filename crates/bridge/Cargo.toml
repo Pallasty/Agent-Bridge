@@ -47,6 +47,12 @@ seed-substrate = []
 # Default-off, non-authoritative invocation guardian lab. This feature contains
 # no production monotonic witness and cannot grant InvocationLease authority.
 invocation-guardian-lab = []
+# Default-off source canary. It uses an in-process fake witness and therefore
+# cannot satisfy protected-witness or production deployment claims.
+invocation-guardian-v2-canary = [
+    "invocation-guardian-lab",
+    "ab-mcp/invocation-guardian-v2-canary",
+]
 
 [dependencies]
 ab-core.workspace = true
@@ -127,3 +133,8 @@ path = "src/bin/mobile_projection_host.rs"
 name = "invocation-guardian"
 path = "src/bin/invocation_guardian.rs"
 required-features = ["invocation-guardian-lab"]
+
+[[bin]]
+name = "invocation-guardian-canary-mcp"
+path = "src/bin/invocation_guardian_canary_mcp.rs"
+required-features = ["invocation-guardian-v2-canary"]

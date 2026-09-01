@@ -1,7 +1,7 @@
 # AB Invocation Guardian v2：单入口 Canary 与晋级计划
 
 日期：2026-09-01
-状态：**C0 源码协议已实现并通过定向验证；C1—C4 未实现、未部署；production `enforce` 继续 HOLD**
+状态：**C0 协议与 C1 默认关闭源码 canary 已实现并通过定向验证；C2—C4 未实现、未部署；production `enforce` 继续 HOLD**
 
 ## 1. 决策
 
@@ -242,7 +242,7 @@ C4 通过后仍必须保持：
 ## 12. 当前阶段状态
 
 截至本文日期，C0 已在源码层冻结 signed self-contained scope、signed
-provider receipt 和独立 v2 bounded wire protocol：
+provider receipt 和独立 v2 bounded wire protocol；C1 已完成默认关闭的源码 canary：
 
 - `invocation_lease_scope.rs` 是 envelope canonicalization、Ed25519 signing
   message 和 exact observed-invocation verifier 的唯一实现；canary lane、tool、
@@ -257,11 +257,22 @@ provider receipt 和独立 v2 bounded wire protocol：
   predicate。只有 receipt verifier 能形成不可 `Clone` 的 verified evidence，且它仍
   不是 permit；v1/v2 cross-decode、未知 tag/reserved bit、截断、oversize、wrong
   key/time/pin、所有 scope/receipt/request binding 漂移均被测试拒绝；
-- 该源码不包含 v2 client permit、async protected witness、canary tool、marker
-  effect 或任何 production constructor，因此 C0 通过不等于 C1；
+- `invocation_guardian_canary.rs` 提供 async fake witness、提交前/提交后丢包
+  fault、只允许 `FreshCommitted` 构造的私有 non-`Clone` permit，以及固定 marker
+  sink；`AlreadyCommitted`、conflict、indeterminate 和 hold 均不能 dispatch；
+- `ToolContext` 的 guard handoff 绑定 canonical finalized dispatch，每次 invocation
+  新建、最多安装一次且只能消费一次；effect 执行前清除 caller authorization meta；
+- `invocation-guardian-v2-canary` Cargo feature 默认关闭；专用 stdio binary 只注册
+  固定 marker tool，不接收 caller-selected path、payload 或 command；
+- 真实子进程 stdio `tools/call` E2E 已验证 missing meta、arguments 内 `_meta`
+  spoof 和同 token 并发 replay，最终恰好一个成功响应、一个 marker；
+- C1 的 witness 和 guard 仍与 canary MCP 同进程，provider signing key 也只用于测试
+  配置；它们不构成独立 guardian、IPC authentic channel 或 protected witness；
 - 没有 protected witness provider；
 - 没有创建部署 UID、socket、密钥、namespace 或 marker directory；
-- 没有启用 canary；
+- 没有在任何安装或 production profile 中启用 canary；
 - 没有改变 production `enforce`、capabilities 或发布结论。
 
-在 C0—C4 证据逐项形成前，任何本地 demo、volatile witness、mock receipt、同机数据库或运行时长都不能替代 promotion gate。
+下一 gate 是 C2：必须在真实部署中建立独立 guardian UID/IPC，并用权限、FD
+继承、socket 替换和 ptrace 探针证明隔离。C1 的本地 fake/map、测试私钥、marker
+和 stdio 通过结果都不能替代 C2/C3 外部证据。
