@@ -28,7 +28,7 @@ use sha2::{Digest, Sha256};
 
 use crate::invocation_lease_scope::{
     domain_hash, CanaryTrustPins, Commitment, ObservedCanaryInvocation, SignedCanaryLease,
-    SIGNATURE_BYTES,
+    CANARY_CONNECTION_CONTEXT_KIND, SIGNATURE_BYTES,
 };
 
 pub const CANARY_TOOL_NAME: &str = "invocation_guardian_canary_write";
@@ -249,6 +249,7 @@ impl ToolCallGuard for CanaryGuard {
             principal_kind: self.config.principal_kind.clone(),
             principal_commitment: self.config.principal_commitment,
             transport_kind: "stdio".into(),
+            connection_context_kind: CANARY_CONNECTION_CONTEXT_KIND.into(),
             connection_commitment: *execution.commitment(),
         };
         let exact_scope_commitment = lease
