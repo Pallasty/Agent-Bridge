@@ -20,6 +20,7 @@ use ab_bridge::invocation_guardian_canary::{
 };
 use ab_bridge::invocation_lease_scope::{
     domain_hash, CanaryLeaseScope, CanaryTrustPins, SignedCanaryLease,
+    CANARY_CONNECTION_CONTEXT_KIND, CANARY_ISSUANCE_LANE, CANARY_TRANSPORT_KIND,
 };
 
 #[test]
@@ -71,6 +72,7 @@ fn actual_stdio_tools_call_creates_at_most_one_marker() {
         .unwrap()
         .as_secs() as i64;
     let scope = CanaryLeaseScope {
+        issuance_lane: CANARY_ISSUANCE_LANE.into(),
         key_generation: 1,
         issuer_key_commitment: pins.issuer_key_commitment,
         ledger_generation,
@@ -83,6 +85,8 @@ fn actual_stdio_tools_call_creates_at_most_one_marker() {
         namespace: namespace.clone(),
         principal_kind: "service".into(),
         principal_commitment,
+        transport_kind: CANARY_TRANSPORT_KIND.into(),
+        connection_context_kind: CANARY_CONNECTION_CONTEXT_KIND.into(),
         connection_commitment: ab_mcp::stdio_connection_commitment(instance_id),
         issued_at_unix: now - 1,
         not_before_unix: now - 1,
