@@ -2590,9 +2590,58 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return args
 
 
+def system_python_executable() -> str:
+    """Resolve the OS-controlled Python executable used for migration.
+
+    On current macOS releases ``/usr/bin/python3`` is an Apple toolchain shim:
+    after exec, ``sys.executable`` names the selected Xcode Python instead of
+    the shim. Bind the running interpreter to xcrun's fixed system resolution
+    rather than to an argv spelling that is no longer observable.
+    """
+    if sys.platform != "darwin":
+        return "/usr/bin/python3"
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/xcrun", "--find", "python3"],
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("cannot resolve the fixed Darwin system Python interpreter")
+    if completed.returncode != 0:
+        fail("cannot resolve the fixed Darwin system Python interpreter")
+    try:
+        expected = completed.stdout.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        fail("Darwin system Python resolution is malformed")
+    if not expected.startswith("/") or "\n" in expected or os.path.normpath(expected) != expected:
+        fail("Darwin system Python resolution is malformed")
+    try:
+        value = os.stat(expected)
+    except OSError:
+        fail("Darwin system Python interpreter is unavailable")
+    if (
+        not stat.S_ISREG(value.st_mode)
+        or value.st_uid != 0
+        or stat.S_IMODE(value.st_mode) & 0o022
+        or not os.access(expected, os.X_OK)
+    ):
+        fail("Darwin system Python interpreter custody is invalid")
+    return expected
+
+
 def validate_production_interpreter() -> None:
-    if sys.executable != "/usr/bin/python3":
-        fail("production migration requires the fixed /usr/bin/python3 interpreter")
+    expected = system_python_executable()
+    try:
+        same_interpreter = os.path.samefile(sys.executable, expected)
+    except OSError:
+        same_interpreter = False
+    if not same_interpreter:
+        fail("production migration requires the fixed system Python interpreter")
     if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
         fail("production migration requires /usr/bin/python3 -I -B")
 

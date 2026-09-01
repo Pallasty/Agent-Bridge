@@ -352,6 +352,36 @@ def snapshot(paths: list[Path]) -> dict[str, tuple[object, ...]]:
 class MigrationTests(unittest.TestCase):
     maxDiff = None
 
+    def test_darwin_system_python_binds_xcrun_selected_interpreter(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["/usr/bin/xcrun", "--find", "python3"],
+            returncode=0,
+            stdout=b"/Applications/Xcode.app/Contents/Developer/usr/bin/python3\n",
+            stderr=b"",
+        )
+        interpreter = mock.Mock(st_mode=0o100755, st_uid=0)
+        with mock.patch.object(MIGRATION.sys, "platform", "darwin"), \
+             mock.patch.object(MIGRATION.subprocess, "run", return_value=completed), \
+             mock.patch.object(MIGRATION.os, "stat", return_value=interpreter), \
+             mock.patch.object(MIGRATION.os, "access", return_value=True):
+            observed = MIGRATION.system_python_executable()
+        self.assertEqual(
+            observed,
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+        )
+
+    def test_darwin_system_python_resolution_fails_closed(self) -> None:
+        cases = (
+            subprocess.CompletedProcess([], 1, b"", b"unavailable"),
+            subprocess.CompletedProcess([], 0, b"relative/python3\n", b""),
+        )
+        for completed in cases:
+            with self.subTest(returncode=completed.returncode, stdout=completed.stdout), \
+                 mock.patch.object(MIGRATION.sys, "platform", "darwin"), \
+                 mock.patch.object(MIGRATION.subprocess, "run", return_value=completed):
+                with self.assertRaises(MIGRATION.MigrationError):
+                    MIGRATION.system_python_executable()
+
     def fixture(self, *, wal: bool = False) -> Fixture:
         value = Fixture(wal=wal)
         self.addCleanup(value.close)
