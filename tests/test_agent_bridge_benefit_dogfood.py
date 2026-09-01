@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,6 +173,54 @@ class BenefitDogfoodTests(unittest.TestCase):
         )
         return rows
 
+    def test_log_path_requires_one_absolute_authority(self) -> None:
+        state_root = Path(self.temp.name) / "Application Support" / "private-state"
+        explicit = Path(self.temp.name) / "explicit" / "trial.jsonl"
+        with mock.patch.dict(
+            os.environ,
+            {"AGENT_BRIDGE_STATE_DIR": str(state_root)},
+            clear=True,
+        ):
+            self.assertEqual(
+                MODULE.resolve_log_path(None),
+                state_root / "dogfood" / "benefit-v1.jsonl",
+            )
+            self.assertEqual(MODULE.resolve_log_path(explicit), explicit)
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(MODULE.DogfoodError, "LOG_PATH_REQUIRED"):
+                MODULE.resolve_log_path(None)
+        with mock.patch.dict(
+            os.environ,
+            {"AGENT_BRIDGE_STATE_DIR": "relative-state"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.DogfoodError, "LOG_PATH_NOT_ABSOLUTE"
+            ):
+                MODULE.resolve_log_path(None)
+        with self.assertRaisesRegex(MODULE.DogfoodError, "LOG_PATH_NOT_ABSOLUTE"):
+            MODULE.resolve_log_path(Path("relative-ledger.jsonl"))
+        with self.assertRaisesRegex(MODULE.DogfoodError, "LOG_PATH_NOT_NORMALIZED"):
+            MODULE.resolve_log_path(Path("/private/state/../trial.jsonl"))
+        for root in ("/", "//", "/..", "/tmp/.."):
+            with self.subTest(root=root), mock.patch.dict(
+                os.environ,
+                {"AGENT_BRIDGE_STATE_DIR": root},
+                clear=True,
+            ):
+                with self.assertRaises(MODULE.DogfoodError):
+                    MODULE.resolve_log_path(None)
+
+    def test_xdg_state_is_not_an_implicit_trial_authority(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"XDG_STATE_HOME": str(Path(self.temp.name) / "xdg")},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(MODULE.DogfoodError, "LOG_PATH_REQUIRED"):
+                MODULE.resolve_log_path(None)
+
     def test_private_append_only_ledger_and_duplicate_subject_guard(self) -> None:
         row = continuity("task-1")
         result = MODULE.record_event(self.log, row)
@@ -222,6 +272,16 @@ class BenefitDogfoodTests(unittest.TestCase):
         report = MODULE.build_report(rows)
         self.assertEqual(report["gates"]["avatar"], "FAIL")
         self.assertEqual(report["verdict"], "RETAIN_ON_DEMAND")
+
+    def test_physical_display_confirmation_is_supporting_evidence(self) -> None:
+        rows = self.passing_rows()
+        for row in rows:
+            if row["event_type"] == "avatar":
+                row["metrics"]["physical_display_confirmed"] = False
+        report = MODULE.build_report(rows)
+        self.assertEqual(report["avatar"]["physical_display_confirmation_count"], 0)
+        self.assertEqual(report["gates"]["avatar"], "PASS")
+        self.assertEqual(report["verdict"], "READY_FOR_OWNER_ADOPTION_REVIEW")
 
     def test_duplicate_external_action_is_a_hard_guardrail(self) -> None:
         report = MODULE.build_report(
@@ -311,7 +371,13 @@ class BenefitDogfoodTests(unittest.TestCase):
         with self.assertRaises(MODULE.DogfoodError):
             MODULE.read_rows(self.log)
 
+    def test_unsearchable_ledger_path_is_not_misreported_as_empty(self) -> None:
+        with mock.patch.object(MODULE.os, "open", side_effect=PermissionError):
+            with self.assertRaisesRegex(MODULE.DogfoodError, "LEDGER_OPEN_FAILED"):
+                MODULE.read_rows(self.log)
+
     def test_cli_empty_report_is_structured(self) -> None:
+        self.assertFalse(self.log.parent.exists())
         completed = subprocess.run(
             [sys.executable, str(MODULE_PATH), "--log", str(self.log), "report"],
             check=False,
@@ -324,6 +390,27 @@ class BenefitDogfoodTests(unittest.TestCase):
             "COLLECTING_TWO_WEEK_DOGFOOD",
         )
         self.assertEqual(completed.stderr, "")
+        self.assertFalse(self.log.exists())
+        self.assertFalse(self.log.parent.exists())
+
+    def test_cli_without_log_authority_fails_closed(self) -> None:
+        env = os.environ.copy()
+        env.pop("AGENT_BRIDGE_STATE_DIR", None)
+        env["XDG_STATE_HOME"] = str(Path(self.temp.name) / "xdg-must-not-be-used")
+        completed = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "report"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(
+            json.loads(completed.stdout)["error_code"],
+            "LOG_PATH_REQUIRED",
+        )
+        self.assertEqual(completed.stderr, "")
+        self.assertFalse((Path(self.temp.name) / "xdg-must-not-be-used").exists())
 
     def test_concurrent_cli_records_remain_complete(self) -> None:
         processes = []

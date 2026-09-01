@@ -82,6 +82,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Set up Python 3.9 contract floor
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.9"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -97,6 +102,11 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --no-fail-fast
+
+      - name: Run benefit dogfood contract tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest -v tests.test_agent_bridge_benefit_dogfood
 
       - name: Clippy (warnings only on PR; do not gate)
         run: cargo clippy --workspace --all-targets -- -W clippy::all || true

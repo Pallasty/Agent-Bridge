@@ -387,6 +387,76 @@ def result(command: str, status_value: str, **extra: Any) -> dict[str, Any]:
     return {"schema": RESULT, "command": command, "status": status_value, **extra}
 
 
+def verify_seed_local_git_config(repo: str, value: dict[str, Any]) -> None:
+    raw = git(("config", "--local", "--list"), repo=repo, value=value)
+    try:
+        lines = raw.decode("utf-8", "strict").splitlines()
+    except UnicodeDecodeError:
+        fail("seed Git authority configuration drifted")
+    observed: dict[str, list[str]] = {}
+    for line in lines:
+        if "=" not in line:
+            fail("seed Git authority configuration drifted")
+        key, item = line.split("=", 1)
+        observed.setdefault(key.lower(), []).append(item)
+    filemode = observed.pop("core.filemode", None)
+    remote_name = value["remote_name"]
+    expected = {
+        "core.bare": ["false"],
+        "core.logallrefupdates": ["true"],
+        "core.repositoryformatversion": ["0"],
+        f"remote.{remote_name}.fetch": [
+            f"+refs/heads/*:refs/remotes/{remote_name}/*"
+        ],
+        f"remote.{remote_name}.url": [value["remote_url"]],
+        "branch.master.remote": [remote_name],
+        "branch.master.merge": ["refs/heads/master"],
+    }
+    if filemode not in (["true"], ["false"]) or observed != expected:
+        fail("seed Git authority configuration drifted")
+
+
+def normalize_seed_local_git_config(repo: str, value: dict[str, Any]) -> None:
+    filemode = git(
+        ("config", "--local", "--get", "core.filemode"), repo=repo, value=value
+    ).decode("ascii", "strict").strip()
+    if filemode not in ("true", "false"):
+        fail("seed Git authority configuration drifted")
+    remote_name = value["remote_name"]
+    git(
+        ("config", "--local", "branch.master.remote", remote_name),
+        repo=repo,
+        value=value,
+    )
+    branch_keys = git(
+        ("config", "--local", "--name-only", "--get-regexp", r"^branch\."),
+        repo=repo,
+        value=value,
+    ).decode("utf-8", "strict").splitlines()
+    branch_sections = sorted({key.rsplit(".", 1)[0] for key in branch_keys})
+    for section in ("core", f"remote.{remote_name}", *branch_sections):
+        git(
+            ("config", "--local", "--remove-section", section),
+            repo=repo,
+            value=value,
+        )
+    for key, item in (
+        ("core.repositoryformatversion", "0"),
+        ("core.filemode", filemode),
+        ("core.bare", "false"),
+        ("core.logallrefupdates", "true"),
+        (f"remote.{remote_name}.url", value["remote_url"]),
+        (
+            f"remote.{remote_name}.fetch",
+            f"+refs/heads/*:refs/remotes/{remote_name}/*",
+        ),
+        ("branch.master.remote", remote_name),
+        ("branch.master.merge", "refs/heads/master"),
+    ):
+        git(("config", "--local", key, item), repo=repo, value=value)
+    verify_seed_local_git_config(repo, value)
+
+
 def normalize(root: str) -> None:
     for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
         if os.path.islink(current): fail("seed contains a symlink")
@@ -416,13 +486,24 @@ def durable_tree(root: str) -> None:
 
 
 def rename_noreplace(source: str, destination: str) -> None:
-    try:
-        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
-    except AttributeError:
-        fail("atomic no-replace activation is unavailable")
-    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-    renameat2.restype = ctypes.c_int
-    if renameat2(-100, os.fsencode(source), -100, os.fsencode(destination), 1) == 0:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        try:
+            rename = libc.renameatx_np
+        except AttributeError:
+            fail("atomic no-replace activation is unavailable")
+        at_fdcwd = -2
+        flags = 0x00000004  # RENAME_EXCL
+    else:
+        try:
+            rename = libc.renameat2
+        except AttributeError:
+            fail("atomic no-replace activation is unavailable")
+        at_fdcwd = -100
+        flags = 1  # RENAME_NOREPLACE
+    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    rename.restype = ctypes.c_int
+    if rename(at_fdcwd, os.fsencode(source), at_fdcwd, os.fsencode(destination), flags) == 0:
         return
     error = ctypes.get_errno()
     if error in (errno.EEXIST, errno.ENOTEMPTY):
@@ -436,12 +517,30 @@ def acquire(value: dict[str, Any]) -> None:
     stage = seed + ".acquire-stage"
     if os.path.lexists(stage): fail("seed acquisition stage already exists")
     try:
-        git(("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--origin", value["remote_name"], value["remote_url"], stage), repo=None,
-            value=value, timeout=120)
+        git(
+            (
+                "clone",
+                "--no-local",
+                "--no-hardlinks",
+                "--no-checkout",
+                "--no-tags",
+                "--single-branch",
+                "--branch",
+                "master",
+                "--origin",
+                value["remote_name"],
+                value["remote_url"],
+                stage,
+            ),
+            repo=None,
+            value=value,
+            timeout=120,
+        )
         git(("checkout", "-q", "-B", "master", value["candidate_commit"]), repo=stage,
             value=value)
         git(("config", "branch.master.remote", value["remote_name"]), repo=stage, value=value)
         git(("config", "branch.master.merge", "refs/heads/master"), repo=stage, value=value)
+        normalize_seed_local_git_config(stage, value)
         normalize(stage)
         durable_tree(stage)
         rename_noreplace(stage, seed)
@@ -476,6 +575,7 @@ def verify_seed(value: dict[str, Any]) -> None:
         value["remote_url"], remote_name, "refs/heads/master"
     ):
         fail("seed Git authority configuration drifted")
+    verify_seed_local_git_config(seed, value)
     if git(("status", "--porcelain=v1", "--untracked-files=all"), repo=seed, value=value):
         fail("seed is not clean")
     listing = git(("ls-tree", "-r", head), repo=seed, value=value)
