@@ -279,6 +279,49 @@ returned `ready`. A later bounded retry received only about 452 KiB after
 stage was removed and no seed was activated. The measured blocker therefore
 remains unchanged.
 
+#### D3 trusted source-closure audit
+
+A read-only audit on 2026-08-31 rejected a source-closure implementation for
+this slice. A conservative deterministic build/deploy closure can be described,
+but it does not reduce the transfer performed by the currently admitted seed
+acquisition protocol:
+
+- the complete current tree contains 4,814 files and 136,663,961 bytes;
+- a conservative closure containing every workspace member, the ten local
+  packages transitively used by `agent-bridge`, compile-time external
+  `include_*` inputs, the trusted orchestrators, wrapper/systemd files, runtime
+  scripts, and admitted policy assets contains 673 files and 34,737,855 bytes;
+- an archive of that closure compresses to 13,977,997 bytes, versus 39,891,700
+  bytes for the complete current tree;
+- the complete `master` history pack is 47,546,425 bytes; the current
+  single-branch/no-tags clone must receive that pack before checkout selection
+  can affect the working tree;
+- a local lower-bound simulation of full commit/tree history plus only the
+  current closure blobs is 17,349,209 bytes (3,068,052 bytes of commit/tree
+  history and 14,281,157 bytes of current blobs). Reaching that route requires
+  filtered partial-clone semantics and a path-scoped materialization contract.
+
+The conservative closure was materialized only in an automatically removed
+temporary directory. `cargo metadata --locked --offline --no-deps` accepted all
+15 workspace members from it, every explicitly required input was present, and
+the materialized tree contained no symlinks. This is manifest/static-input
+evidence, not a release build.
+
+Changing checkout selection alone is ineffective: seed acquisition fetches the
+pack first, the root provisioner currently clones and checks out the complete
+seed, and the publisher materializes the complete authoritative tree with
+`git archive`. A useful closure route would therefore need a new partial-clone
+filter contract, generated path manifest, blob-completeness receipt, provisioner
+copy rule, and path-scoped archive rule. That is a new acquisition protocol,
+not the minimum Darwin compatibility adapter, and the measured compressed
+reduction is about 63.5%, below the 70% design threshold used for this audit.
+
+Decision: `SOURCE_CLOSURE_AUDIT_COMPLETE; OPTIMIZATION_NOT_ADMITTED;
+TRUSTED_SEED_NETWORK_HOLD`. Do not add a closure manifest or repeat the same
+bounded clone merely to collect another timeout. Retain the existing complete
+`master`/no-tags protocol and retry it only after the network route materially
+improves or a separately authorized transport-design gate changes the contract.
+
 ### D4 — migration and launchd adoption
 
 Run an explicitly authorized writer freeze, migrate and verify state, install
