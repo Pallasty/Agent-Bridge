@@ -59,7 +59,7 @@ cargo test -p ab-bridge --test invocation_guardian_v2_canary_stdio \
 1 passed / 0 failed
 
 cargo test -p ab-bridge --lib invocation_lease_scope --no-default-features
-3 passed / 0 failed
+4 passed / 0 failed
 
 cargo test -p ab-bridge --lib invocation_guardian_protocol_v2 --no-default-features
 4 passed / 0 failed
