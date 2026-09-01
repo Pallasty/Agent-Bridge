@@ -7,8 +7,8 @@ Production entry point (the interpreter flags are part of the trust boundary):
         preflight|migrate|verify --deploy-root /private/agent-bridge
 
 The tool deliberately never controls a service.  An operator must quiesce the
-complete fixed unit set before every command, and a successful migration leaves
-that unit set quiesced.  ``preflight`` and ``verify`` perform no filesystem
+complete fixed platform job set before every command, and a successful migration
+leaves that job set quiesced.  ``preflight`` and ``verify`` perform no filesystem
 mutation.  ``migrate`` is the only writing command and requires a confirmation
 string bound to the publisher candidate and pending-admission digest.
 """
@@ -91,6 +91,20 @@ UNITS = (
     "agent-bridge-day2-audit.timer",
 )
 
+# A migration freeze must make recurring launchd jobs untriggerable, not merely
+# observe them between invocations.  These are the fixed Agent Bridge jobs on
+# the Darwin host that can write or consume migrated runtime-state leaves.
+DARWIN_LAUNCHD_JOBS = (
+    "com.pallasting.agent-bridge.daemon",
+    "com.pallasting.agent-bridge.daemon-http",
+    "com.pallasting.agent-bridge.palace",
+    "com.agentbridge.sync",
+    "com.agentbridge.daily-hygiene",
+    "com.agentbridge.avatar-heartbeat.agent-bridge",
+    "com.agentbridge.avatar-heartbeat-alert.agent-bridge",
+    "com.agentbridge.avatar-cortex.agent-bridge",
+)
+
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -102,10 +116,20 @@ MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 HARD_MAX_FILES = 1_000_000
 HARD_MAX_BYTES = 1 << 40  # 1 TiB is an implementation safety ceiling.
 BACKUP_BUSY_DEADLINE_SECONDS = 10.0
+SQLITE_BUSY_CODE = 5
+SQLITE_LOCKED_CODE = 6
 
 
 class MigrationError(RuntimeError):
     """Expected fail-closed rejection."""
+
+
+def runtime_platform() -> str:
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform == "darwin":
+        return "darwin"
+    fail("trusted runtime-state migration is unsupported on this platform")
 
 
 @dataclass(frozen=True)
@@ -1229,7 +1253,7 @@ def query_unit_state(unit: str) -> dict[str, str]:
     return values
 
 
-def collect_quiescence() -> list[dict[str, Any]]:
+def collect_systemd_quiescence() -> list[dict[str, Any]]:
     baseline: list[dict[str, Any]] = []
     for unit in UNITS:
         values = query_unit_state(unit)
@@ -1268,6 +1292,58 @@ def collect_quiescence() -> list[dict[str, Any]]:
                 }
             )
     return baseline
+
+
+def query_launchd_loaded(label: str) -> bool:
+    domain = f"gui/{os.geteuid()}"
+    command = ("/bin/launchctl", "print", f"{domain}/{label}")
+    try:
+        result = subprocess.run(
+            command,
+            env={
+                "HOME": "/nonexistent",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=15,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("cannot query the fixed launchd user-job gate")
+    if result.returncode == 0:
+        return True
+    missing = result.stdout + "\n" + result.stderr
+    if result.returncode == 113 and "Could not find service" in missing:
+        return False
+    fail("cannot query the fixed launchd user-job gate")
+
+
+def collect_launchd_quiescence() -> list[dict[str, Any]]:
+    domain = f"gui/{os.geteuid()}"
+    baseline: list[dict[str, Any]] = []
+    for label in DARWIN_LAUNCHD_JOBS:
+        if query_launchd_loaded(label):
+            fail(f"required launchd job remains loaded or triggerable: {label}")
+        baseline.append(
+            {
+                "domain": domain,
+                "loaded": False,
+                "name": label,
+                "type": "launchd",
+            }
+        )
+    return baseline
+
+
+def collect_quiescence() -> list[dict[str, Any]]:
+    if runtime_platform() == "darwin":
+        return collect_launchd_quiescence()
+    return collect_systemd_quiescence()
 
 
 def check_quiescence() -> None:
@@ -1415,7 +1491,7 @@ def is_exact_user_manager_infrastructure(pid: int, proc_root: str = "/proc") -> 
         os.close(directory_fd)
 
 
-def scan_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -> None:
+def scan_proc_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -> None:
     wanted = {os.path.normpath(path) for path in paths}
     database_bases = {
         path
@@ -1496,6 +1572,53 @@ def scan_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -
                 os.close(fd_dir)
         finally:
             os.close(proc_fd)
+
+
+def scan_darwin_open_fds(paths: set[str]) -> None:
+    wanted = sorted({os.path.normpath(path) for path in paths})
+    if not wanted or any(not os.path.isabs(path) for path in wanted):
+        fail("Darwin SQLite descriptor inventory requires absolute paths")
+    try:
+        result = subprocess.run(
+            ("/usr/sbin/lsof", "-nP", "-Fpcufn", "--", *wanted),
+            env={
+                "HOME": "/nonexistent",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=15,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("cannot enumerate Darwin open database descriptors")
+    if result.returncode not in (0, 1):
+        fail("cannot enumerate Darwin open database descriptors")
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        if not line or line[0] not in "pcufn":
+            fail("Darwin lsof returned an unknown descriptor-inventory shape")
+        if line[0] == "p":
+            if not line[1:].isdigit() or int(line[1:]) <= 0:
+                fail("Darwin lsof returned an invalid process identity")
+            pids.append(int(line[1:]))
+    if result.returncode == 0 and not pids:
+        fail("Darwin lsof omitted process identities from a successful inventory")
+    if any(pid != os.getpid() for pid in pids):
+        fail("an external process still holds a legacy or destination SQLite descriptor")
+
+
+def scan_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -> None:
+    # Explicit PID inventories are a Linux-test seam and retain the hardened
+    # /proc implementation even when that isolated suite runs on a Mac host.
+    if pid_inventory is not None or runtime_platform() == "linux":
+        scan_proc_open_fds(paths, pid_inventory)
+        return
+    scan_darwin_open_fds(paths)
 
 
 def check_runtime_gates(plan: PreparedPlan, root: str) -> None:
@@ -1824,9 +1947,10 @@ def sqlite_checkpoint_and_backup(
         destination = sqlite3.connect(target, timeout=0.0, isolation_level=None)
         destination.execute("PRAGMA journal_mode=DELETE")
         deadline = time.monotonic() + BACKUP_BUSY_DEADLINE_SECONDS
+        busy_statuses = sqlite_busy_statuses()
 
         def progress(status: int, _remaining: int, _total: int) -> None:
-            if status in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) and time.monotonic() > deadline:
+            if status in busy_statuses and time.monotonic() > deadline:
                 raise MigrationError("SQLite backup remained busy beyond its bounded deadline")
 
         connection.backup(destination, pages=256, progress=progress, sleep=0.01)
@@ -1866,9 +1990,17 @@ def sqlite_checkpoint_and_backup(
     return source_sha_before, source_fact, target_fact
 
 
+def sqlite_busy_statuses(api: Any = sqlite3) -> tuple[int, int]:
+    """Return SQLite busy statuses on both Apple Python 3.9 and newer Python."""
+    return (
+        getattr(api, "SQLITE_BUSY", SQLITE_BUSY_CODE),
+        getattr(api, "SQLITE_LOCKED", SQLITE_LOCKED_CODE),
+    )
+
+
 # This indirection is intentionally patchable by the isolated stdlib test
 # harness.  Production replaces it for the duration of migrate with a closure
-# that re-runs the fixed unit and /proc gates.
+# that re-runs the fixed platform quiescence and descriptor gates.
 def check_runtime_gate_during_sqlite() -> None:
     return None
 
@@ -2046,7 +2178,7 @@ def build_receipt(
         "mappings_digest": context.plan.mappings_digest,
         "open_fd_baseline": {
             "database_family_open_descriptors": 0,
-            "scope": "same_euid_proc_fd_exact_user_manager_infrastructure_exception",
+            "scope": open_fd_scope(),
         },
         "pending_admission": {
             "challenge": context.pending["challenge"],
@@ -2152,6 +2284,26 @@ def validate_manifest_json(value: Any, label: str) -> list[dict[str, Any]]:
 
 
 def validate_unit_baseline(value: Any) -> list[dict[str, Any]]:
+    if runtime_platform() == "darwin":
+        if not isinstance(value, list) or len(value) != len(DARWIN_LAUNCHD_JOBS):
+            fail("receipt unit baseline must cover the exact fixed launchd job set")
+        expected_domain = f"gui/{os.geteuid()}"
+        for index, (record_value, expected_name) in enumerate(
+            zip(value, DARWIN_LAUNCHD_JOBS)
+        ):
+            record = require_exact_keys(
+                record_value,
+                ("domain", "loaded", "name", "type"),
+                f"receipt launchd baseline {index}",
+            )
+            if record != {
+                "domain": expected_domain,
+                "loaded": False,
+                "name": expected_name,
+                "type": "launchd",
+            }:
+                fail("receipt launchd baseline is not the exact quiesced job set")
+        return value
     if not isinstance(value, list) or len(value) != len(UNITS):
         fail("receipt unit baseline must cover the exact fixed unit set")
     for index, (record_value, expected_name) in enumerate(zip(value, UNITS)):
@@ -2196,6 +2348,12 @@ def validate_unit_baseline(value: Any) -> list[dict[str, Any]]:
     return value
 
 
+def open_fd_scope() -> str:
+    if runtime_platform() == "darwin":
+        return "darwin_lsof_exact_database_family"
+    return "same_euid_proc_fd_exact_user_manager_infrastructure_exception"
+
+
 def load_receipt(path: str) -> tuple[dict[str, Any], FileIdentity]:
     raw, identity = read_regular_bytes(
         path, "state migration receipt", exact_mode=0o600, maximum=MAX_RECEIPT_BYTES
@@ -2237,7 +2395,7 @@ def load_receipt(path: str) -> tuple[dict[str, Any], FileIdentity]:
     )
     if open_fds != {
         "database_family_open_descriptors": 0,
-        "scope": "same_euid_proc_fd_exact_user_manager_infrastructure_exception",
+        "scope": open_fd_scope(),
     }:
         fail("receipt open-fd baseline is not the exact zero-open-descriptor state")
     rollback = require_exact_keys(

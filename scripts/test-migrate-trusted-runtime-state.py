@@ -19,6 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -307,7 +308,9 @@ os._exit(0)
             MIGRATION, "running_script_path", return_value=str(self.installed_script)
         ), mock.patch.object(
             MIGRATION, "query_unit_state", side_effect=unit_state
-        ), mock.patch.object(MIGRATION, "scan_open_fds", side_effect=fd_scan):
+        ), mock.patch.object(
+            MIGRATION, "scan_open_fds", side_effect=fd_scan
+        ), mock.patch.object(MIGRATION, "runtime_platform", return_value="linux"):
             return MIGRATION.execute(
                 command,
                 str(self.root),
@@ -386,6 +389,98 @@ class MigrationTests(unittest.TestCase):
         value = Fixture(wal=wal)
         self.addCleanup(value.close)
         return value
+
+    def test_darwin_launchd_quiescence_requires_fixed_jobs_unloaded(self) -> None:
+        missing = subprocess.CompletedProcess(
+            args=("/bin/launchctl",),
+            returncode=113,
+            stdout="",
+            stderr='Could not find service "fixture" in domain for user gui: 501\n',
+        )
+        with mock.patch.object(
+            MIGRATION.subprocess, "run", return_value=missing
+        ) as run:
+            baseline = MIGRATION.collect_launchd_quiescence()
+        self.assertEqual(len(baseline), len(MIGRATION.DARWIN_LAUNCHD_JOBS))
+        self.assertEqual(
+            [record["name"] for record in baseline],
+            list(MIGRATION.DARWIN_LAUNCHD_JOBS),
+        )
+        self.assertTrue(all(record["loaded"] is False for record in baseline))
+        self.assertEqual(run.call_count, len(MIGRATION.DARWIN_LAUNCHD_JOBS))
+        with mock.patch.object(MIGRATION, "runtime_platform", return_value="darwin"):
+            self.assertIs(MIGRATION.validate_unit_baseline(baseline), baseline)
+            tampered = [dict(record) for record in baseline]
+            tampered[0]["loaded"] = True
+            self.assert_rejected(
+                lambda: MIGRATION.validate_unit_baseline(tampered),
+                "exact quiesced job set",
+            )
+
+        loaded = subprocess.CompletedProcess(
+            args=("/bin/launchctl",), returncode=0, stdout="state = running\n", stderr=""
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=loaded):
+            self.assert_rejected(
+                MIGRATION.collect_launchd_quiescence,
+                "loaded or triggerable",
+            )
+
+    def test_darwin_launchd_inventory_failure_is_not_unloaded(self) -> None:
+        failure = subprocess.CompletedProcess(
+            args=("/bin/launchctl",), returncode=1, stdout="", stderr="unexpected\n"
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=failure):
+            self.assert_rejected(
+                lambda: MIGRATION.query_launchd_loaded(
+                    MIGRATION.DARWIN_LAUNCHD_JOBS[0]
+                ),
+                "cannot query",
+            )
+
+    def test_darwin_lsof_inventory_fails_closed_on_external_holder(self) -> None:
+        path = "/private/var/tmp/agent-bridge/state.db"
+        empty = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",), returncode=1, stdout="", stderr=""
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=empty):
+            MIGRATION.scan_darwin_open_fds({path})
+
+        own = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",),
+            returncode=0,
+            stdout=f"p{os.getpid()}\ncpython3\nu{os.geteuid()}\nf5u\nn{path}\n",
+            stderr="",
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=own):
+            MIGRATION.scan_darwin_open_fds({path})
+
+        external = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",),
+            returncode=0,
+            stdout=f"p{os.getpid() + 1}\ncagent-bridge\nu{os.geteuid()}\nf12u\nn{path}\n",
+            stderr="",
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=external):
+            self.assert_rejected(
+                lambda: MIGRATION.scan_darwin_open_fds({path}),
+                "external process",
+            )
+
+        incomplete = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",), returncode=2, stdout="", stderr="denied\n"
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=incomplete):
+            self.assert_rejected(
+                lambda: MIGRATION.scan_darwin_open_fds({path}),
+                "cannot enumerate",
+            )
+
+    def test_sqlite_busy_statuses_support_apple_python_39(self) -> None:
+        self.assertEqual(
+            MIGRATION.sqlite_busy_statuses(types.SimpleNamespace()),
+            (MIGRATION.SQLITE_BUSY_CODE, MIGRATION.SQLITE_LOCKED_CODE),
+        )
 
     def assert_rejected(self, callback, fragment: str | None = None) -> str:
         with self.assertRaises(MIGRATION.MigrationError) as caught:

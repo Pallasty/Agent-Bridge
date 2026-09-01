@@ -1,6 +1,6 @@
 # macOS Trusted Deployment Compatibility V0
 
-Status: **D1 AND D2 ACCEPTED / D3 EXISTING-PUBLISHER ADAPTATION STARTED / NO DEPLOYMENT**
+Status: **D1 AND D2 ACCEPTED / D3 EXISTING-PUBLISHER ADAPTATION STARTED / D4 MIGRATION ADAPTATION STARTED / NO DEPLOYMENT**
 
 Date: 2026-08-29
 
@@ -327,6 +327,20 @@ improves or a separately authorized transport-design gate changes the contract.
 Run an explicitly authorized writer freeze, migrate and verify state, install
 canonical plists, adopt services in order, prove inode/health convergence,
 and close with fresh-MCP exact-SHA admission.
+
+The first source-only D4 migration slice keeps the established migration tool
+and dispatches its quiescence and open-descriptor gates by platform. Darwin
+requires the fixed service, sync, maintenance, and avatar job set to be fully
+unloaded rather than merely idle; it uses bounded fixed-path `lsof` inventory,
+binds those Darwin facts into the receipt shape, and accepts Apple Python 3.9's
+SQLite status API. Focused Darwin tests, the 20-test D1/D2 suite, and the
+7-test publisher/seed suite pass. A real read-only probe correctly returned
+`HOLD` for the loaded daemon and open production SQLite descriptors without
+changing the database or installed-binary identities.
+
+This slice does not stop any job, run the migration writer, activate a Darwin
+runtime-state exchange, install/adopt a plist, publish, deploy, or accept D4.
+Those remain separate gates.
 
 ## 9. Required negative tests
 
