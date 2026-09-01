@@ -59,7 +59,7 @@ It must not expose:
 - patch/action/invoke fields
 - unknown additional properties
 
-The report checks the live schema facts from `ToolRegistry::list()`, not a manually copied schema description.
+The report checks the frozen schema facts from `FinalizedToolRegistry::list()`, not a manually copied schema description.
 
 ## Safety Boundary
 
@@ -91,4 +91,3 @@ cargo test -p ab-bridge --test lswr_readonly_bridge_mcp_surface -- --nocapture
 ```
 
 Follow-up deployment verification, when requested, should compare the live MCP client tool list after redeploy/reconnect against this report. This slice intentionally does not perform that deployment.
-

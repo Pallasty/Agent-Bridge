@@ -8,6 +8,19 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Evidence-gated plan completion.** Plan steps now carry content-bound
+  completion contracts and immutable outcome references. `plan_save` and
+  `plan_update` share a fail-closed Store gate: `done` requires all
+  dependencies plus an exact `achieved`/`verified`/`harness_verified`
+  `AgentTaskOutcomeRecord`, and the lookup and write occur in one SQLite
+  transaction. Evidence-gated completion is terminal in v1 to prevent old
+  outcome replay; a Store-owned persistent anchor keeps that terminal rule in
+  force when status or evidence fields are malformed. Legacy evidence-free
+  `done` rows remain readable but are not counted as verified completion, while
+  corrupt completion anchors surface as explicit integrity diagnostics. This
+  is a source contract only and is held from runtime rollout: no production
+  `harness_verified` writer exists yet, so deployment would make every new
+  `done` transition unavailable.
 - **Default-off ChatGPT P2B provider-backed OAuth candidate.** A separate
   `mcp-http-auth-candidate` command keeps the one-tool, non-executing boundary
   while adding provider discovery, PKCE and client-registration capability

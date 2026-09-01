@@ -95,7 +95,10 @@ msgs = [
     }},
     {"jsonrpc": "2.0", "id": 17, "method": "tools/call", "params": {
         "name": "plan_update",
-        "arguments": {"plan_id": plan_id, "step_id": "a", "status": "done"},
+        # The generic Warp smoke has no trusted harness-outcome producer. Keep
+        # this as a non-terminal transition; focused tests exercise the
+        # fail-closed completion-evidence gate.
+        "arguments": {"plan_id": plan_id, "step_id": "a", "status": "in_progress"},
     }},
     {"jsonrpc": "2.0", "id": 18, "method": "tools/call", "params": {
         "name": "warp_status",

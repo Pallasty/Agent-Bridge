@@ -2,9 +2,11 @@
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
 use crate::agent_task_contract::{preview_agent_task_contract, AgentTaskContract};
+use crate::effect_inventory::McpEffectInventory;
 use crate::operator_request::{
     configured_chatgpt_collab_capabilities, configured_chatgpt_collab_channel, OperatorRequestStore,
 };
+use crate::invocation_lease::{InvocationLeaseMode, HOLD_OPEN_TOOLS};
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
     trigger_recall_enforce_hold_approval_packet_validator,
@@ -28,7 +30,8 @@ use crate::warp_scheme::{
 use ab_agent::{oz::fetch_run_status, AgentRuntime, GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{
-    ContentBlock, McpTool, ToolAnnotations, ToolContext, ToolRegistry, ToolResult, ToolSchema,
+    AllowAllToolCallGuard, ContentBlock, FinalizedToolRegistry, McpTool, RegistryFinalization,
+    ToolAnnotations, ToolCallGuard, ToolContext, ToolRegistryBuilder, ToolResult, ToolSchema,
 };
 use ab_store::{
     cosine_similarity,
@@ -17386,6 +17389,14 @@ fn agent_node_is_remote(node: Option<&str>) -> bool {
     })
 }
 
+fn agent_spawn_target(node: Option<&str>) -> crate::agent_spawn_governor::AgentSpawnTarget {
+    if agent_node_is_remote(node) {
+        crate::agent_spawn_governor::AgentSpawnTarget::Remote
+    } else {
+        crate::agent_spawn_governor::AgentSpawnTarget::Local
+    }
+}
+
 fn validate_workspace_runtime_request(
     runtime: &dyn AgentRuntime,
     cfg: &SpawnConfig,
@@ -18008,8 +18019,23 @@ impl McpTool for AgentSpawnTool {
                 Ok(a) => a,
                 Err(e) => return Ok(ToolResult::error(e)),
             };
-            return match spawn_agent_with_body_span(&self.hub, agent, cfg).await {
+            let reservation = match self.hub.agent_spawn_governor.reserve() {
+                Ok(reservation) => reservation,
+                Err(error) => return Ok(ToolResult::error(error)),
+            };
+            if let Err(error) = self.hub.agent_spawn_governor.preflight_runtime(
+                agent.id(),
+                &agent.workspace_contract(),
+                agent_spawn_target(cfg.node.as_deref()),
+            ) {
+                return Ok(ToolResult::error(error));
+            }
+            return match spawn_agent_with_body_span(&self.hub, agent.clone(), cfg).await {
                 Ok((s, body_span)) => {
+                    let governor_lease = match reservation.activate(agent, &s).await {
+                        Ok(lease) => lease,
+                        Err(error) => return Ok(ToolResult::error(error)),
+                    };
                     let event_recorded = record_body_scheduling_advice_event(
                         &self.hub,
                         &s,
@@ -18027,6 +18053,10 @@ impl McpTool for AgentSpawnTool {
                             "body_scheduling_event_recorded".to_string(),
                             json!(event_recorded),
                         );
+                        if let Some(governor_lease) = governor_lease {
+                            object
+                                .insert("agent_spawn_governor".to_string(), json!(governor_lease));
+                        }
                     }
                     Ok(ToolResult::json_text(&value))
                 }
@@ -18038,8 +18068,16 @@ impl McpTool for AgentSpawnTool {
         if chain.is_empty() {
             return Ok(ToolResult::error("no default agent runtime configured"));
         }
+        let reservation = match self.hub.agent_spawn_governor.reserve() {
+            Ok(reservation) => reservation,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         match spawn_with_failover_with_body_span(&self.hub, &chain, cfg).await {
             Ok((s, idx, failed, body_span)) => {
+                let governor_lease = match reservation.activate(chain[idx].clone(), &s).await {
+                    Ok(lease) => lease,
+                    Err(error) => return Ok(ToolResult::error(error)),
+                };
                 let event_recorded = record_body_scheduling_advice_event(
                     &self.hub,
                     &s,
@@ -18067,6 +18105,9 @@ impl McpTool for AgentSpawnTool {
                         "body_scheduling_event_recorded".to_string(),
                         json!(event_recorded),
                     );
+                    if let Some(governor_lease) = governor_lease {
+                        object.insert("agent_spawn_governor".to_string(), json!(governor_lease));
+                    }
                 }
                 Ok(ToolResult::json_text(&v))
             }
@@ -18213,6 +18254,20 @@ async fn spawn_with_failover_with_body_span(
     let mut failed: Vec<String> = Vec::new();
     let mut last_err = String::from("no agent backend available");
     for (idx, rt) in chain.iter().enumerate() {
+        if let Err(error) = hub.agent_spawn_governor.preflight_runtime(
+            rt.id(),
+            &rt.workspace_contract(),
+            agent_spawn_target(cfg.node.as_deref()),
+        ) {
+            tracing::warn!(
+                backend = %rt.id(),
+                error = %error,
+                "agent_spawn: governor rejected backend; trying next"
+            );
+            last_err = format!("{}: {error}", rt.id());
+            failed.push(rt.id().to_string());
+            continue;
+        }
         match spawn_agent_with_body_span(hub, rt.clone(), cfg.clone()).await {
             Ok(session) => {
                 if idx > 0 {
@@ -30176,7 +30231,7 @@ impl McpTool for McpDispatchAuditTool {
         }
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
@@ -30207,12 +30262,21 @@ impl McpTool for McpDispatchAuditTool {
             filter.clone()
         };
 
-        let policy = ToolPolicy::from_env();
-        let current_tools: Vec<String> = build_registry(self.hub.clone())
-            .list()
-            .into_iter()
-            .map(|schema| schema.name)
-            .collect();
+        let Some(finalized_snapshot) =
+            ctx.finalized_registry_snapshot_for("mcp_dispatch_audit")
+        else {
+            return Ok(ToolResult::error(
+                "mcp_dispatch_audit requires its canonical FinalizedToolRegistry dispatch snapshot",
+            ));
+        };
+        let frozen_tool_policy = finalized_snapshot
+            .security_projection()
+            .get("tool_policy");
+        let current_tools = finalized_snapshot
+            .descriptors()
+            .iter()
+            .map(|descriptor| descriptor.schema.name.clone())
+            .collect::<Vec<_>>();
         let current_tool_count = current_tools.len();
 
         // Ask for enough rows to cover the full current surface. The store clamps
@@ -30379,8 +30443,8 @@ impl McpTool for McpDispatchAuditTool {
         );
 
         Ok(ToolResult::json_text(&json!({
-            "profile": policy.profile().label(),
-            "toolset": policy.label(),
+            "profile": frozen_tool_policy.and_then(|policy| policy.get("profile")),
+            "toolset": frozen_tool_policy.and_then(|policy| policy.get("toolset")),
             "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
             "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
             "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
@@ -31050,7 +31114,7 @@ impl McpTool for ToolAtlasSnapshotTool {
         }
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
@@ -31070,11 +31134,18 @@ impl McpTool for ToolAtlasSnapshotTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
         let filter = dispatch_filter_from_args(&args);
-        let current_tools: Vec<String> = build_registry(self.hub.clone())
-            .list()
-            .into_iter()
-            .map(|schema| schema.name)
-            .collect();
+        let Some(finalized_snapshot) =
+            ctx.finalized_registry_snapshot_for("tool_atlas_snapshot")
+        else {
+            return Ok(ToolResult::error(
+                "tool_atlas_snapshot requires its canonical FinalizedToolRegistry dispatch snapshot",
+            ));
+        };
+        let current_tools = finalized_snapshot
+            .descriptors()
+            .iter()
+            .map(|descriptor| descriptor.schema.name.clone())
+            .collect::<Vec<_>>();
         let stats_limit = current_tools.len().max(1).min(200) as u32;
         let stats = match store
             .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
@@ -31360,7 +31431,7 @@ impl McpTool for GosLiteSnapshotTool {
         }
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no store configured")),
@@ -31389,11 +31460,18 @@ impl McpTool for GosLiteSnapshotTool {
             .unwrap_or(200)
             .clamp(1, 500) as usize;
         let filter = dispatch_filter_from_args(&args);
-        let current_tools: Vec<String> = build_registry(self.hub.clone())
-            .list()
-            .into_iter()
-            .map(|schema| schema.name)
-            .collect();
+        let Some(finalized_snapshot) =
+            ctx.finalized_registry_snapshot_for("gos_lite_snapshot")
+        else {
+            return Ok(ToolResult::error(
+                "gos_lite_snapshot requires its canonical FinalizedToolRegistry dispatch snapshot",
+            ));
+        };
+        let current_tools = finalized_snapshot
+            .descriptors()
+            .iter()
+            .map(|descriptor| descriptor.schema.name.clone())
+            .collect::<Vec<_>>();
         let stats_limit = current_tools.len().max(1).min(200) as u32;
         let generated_at = dispatch_now_secs();
         let stats = match store
@@ -31546,14 +31624,13 @@ impl McpTool for McpLifecycleDigestTool {
         }
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let payload = mcp_lifecycle_digest_payload(&args, &self.hub).await;
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let payload = mcp_lifecycle_digest_payload(&args, &self.hub, ctx).await;
         Ok(ToolResult::json_text(&payload))
     }
 }
 
-async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
-    let policy = ToolPolicy::from_env();
+async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub, ctx: &ToolContext) -> Value {
     let window_secs = args
         .get("window_secs")
         .and_then(|v| v.as_i64())
@@ -31568,16 +31645,17 @@ async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let current_tool_count = build_registry(hub.clone()).list().len();
-    // Same reality semantics as current_tool_count (host detection applied) —
-    // pre-prune both used one builder and were always equal.
-    let scoped_tool_count = build_registry_current_view(policy).list().len();
+    let finalized_snapshot = ctx.finalized_registry_snapshot_for("mcp_lifecycle_digest");
+    let frozen_tool_policy = finalized_snapshot
+        .and_then(|snapshot| snapshot.security_projection().get("tool_policy"));
+    let current_tool_count = finalized_snapshot.map(|snapshot| snapshot.descriptors().len());
+    let scoped_tool_count = current_tool_count;
     let readiness_args = json!({
         "repo_root": args.get("repo_root").cloned().unwrap_or(Value::Null),
         "include_local_install": include_local_install,
     });
     let readiness = readiness_audit_payload(&readiness_args, hub);
-    let telemetry = mcp_lifecycle_tool_telemetry(hub, window_secs).await;
+    let telemetry = mcp_lifecycle_tool_telemetry(hub, window_secs, finalized_snapshot).await;
     let runtime_health = if include_runtime_health {
         let mut runtime_args = json!({
             "timeout_ms": args.get("timeout_ms").cloned().unwrap_or(json!(1000)),
@@ -31622,7 +31700,9 @@ async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
         .pointer("/summary/failing_tool_count")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    let lifecycle_state = if readiness_warnings == 0 && failing_tool_count == 0 {
+    let lifecycle_state = if finalized_snapshot.is_none() {
+        "unbound_registry_snapshot"
+    } else if readiness_warnings == 0 && failing_tool_count == 0 {
         if include_runtime_health && !mcp_lifecycle_runtime_status_ready(&runtime_status) {
             "stdio_ready_runtime_degraded"
         } else {
@@ -31639,22 +31719,30 @@ async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
         "lifecycle_state": lifecycle_state,
         "summary": {
             "mcp_stdio_available": true,
-            "toolset": policy.label(),
-            "tool_profile": policy.profile().label(),
+            "toolset": frozen_tool_policy.and_then(|policy| policy.get("toolset")),
+            "tool_profile": frozen_tool_policy.and_then(|policy| policy.get("profile")),
             "current_tool_count": current_tool_count,
             "scoped_tool_count": scoped_tool_count,
+            "tool_count_source": finalized_registry_projection_source(finalized_snapshot),
             "readiness_status": readiness_status,
             "readiness_warnings": readiness_warnings,
             "telemetry_window_secs": window_secs,
-            "failing_tool_count": failing_tool_count,
+            "failing_tool_count": finalized_snapshot.map(|_| failing_tool_count),
             "runtime_health_checked": include_runtime_health,
             "runtime_health_status": runtime_status,
         },
         "sections": {
             "mcp_profile": {
-                "toolset": policy.label(),
-                "tool_profile": policy.profile().label(),
-                "tool_profile_extras": policy.extras(),
+                "toolset": frozen_tool_policy.and_then(|policy| policy.get("toolset")),
+                "tool_profile": frozen_tool_policy.and_then(|policy| policy.get("profile")),
+                "tool_profile_extras": frozen_tool_policy.and_then(|policy| policy.get("extras")),
+                "finalized_registry": finalized_snapshot
+                    .map(|snapshot| finalized_registry_bound_report(snapshot, false))
+                    .unwrap_or_else(|| json!({
+                        "live_serving_registry_bound": false,
+                        "transport_serving_registry_attested": false,
+                        "status": "unbound_direct_tool_invocation"
+                    })),
                 "toolset_env": std::env::var("AGENT_BRIDGE_TOOLSET").ok(),
                 "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
                 "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
@@ -31719,13 +31807,39 @@ fn mcp_lifecycle_tool_atlas_input(
     }
 }
 
-async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
+async fn mcp_lifecycle_tool_telemetry(
+    hub: &Hub,
+    window_secs: i64,
+    finalized_snapshot: Option<&ab_mcp::FinalizedRegistrySnapshot>,
+) -> Value {
+    let Some(finalized_snapshot) = finalized_snapshot else {
+        return json!({
+            "status": "unbound_registry_snapshot",
+            "reason": "lifecycle telemetry was not invoked as mcp_lifecycle_digest through FinalizedToolRegistry",
+            "tool_count_source": "unbound_direct_tool_invocation",
+            "summary": {
+                "current_tool_count": Value::Null,
+                "observed_tool_count": Value::Null,
+                "hot_tool_count": Value::Null,
+                "failing_tool_count": Value::Null,
+                "cold_tool_count": Value::Null
+            }
+        });
+    };
+    let current_tools = finalized_snapshot
+        .descriptors()
+        .iter()
+        .map(|descriptor| descriptor.schema.name.clone())
+        .collect::<Vec<_>>();
+    let finalized_snapshot = Some(finalized_snapshot);
+    let tool_count_source = finalized_registry_projection_source(finalized_snapshot);
     let Some(store) = hub.store.as_ref() else {
         return json!({
             "status": "unavailable",
             "reason": "no store configured",
+            "tool_count_source": tool_count_source,
             "summary": {
-                "current_tool_count": build_registry(hub.clone()).list().len(),
+                "current_tool_count": current_tools.len(),
                 "observed_tool_count": 0,
                 "hot_tool_count": 0,
                 "failing_tool_count": 0,
@@ -31733,13 +31847,8 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
             }
         });
     };
-    let current_tools: Vec<String> = build_registry(hub.clone())
-        .list()
-        .into_iter()
-        .map(|schema| schema.name)
-        .collect();
     let stats_limit = current_tools.len().max(1).min(200) as u32;
-    let filter = mcp_lifecycle_telemetry_filter_from_env();
+    let filter = mcp_lifecycle_telemetry_filter(finalized_snapshot);
     let stats = match store
         .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
         .await
@@ -31749,6 +31858,7 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
             return json!({
                 "status": "error",
                 "reason": format!("mcp_tool_call_stats_filtered: {e}"),
+                "tool_count_source": tool_count_source,
             })
         }
     };
@@ -31761,6 +31871,7 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
             return json!({
                 "status": "error",
                 "reason": format!("recent_mcp_tool_errors: {e}"),
+                "tool_count_source": tool_count_source,
             })
         }
     };
@@ -31781,6 +31892,7 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
     if let Some(obj) = payload.as_object_mut() {
         obj.insert("status".to_string(), json!("ok"));
         obj.insert("filter".to_string(), dispatch_filter_json(&filter));
+        obj.insert("tool_count_source".to_string(), json!(tool_count_source));
         obj.insert(
             "scope_note".to_string(),
             json!("Lifecycle telemetry is scoped to the current MCP surface and attribution where available. The recent error ring has no attribution columns, so it is used only for tools with current scoped error stats."),
@@ -31789,15 +31901,19 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
     payload
 }
 
-fn mcp_lifecycle_telemetry_filter_from_env() -> McpToolCallFilter {
-    let policy = ToolPolicy::from_env();
+fn mcp_lifecycle_telemetry_filter(
+    finalized_snapshot: Option<&ab_mcp::FinalizedRegistrySnapshot>,
+) -> McpToolCallFilter {
     McpToolCallFilter {
         source: mcp_lifecycle_source_from_env(),
         client_name: std::env::var("AGENT_BRIDGE_CLIENT_NAME")
             .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
-        profile: Some(policy.profile().label().to_string()),
+        profile: finalized_snapshot
+            .and_then(|snapshot| snapshot.security_projection().pointer("/tool_policy/profile"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         model: std::env::var("AGENT_BRIDGE_MODEL")
             .ok()
             .map(|s| s.trim().to_string())
@@ -32327,13 +32443,12 @@ impl McpTool for MemorySyncStatusTool {
     }
 }
 
-async fn mobile_capabilities_json(policy: ToolPolicy, probe_devices: bool) -> Value {
-    // Reality view (host detection applied): without adb/macOS the mobile
-    // families are not registered, and this list truthfully comes back empty.
-    let exposed: Vec<String> = build_registry_current_view(policy)
-        .list()
-        .into_iter()
-        .map(|s| s.name)
+async fn mobile_capabilities_json(exposed_tool_names: &[String], probe_devices: bool) -> Value {
+    // This list is projected from the exact finalized registry dispatching the
+    // capabilities call. It never reconstructs a lookalike registry from env.
+    let exposed: Vec<String> = exposed_tool_names
+        .iter()
+        .cloned()
         .filter(|n| n.starts_with("mobile_"))
         .collect();
     let adb_on_path = which_binary("adb");
@@ -32368,6 +32483,58 @@ async fn mobile_capabilities_json(policy: ToolPolicy, probe_devices: bool) -> Va
         "devices": devices,
         "security_note": "mobile_install_apk and other write tools respect AB_ALLOW_* policy via capabilities.security"
     })
+}
+
+fn finalized_registry_projection_source(
+    snapshot: Option<&ab_mcp::FinalizedRegistrySnapshot>,
+) -> &'static str {
+    if snapshot.is_some() {
+        "finalized_registry_dispatch_snapshot"
+    } else {
+        "unbound_direct_tool_invocation"
+    }
+}
+
+fn finalized_registry_bound_report(
+    snapshot: &ab_mcp::FinalizedRegistrySnapshot,
+    include_descriptors: bool,
+) -> Value {
+    let source = finalized_registry_projection_source(Some(snapshot));
+    let mut report = snapshot.report_json(include_descriptors);
+    if !include_descriptors {
+        if let Some(effect_inventory) = report
+            .pointer_mut("/security_projection/effect_inventory")
+            .and_then(Value::as_object_mut)
+        {
+            let omitted_count = effect_inventory
+                .remove("mcp_descriptors")
+                .and_then(|value| value.as_array().map(Vec::len))
+                .unwrap_or(0);
+            effect_inventory.insert("mcp_descriptors_omitted".to_string(), json!(true));
+            effect_inventory.insert(
+                "mcp_descriptors_omitted_count".to_string(),
+                json!(omitted_count),
+            );
+        }
+    }
+    let object = report
+        .as_object_mut()
+        .expect("finalized registry report is an object");
+    object.insert(
+        "security_projection_compacted_for_report".to_string(),
+        json!(!include_descriptors),
+    );
+    object.insert(
+        "dispatching_finalized_registry_bound".to_string(),
+        json!(true),
+    );
+    object.insert(
+        "live_serving_registry_bound".to_string(),
+        json!(false),
+    );
+    object.insert("transport_serving_registry_attested".to_string(), json!(false));
+    object.insert("projection_source".to_string(), json!(source));
+    report
 }
 
 fn compact_instinct_observer_status_json(mut status: Value, include_sessions: bool) -> Value {
@@ -32454,7 +32621,7 @@ impl McpTool for CapabilitiesTool {
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let compact = args
             .get("compact")
             .and_then(|v| v.as_bool())
@@ -32547,14 +32714,85 @@ impl McpTool for CapabilitiesTool {
         // Package version remains semver-compatible; build identity distinguishes
         // unreleased source builds from the release tag they follow.
         let version = crate::build_identity::PACKAGE_VERSION;
-        let policy = ToolPolicy::from_env();
 
         let sec = &self.hub.security;
-        let mobile = mobile_capabilities_json(policy, !compact).await;
-        // Reality view: report what this host actually exposes for the policy,
-        // not the nominal fully-available surface.
-        let exposed_tools = build_registry_current_view(policy).list();
-        let exposed_tool_count = exposed_tools.len();
+        let finalized_snapshot = ctx.finalized_registry_snapshot_for("capabilities");
+        let finalized_tool_policy = finalized_snapshot.and_then(|snapshot| {
+            snapshot
+                .security_projection()
+                .get("tool_policy")
+        });
+        let exposed_tools = finalized_snapshot
+            .map(|snapshot| {
+                snapshot
+                    .descriptors()
+                    .iter()
+                    .map(|descriptor| descriptor.schema.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let exposed_tool_names = exposed_tools
+            .iter()
+            .map(|schema| schema.name.clone())
+            .collect::<Vec<_>>();
+        let exposed_tool_count = finalized_snapshot.map(|snapshot| snapshot.descriptors().len());
+        let mobile = mobile_capabilities_json(&exposed_tool_names, !compact).await;
+        let mut effect_inventory_report = finalized_snapshot
+            .and_then(|snapshot| {
+                snapshot
+                    .security_projection()
+                    .get("effect_inventory")
+                    .cloned()
+            })
+            .unwrap_or_else(|| json!({
+                "status": "unbound_direct_tool_invocation",
+                "live_serving_registry_attested_by_inventory_alone": false,
+                "reason": "capabilities was not invoked through FinalizedToolRegistry"
+            }));
+        let capability_projection_source = finalized_registry_projection_source(finalized_snapshot);
+        let effect_inventory_object = effect_inventory_report
+            .as_object_mut()
+            .expect("effect inventory report is an object");
+        if compact {
+            let omitted_count = effect_inventory_object
+                .remove("mcp_descriptors")
+                .and_then(|value| value.as_array().map(Vec::len))
+                .unwrap_or(0);
+            effect_inventory_object.insert("mcp_descriptors_omitted".to_owned(), json!(true));
+            effect_inventory_object.insert(
+                "mcp_descriptors_omitted_count".to_owned(),
+                json!(omitted_count),
+            );
+        }
+        effect_inventory_object.insert(
+            "capability_projection_source".to_owned(),
+            json!(capability_projection_source),
+        );
+        effect_inventory_object.insert(
+            "finalized_registry_binding".to_owned(),
+            json!({
+                "dispatching_finalized_registry_bound": finalized_snapshot.is_some(),
+                "live_serving_registry_bound": false,
+                "transport_serving_registry_attested": false,
+                "registry_guard_replacement_locked_by_finalized_type": finalized_snapshot.is_some(),
+                "pre_finalization_registry_handle_retrieval_closed_by_builder_ownership":
+                    finalized_snapshot.is_some(),
+                "runtime_authorization_behavior_attested": false,
+                "tool_implementation_behavior_attested": false,
+                "same_process_direct_tool_or_backend_invocation_closed": false,
+                "composite_child_direct_invocation_closed": false
+            }),
+        );
+        let finalized_registry_report = finalized_snapshot
+            .map(|snapshot| finalized_registry_bound_report(snapshot, !compact))
+            .unwrap_or_else(|| json!({
+                "schema": "agent_bridge.finalized_mcp_registry.v1",
+                "live_serving_registry_bound": false,
+                "transport_serving_registry_attested": false,
+                "cryptographically_attested": false,
+                "status": "unbound_direct_tool_invocation",
+                "reason": "no private finalized-registry snapshot was attached by dispatch"
+            }));
         #[cfg(feature = "embodiment-runtime-p4")]
         let embodiment_p4 = match configured_projection_preview_operations() {
             Ok(Some(operations)) => json!({
@@ -32602,15 +32840,23 @@ impl McpTool for CapabilitiesTool {
             "mcp": {
                 "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
                 "source": std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok(),
-                "toolset": policy.label(),
-                "tool_profile": policy.profile().label(),
-                "tool_profile_extras": policy.extras(),
+                "toolset": finalized_tool_policy.and_then(|policy| policy.get("toolset")),
+                "tool_profile": finalized_tool_policy.and_then(|policy| policy.get("profile")),
+                "tool_profile_extras": finalized_tool_policy.and_then(|policy| policy.get("extras")),
                 "toolset_env": std::env::var("AGENT_BRIDGE_TOOLSET").ok(),
                 "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
                 "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
                 "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
                 "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
-                "exposed_tool_count": exposed_tool_count
+                "exposed_tool_count": exposed_tool_count,
+                "exposed_tool_count_source": finalized_registry_projection_source(finalized_snapshot),
+                "finalized_registry": finalized_registry_report,
+                "verified_execution_context": ctx.verified_execution_context().map(|context| json!({
+                    "kind": context.kind(),
+                    "commitment_sha256": context.commitment_hex(),
+                    "task_identity_attested": context.task_identity_attested(),
+                    "authority": "transport_created_not_caller_metadata"
+                }))
             },
             "mobile": mobile,
             "terminal": {
@@ -32654,7 +32900,8 @@ impl McpTool for CapabilitiesTool {
                 "runtime": runtime_id,
                 "binary": agent_bin,
                 "binary_found": agent_binary_found,
-                "backends": agent_backends
+                "backends": agent_backends,
+                "governor": self.hub.agent_spawn_governor.snapshot()
             },
             "hooks": {
                 "configured": configured_hooks,
@@ -32667,7 +32914,9 @@ impl McpTool for CapabilitiesTool {
                 "terminal_write": sec.allow_terminal_write,
                 "browser": sec.allow_browser,
                 "shell_exec_timeout_max_ms": sec.shell_exec_timeout_max_ms,
-                "env_vars": "AB_ALLOW_SHELL_EXEC, AB_ALLOW_AGENT_SPAWN, AB_ALLOW_TERMINAL_WRITE, AB_ALLOW_BROWSER, AB_SHELL_EXEC_TIMEOUT_MAX"
+                "invocation_lease": self.hub.invocation_leases.snapshot(),
+                "effect_inventory": effect_inventory_report,
+                "env_vars": "AB_ALLOW_SHELL_EXEC, AB_ALLOW_AGENT_SPAWN, AB_ALLOW_TERMINAL_WRITE, AB_ALLOW_BROWSER, AB_SHELL_EXEC_TIMEOUT_MAX, AB_INVOCATION_LEASE_MODE, AB_INVOCATION_LEASE_DB, AB_INVOCATION_LEASE_DB_GENERATION, AB_INVOCATION_LEASE_VERIFY_KEY, AB_INVOCATION_LEASE_EXTRA_TOOLS"
             },
             "oz_run_tools": runtime_id == "warp-oz",
             "version": version,
@@ -47210,13 +47459,58 @@ impl McpTool for MemoryAutoCurateTool {
 
 fn enrich_plan_json(rec: &PlanRecord) -> Value {
     let total = rec.steps.len();
-    let done = rec.steps.iter().filter(|s| s.status == "done").count();
-    let progress = format!("{done}/{total} done");
+    let completion_integrity_failure_step_ids = rec
+        .completion_diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic.step_id.clone())
+        .collect::<BTreeSet<_>>();
+    let completion_integrity_failure_count = rec.completion_diagnostics.len();
+    let verified_done_ids = rec
+        .steps
+        .iter()
+        .filter(|step| {
+            step.status == "done"
+                && step.completion_anchor
+                && step.completion_evidence.is_some()
+                && !completion_integrity_failure_step_ids.contains(&step.id)
+        })
+        .map(|step| step.id.as_str())
+        .collect::<HashSet<_>>();
+    let verified_done = verified_done_ids.len();
+    let legacy_unverified_done_step_ids = rec
+        .steps
+        .iter()
+        .filter(|step| {
+            step.status == "done"
+                && step.completion_evidence.is_none()
+                && !completion_integrity_failure_step_ids.contains(&step.id)
+        })
+        .map(|step| step.id.clone())
+        .collect::<Vec<_>>();
+    let legacy_unverified_done_count = legacy_unverified_done_step_ids.len();
+    let completion_gate = if completion_integrity_failure_count > 0 {
+        "integrity_failure"
+    } else if !legacy_unverified_done_step_ids.is_empty() {
+        "legacy_unverified"
+    } else {
+        "evidence_gated"
+    };
+    let progress = format!("{verified_done}/{total} evidence-gated done");
     let next = rec
         .steps
         .iter()
-        .find(|s| s.status != "done" && s.status != "cancelled")
-        .map(|s| s.id.clone());
+        .find(|step| {
+            !verified_done_ids.contains(step.id.as_str())
+                && !matches!(
+                    step.status.as_str(),
+                    "blocked" | "obsolete" | "cancelled" | "canceled"
+                )
+                && step
+                    .deps
+                    .iter()
+                    .all(|dependency| verified_done_ids.contains(dependency.as_str()))
+        })
+        .map(|step| step.id.clone());
     json!({
         "plan_id": rec.plan_id,
         "title": rec.title,
@@ -47224,10 +47518,120 @@ fn enrich_plan_json(rec: &PlanRecord) -> Value {
         "created_at": rec.created_at,
         "updated_at": rec.updated_at,
         "progress": progress,
-        "done_count": done,
+        // Keep the original key while making its meaning evidence-gated.
+        "done_count": verified_done,
+        "verified_done_count": verified_done,
+        "legacy_unverified_done_count": legacy_unverified_done_count,
+        "legacy_unverified_done_step_ids": legacy_unverified_done_step_ids,
+        "completion_diagnostics": rec.completion_diagnostics,
+        "completion_integrity_failure_count": completion_integrity_failure_count,
+        "completion_integrity_failure_step_ids": completion_integrity_failure_step_ids,
+        "completion_gate": completion_gate,
         "total_steps": total,
         "next_step_id": next,
     })
+}
+
+fn plan_rejection_result(reason: &impl serde::Serialize) -> ToolResult {
+    let payload = json!({
+        "status": "rejected",
+        "reason": reason,
+    });
+    let mut result = ToolResult::json_text(&payload);
+    result.is_error = true;
+    result
+}
+
+fn valid_plan_record_sha256(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_plan_outcome_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
+}
+
+/// MCP dispatch does not apply JSON Schema. Enforce the additive completion
+/// roundtrip fields here, while leaving completion authority and dependency
+/// policy to the Store's single mutation gate.
+fn validate_plan_step_roundtrip_fields(steps: &Value) -> Option<ToolResult> {
+    for (index, step) in steps.as_array()?.iter().enumerate() {
+        let Some(step) = step.as_object() else {
+            continue;
+        };
+        if let Some(field) = step.keys().find(|field| {
+            !matches!(
+                field.as_str(),
+                "id" | "desc"
+                    | "status"
+                    | "deps"
+                    | "completion_contract"
+                    | "completion_evidence"
+                    | "completion_anchor"
+            )
+        }) {
+            return Some(ToolResult::error(format!(
+                "steps[{index}] contains unsupported field '{field}'; every step requires non-empty string fields 'id' and 'desc' (use 'desc', not 'description' or 'step')"
+            )));
+        }
+        if let Some(contract) = step.get("completion_contract") {
+            let Some(contract) = contract.as_object() else {
+                return Some(ToolResult::error(format!(
+                    "steps[{index}].completion_contract must be an object"
+                )));
+            };
+            if contract
+                .keys()
+                .any(|key| !matches!(key.as_str(), "contract_id" | "revision"))
+            {
+                return Some(ToolResult::error(format!(
+                    "steps[{index}].completion_contract contains an unsupported field"
+                )));
+            }
+        }
+        if let Some(evidence) = step.get("completion_evidence") {
+            let Some(evidence) = evidence.as_object() else {
+                return Some(ToolResult::error(format!(
+                    "steps[{index}].completion_evidence must be an object"
+                )));
+            };
+            if evidence
+                .keys()
+                .any(|key| !matches!(key.as_str(), "outcome_id" | "record_sha256"))
+            {
+                return Some(ToolResult::error(format!(
+                    "steps[{index}].completion_evidence accepts only outcome_id and record_sha256"
+                )));
+            }
+            let Some(outcome_id) = evidence.get("outcome_id").and_then(Value::as_str) else {
+                return Some(ToolResult::error(format!(
+                    "steps[{index}].completion_evidence.outcome_id must be a non-empty bounded identifier"
+                )));
+            };
+            if outcome_id != outcome_id.trim() || !valid_plan_outcome_id(outcome_id) {
+                return Some(ToolResult::error(format!(
+                    "steps[{index}].completion_evidence.outcome_id must match [A-Za-z0-9._:-] and contain at most 128 bytes"
+                )));
+            }
+            if let Some(digest) = evidence.get("record_sha256") {
+                if !digest.as_str().is_some_and(valid_plan_record_sha256) {
+                    return Some(ToolResult::error(format!(
+                        "steps[{index}].completion_evidence.record_sha256 must use sha256:<64 lowercase hex>"
+                    )));
+                }
+            }
+        }
+    }
+    None
 }
 
 pub struct PlanSaveTool {
@@ -47247,11 +47651,11 @@ impl McpTool for PlanSaveTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Persist a structured task plan to SQLite (survives sessions). \
-                 Each step has id, desc, optional status (default pending), optional deps (step ids)."
+            description: "Persist a structured task plan to SQLite (survives sessions). Each step has id, desc, optional status (default pending), and optional deps. A done step is admitted only when its completion_evidence outcome_id resolves to an immutable, content-bound, harness-verified outcome after every dependency is evidence-gated done. This public route cannot mint trusted outcomes or supply provenance/verdict claims."
                 .into(),
             input_schema: json!({
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                     "plan_id": { "type": "string", "minLength": 1, "description": "Stable plan identifier." },
                     "title": { "type": "string", "minLength": 1, "description": "Human-readable plan title." },
@@ -47259,11 +47663,41 @@ impl McpTool for PlanSaveTool {
                         "type": "array",
                         "items": {
                             "type": "object",
+                            "additionalProperties": false,
                             "properties": {
                                 "id": { "type": "string", "minLength": 1 },
                                 "desc": { "type": "string", "minLength": 1, "description": "Required human-readable step description. The field name is desc, not description or step." },
-                                "status": { "type": "string", "description": "pending | in_progress | done | cancelled (free-form allowed)" },
-                                "deps": { "type": "array", "items": { "type": "string" } }
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "not_yet", "in_progress", "done", "blocked", "obsolete", "cancelled", "canceled", "NOT_YET", "IN_PROGRESS", "DONE", "BLOCKED", "OBSOLETE"],
+                                    "description": "Closed plan state. Aliases are normalized by the Store; done requires trusted completion evidence."
+                                },
+                                "deps": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+                                "completion_contract": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "description": "Store-derived, content-bound contract returned by plan_load. May be supplied unchanged when round-tripping a plan.",
+                                    "properties": {
+                                        "contract_id": { "type": "string", "minLength": 1 },
+                                        "revision": { "type": "integer", "minimum": 1 }
+                                    },
+                                    "required": ["contract_id", "revision"]
+                                },
+                                "completion_evidence": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "description": "Reference returned for an evidence-gated done step. The Store resolves outcome_id and fills/verifies record_sha256; caller-supplied provenance, kind, method, or verdict is not accepted.",
+                                    "properties": {
+                                        "outcome_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+                                        "record_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+                                    },
+                                    "required": ["outcome_id"]
+                                },
+                                "completion_anchor": {
+                                    "type": "boolean",
+                                    "default": false,
+                                    "description": "Store-owned persistent terminal marker returned after a trusted completion is admitted. It is accepted only for lossless load-to-save roundtrips; a client-supplied true value grants no authority and cannot replace completion evidence."
+                                }
                             },
                             "required": ["id", "desc"]
                         },
@@ -47279,9 +47713,19 @@ impl McpTool for PlanSaveTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no memory store configured")),
         };
+        if let Some(field) = args.as_object().and_then(|object| {
+            object
+                .keys()
+                .find(|field| !matches!(field.as_str(), "plan_id" | "title" | "steps"))
+        }) {
+            return Ok(ToolResult::error(format!(
+                "plan_save contains unsupported field '{field}'"
+            )));
+        }
         let plan_id = match args
             .get("plan_id")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
         {
             Some(s) => s.to_string(),
@@ -47290,6 +47734,7 @@ impl McpTool for PlanSaveTool {
         let title = match args
             .get("title")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
         {
             Some(s) => s.to_string(),
@@ -47299,6 +47744,9 @@ impl McpTool for PlanSaveTool {
             Some(v) if v.is_array() => v.clone(),
             _ => return Ok(ToolResult::error("missing 'steps' array")),
         };
+        if let Some(error) = validate_plan_step_roundtrip_fields(&steps_val) {
+            return Ok(error);
+        }
         let steps: Vec<PlanStep> = match serde_json::from_value(steps_val) {
             Ok(steps) => steps,
             Err(e) => {
@@ -47310,13 +47758,20 @@ impl McpTool for PlanSaveTool {
         if steps.is_empty() {
             return Ok(ToolResult::error("'steps' must be non-empty"));
         }
-        store
+        let outcome = store
             .plan_save(&plan_id, &title, &steps)
             .await
             .map_err(|e| ab_core::Error::Backend(format!("plan_save: {e}")))?;
-        Ok(ToolResult::json_text(
-            &json!({ "status": "ok", "plan_id": plan_id, "title": title, "step_count": steps.len() }),
-        ))
+        match outcome {
+            ab_store::PlanSaveOutcome::Saved { plan } => Ok(ToolResult::json_text(&json!({
+                "status": "ok",
+                "plan_id": plan.plan_id,
+                "title": plan.title,
+                "step_count": plan.steps.len(),
+                "plan": enrich_plan_json(&plan),
+            }))),
+            ab_store::PlanSaveOutcome::Rejected { reason } => Ok(plan_rejection_result(&reason)),
+        }
     }
 }
 
@@ -47337,10 +47792,11 @@ impl McpTool for PlanLoadTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Load a persisted plan by plan_id. Includes progress string and next_step_id heuristic."
+            description: "Load a persisted plan by plan_id. Includes evidence-gated progress, explicit legacy-unverified done diagnostics, and the first dependency-ready next_step_id."
                 .into(),
             input_schema: json!({
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                     "plan_id": { "type": "string" }
                 },
@@ -47356,6 +47812,7 @@ impl McpTool for PlanLoadTool {
         let plan_id = match args
             .get("plan_id")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
         {
             Some(s) => s,
@@ -47389,14 +47846,27 @@ impl McpTool for PlanUpdateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Update one plan step's status by step id. Returns updated plan envelope or error if missing."
+            description: "Update one plan step's status by step id. Nonterminal updates remain lightweight. A done transition requires completion_evidence.outcome_id for an already-admitted, content-bound, harness-verified outcome and completed dependencies; once evidence-anchored, done is terminal in v1 and cannot be reopened or rebound. The public MCP route cannot mint that trusted outcome and cannot supply provenance, kind, method, or verdict fields."
                 .into(),
             input_schema: json!({
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
-                    "plan_id": { "type": "string" },
-                    "step_id": { "type": "string" },
-                    "status": { "type": "string", "description": "e.g. done | in_progress | pending | cancelled" }
+                    "plan_id": { "type": "string", "minLength": 1 },
+                    "step_id": { "type": "string", "minLength": 1 },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "not_yet", "in_progress", "done", "blocked", "obsolete", "cancelled", "canceled", "NOT_YET", "IN_PROGRESS", "DONE", "BLOCKED", "OBSOLETE"]
+                    },
+                    "completion_evidence": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "description": "For done only: a reference to a trusted outcome already present in the immutable outcome ledger. No caller-supplied provenance or verdict fields are accepted.",
+                        "properties": {
+                            "outcome_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" }
+                        },
+                        "required": ["outcome_id"]
+                    }
                 },
                 "required": ["plan_id", "step_id", "status"]
             }),
@@ -47407,9 +47877,22 @@ impl McpTool for PlanUpdateTool {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no memory store configured")),
         };
+        if let Some(field) = args.as_object().and_then(|object| {
+            object.keys().find(|field| {
+                !matches!(
+                    field.as_str(),
+                    "plan_id" | "step_id" | "status" | "completion_evidence"
+                )
+            })
+        }) {
+            return Ok(ToolResult::error(format!(
+                "plan_update contains unsupported field '{field}'"
+            )));
+        }
         let plan_id = match args
             .get("plan_id")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
         {
             Some(s) => s,
@@ -47418,6 +47901,7 @@ impl McpTool for PlanUpdateTool {
         let step_id = match args
             .get("step_id")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
         {
             Some(s) => s,
@@ -47426,29 +47910,48 @@ impl McpTool for PlanUpdateTool {
         let status = match args
             .get("status")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
         {
             Some(s) => s,
             None => return Ok(ToolResult::error("missing or empty 'status'")),
         };
-        let ok = store
-            .plan_update_step(plan_id, step_id, status)
+        let completion_outcome_id = match args.get("completion_evidence") {
+            None => None,
+            Some(value) => {
+                let Some(evidence) = value.as_object() else {
+                    return Ok(ToolResult::error(
+                        "'completion_evidence' must be an object containing only outcome_id",
+                    ));
+                };
+                if evidence.len() != 1 || !evidence.contains_key("outcome_id") {
+                    return Ok(ToolResult::error(
+                        "'completion_evidence' accepts exactly one field: outcome_id",
+                    ));
+                }
+                let Some(outcome_id) = evidence
+                    .get("outcome_id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                else {
+                    return Ok(ToolResult::error(
+                        "'completion_evidence.outcome_id' must be a non-empty string",
+                    ));
+                };
+                Some(outcome_id)
+            }
+        };
+        let outcome = store
+            .plan_update_step(plan_id, step_id, status, completion_outcome_id)
             .await
             .map_err(|e| ab_core::Error::Backend(format!("plan_update: {e}")))?;
-        if !ok {
-            return Ok(ToolResult::error(format!(
-                "plan '{plan_id}' or step '{step_id}' not found"
-            )));
+        match outcome {
+            ab_store::PlanUpdateOutcome::Updated { plan } => Ok(ToolResult::json_text(&json!({
+                "status": "ok",
+                "plan": enrich_plan_json(&plan),
+            }))),
+            ab_store::PlanUpdateOutcome::Rejected { reason } => Ok(plan_rejection_result(&reason)),
         }
-        let rec = store
-            .plan_load(plan_id)
-            .await
-            .map_err(|e| ab_core::Error::Backend(format!("plan_load: {e}")))?
-            .expect("row exists after update");
-        Ok(ToolResult::json_text(&json!({
-            "status": "ok",
-            "plan": enrich_plan_json(&rec),
-        })))
     }
 }
 
@@ -48929,7 +49432,7 @@ pub fn compute_practical_workflow_scorecard_with_outcomes(
                 .iter()
                 .filter(|call| call.ok && call.tool_name == "plan_update")
                 .count(),
-            interpretation: "Finalize and plan-update calls are completion signals; MCP telemetry cannot prove the user goal was achieved.",
+            interpretation: "Successful finalize calls are lifecycle activity and successful plan-update calls are plan-mutation activity. Both are operational proxies only; MCP telemetry does not establish semantic task completion, even when a separate evidence gate admits a done transition.",
         },
         recovery: PracticalRecoveryMetrics {
             failed_calls,
@@ -51869,7 +52372,7 @@ fn chatgpt_collab_tool(tool_name: &str) -> bool {
 }
 
 fn register_chatgpt_forum_tools(
-    registry: &mut ToolRegistry,
+    registry: &mut ToolRegistryBuilder,
     hub: &Hub,
     policy: ToolPolicy,
     allowed_tags: Vec<String>,
@@ -51879,18 +52382,18 @@ fn register_chatgpt_forum_tools(
     {
         return;
     }
-    registry.register(Arc::new(ChatGptForumSearchTool::new(
+    registry.register(Box::new(ChatGptForumSearchTool::new(
         hub.clone(),
         allowed_tags.clone(),
     )));
-    registry.register(Arc::new(ChatGptForumFetchTool::new(
+    registry.register(Box::new(ChatGptForumFetchTool::new(
         hub.clone(),
         allowed_tags,
     )));
 }
 
 fn register_chatgpt_collab_tools_with(
-    registry: &mut ToolRegistry,
+    registry: &mut ToolRegistryBuilder,
     policy: ToolPolicy,
     channel_id: Option<String>,
     capabilities: BTreeSet<crate::operator_request::OperatorCapability>,
@@ -51905,15 +52408,15 @@ fn register_chatgpt_collab_tools_with(
         );
         return;
     };
-    registry.register(Arc::new(OperatorRequestStageTool::new(
+    registry.register(Box::new(OperatorRequestStageTool::new(
         store.clone(),
         channel_id.clone(),
         capabilities,
     )));
-    registry.register(Arc::new(OperatorRequestGetTool::new(store, channel_id)));
+    registry.register(Box::new(OperatorRequestGetTool::new(store, channel_id)));
 }
 
-fn register_chatgpt_collab_tools(registry: &mut ToolRegistry, policy: ToolPolicy) {
+fn register_chatgpt_collab_tools(registry: &mut ToolRegistryBuilder, policy: ToolPolicy) {
     register_chatgpt_collab_tools_with(
         registry,
         policy,
@@ -52029,11 +52532,13 @@ fn collab_group_divergence() -> Value {
     })
 }
 
-fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn McpTool>) {
-    let name = tool.name();
-    if policy.includes(tier, name) {
-        reg.register(tool);
-    }
+fn reg_if(
+    reg: &mut ToolRegistryBuilder,
+    policy: ToolPolicy,
+    tier: Tier,
+    tool: Box<dyn McpTool>,
+) {
+    reg.register_if(tool, |frozen_name| policy.includes(tier, frozen_name));
 }
 
 /// `reg_if` with an availability precondition. Used for tool families whose
@@ -52043,11 +52548,11 @@ fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn 
 /// (a hidden tool is also uncallable), so callers that need one back must
 /// flip the corresponding env override and reconnect.
 fn reg_if_available(
-    reg: &mut ToolRegistry,
+    reg: &mut ToolRegistryBuilder,
     policy: ToolPolicy,
     available: bool,
     tier: Tier,
-    tool: Arc<dyn McpTool>,
+    tool: Box<dyn McpTool>,
 ) {
     if available {
         reg_if(reg, policy, tier, tool);
@@ -53567,15 +54072,111 @@ fn tag_value_in(tags: &[String], prefix: &str) -> Option<String> {
         .map(|t| t[prefix.len()..].to_string())
 }
 
+/// Consume the only mutable registry builder and derive the inventory, actual
+/// guard, and composite security projection from the exact same frozen
+/// descriptor slice. No registration can occur between these steps.
+fn finalize_effect_registry(
+    registry: ToolRegistryBuilder,
+    hub: &Hub,
+    policy: ToolPolicy,
+    surface: HostSurface,
+    ceremony: bool,
+    build_view: &'static str,
+) -> (FinalizedToolRegistry, McpEffectInventory) {
+    let mut frozen_inventory = None;
+    let finalized = registry.finalize_with(|descriptors| {
+        let inventory = McpEffectInventory::from_tool_descriptors(descriptors);
+        let guard: Arc<dyn ToolCallGuard> = if hub.invocation_leases.gate_enabled() {
+            Arc::new(hub.invocation_leases.mcp_guard_for_inventory(
+                hub.security.clone(),
+                BTreeSet::new(),
+                inventory.digest_sha256.clone(),
+            ))
+        } else {
+            Arc::new(AllowAllToolCallGuard)
+        };
+        let mode = hub.invocation_leases.mode();
+        let effective_exposed_open_tools = if mode == InvocationLeaseMode::Invalid {
+            descriptors
+                .iter()
+                .filter_map(|descriptor| {
+                    HOLD_OPEN_TOOLS
+                        .contains(&descriptor.schema.name.as_str())
+                        .then(|| descriptor.schema.name.clone())
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let security_projection = json!({
+            "schema": "agent_bridge.finalized_mcp_security_projection.v1",
+            "build_view": build_view,
+            "tool_policy": {
+                "toolset": policy.label(),
+                "profile": policy.profile().label(),
+                "extras": policy.extras()
+            },
+            "host_surface": {
+                "android_adb": surface.android_adb,
+                "apple_host": surface.apple_host,
+                "brave": surface.brave,
+                "notion": surface.notion,
+                "cloudflare": surface.cloudflare,
+                "cloudflare_kitesurf": surface.cloudflare_kitesurf,
+                "github_api": surface.github_api,
+                "gitlab_api": surface.gitlab_api,
+                "tailscale_api": surface.tailscale_api
+            },
+            "static_security_policy": {
+                "allow_shell_exec": hub.security.allow_shell_exec,
+                "allow_agent_spawn": hub.security.allow_agent_spawn,
+                "allow_terminal_write": hub.security.allow_terminal_write,
+                "allow_browser": hub.security.allow_browser,
+                "shell_exec_timeout_max_ms": hub.security.shell_exec_timeout_max_ms
+            },
+            "ceremony_tools_exposed": ceremony,
+            "effect_inventory": inventory.report_json(true),
+            "hold_carveout": {
+                "configured_open_tools": HOLD_OPEN_TOOLS,
+                "hold_mode_active": mode == InvocationLeaseMode::Invalid,
+                "effective_exposed_open_tools": effective_exposed_open_tools
+            },
+            "serving_registry_boundary": {
+                "builder_consumed": true,
+                "post_finalization_registration_available": false,
+                "registry_guard_replacement_available": false,
+                "raw_executable_handle_retrieval_available": false,
+                "all_registry_dispatches_use_frozen_guard": true,
+                "tool_implementation_behavior_attested": false,
+                "guard_implementation_behavior_attested": false,
+                "same_process_direct_tool_or_backend_invocation_closed": false,
+                "composite_child_direct_invocation_closed": false
+            },
+            "production_enforcement": {
+                "rollout_state": "hold",
+                "globally_fail_closed": false,
+                "independent_uid_guardian_present": false,
+                "durable_anti_replay_attested": false
+            }
+        });
+        frozen_inventory = Some(inventory);
+        RegistryFinalization::new(guard, security_projection)
+    });
+    (
+        finalized,
+        frozen_inventory.expect("finalize_with always derives one effect inventory"),
+    )
+}
+
 /// The real serving entry point: env policy + **host detection** (device /
 /// credential availability gates unusable tool families; see `HostSurface`).
 /// This is what the MCP stdio server and every "what is this process actually
 /// exposing" audit path build.
-pub fn build_registry(hub: Hub) -> ToolRegistry {
+pub fn build_registry(hub: Hub) -> FinalizedToolRegistry {
     let policy = ToolPolicy::from_env();
     let surface = HostSurface::detect();
     let ceremony = ceremony_tools_exposed(policy);
-    let mut reg = build_registry_with_policy_surface(hub.clone(), policy, surface, ceremony);
+    let mut reg = build_registry_builder_with_policy_surface(hub.clone(), policy, surface, ceremony);
     let chatgpt_forum_tags = configured_chatgpt_forum_tags();
     register_chatgpt_forum_tools(&mut reg, &hub, policy, chatgpt_forum_tags.clone());
     register_chatgpt_collab_tools(&mut reg, policy);
@@ -53585,7 +54186,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
             &mut reg,
             policy,
             Tier::Niche,
-            Arc::new(EmbodimentProjectionPreviewTool::new(operations)),
+            Box::new(EmbodimentProjectionPreviewTool::new(operations)),
         ),
         Ok(None) => {}
         Err(error) => tracing::warn!(
@@ -53599,7 +54200,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
             &mut reg,
             policy,
             Tier::Niche,
-            Arc::new(StoryCommandPreflightTool::new(config)),
+            Box::new(StoryCommandPreflightTool::new(config)),
         ),
         Ok(None) => {}
         Err(error) => tracing::warn!(
@@ -53608,6 +54209,15 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
             "invalid story MCP configuration; tool left unregistered"
         ),
     }
+    let (reg, invocation_inventory) =
+        finalize_effect_registry(
+            reg,
+            &hub,
+            policy,
+            surface,
+            ceremony,
+            "default_registry_build",
+        );
     tracing::info!(
         profile = policy.profile().label(),
         toolset = policy.label(),
@@ -53622,6 +54232,9 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
         github_api = surface.github_api,
         gitlab_api = surface.gitlab_api,
         tailscale_api = surface.tailscale_api,
+        effect_inventory_digest = invocation_inventory.digest_sha256,
+        effect_inventory_unknown = invocation_inventory.unknown_count,
+        effect_inventory_exact = invocation_inventory.exact_invocation_count,
         "MCP tool registry built (set AGENT_BRIDGE_TOOLSET or AGENT_BRIDGE_TOOL_PROFILE; \
          false surface flags hide that family — AGENT_BRIDGE_EXPOSE_UNAVAILABLE / \
          AGENT_BRIDGE_EXPOSE_CEREMONY override)"
@@ -53897,6 +54510,13 @@ impl McpTool for AgentSteerLaunchTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
             return Ok(ToolResult::error(e));
+        }
+        if let Err(error) = self
+            .hub
+            .agent_spawn_governor
+            .check_unmanaged_launch_surface(self.name())
+        {
+            return Ok(ToolResult::error(error));
         }
         let project = match args
             .get("project")
@@ -54508,13 +55128,15 @@ impl McpTool for AgentSteerKillTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
-            return Ok(ToolResult::error(e));
-        }
         let (session, logical) = match steer_resolve_session(&args) {
             Ok(v) => v,
             Err(e) => return Ok(ToolResult::error(e)),
         };
+        if crate::remote_steer::parse_tmux_session(&session).is_none() {
+            return Ok(ToolResult::error(
+                "agent_steer_kill only accepts an AB-owned steer session",
+            ));
+        }
         let target = steer_target_from_args(&args);
         let mux = crate::remote_steer::TmuxBackend::default();
         if !crate::remote_steer::has_session(&target, &mux, &session).await {
@@ -54753,7 +55375,7 @@ impl McpTool for AgentOrchestrateScanTool {
 /// Ceremony gating still applies (it is policy/env-scoped, not host-scoped).
 /// For "what does this process actually expose", use `build_registry`; for
 /// explicit control, use `build_registry_with_policy_surface`.
-pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry {
+pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> FinalizedToolRegistry {
     build_registry_with_policy_surface(
         hub,
         policy,
@@ -54772,15 +55394,47 @@ pub(crate) fn build_registry_with_policy_surface(
     policy: ToolPolicy,
     surface: HostSurface,
     ceremony: bool,
-) -> ToolRegistry {
-    let mut reg = ToolRegistry::new();
+) -> FinalizedToolRegistry {
+    let builder = build_registry_builder_with_policy_surface(
+        hub.clone(),
+        policy,
+        surface,
+        ceremony,
+    );
+    let (registry, invocation_inventory) = finalize_effect_registry(
+        builder,
+        &hub,
+        policy,
+        surface,
+        ceremony,
+        "explicit_policy_surface",
+    );
+    tracing::debug!(
+        profile = policy.profile().label(),
+        toolset = policy.label(),
+        tools = registry.list().len(),
+        ceremony_tools = ceremony,
+        effect_inventory_digest = invocation_inventory.digest_sha256,
+        effect_inventory_unknown = invocation_inventory.unknown_count,
+        "MCP tool registry finalized"
+    );
+    registry
+}
+
+fn build_registry_builder_with_policy_surface(
+    hub: Hub,
+    policy: ToolPolicy,
+    surface: HostSurface,
+    ceremony: bool,
+) -> ToolRegistryBuilder {
+    let mut reg = ToolRegistryBuilder::new();
 
     // Generic names are reserved for ChatGPT company-knowledge discovery.
     // Keep them out of every existing client profile to avoid collisions with
     // native search/fetch tools and preserve current Codex/Claude surfaces.
     if matches!(policy.set, ToolSet::ChatGptRead | ToolSet::ChatGptCollab) {
-        reg.register(Arc::new(ChatGptSearchTool::new(hub.clone())));
-        reg.register(Arc::new(ChatGptFetchTool::new(hub.clone())));
+        reg.register(Box::new(ChatGptSearchTool::new(hub.clone())));
+        reg.register(Box::new(ChatGptFetchTool::new(hub.clone())));
     }
 
     // ── ESSENTIAL ──────────────────────────────────────────────────────
@@ -54789,55 +55443,55 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(MemorySearchTool::new(hub.clone())),
+        Box::new(MemorySearchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(MemorySaveTool::new(hub.clone())),
+        Box::new(MemorySaveTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(MemoryGetTool::new(hub.clone())),
+        Box::new(MemoryGetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(MemoryListTool::new(hub.clone())),
+        Box::new(MemoryListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(MemoryDeleteTool::new(hub.clone())),
+        Box::new(MemoryDeleteTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(MemoryNeighborsTool::new(hub.clone())),
+        Box::new(MemoryNeighborsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(WorkMemoryTool::new(hub.clone())),
+        Box::new(WorkMemoryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentTaskContractPreviewTool::new()),
+        Box::new(AgentTaskContractPreviewTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryCoactivationTopTool::new(hub.clone())),
+        Box::new(MemoryCoactivationTopTool::new(hub.clone())),
     );
     // Terminal: list + send + read + split + resize. Retired after Warp drop
     // (see memory `project_warp_drop_to_museum`); kept as Niche for any
@@ -54846,87 +55500,87 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TerminalListTool::new(hub.clone())),
+        Box::new(TerminalListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TerminalSendKeysTool::new(hub.clone())),
+        Box::new(TerminalSendKeysTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TerminalReadOutputTool::new(hub.clone())),
+        Box::new(TerminalReadOutputTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TerminalSplitTool::new(hub.clone())),
+        Box::new(TerminalSplitTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TerminalResizeTool::new(hub.clone())),
+        Box::new(TerminalResizeTool::new(hub.clone())),
     );
     // Agent runtime: spawn + drive + observe sessions.
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSpawnTool::new(hub.clone())),
+        Box::new(AgentSpawnTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSendInputTool::new(hub.clone())),
+        Box::new(AgentSendInputTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSessionGetTool::new(hub.clone())),
+        Box::new(AgentSessionGetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSessionOutputTool::new(hub.clone())),
+        Box::new(AgentSessionOutputTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSessionWaitTool::new(hub.clone())),
+        Box::new(AgentSessionWaitTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSessionListTool::new(hub.clone())),
+        Box::new(AgentSessionListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(AgentSessionReconcileTool::new(hub.clone())),
+        Box::new(AgentSessionReconcileTool::new(hub.clone())),
     );
     // Shell + lifecycle bootstrap + ops introspection that callers ask first.
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(ShellExecTool::new(hub.clone())),
+        Box::new(ShellExecTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SystemControlTool::new(hub.clone())),
+        Box::new(SystemControlTool::new(hub.clone())),
     );
     // Remote session steering (P2/P3/P4): AB-owned launch + gate-aware drive +
     // blackboard roll-up. Standard tier (multi-agent ops, not minimal-essential).
@@ -54934,79 +55588,79 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentSteerLaunchTool::new(hub.clone())),
+        Box::new(AgentSteerLaunchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentSteerDriveTool::new(hub.clone())),
+        Box::new(AgentSteerDriveTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentSteerCaptureTool::new(hub.clone())),
+        Box::new(AgentSteerCaptureTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(AgentSteerListTool::new(hub.clone())),
+        Box::new(AgentSteerListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentSteerKillTool::new(hub.clone())),
+        Box::new(AgentSteerKillTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(AgentOrchestrateScanTool::new(hub.clone())),
+        Box::new(AgentOrchestrateScanTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(SessionBootstrapTool::new(hub.clone())),
+        Box::new(SessionBootstrapTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SessionFinalizeTool::new(hub.clone())),
+        Box::new(SessionFinalizeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SessionReflectTool::new(hub.clone())),
+        Box::new(SessionReflectTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(CapabilitiesTool::new(hub.clone())),
+        Box::new(CapabilitiesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(BodyStatusTool::new()),
+        Box::new(BodyStatusTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(BodyReflexAdviceTool::new()),
+        Box::new(BodyReflexAdviceTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(if policy.uses_receipt_only_embodiment_surface() {
+        Box::new(if policy.uses_receipt_only_embodiment_surface() {
             EmbodimentSnapshotTool::operation_receipts_only(hub.clone())
         } else {
             EmbodimentSnapshotTool::new(hub.clone())
@@ -55016,13 +55670,13 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(EmbodimentLeaseTool::new(hub.clone())),
+        Box::new(EmbodimentLeaseTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(if policy.uses_receipt_only_embodiment_surface() {
+        Box::new(if policy.uses_receipt_only_embodiment_surface() {
             EmbodimentRecordTool::operation_receipts_only(hub.clone())
         } else {
             EmbodimentRecordTool::new(hub.clone())
@@ -55032,61 +55686,61 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(BodyTaskSpanTool::new(hub.clone())),
+        Box::new(BodyTaskSpanTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(BodySchedulingReportTool::new(hub.clone())),
+        Box::new(BodySchedulingReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(McpDispatchAuditTool::new(hub.clone())),
+        Box::new(McpDispatchAuditTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(EventSpineSnapshotTool::new(hub.clone())),
+        Box::new(EventSpineSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentWorldTrajectoryAuditTool::new(hub.clone())),
+        Box::new(AgentWorldTrajectoryAuditTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentWorldProbeCaptureTool::new(hub.clone())),
+        Box::new(AgentWorldProbeCaptureTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentWorldCaptureReportTool::new(hub.clone())),
+        Box::new(AgentWorldCaptureReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(ToolAtlasSnapshotTool::new(hub.clone())),
+        Box::new(ToolAtlasSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(ContextGovernorSnapshotTool::new()),
+        Box::new(ContextGovernorSnapshotTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ResearchCyclePlanTool::new()),
+        Box::new(ResearchCyclePlanTool::new()),
     );
     // GoS-lite belief-graph projection over the same Tool Atlas telemetry.
     // Standard: it is the SSB belief-graph synthesis layer over Essential-tier
@@ -55100,7 +55754,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(GosLiteSnapshotTool::new(hub.clone())),
+        Box::new(GosLiteSnapshotTool::new(hub.clone())),
     );
     // SSB integrity monitor: release-build safety net re-running the unified
     // contract validator + a green-laundering check over emitted events. Niche
@@ -55109,19 +55763,19 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SemanticBusIntegrityTool::new(hub.clone())),
+        Box::new(SemanticBusIntegrityTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(ReadinessAuditTool::new(hub.clone())),
+        Box::new(ReadinessAuditTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(McpLifecycleDigestTool::new(hub.clone())),
+        Box::new(McpLifecycleDigestTool::new(hub.clone())),
     );
     // IDE bridge stays Niche by default, but Codex Essential allowlists it so
     // IDE-aware Codex sessions can opt into editor context without widening to
@@ -55130,13 +55784,13 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(IdeSnapshotTool::new(hub.clone())),
+        Box::new(IdeSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(IdeCommandTool::new(hub.clone())),
+        Box::new(IdeCommandTool::new(hub.clone())),
     );
     // Desktop Computer Use bridge: read-only structural snapshot. Exposed to
     // Codex via the direct extras allowlist; mutating desktop_action is not.
@@ -55144,7 +55798,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(DesktopSnapshotTool::new(hub.clone())),
+        Box::new(DesktopSnapshotTool::new(hub.clone())),
     );
     // Linux Computer Use: read-only postflight verifier (verify/recover leg of the act
     // loop). In codex-essential — completes the read-only triad with desktop_snapshot.
@@ -55152,7 +55806,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(DesktopVerifyTool::new(hub.clone())),
+        Box::new(DesktopVerifyTool::new(hub.clone())),
     );
     // macOS Semantic System Bus probe: read-only AX trust + bounded
     // frontmost-window observation. Exposed to Codex via direct extras; mutating
@@ -55162,65 +55816,65 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.apple_host,
         Tier::Standard,
-        Arc::new(MacosAxProbeTool::new(hub.clone())),
+        Box::new(MacosAxProbeTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Standard,
-        Arc::new(MacosAxVerifyTool::new(hub.clone())),
+        Box::new(MacosAxVerifyTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Standard,
-        Arc::new(MacosAxWatchTool::new(hub.clone())),
+        Box::new(MacosAxWatchTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Niche,
-        Arc::new(MacosAxActionAdmissionTool::new()),
+        Box::new(MacosAxActionAdmissionTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Niche,
-        Arc::new(MacosAxFocusTransactionTool::new(hub.clone())),
+        Box::new(MacosAxFocusTransactionTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SemanticBusAdapterReportTool::new(hub.clone())),
+        Box::new(SemanticBusAdapterReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SemanticBusRuntimeHealthTool::new(hub.clone())),
+        Box::new(SemanticBusRuntimeHealthTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SemanticBusRuntimeConformanceTool::new(hub.clone())),
+        Box::new(SemanticBusRuntimeConformanceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SemanticBusPeerConformanceTool::new(hub.clone())),
+        Box::new(SemanticBusPeerConformanceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(VisionGroundingOcrTool::new(hub.clone())),
+        Box::new(VisionGroundingOcrTool::new(hub.clone())),
     );
     // Linux Computer Use T9c: gated desktop input injection (isolated-only MVP).
     // NOT in codex-essential (mutating); host injection is unreachable via this
@@ -55229,7 +55883,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(DesktopActionTool::new(hub.clone())),
+        Box::new(DesktopActionTool::new(hub.clone())),
     );
     // Linux Computer Use L2: gated semantic AT-SPI invoke (isolated-only MVP).
     // In codex-essential as the single bounded act surface: host invocation is
@@ -55239,7 +55893,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(DesktopInvokeTool::new(hub.clone())),
+        Box::new(DesktopInvokeTool::new(hub.clone())),
     );
     // Practical Codex-facing task loop. This is the sole compact act surface;
     // it cannot request/consume host confirmation and cannot use grants.
@@ -55247,7 +55901,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(DesktopSemanticTaskTool::new(hub.clone())),
+        Box::new(DesktopSemanticTaskTool::new(hub.clone())),
     );
     // Protocol-first application control. The initial media adapter exposes
     // only allowlisted MPRIS operations and requires independent postflight.
@@ -55255,7 +55909,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AppControlTool::new(hub.clone())),
+        Box::new(AppControlTool::new(hub.clone())),
     );
     // Linux Computer Use host-confirm phase 2: execute a human-approved host action by
     // its single-use token. NOT in codex-essential. The only MCP path to host mutation,
@@ -55264,74 +55918,74 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(DesktopConfirmTool::new(hub.clone())),
+        Box::new(DesktopConfirmTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(PetStateGetTool::new(hub.clone())),
+        Box::new(PetStateGetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(PetStateSetTool::new(hub.clone())),
+        Box::new(PetStateSetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(PetStateRitualTool::new(hub.clone())),
+        Box::new(PetStateRitualTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(ProjectDetectTool::new(hub.clone())),
+        Box::new(ProjectDetectTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(ChangesDigestTool::new(hub.clone())),
+        Box::new(ChangesDigestTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(GitTopologyPreflightTool::new(hub.clone())),
+        Box::new(GitTopologyPreflightTool::new(hub.clone())),
     );
     // Plans + worktrees.
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(PlanSaveTool::new(hub.clone())),
+        Box::new(PlanSaveTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(PlanLoadTool::new(hub.clone())),
+        Box::new(PlanLoadTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(PlanUpdateTool::new(hub.clone())),
+        Box::new(PlanUpdateTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(WorktreeListTool::new(hub.clone())),
+        Box::new(WorktreeListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
-        Arc::new(WorktreeCreateTool::new(hub.clone())),
+        Box::new(WorktreeCreateTool::new(hub.clone())),
     );
     // Indexed codebase graph queries overlap Codex native search surfaces and
     // remain Niche/default-off for explicit diagnostics.
@@ -55339,37 +55993,37 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseSearchTool::new(hub.clone())),
+        Box::new(CodebaseSearchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseImportsTool::new(hub.clone())),
+        Box::new(CodebaseImportsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseCallsTool::new(hub.clone())),
+        Box::new(CodebaseCallsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseCallersTool::new(hub.clone())),
+        Box::new(CodebaseCallersTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseImpactTool::new(hub.clone())),
+        Box::new(CodebaseImpactTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodeReviewContextPreviewTool::new(hub.clone())),
+        Box::new(CodeReviewContextPreviewTool::new(hub.clone())),
     );
 
     // Mobile Device Bridge: Android-first install/debug/control via ADB.
@@ -55379,168 +56033,168 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileListDevicesTool::new(hub.clone())),
+        Box::new(MobileListDevicesTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileCurrentFocusTool::new(hub.clone())),
+        Box::new(MobileCurrentFocusTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileScreenshotTool::new(hub.clone())),
+        Box::new(MobileScreenshotTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileHealthTool::new(hub.clone())),
+        Box::new(MobileHealthTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileDebugBundleTool::new(hub.clone())),
+        Box::new(MobileDebugBundleTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionStartTool::new(hub.clone())),
+        Box::new(MobileProjectionStartTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionUpdateTool::new(hub.clone())),
+        Box::new(MobileProjectionUpdateTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionSyncMediaTool::new(hub.clone())),
+        Box::new(MobileProjectionSyncMediaTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionFollowMediaTool::new(hub.clone())),
+        Box::new(MobileProjectionFollowMediaTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionStatusTool::new(hub.clone())),
+        Box::new(MobileProjectionStatusTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionWaitTool::new(hub.clone())),
+        Box::new(MobileProjectionWaitTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileProjectionStopTool::new(hub.clone())),
+        Box::new(MobileProjectionStopTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(AdvanceTrackThenProjectTool::new(hub.clone())),
+        Box::new(AdvanceTrackThenProjectTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileUiSnapshotTool::new(hub.clone())),
+        Box::new(MobileUiSnapshotTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileWaitForUiTool::new(hub.clone())),
+        Box::new(MobileWaitForUiTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileLogcatTailTool::new(hub.clone())),
+        Box::new(MobileLogcatTailTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileInstallApkTool::new(hub.clone())),
+        Box::new(MobileInstallApkTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileLaunchAppTool::new(hub.clone())),
+        Box::new(MobileLaunchAppTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileClickTool::new(hub.clone())),
+        Box::new(MobileClickTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.android_adb,
         Tier::Niche,
-        Arc::new(MobileInputTextTool::new(hub.clone())),
+        Box::new(MobileInputTextTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Niche,
-        Arc::new(MobileAppleStatusTool::new(hub.clone())),
+        Box::new(MobileAppleStatusTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Niche,
-        Arc::new(MobileIosListDevicesTool::new(hub.clone())),
+        Box::new(MobileIosListDevicesTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Niche,
-        Arc::new(MobileIosAppsTool::new(hub.clone())),
+        Box::new(MobileIosAppsTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.apple_host,
         Tier::Niche,
-        Arc::new(MobileIosSyslogTailTool::new(hub.clone())),
+        Box::new(MobileIosSyslogTailTool::new(hub.clone())),
     );
 
     // ── STANDARD (default-on, hook-friendly + multi-agent + maintenance) ──
@@ -55548,272 +56202,272 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryCompactTool::new(hub.clone())),
+        Box::new(MemoryCompactTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryPurgeTombstonesTool::new(hub.clone())),
+        Box::new(MemoryPurgeTombstonesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())),
+        Box::new(MemoryPruneCoactivationNoiseTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())),
+        Box::new(MemoryPruneDegenerateRelatesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryArchiveOrphanStubsTool::new(hub.clone())),
+        Box::new(MemoryArchiveOrphanStubsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryRestoreArchivedTool::new(hub.clone())),
+        Box::new(MemoryRestoreArchivedTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())),
+        Box::new(MemoryTombstoneAgedArchivedTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryDecayUnusedTool::new(hub.clone())),
+        Box::new(MemoryDecayUnusedTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryReindexTool::new(hub.clone())),
+        Box::new(MemoryReindexTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseReindexTool::new(hub.clone())),
+        Box::new(CodebaseReindexTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryLinkTool::new(hub.clone())),
+        Box::new(MemoryLinkTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryCorrectionTool::new(hub.clone())),
+        Box::new(MemoryCorrectionTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryRetrievalFeedbackTool::new(hub.clone())),
+        Box::new(MemoryRetrievalFeedbackTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryStatsTool::new(hub.clone())),
+        Box::new(MemoryStatsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryScopeSurveyTool::new(hub.clone())),
+        Box::new(MemoryScopeSurveyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(EmbeddingQuantShadowTool::new(hub.clone())),
+        Box::new(EmbeddingQuantShadowTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(OutcomeValenceShadowTool::new(hub.clone())),
+        Box::new(OutcomeValenceShadowTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(OutcomeValenceImportanceApplyTool::new(hub.clone())),
+        Box::new(OutcomeValenceImportanceApplyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryQueryStatsTool::new(hub.clone())),
+        Box::new(MemoryQueryStatsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(RetrievalOutcomeReportTool::new(hub.clone())),
+        Box::new(RetrievalOutcomeReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(RetrievalOutcomeShadowTool::new(hub.clone())),
+        Box::new(RetrievalOutcomeShadowTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryFusionShadowReportTool::new(hub.clone())),
+        Box::new(MemoryFusionShadowReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(RetrievalOutcomeApplyTool::new(hub.clone())),
+        Box::new(RetrievalOutcomeApplyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryGraphTopologyTool::new(hub.clone())),
+        Box::new(MemoryGraphTopologyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemorySubstrateAuditTool::new(hub.clone())),
+        Box::new(MemorySubstrateAuditTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SubstrateStatsTool::new()),
+        Box::new(SubstrateStatsTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SubstrateNeighborsTool::new()),
+        Box::new(SubstrateNeighborsTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexShadowDigestTool::new()),
+        Box::new(BioCortexShadowDigestTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexReplayCompareTool::new(hub.clone())),
+        Box::new(BioCortexReplayCompareTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInStatusTool::new()),
+        Box::new(BioCortexRetrievalOptInStatusTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Standard,
-        Arc::new(BioCortexRetrievalOptInDryRunTool::new()),
+        Box::new(BioCortexRetrievalOptInDryRunTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInReviewPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInReviewPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRuntimeTrialTool::new()),
+        Box::new(BioCortexRetrievalOptInRuntimeTrialTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInOrderDiffPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInOrderDiffPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRedactedOrderArtifactTool::new()),
+        Box::new(BioCortexRetrievalOptInRedactedOrderArtifactTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
+        Box::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new()),
+        Box::new(BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInStoreTrialTool::new(hub.clone())),
+        Box::new(BioCortexRetrievalOptInStoreTrialTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInBatchDiagnosticsTool::new(
+        Box::new(BioCortexRetrievalOptInBatchDiagnosticsTool::new(
             hub.clone(),
         )),
     );
@@ -55821,19 +56475,19 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalRelevanceLiftEvalTool::new(hub.clone())),
+        Box::new(BioCortexRetrievalRelevanceLiftEvalTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRuntimeReadinessPacketTool::new()),
+        Box::new(BioCortexRetrievalOptInRuntimeReadinessPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInRuntimeTransitionGateTool::new()),
+        Box::new(BioCortexRetrievalOptInRuntimeTransitionGateTool::new()),
     );
     // Read-only status observability stays exposed (parallel to
     // biocortex_retrieval_opt_in_status); only the ceremony gates/trials of
@@ -55842,27 +56496,27 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TriggerRecallOptInStatusTool::new()),
+        Box::new(TriggerRecallOptInStatusTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(TriggerRecallOptInRuntimeTransitionGateTool::new()),
+        Box::new(TriggerRecallOptInRuntimeTransitionGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(TriggerRecallOptInGatedBaselineTrialTool::new(hub.clone())),
+        Box::new(TriggerRecallOptInGatedBaselineTrialTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TriggerRecallOptInPrePolicyHoldSimulationTool::new(
+        Box::new(TriggerRecallOptInPrePolicyHoldSimulationTool::new(
             hub.clone(),
         )),
     );
@@ -55871,26 +56525,26 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(TriggerRecallOptInGatedBatchDiagnosticsTool::new()),
+        Box::new(TriggerRecallOptInGatedBatchDiagnosticsTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(TriggerRecallEnforceHoldApprovalPacketValidatorTool::new()),
+        Box::new(TriggerRecallEnforceHoldApprovalPacketValidatorTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
+        Box::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(
+        Box::new(BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(
             hub.clone(),
         )),
     );
@@ -55899,61 +56553,61 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(BioCortexRetrievalShadowTool::new()),
+        Box::new(BioCortexRetrievalShadowTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(IntrospectRecallTool::new(hub.clone())),
+        Box::new(IntrospectRecallTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryLinkAuditTool::new(hub.clone())),
+        Box::new(MemoryLinkAuditTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemorySuggestTool::new(hub.clone())),
+        Box::new(MemorySuggestTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryRelatedKeysPreflightTool::new(hub.clone())),
+        Box::new(MemoryRelatedKeysPreflightTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryRelatedKeysReviewPacketTool::new(hub.clone())),
+        Box::new(MemoryRelatedKeysReviewPacketTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryRelatedKeysMaterializeTool::new(hub.clone())),
+        Box::new(MemoryRelatedKeysMaterializeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryOrphanCandidatesTool::new(hub.clone())),
+        Box::new(MemoryOrphanCandidatesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryOrphanInventoryTool::new(hub.clone())),
+        Box::new(MemoryOrphanInventoryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryConsolidationQueueTool::new(hub.clone())),
+        Box::new(MemoryConsolidationQueueTool::new(hub.clone())),
     );
     // Stage 1 + Stage 2 gate-ceremony surfaces — Niche like the trigger-recall /
     // biocortex opt-in gate tools, kept out of the eager Standard/codex set.
@@ -55962,129 +56616,129 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(OutcomeGatedConsolidationStatusTool::new(hub.clone())),
+        Box::new(OutcomeGatedConsolidationStatusTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(OutcomeGatedConsolidationTransitionGateTool::new()),
+        Box::new(OutcomeGatedConsolidationTransitionGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(OutcomeGatedConsolidationApplyTrialTool::new(hub.clone())),
+        Box::new(OutcomeGatedConsolidationApplyTrialTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(OutcomeGatedConsolidationApprovalPacketTool::new()),
+        Box::new(OutcomeGatedConsolidationApprovalPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(OutcomeGatedConsolidationApplyTool::new(hub.clone())),
+        Box::new(OutcomeGatedConsolidationApplyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
+        Box::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryBioCortexRedactedEvidenceAggregateTool::new()),
-    );
-    reg_if(
-        &mut reg,
-        policy,
-        Tier::Standard,
-        Arc::new(MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone())),
+        Box::new(MemoryBioCortexRedactedEvidenceAggregateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryBioCortexRelevanceLiftSummaryTool::new(hub.clone())),
+        Box::new(MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Box::new(MemoryBioCortexRelevanceLiftSummaryTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6InfluenceGateTool::new()),
+        Box::new(MemoryBioCortexT6InfluenceGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionReviewPacketTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionReviewPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionDryRunPlanTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionDryRunPlanTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionDryRunReportTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionDryRunReportTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionOwnerDecisionRecordTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionOwnerDecisionRecordTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGatePreflightTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionRuntimeGatePreflightTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateDesignArtifactTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionRuntimeGateDesignArtifactTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(
+        Box::new(
             MemoryBioCortexT6CandidateExpansionRuntimeGateImplementationPlanArtifactTool::new(),
         ),
     );
@@ -56093,56 +56747,56 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateCodeImplementationGateTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionRuntimeGateCodeImplementationGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionShadowRuntimeGateTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionShadowRuntimeGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationReportTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationReportTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(
+        Box::new(
             MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool::new(),
         ),
     );
@@ -56151,7 +56805,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(
+        Box::new(
             MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool::new(
             ),
         ),
@@ -56161,7 +56815,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(
+        Box::new(
             MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool::new(),
         ),
     );
@@ -56170,141 +56824,141 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool::new()),
+        Box::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryNeuralCriticShadowEvalTool::new()),
+        Box::new(MemoryNeuralCriticShadowEvalTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemoryLinkOrphansTool::new(hub.clone())),
+        Box::new(MemoryLinkOrphansTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(AgentKillTool::new(hub.clone())),
+        Box::new(AgentKillTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentMessageTool::new(hub.clone())),
+        Box::new(AgentMessageTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentInboxTool::new(hub.clone())),
+        Box::new(AgentInboxTool::new(hub.clone())),
     );
     // Forum (v18): cross-process collaboration whiteboard.
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ForumPostTool::new(hub.clone())),
+        Box::new(ForumPostTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ForumReadTool::new(hub.clone())),
+        Box::new(ForumReadTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ForumSubscribeTool::new(hub.clone())),
+        Box::new(ForumSubscribeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ForumListThreadsTool::new(hub.clone())),
+        Box::new(ForumListThreadsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ForumSetThreadStatusTool::new(hub.clone())),
+        Box::new(ForumSetThreadStatusTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ForumDigestTool::new(hub.clone())),
+        Box::new(ForumDigestTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(MemorySyncStatusTool::new()),
+        Box::new(MemorySyncStatusTool::new()),
     );
     // Presence (v19): identity convention + agent registry (A2A AgentCard-aligned).
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SessionIdentityTool::new(hub.clone())),
+        Box::new(SessionIdentityTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AgentPresenceAnnounceTool::new(hub.clone())),
+        Box::new(AgentPresenceAnnounceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(AgentPresenceListTool::new(hub.clone())),
+        Box::new(AgentPresenceListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(PetPresenceSyncTool::new(hub.clone())),
+        Box::new(PetPresenceSyncTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AvatarAdapterCapabilitiesTool::new(hub.clone())),
+        Box::new(AvatarAdapterCapabilitiesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AvatarStateGetTool::new(hub.clone())),
+        Box::new(AvatarStateGetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AvatarSurfaceSnapshotTool::new(hub.clone())),
+        Box::new(AvatarSurfaceSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AvatarSurfaceReportTool::new(hub.clone())),
+        Box::new(AvatarSurfaceReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(AvatarCortexRendererSnapshotTool::new(hub.clone())),
+        Box::new(AvatarCortexRendererSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(XiaoShuActionRequestTool::new(hub.clone())),
+        Box::new(XiaoShuActionRequestTool::new(hub.clone())),
     );
     // Tailscale REST API: ACL editing without browser automation.
     reg_if_available(
@@ -56312,14 +56966,14 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.tailscale_api,
         Tier::Standard,
-        Arc::new(TailscaleAclGetTool::new()),
+        Box::new(TailscaleAclGetTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.tailscale_api,
         Tier::Standard,
-        Arc::new(TailscaleAclSetTool::new()),
+        Box::new(TailscaleAclSetTool::new()),
     );
     // GitHub REST API: issue/PR management without browser/gh-cli. Demoted
     // to Niche — Claude Code uses `gh` CLI; codex has native overlap.
@@ -56328,21 +56982,21 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.github_api,
         Tier::Niche,
-        Arc::new(GithubIssueListTool::new()),
+        Box::new(GithubIssueListTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.github_api,
         Tier::Niche,
-        Arc::new(GithubIssueCreateTool::new()),
+        Box::new(GithubIssueCreateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.github_api,
         Tier::Niche,
-        Arc::new(GithubPrListTool::new()),
+        Box::new(GithubPrListTool::new()),
     );
 
     // GitLab REST API v4: same pattern as github_*; primary forge for this project.
@@ -56352,21 +57006,21 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.gitlab_api,
         Tier::Niche,
-        Arc::new(GitlabIssueListTool::new()),
+        Box::new(GitlabIssueListTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.gitlab_api,
         Tier::Niche,
-        Arc::new(GitlabIssueCreateTool::new()),
+        Box::new(GitlabIssueCreateTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.gitlab_api,
         Tier::Niche,
-        Arc::new(GitlabMrListTool::new()),
+        Box::new(GitlabMrListTool::new()),
     );
 
     // Notion REST API: integration-token Bearer; complements memory system.
@@ -56376,21 +57030,21 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.notion,
         Tier::Niche,
-        Arc::new(NotionSearchTool::new()),
+        Box::new(NotionSearchTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.notion,
         Tier::Niche,
-        Arc::new(NotionPageGetTool::new()),
+        Box::new(NotionPageGetTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.notion,
         Tier::Niche,
-        Arc::new(NotionPageCreateTool::new()),
+        Box::new(NotionPageCreateTool::new()),
     );
 
     // Brave Search REST API: independent web search, fallback / fresh-results channel.
@@ -56400,7 +57054,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.brave,
         Tier::Niche,
-        Arc::new(BraveWebSearchTool::new()),
+        Box::new(BraveWebSearchTool::new()),
     );
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
@@ -56410,77 +57064,77 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         surface.cloudflare_kitesurf,
         Tier::Niche,
-        Arc::new(CloudflareKitesurfSnapshotTool::new(hub.clone())),
+        Box::new(CloudflareKitesurfSnapshotTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.cloudflare,
         Tier::Niche,
-        Arc::new(CloudflareZoneListTool::new()),
+        Box::new(CloudflareZoneListTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.cloudflare,
         Tier::Niche,
-        Arc::new(CloudflareWorkerListTool::new()),
+        Box::new(CloudflareWorkerListTool::new()),
     );
     reg_if_available(
         &mut reg,
         policy,
         surface.cloudflare,
         Tier::Niche,
-        Arc::new(CloudflareR2BucketListTool::new()),
+        Box::new(CloudflareR2BucketListTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SessionCurateTool::new(hub.clone())),
+        Box::new(SessionCurateTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(SessionHandoffBriefTool::new(hub.clone())),
+        Box::new(SessionHandoffBriefTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SessionLifecycleStepTool::new(hub.clone())),
+        Box::new(SessionLifecycleStepTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(WorktreeRemoveTool::new(hub.clone())),
+        Box::new(WorktreeRemoveTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(CodebaseIndexTool::new(hub.clone())),
+        Box::new(CodebaseIndexTool::new(hub.clone())),
     );
     // Retired with rest of terminal_* after Warp drop.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TerminalReadBlocksTool::new(hub.clone())),
+        Box::new(TerminalReadBlocksTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(NotifyTool::new(hub.clone())),
+        Box::new(NotifyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(NotificationsRecentTool::new(hub.clone())),
+        Box::new(NotificationsRecentTool::new(hub.clone())),
     );
     // Skill library (Phase C): in-loop recommendation over the local skill index.
     // Keep this in Essential for Codex/GPT-style deferred tool discovery: it is
@@ -56489,19 +57143,19 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SkillsRecommendTool::new(hub.clone())),
+        Box::new(SkillsRecommendTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SkillsRouteTool::new(hub.clone())),
+        Box::new(SkillsRouteTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(SkillsFeedbackTool::new(hub.clone())),
+        Box::new(SkillsFeedbackTool::new(hub.clone())),
     );
     // External browser-lite discovery. Standard/read-only: exposes the probe
     // evidence path without registering the full browser_* automation surface.
@@ -56509,7 +57163,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserLiteProbeTool::new()),
+        Box::new(BrowserLiteProbeTool::new()),
     );
 
     // ── NICHE (opt-in via AGENT_BRIDGE_TOOL_PROFILE=all) ───────────────
@@ -56518,7 +57172,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserNavigateTool::new(hub.clone())),
+        Box::new(BrowserNavigateTool::new(hub.clone())),
     );
     // Browser-owned, one-shot ABot-World lifecycle. Execution remains gated by
     // Browser capability, an embodiment lease, owner confirmation, and an
@@ -56527,37 +57181,37 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ModelScopeAbotRunOnceTool::new(hub.clone())),
+        Box::new(ModelScopeAbotRunOnceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ModelScopeAbotProviderStatusTool::new(hub.clone())),
+        Box::new(ModelScopeAbotProviderStatusTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ModelScopeAbotAttemptPreviewTool::new(hub.clone())),
+        Box::new(ModelScopeAbotAttemptPreviewTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ModelScopeAbotTaskStatusTool),
+        Box::new(ModelScopeAbotTaskStatusTool),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ModelScopeAbotReceiptValidateTool),
+        Box::new(ModelScopeAbotReceiptValidateTool),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ModelScopeAbotReceiptAuditTool),
+        Box::new(ModelScopeAbotReceiptAuditTool),
     );
     // Output / expression lane — E1 present() static-artifact sink (uses the
     // browser for self-verify; opt-in via AGENT_BRIDGE_TOOL_PROFILE=all for v0).
@@ -56565,7 +57219,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentTool::new(hub.clone())),
+        Box::new(PresentTool::new(hub.clone())),
     );
     // GSL-1A: narrow structured observation card for Codex lean. The policy
     // allowlist admits this wrapper by name without widening to raw `present`.
@@ -56573,7 +57227,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(GroundedSurfacePresentTool::new(hub.clone())),
+        Box::new(GroundedSurfacePresentTool::new(hub.clone())),
     );
     // slice 2: read-only replay/audit projection over present() artifacts. Niche
     // (opt-in) alongside present; no new source of truth, no mutation.
@@ -56581,7 +57235,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentReplayTool::new(hub.clone())),
+        Box::new(PresentReplayTool::new(hub.clone())),
     );
     // E3 embodied mirror: persistent dashboard surface that reflects the
     // present_replay snapshot, self-verified by chain_head readback. Niche
@@ -56590,7 +57244,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentDashboardTool::new(hub.clone())),
+        Box::new(PresentDashboardTool::new(hub.clone())),
     );
     // Slice A: read-only falsifier-gated verified (intent→action→outcome) stream
     // over the present() outcome sidecars. Niche (opt-in), no new source of truth.
@@ -56598,7 +57252,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentOutcomesTool::new(hub.clone())),
+        Box::new(PresentOutcomesTool::new(hub.clone())),
     );
     // LSWR Step E2: read-only admission projection over Step D present artifacts.
     // Niche (opt-in), no memory writes or ingestion calls.
@@ -56607,7 +57261,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrOutcomeAdmissionsTool::new(hub.clone())),
+        Box::new(LswrOutcomeAdmissionsTool::new(hub.clone())),
     );
     // LSWR Step E3: dry-run adapter from E2 admissions to #94-compatible
     // present_outcome candidates. Niche (opt-in), no write flag.
@@ -56616,7 +57270,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrOutcomeAdmissionsDryRunTool::new(hub.clone())),
+        Box::new(LswrOutcomeAdmissionsDryRunTool::new(hub.clone())),
     );
     // LSWR Step E4c: read-only approval packet with deterministic plan_hash.
     // Niche (opt-in), no write flag and no memory writes.
@@ -56625,7 +57279,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrOutcomeAdmissionsApprovalPacketTool::new(hub.clone())),
+        Box::new(LswrOutcomeAdmissionsApprovalPacketTool::new(hub.clone())),
     );
     // LSWR Step E4d: read-only future-write request validator over the E4c plan.
     // Niche (opt-in), no writer path and no memory writes.
@@ -56634,7 +57288,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrOutcomeAdmissionsWritePreflightTool::new(hub.clone())),
+        Box::new(LswrOutcomeAdmissionsWritePreflightTool::new(hub.clone())),
     );
     // LSWR Step E4d/E4e: the ONLY LSWR outcome writer. Niche (all-profile only),
     // dry_run=true default; a durable write requires the full owner approval
@@ -56644,7 +57298,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrOutcomeAdmissionsIngestTool::new(hub.clone())),
+        Box::new(LswrOutcomeAdmissionsIngestTool::new(hub.clone())),
     );
     // Slice B (v0): read-only outcome→memory drift projection. Reports which
     // verified outcomes are/aren't represented in memory (tamper-evident chain);
@@ -56653,7 +57307,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(OutcomesMemoryDriftTool::new(hub.clone())),
+        Box::new(OutcomesMemoryDriftTool::new(hub.clone())),
     );
     // Slice B (v0): opt-in, dry-run-default, capped ingestion of verified
     // outcomes into memory as ordinary rows. Never automatic. Niche (opt-in).
@@ -56661,7 +57315,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentOutcomesIngestTool::new(hub.clone())),
+        Box::new(PresentOutcomesIngestTool::new(hub.clone())),
     );
     // Live Semantic World Runtime Step C: thin client surface for the onsen
     // dev-only live viewport host. Niche only; with no live host it returns a
@@ -56670,19 +57324,19 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(crate::world_tools::WorldQueryTool::new()),
+        Box::new(crate::world_tools::WorldQueryTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(crate::world_tools::WorldPatchTool::new()),
+        Box::new(crate::world_tools::WorldPatchTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(crate::world_tools::WorldVisibilityQueryTool::new()),
+        Box::new(crate::world_tools::WorldVisibilityQueryTool::new()),
     );
     // Live Semantic World Runtime Step D: convert world_* result envelopes into
     // human-presentable review packets + dual-encoded HTML. Niche only; this is
@@ -56691,7 +57345,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(crate::world_tools::WorldPresentTool::new()),
+        Box::new(crate::world_tools::WorldPresentTool::new()),
     );
     // LSWR interaction feedback: MCP transport wrapper over the pure
     // consumption report builder. Niche/all only; accepts only one explicit
@@ -56701,7 +57355,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrInteractionFeedbackConsumptionReportTool::new()),
+        Box::new(LswrInteractionFeedbackConsumptionReportTool::new()),
     );
     // LSWR P34: real but gated read-only display wrapper over an explicit P28
     // report packet. Niche/all only; no host path, live runtime, GUI capture,
@@ -56711,7 +57365,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(LswrReadonlyBridgeDisplayTool::new()),
+        Box::new(LswrReadonlyBridgeDisplayTool::new()),
     );
     // Audio embodiment: emit a known tone + read it back off the system bus (sink
     // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
@@ -56721,13 +57375,13 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(A2uiValidateTool::new()),
+        Box::new(A2uiValidateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(A2uiPreviewTool::new()),
+        Box::new(A2uiPreviewTool::new()),
     );
     // Pure AG-UI projection is deliberately stricter than a normal Niche
     // tool: generic profile=all must not expose it. Only the dedicated named
@@ -56740,13 +57394,13 @@ pub(crate) fn build_registry_with_policy_surface(
             ToolSet::CodexAgUiReadonly | ToolSet::AllDev
         ),
         Tier::Niche,
-        Arc::new(ag_ui_readonly::AgUiReadonlyProjectTool::new()),
+        Box::new(ag_ui_readonly::AgUiReadonlyProjectTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentVoiceTool::new(hub.clone())),
+        Box::new(PresentVoiceTool::new(hub.clone())),
     );
     // Non-actuating voice readiness inspection. It checks configured
     // binaries/assets/channel commands but never synthesizes, plays, records,
@@ -56755,7 +57409,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(VoiceRuntimePreflightTool::new(hub.clone())),
+        Box::new(VoiceRuntimePreflightTool::new(hub.clone())),
     );
     // Default-safe task-final summary delivery: renders an audio artifact for an
     // explicit click, without emitting it to any physical output device.
@@ -56763,25 +57417,25 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(VoiceSummaryTool::new(hub.clone())),
+        Box::new(VoiceSummaryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TaskSummaryFinalizeTool::new(hub.clone())),
+        Box::new(TaskSummaryFinalizeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(TaskSummaryCompletionCheckTool::new(hub.clone())),
+        Box::new(TaskSummaryCompletionCheckTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(VoiceSummaryPolicyTool::new(hub.clone())),
+        Box::new(VoiceSummaryPolicyTool::new(hub.clone())),
     );
     // Human audibility confirmation for one existing voice outcome. Separate
     // append-only sidecar; never rewrites the machine receipt or generalises
@@ -56790,7 +57444,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentVoiceConfirmAudibilityTool::new(hub.clone())),
+        Box::new(PresentVoiceConfirmAudibilityTool::new(hub.clone())),
     );
     // Read-only aggregate of machine voice receipts and their explicitly linked
     // human audibility confirmations. Niche: it neither emits audio nor adapts
@@ -56799,7 +57453,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(VoiceDeliveryHealthTool::new(hub.clone())),
+        Box::new(VoiceDeliveryHealthTool::new(hub.clone())),
     );
     // One read-only operator snapshot over independent body scheduling and
     // voice delivery observations. It deliberately derives no cross-domain
@@ -56808,7 +57462,7 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(EmbodimentOperatingReadinessTool::new(hub.clone())),
+        Box::new(EmbodimentOperatingReadinessTool::new(hub.clone())),
     );
     // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
     // pending host desktop action, block until a human decides, return the verdict.
@@ -56817,322 +57471,313 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentApprovalTool::new(hub.clone())),
+        Box::new(PresentApprovalTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(PresentListTool::new(hub.clone())),
+        Box::new(PresentListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserEvalTool::new(hub.clone())),
+        Box::new(BrowserEvalTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserSnapshotTool::new(hub.clone())),
+        Box::new(BrowserSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserClickTool::new(hub.clone())),
+        Box::new(BrowserClickTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserScreenshotTool::new(hub.clone())),
+        Box::new(BrowserScreenshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserScreenshotElementTool::new(hub.clone())),
+        Box::new(BrowserScreenshotElementTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserExtractTextTool::new(hub.clone())),
+        Box::new(BrowserExtractTextTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserFillFormTool::new(hub.clone())),
+        Box::new(BrowserFillFormTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserWaitForTool::new(hub.clone())),
+        Box::new(BrowserWaitForTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserListPagesTool::new(hub.clone())),
+        Box::new(BrowserListPagesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserPressKeyTool::new(hub.clone())),
+        Box::new(BrowserPressKeyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserSelectOptionTool::new(hub.clone())),
+        Box::new(BrowserSelectOptionTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserFindByTextTool::new(hub.clone())),
+        Box::new(BrowserFindByTextTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserListFramesTool::new(hub.clone())),
+        Box::new(BrowserListFramesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserEvalInFrameTool::new(hub.clone())),
+        Box::new(BrowserEvalInFrameTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserPauseForHumanTool::new(hub.clone())),
+        Box::new(BrowserPauseForHumanTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserResumeTool::new(hub.clone())),
+        Box::new(BrowserResumeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserCaptureResponseStartTool::new(hub.clone())),
+        Box::new(BrowserCaptureResponseStartTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserCaptureResponseDrainTool::new(hub.clone())),
+        Box::new(BrowserCaptureResponseDrainTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserReloadTool::new(hub.clone())),
+        Box::new(BrowserReloadTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserBackTool::new(hub.clone())),
+        Box::new(BrowserBackTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserForwardTool::new(hub.clone())),
+        Box::new(BrowserForwardTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserClosePageTool::new(hub.clone())),
+        Box::new(BrowserClosePageTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserScrollTool::new(hub.clone())),
+        Box::new(BrowserScrollTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserHoverTool::new(hub.clone())),
+        Box::new(BrowserHoverTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserSetEmulationTool::new(hub.clone())),
+        Box::new(BrowserSetEmulationTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(BrowserUploadFileTool::new(hub.clone())),
+        Box::new(BrowserUploadFileTool::new(hub.clone())),
     );
     // Warp URL-scheme + status.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(WarpOpenTabTool::new(hub.clone())),
+        Box::new(WarpOpenTabTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(WarpOpenWindowTool::new(hub.clone())),
+        Box::new(WarpOpenWindowTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(WarpOpenSettingsTool::new(hub.clone())),
+        Box::new(WarpOpenSettingsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(WarpLaunchWorkflowTool::new(hub.clone())),
+        Box::new(WarpLaunchWorkflowTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(WarpStatusTool::new(hub.clone())),
+        Box::new(WarpStatusTool::new(hub.clone())),
     );
     // Warp-Oz cloud runs.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(OzRunGetTool::new(hub.clone())),
+        Box::new(OzRunGetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(OzRunListTool::new(hub.clone())),
+        Box::new(OzRunListTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(OzRunCancelTool::new(hub.clone())),
+        Box::new(OzRunCancelTool::new(hub.clone())),
     );
     // Ops introspection / debugging.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(OscParseTool::new(hub.clone())),
+        Box::new(OscParseTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(McpRecentErrorsTool::new(hub.clone())),
+        Box::new(McpRecentErrorsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(McpCallStatsTool::new(hub.clone())),
+        Box::new(McpCallStatsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(McpConfigAuditTool::new()),
+        Box::new(McpConfigAuditTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ContextBudgetTool::new()),
+        Box::new(ContextBudgetTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(ContextPressureEstimateTool::new()),
+        Box::new(ContextPressureEstimateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(ToolCallAttentionReportTool::new(hub.clone())),
+        Box::new(ToolCallAttentionReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(PracticalWorkflowScorecardTool::new(hub.clone())),
+        Box::new(PracticalWorkflowScorecardTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Standard,
-        Arc::new(EmbedTextTool::new()),
+        Box::new(EmbedTextTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(HookStatusTool::new(hub.clone())),
+        Box::new(HookStatusTool::new(hub.clone())),
     );
     // Memory admin / visualisation.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryExportTool::new(hub.clone())),
+        Box::new(MemoryExportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryImportTool::new(hub.clone())),
+        Box::new(MemoryImportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryConsolidateTool::new(hub.clone())),
+        Box::new(MemoryConsolidateTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryAutoCurateTool::new(hub.clone())),
+        Box::new(MemoryAutoCurateTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
-        Arc::new(MemoryGraphExportTool::new(hub)),
+        Box::new(MemoryGraphExportTool::new(hub.clone())),
     );
 
-    // debug-level here: what-if/nominal builds (audits, matrices, tests) call
-    // this too — the authoritative serving log is emitted by build_registry.
-    tracing::debug!(
-        profile = policy.profile().label(),
-        toolset = policy.label(),
-        tools = reg.list().len(),
-        ceremony_tools = ceremony,
-        "MCP tool registry built"
-    );
     reg
 }
 
@@ -57142,13 +57787,15 @@ pub(crate) fn build_registry_with_policy_surface(
 /// context governor, config audit) — `build_registry_with_policy` is the
 /// deterministic nominal view and will overcount on hosts missing
 /// devices/credentials.
-pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
+pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> FinalizedToolRegistry {
     let hub = Hub::builder().build();
-    let mut registry = build_registry_with_policy_surface(
+    let surface = HostSurface::detect();
+    let ceremony = ceremony_tools_exposed(policy);
+    let mut registry = build_registry_builder_with_policy_surface(
         hub.clone(),
         policy,
-        HostSurface::detect(),
-        ceremony_tools_exposed(policy),
+        surface,
+        ceremony,
     );
     register_chatgpt_forum_tools(&mut registry, &hub, policy, configured_chatgpt_forum_tags());
     register_chatgpt_collab_tools(&mut registry, policy);
@@ -57158,10 +57805,32 @@ pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
             &mut registry,
             policy,
             Tier::Niche,
-            Arc::new(EmbodimentProjectionPreviewTool::new(operations)),
+            Box::new(EmbodimentProjectionPreviewTool::new(operations)),
         );
     }
-    registry
+    match StoryMcpConfig::from_env() {
+        Ok(Some(config)) => reg_if(
+            &mut registry,
+            policy,
+            Tier::Niche,
+            Box::new(StoryCommandPreflightTool::new(config)),
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            tool = "story_command_preflight",
+            %error,
+            "invalid story MCP configuration; tool left unregistered"
+        ),
+    }
+    finalize_effect_registry(
+        registry,
+        &hub,
+        policy,
+        surface,
+        ceremony,
+        "reconstructed_current_process_view",
+    )
+    .0
 }
 
 /// `exposed_tool_count_for`, but for what the host would actually serve.

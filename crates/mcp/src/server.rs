@@ -1,7 +1,7 @@
 //! MCP stdio server main loop.
 //!
 //! Reads newline-delimited JSON-RPC requests from stdin, dispatches them
-//! against the [`ToolRegistry`], and writes responses to stdout.
+//! against the [`FinalizedToolRegistry`], and writes responses to stdout.
 //! Logs go to stderr (so they never collide with the protocol stream).
 
 use crate::protocol::{
@@ -13,7 +13,8 @@ use crate::protocol::{
 #[cfg(test)]
 use crate::{default_tool_title, ToolSchema};
 use crate::{
-    ContentBlock, McpTransportKind, ToolContext, ToolDescriptor, ToolRegistry, ToolResult,
+    without_effectful_call_lease, ContentBlock, FinalizedToolRegistry, McpTransportKind,
+    ToolContext, ToolDescriptor, ToolResult, VerifiedExecutionContext,
 };
 use ab_core::SessionId;
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
@@ -112,15 +113,27 @@ fn session_id_from_env() -> Option<String> {
 }
 
 fn tool_context_from_call(params: &Value, args: &Value) -> ToolContext {
-    let meta = params.get("_meta").or_else(|| args.get("_meta"));
-    let raw_session_id = session_id_from_object(meta)
+    tool_context_from_call_with_execution_context(params, args, None)
+}
+
+fn tool_context_from_call_with_execution_context(
+    params: &Value,
+    args: &Value,
+    verified_execution_context: Option<VerifiedExecutionContext>,
+) -> ToolContext {
+    // Preserve the legacy hint channel (including arguments._meta) for session
+    // correlation and extras. Only the protocol-level params metadata has
+    // transport-owned placement suitable for authorization checks.
+    let hint_meta = params.get("_meta").or_else(|| args.get("_meta"));
+    let authorization_meta = params.get("_meta");
+    let raw_session_id = session_id_from_object(hint_meta)
         .or_else(|| session_id_from_object(Some(args)))
         .or_else(|| session_id_from_object(Some(params)))
         .or_else(session_id_from_env);
 
     let mut extras = HashMap::new();
-    if let Some(meta) = meta.cloned() {
-        extras.insert("_meta".to_string(), meta);
+    if let Some(meta) = hint_meta.cloned() {
+        extras.insert("_meta".to_string(), without_effectful_call_lease(&meta));
     }
 
     ToolContext {
@@ -130,6 +143,9 @@ fn tool_context_from_call(params: &Value, args: &Value) -> ToolContext {
         // Stdio carries JSON-RPC only. Caller-provided `_meta` and arguments
         // cannot be promoted into authenticated OAuth identity evidence.
         verified_oauth_subject: None,
+        verified_execution_context,
+        authorization_meta: authorization_meta.cloned(),
+        finalized_registry_dispatch: None,
     }
 }
 
@@ -138,7 +154,7 @@ fn tool_context_from_call(params: &Value, args: &Value) -> ToolContext {
 /// `store` is optional; when present, memory resources (`memory://…`) are
 /// advertised and readable. Pass `None` when no state store is available.
 pub async fn serve_stdio(
-    registry: ToolRegistry,
+    registry: FinalizedToolRegistry,
     store: Option<Arc<dyn StateStore>>,
     server_name: &str,
     version: &str,
@@ -198,7 +214,7 @@ pub async fn serve_stdio(
 async fn run_dispatch_loop(
     mut line_rx: mpsc::UnboundedReceiver<String>,
     resp_tx: mpsc::UnboundedSender<McpResponse>,
-    registry: ToolRegistry,
+    registry: FinalizedToolRegistry,
     store: Option<Arc<dyn StateStore>>,
     server_name: String,
     version: String,
@@ -411,8 +427,9 @@ async fn record_mcp_tool_failure(store: Option<&dyn StateStore>, tool_name: &str
 
 #[derive(Debug, Clone)]
 struct ConnectionTelemetry {
-    /// Random per-process identifier used only to correlate calls emitted by
-    /// this MCP connection. It is not derived from client or user identity.
+    /// Random server-owned identifier for this stdio transport instance. It
+    /// correlates calls and seeds the non-task execution-context commitment;
+    /// it is never derived from client, session, or user metadata.
     mcp_session_id: String,
     client_name: Option<String>,
     profile: String,
@@ -546,7 +563,11 @@ fn mcp_connection_source_from_env(client_name: Option<&str>) -> &'static str {
     let source = std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok();
     let client = std::env::var("AGENT_BRIDGE_CLIENT").ok();
     let toolset = std::env::var("AGENT_BRIDGE_TOOLSET").ok();
-    let codex_context = std::env::vars().any(|(k, _)| k.starts_with("CODEX_"));
+    // `std::env::vars()` panics when any inherited value is not UTF-8. MCP
+    // transports must remain available long enough for security guards to
+    // reject malformed configuration, so inspect only OS-string keys here.
+    let codex_context =
+        std::env::vars_os().any(|(key, _)| key.to_string_lossy().starts_with("CODEX_"));
     classify_mcp_connection_source(
         client_name,
         source.as_deref(),
@@ -718,7 +739,10 @@ fn tools_list_result_from_descriptors(
     .map_err(|e| format!("serialize tools/list result: {e}"))
 }
 
-fn tools_list_response(registry: &ToolRegistry, params: Option<&Value>) -> Result<Value, String> {
+fn tools_list_response(
+    registry: &FinalizedToolRegistry,
+    params: Option<&Value>,
+) -> Result<Value, String> {
     let tools = registry.descriptors();
     tools_list_result_from_descriptors(&tools, params, tools_list_page_size())
 }
@@ -760,7 +784,7 @@ async fn record_mcp_tool_call_telemetry(
 }
 
 async fn handle(
-    registry: &ToolRegistry,
+    registry: &FinalizedToolRegistry,
     store: Option<&dyn StateStore>,
     req: McpRequest,
     server_name: &str,
@@ -778,7 +802,10 @@ async fn handle(
                 protocol_version: PROTOCOL_VERSION.into(),
                 capabilities: ServerCapabilities {
                     tools: Some(ToolsCapability {
-                        list_changed: Some(true),
+                        // A finalized registry cannot change for the lifetime of
+                        // this server instance, so advertising list-change
+                        // notifications would be an incorrect capability claim.
+                        list_changed: Some(false),
                     }),
                     resources: store.map(|_| ResourcesCapability::default()),
                 },
@@ -822,8 +849,15 @@ async fn handle(
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             let args_size = serde_json::to_string(&args).map(|s| s.len() as u32).ok();
 
-            let tool = match registry.get(&name) {
-                Some(t) => t,
+            let ctx = tool_context_from_call_with_execution_context(
+                &params,
+                &args,
+                Some(VerifiedExecutionContext::stdio_connection(
+                    &telemetry.mcp_session_id,
+                )),
+            );
+            let invocation = match registry.invoke(&name, args, &ctx).await {
+                Some(result) => result,
                 None => {
                     let msg = format!("unknown tool: {name}");
                     record_mcp_tool_failure(store, &name, &msg).await;
@@ -834,9 +868,7 @@ async fn handle(
                     return McpResponse::error(id, METHOD_NOT_FOUND, msg);
                 }
             };
-
-            let ctx = tool_context_from_call(&params, &args);
-            match tool.execute(args, &ctx).await {
+            match invocation {
                 Ok(mut result) => {
                     let ok = !result.is_error;
                     if result.is_error {
@@ -1148,7 +1180,9 @@ async fn write_response(stdout: &mut tokio::io::Stdout, resp: &McpResponse) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{McpTool, ToolSchema};
+    use crate::{
+        AllowAllToolCallGuard, McpTool, RegistryFinalization, ToolRegistryBuilder, ToolSchema,
+    };
     use async_trait::async_trait;
 
     // --- Layer 3 concurrency: a slow/hung tools/call must not block a later one,
@@ -1209,7 +1243,23 @@ mod tests {
     /// The loop returns when input closes; the response channel then drains as the
     /// spawned tasks (which hold cloned senders) complete, so recv() yields all of
     /// them and ends when the last task drops its sender.
-    async fn drive(reg: ToolRegistry, lines: Vec<String>) -> Vec<McpResponse> {
+    fn finalize_test_registry(builder: ToolRegistryBuilder) -> FinalizedToolRegistry {
+        builder.finalize_with(|_| {
+            RegistryFinalization::new(
+                Arc::new(AllowAllToolCallGuard),
+                json!({
+                    "environment": "server_test",
+                    "uncovered_ingress": [],
+                }),
+            )
+        })
+    }
+
+    fn empty_test_registry() -> FinalizedToolRegistry {
+        finalize_test_registry(ToolRegistryBuilder::default())
+    }
+
+    async fn drive(reg: FinalizedToolRegistry, lines: Vec<String>) -> Vec<McpResponse> {
         let (ltx, lrx) = mpsc::unbounded_channel::<String>();
         let (rtx, mut rrx) = mpsc::unbounded_channel::<McpResponse>();
         for l in lines {
@@ -1233,7 +1283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialize_advertises_tools_list_changed() {
+    async fn initialize_advertises_immutable_tool_list() {
         let init = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -1242,7 +1292,7 @@ mod tests {
         })
         .to_string();
 
-        let resps = drive(ToolRegistry::default(), vec![init]).await;
+        let resps = drive(empty_test_registry(), vec![init]).await;
 
         assert_eq!(resps.len(), 1);
         assert_eq!(
@@ -1252,7 +1302,7 @@ mod tests {
                 .and_then(|v| v.get("capabilities"))
                 .and_then(|v| v.get("tools"))
                 .and_then(|v| v.get("listChanged")),
-            Some(&json!(true))
+            Some(&json!(false))
         );
     }
 
@@ -1299,17 +1349,21 @@ mod tests {
 
     #[tokio::test]
     async fn slow_tools_call_does_not_block_a_later_fast_one() {
-        let mut reg = ToolRegistry::default();
-        reg.register(Arc::new(SleepTool {
+        let mut builder = ToolRegistryBuilder::default();
+        builder.register(Box::new(SleepTool {
             name: "slow",
             delay_ms: 300,
         }));
-        reg.register(Arc::new(SleepTool {
+        builder.register(Box::new(SleepTool {
             name: "fast",
             delay_ms: 0,
         }));
         // slow is sent FIRST; the old sequential loop would block fast behind it.
-        let resps = drive(reg, vec![call_line(1, "slow"), call_line(2, "fast")]).await;
+        let resps = drive(
+            finalize_test_registry(builder),
+            vec![call_line(1, "slow"), call_line(2, "fast")],
+        )
+        .await;
         assert_eq!(resps.len(), 2, "both calls must respond");
         assert_eq!(
             resps[0].id,
@@ -1321,9 +1375,9 @@ mod tests {
 
     #[tokio::test]
     async fn notifications_cancelled_aborts_in_flight_call() {
-        let mut reg = ToolRegistry::default();
+        let mut builder = ToolRegistryBuilder::default();
         // would otherwise run 5s; the cancellation must abort it near-instantly.
-        reg.register(Arc::new(SleepTool {
+        builder.register(Box::new(SleepTool {
             name: "slow",
             delay_ms: 5_000,
         }));
@@ -1335,7 +1389,10 @@ mod tests {
         .to_string();
         let resps = tokio::time::timeout(
             Duration::from_millis(800),
-            drive(reg, vec![call_line(1, "slow"), cancel]),
+            drive(
+                finalize_test_registry(builder),
+                vec![call_line(1, "slow"), cancel],
+            ),
         )
         .await
         .expect("must finish well under the 5s tool sleep because the call was aborted");
@@ -1347,14 +1404,14 @@ mod tests {
 
     #[tokio::test]
     async fn panicking_tools_call_yields_error_response_not_a_hang() {
-        let mut reg = ToolRegistry::default();
-        reg.register(Arc::new(PanicTool));
+        let mut builder = ToolRegistryBuilder::default();
+        builder.register(Box::new(PanicTool));
         // A panic inside tool.execute() must NOT swallow the response (which would
         // re-create the "AB call never returns" wedge); the supervisor must turn it
         // into a JSON-RPC error response, promptly.
         let resps = tokio::time::timeout(
             Duration::from_millis(800),
-            drive(reg, vec![call_line(1, "boom")]),
+            drive(finalize_test_registry(builder), vec![call_line(1, "boom")]),
         )
         .await
         .expect("a panicking tool must return promptly, not hang the request");
@@ -1375,7 +1432,8 @@ mod tests {
         let params = json!({
             "_meta": {
                 "session_id": "session-from-meta",
-                "client": "codex"
+                "client": "codex",
+                "agent_bridge/effectful_call_lease": "one-shot-secret"
             },
             "name": "any_tool",
             "arguments": {}
@@ -1392,8 +1450,98 @@ mod tests {
             ctx.extras.get("_meta").and_then(|v| v.get("client")),
             Some(&json!("codex"))
         );
+        assert!(ctx
+            .extras
+            .get("_meta")
+            .and_then(|meta| meta.get(crate::EFFECTFUL_CALL_LEASE_META_KEY))
+            .is_none());
+        assert_eq!(
+            ctx.authorization_meta().and_then(|meta| meta.get("client")),
+            Some(&json!("codex"))
+        );
+        assert_eq!(
+            ctx.authorization_meta()
+                .and_then(|meta| meta.get(crate::EFFECTFUL_CALL_LEASE_META_KEY)),
+            Some(&json!("one-shot-secret"))
+        );
         assert_eq!(ctx.transport_kind, McpTransportKind::Stdio);
         assert!(ctx.verified_oauth_subject.is_none());
+        assert!(ctx.verified_execution_context().is_none());
+    }
+
+    #[test]
+    fn stdio_execution_context_is_server_owned_and_not_a_task_claim() {
+        let params = json!({
+            "_meta": {
+                "session_id": "caller-session",
+                "task_id": "caller-task",
+                "execution_context_commitment": "caller-chosen"
+            },
+            "name": "any_tool",
+            "arguments": {}
+        });
+        let args = json!({});
+
+        let first = tool_context_from_call_with_execution_context(
+            &params,
+            &args,
+            Some(VerifiedExecutionContext::stdio_connection(
+                "server-connection-a",
+            )),
+        );
+        let same = tool_context_from_call_with_execution_context(
+            &params,
+            &args,
+            Some(VerifiedExecutionContext::stdio_connection(
+                "server-connection-a",
+            )),
+        );
+        let other = tool_context_from_call_with_execution_context(
+            &params,
+            &args,
+            Some(VerifiedExecutionContext::stdio_connection(
+                "server-connection-b",
+            )),
+        );
+
+        let first = first.verified_execution_context().unwrap();
+        assert_eq!(first.kind(), "mcp_stdio_connection_v1");
+        assert!(!first.task_identity_attested());
+        assert_eq!(
+            first.commitment(),
+            same.verified_execution_context().unwrap().commitment()
+        );
+        assert_ne!(
+            first.commitment(),
+            other.verified_execution_context().unwrap().commitment()
+        );
+        assert_ne!(first.commitment_hex(), "caller-chosen");
+    }
+
+    #[test]
+    fn stdio_arguments_meta_is_not_promoted_to_authorization_meta() {
+        let params = json!({
+            "name": "any_tool",
+            "arguments": {
+                "_meta": {
+                    "agent_bridge/effectful_call_lease": "forged-in-tool-input",
+                    "legacy_hint": "still-visible"
+                }
+            }
+        });
+        let args = params.get("arguments").cloned().unwrap();
+
+        let ctx = tool_context_from_call(&params, &args);
+
+        assert!(ctx.authorization_meta().is_none());
+        let extras_meta = ctx.extras.get("_meta").unwrap();
+        assert!(extras_meta
+            .get(crate::EFFECTFUL_CALL_LEASE_META_KEY)
+            .is_none());
+        assert_eq!(
+            extras_meta.get("legacy_hint"),
+            Some(&json!("still-visible"))
+        );
     }
 
     #[test]

@@ -598,6 +598,58 @@ fn tool_atlas_treats_plan_load_missing_plan_as_expected_lookup_miss() {
 }
 
 #[test]
+fn tool_atlas_classifies_typed_plan_gate_rejections_as_expected() {
+    let rejection = |code: &str| {
+        serde_json::json!({
+            "status": "rejected",
+            "reason": {"code": code, "step_id": "s1"}
+        })
+        .to_string()
+    };
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["plan_save".to_string(), "plan_update".to_string()],
+        stats: vec![
+            stat("plan_save", 2, 1, 4, 900.0),
+            stat("plan_update", 3, 1, 4, 900.0),
+        ],
+        recent_errors: vec![
+            McpToolErrorRecord {
+                ts: 1_779_909_990,
+                tool_name: "plan_save".to_string(),
+                message: rejection("duplicate_step_id"),
+            },
+            McpToolErrorRecord {
+                ts: 1_779_909_991,
+                tool_name: "plan_update".to_string(),
+                message: rejection("completion_evidence_required"),
+            },
+        ],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+    let save = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "plan_save")
+        .expect("plan_save");
+    assert!(save
+        .risk_flags
+        .contains(&"expected_input_validation".to_string()));
+    assert!(!save.risk_flags.contains(&"has_errors".to_string()));
+    let update = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "plan_update")
+        .expect("plan_update");
+    assert!(update
+        .risk_flags
+        .contains(&"expected_safety_gate".to_string()));
+    assert!(!update.risk_flags.contains(&"has_errors".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_mobile_adb_missing_as_expected_runtime_unavailable() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,

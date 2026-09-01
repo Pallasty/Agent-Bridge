@@ -44,6 +44,9 @@ g14-wasi-component-runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
 # `ab-seed-bridge`; CLI/MCP surfaces report build-time disabled. Build the
 # standalone `crates/seed-bridge` crate for historical replay experiments.
 seed-substrate = []
+# Default-off, non-authoritative invocation guardian lab. This feature contains
+# no production monotonic witness and cannot grant InvocationLease authority.
+invocation-guardian-lab = []
 
 [dependencies]
 ab-core.workspace = true
@@ -64,6 +67,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10"
+ring = "0.17"
 thiserror.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
@@ -104,7 +108,6 @@ wayland-client = { version = "0.31", optional = true }
 
 [dev-dependencies]
 flate2 = "1"
-ring = "0.17"
 tempfile = "3"
 
 [[bin]]
@@ -119,3 +122,8 @@ required-features = ["episode-observation-c2c-keychain-macos-live-lab"]
 [[bin]]
 name = "mobile-projection-host"
 path = "src/bin/mobile_projection_host.rs"
+
+[[bin]]
+name = "invocation-guardian"
+path = "src/bin/invocation_guardian.rs"
+required-features = ["invocation-guardian-lab"]

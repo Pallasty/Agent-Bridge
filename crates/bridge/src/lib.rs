@@ -4,6 +4,7 @@
 //!
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
+pub mod agent_spawn_governor;
 pub mod agent_task_contract;
 pub mod agent_task_outcome;
 pub mod agent_world_trajectory;
@@ -53,6 +54,7 @@ pub mod daemon_http;
 pub mod dream_digest;
 pub mod dream_distill;
 pub mod dream_replay;
+pub mod effect_inventory;
 pub mod embedding_dim_guard;
 pub mod embodiment_projection;
 /// Default-off P4 runtime gate; no MCP registration or adapter execution.
@@ -82,6 +84,13 @@ pub mod hub;
 pub mod g14_component_runtime;
 pub mod ide;
 pub mod instinct;
+#[cfg(unix)]
+pub mod invocation_guardian_client;
+#[cfg(unix)]
+pub mod invocation_guardian_protocol;
+#[cfg(unix)]
+pub mod invocation_guardian_service;
+pub mod invocation_lease;
 pub mod llm_client;
 pub mod locks;
 pub mod lswr_interaction_feedback;

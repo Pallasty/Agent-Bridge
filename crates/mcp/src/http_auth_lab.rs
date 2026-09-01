@@ -10,8 +10,9 @@ use crate::protocol::{
     ToolsCapability, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
 };
 use crate::{
-    McpTool, McpTransportKind, ToolAnnotations, ToolContext, ToolRegistry, ToolResult, ToolSchema,
-    ToolSecurityScheme, VerifiedOAuthSubject,
+    without_effectful_call_lease, AllowAllToolCallGuard, FinalizedToolRegistry, McpTool,
+    McpTransportKind, RegistryFinalization, ToolAnnotations, ToolCallGuard, ToolContext,
+    ToolRegistryBuilder, ToolResult, ToolSchema, ToolSecurityScheme, VerifiedOAuthSubject,
 };
 use ab_core::{Error, Result};
 use async_trait::async_trait;
@@ -227,7 +228,7 @@ struct LabConfig {
 #[derive(Clone)]
 struct LabState {
     config: Arc<LabConfig>,
-    registry: ToolRegistry,
+    registry: Arc<FinalizedToolRegistry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -375,10 +376,26 @@ async fn provider_state_from_json(raw: &str) -> Result<LabState> {
 }
 
 fn state_from_config(config: Arc<LabConfig>) -> LabState {
-    let mut registry = ToolRegistry::new();
-    registry.register(Arc::new(OAuthSubjectDiagnostic {
+    state_from_config_with_guard(config, Arc::new(AllowAllToolCallGuard))
+}
+
+fn state_from_config_with_guard(config: Arc<LabConfig>, guard: Arc<dyn ToolCallGuard>) -> LabState {
+    let mut registry = ToolRegistryBuilder::new();
+    registry.register(Box::new(OAuthSubjectDiagnostic {
         required_scopes: config.required_scopes.iter().cloned().collect(),
         runtime_kind: config.runtime_kind,
+    }));
+    let runtime_kind = config.runtime_kind.as_str();
+    let registry = Arc::new(registry.finalize_with(|descriptors| {
+        RegistryFinalization::new(
+            guard,
+            json!({
+                "surface": "http_oauth_verification",
+                "runtime_kind": runtime_kind,
+                "execution_allowed": false,
+                "registered_tool_count": descriptors.len(),
+            }),
+        )
     }));
     LabState { config, registry }
 }
@@ -1520,26 +1537,30 @@ async fn dispatch_request(
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return McpResponse::error(id, INVALID_PARAMS, "missing 'name'");
             };
-            let Some(tool) = state.registry.get(name) else {
-                return McpResponse::error(id, METHOD_NOT_FOUND, format!("unknown tool: {name}"));
-            };
             let args = params
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             let mut extras = HashMap::new();
             if let Some(meta) = params.get("_meta") {
-                extras.insert("_meta".to_string(), meta.clone());
+                extras.insert("_meta".to_string(), without_effectful_call_lease(meta));
             }
             let context = ToolContext {
                 session_id: None,
                 extras,
                 transport_kind: McpTransportKind::StreamableHttp,
                 verified_oauth_subject: Some(subject),
+                // OAuth proves a principal, not a task or connection instance.
+                verified_execution_context: None,
+                // Preserve only protocol-level params metadata. A `_meta`
+                // object inside arguments remains ordinary tool input.
+                authorization_meta: params.get("_meta").cloned(),
+                finalized_registry_dispatch: None,
             };
-            match tool.execute(args, &context).await {
-                Ok(result) => serialize_result(id, result),
-                Err(error) => serialize_result(
+            match state.registry.invoke(name, args, &context).await {
+                None => McpResponse::error(id, METHOD_NOT_FOUND, format!("unknown tool: {name}")),
+                Some(Ok(result)) => serialize_result(id, result),
+                Some(Err(error)) => serialize_result(
                     id,
                     ToolResult::error(format!("tool '{name}' failed: {error}")),
                 ),
@@ -1678,6 +1699,39 @@ mod tests {
         private_pem: String,
         modulus: String,
         exponent: String,
+    }
+
+    struct RecordingAuthorizationMetaGuard {
+        seen: std::sync::Mutex<Vec<(Option<Value>, Option<Value>)>>,
+    }
+
+    #[async_trait]
+    impl crate::ToolCallGuard for RecordingAuthorizationMetaGuard {
+        async fn authorize_and_consume(
+            &self,
+            _tool_name: &str,
+            _args: &Value,
+            context: &ToolContext,
+        ) -> Result<()> {
+            let meta = context.authorization_meta().cloned();
+            let extras_meta = context.extras.get("_meta").cloned();
+            self.seen.lock().unwrap().push((meta.clone(), extras_meta));
+            if meta
+                .as_ref()
+                .and_then(|value| value.get(crate::EFFECTFUL_CALL_LEASE_META_KEY))
+                == Some(&json!("valid"))
+            {
+                Ok(())
+            } else {
+                Err(Error::InvalidArgument(
+                    "missing transport-level lease".into(),
+                ))
+            }
+        }
+
+        fn policy_snapshot(&self) -> Value {
+            json!({ "schema": "test_guard.v1", "mode": "recording_authorization_meta" })
+        }
     }
 
     fn test_key() -> &'static TestKeyMaterial {
@@ -1892,6 +1946,90 @@ mod tests {
 
     async fn response_json(response: Response) -> Value {
         serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn http_authorization_meta_comes_only_from_call_params() {
+        let guard = Arc::new(RecordingAuthorizationMetaGuard {
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let raw: RawLabConfig = serde_json::from_str(&config_json()).unwrap();
+        let config = Arc::new(validate_config(raw).unwrap());
+        let state = state_from_config_with_guard(config, guard.clone());
+        let app = router(state);
+
+        let accepted = post(
+            app.clone(),
+            Some(&token(&valid_claims())),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "oauth_subject_diagnostic",
+                    "arguments": {},
+                    "_meta": {
+                        "agent_bridge/effectful_call_lease": "valid",
+                        "client": "chatgpt"
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(accepted.status(), StatusCode::OK);
+        let accepted = response_json(accepted).await;
+        assert_eq!(accepted["result"]["isError"], json!(false));
+        assert_eq!(
+            accepted["result"]["structuredContent"]["transport"],
+            json!("streamable_http")
+        );
+        assert_eq!(
+            accepted["result"]["structuredContent"]["local_subject"],
+            json!("owner")
+        );
+
+        let rejected = post(
+            app,
+            Some(&token(&valid_claims())),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "oauth_subject_diagnostic",
+                    "arguments": {
+                        "_meta": { "agent_bridge/effectful_call_lease": "valid" }
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(rejected.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(rejected).await["result"]["isError"],
+            json!(true)
+        );
+
+        let seen = guard.seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            seen[0]
+                .0
+                .as_ref()
+                .and_then(|meta| meta.get(crate::EFFECTFUL_CALL_LEASE_META_KEY)),
+            Some(&json!("valid"))
+        );
+        assert_eq!(
+            seen[0].1.as_ref().and_then(|meta| meta.get("client")),
+            Some(&json!("chatgpt"))
+        );
+        assert!(seen[0]
+            .1
+            .as_ref()
+            .and_then(|meta| meta.get(crate::EFFECTFUL_CALL_LEASE_META_KEY))
+            .is_none());
+        assert!(seen[1].0.is_none());
+        assert!(seen[1].1.is_none());
     }
 
     #[tokio::test]
