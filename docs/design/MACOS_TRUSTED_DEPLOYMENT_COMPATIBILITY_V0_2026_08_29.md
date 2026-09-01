@@ -274,8 +274,10 @@ not admitted by this slice; provisioning plan and production-root birth remain
 open until an independent seed completes under an explicitly accepted route.
 After both remotes advanced together, the read-only plan was repeated against
 current common master `19fe2cedca1f1a609af83fae0da1977a3a7f691c` and again
-returned `ready`; the transfer was not retried because no newly admitted
-independent acquisition route had changed the measured blocker.
+returned `ready`. A later bounded retry received only about 452 KiB after
+55 seconds and failed closed at the unchanged 120-second limit; its sibling
+stage was removed and no seed was activated. The measured blocker therefore
+remains unchanged.
 
 ### D4 — migration and launchd adoption
 
