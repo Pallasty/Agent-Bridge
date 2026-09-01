@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -84,6 +85,25 @@ class DarwinTrustedRootProvisionerTests(unittest.TestCase):
         receipt.chmod(0o644)
         with self.assertRaisesRegex(MODULE.ProvisionError, "receipt"):
             MODULE.verify(self.root, self.helper)
+
+    def test_receipt_fixed_semantics_and_fields_fail_closed(self) -> None:
+        plan = MODULE.build_plan(self.root, self.helper)
+        MODULE.provision(self.root, self.helper, plan["confirmation"])
+        receipt_path = self.root / MODULE.RECEIPT_NAME
+        original = json.loads(receipt_path.read_text(encoding="utf-8"))
+        mutations = (
+            ("activation", "replacement_rename", "fixed semantics"),
+            ("production_state_imported", True, "fixed semantics"),
+            ("launchd_changed", True, "fixed semantics"),
+            ("unexpected", "accepted", "fields"),
+        )
+        for field, value, expected_error in mutations:
+            with self.subTest(field=field):
+                tampered = dict(original)
+                tampered[field] = value
+                receipt_path.write_bytes(MODULE.canonical_json(tampered) + b"\n")
+                with self.assertRaisesRegex(MODULE.ProvisionError, expected_error):
+                    MODULE.verify(self.root, self.helper)
 
     def test_mutable_namespace_content_does_not_drift_custody_spine(self) -> None:
         plan = MODULE.build_plan(self.root, self.helper)

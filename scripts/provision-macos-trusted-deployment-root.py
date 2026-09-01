@@ -26,6 +26,10 @@ RECEIPT_SCHEMA = "agent_bridge.darwin_trusted_root_receipt.v0"
 RESULT_SCHEMA = "agent_bridge.darwin_trusted_root_result.v0"
 BACKEND = "darwin-launchd-v0"
 RECEIPT_NAME = "receipts/root-provisioning.json"
+RECEIPT_KEYS = {
+    "schema", "backend", "manifest_sha256", "tree_sha256", "entry_count",
+    "activation", "production_state_imported", "launchd_changed",
+}
 LAYOUT = (
     "bin", "build", "config", "data", "lib", "publisher", "receipts",
     "rollback", "share", "source",
@@ -233,8 +237,16 @@ def verify(root: Path, helper: Path) -> dict[str, Any]:
     expected_manifest = build_manifest(root, helper, helper_sha256)
     if manifest != expected_manifest:
         fail("root manifest drifted")
+    if set(receipt) != RECEIPT_KEYS:
+        fail("root receipt fields drifted")
     if receipt.get("schema") != RECEIPT_SCHEMA or receipt.get("backend") != BACKEND:
         fail("root receipt schema or backend is wrong")
+    if (
+        receipt.get("activation") != "renameatx_np_RENAME_EXCL"
+        or receipt.get("production_state_imported") is not False
+        or receipt.get("launchd_changed") is not False
+    ):
+        fail("root receipt fixed semantics drifted")
     if receipt.get("manifest_sha256") != sha256_bytes(canonical_json(manifest)):
         fail("root receipt manifest digest drifted")
     digest, entries = custody_digest(root)

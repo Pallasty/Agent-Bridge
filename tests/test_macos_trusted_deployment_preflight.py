@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -29,6 +30,8 @@ class FakeRunner:
             return MODULE.CommandResult(0, "drwx------  2 owner staff 64 root\n")
         if command[:3] == ("/usr/bin/stat", "-f", "%T"):
             return MODULE.CommandResult(0, "apfs\n")
+        if command[:3] == ("/usr/bin/stat", "-f", "%Sf"):
+            return MODULE.CommandResult(0, "-\n")
         if command[:3] == ("/usr/bin/codesign", "--verify", "--strict"):
             return MODULE.CommandResult(0, "")
         if command[:3] == ("/usr/bin/codesign", "-dv", "--verbose=4"):
@@ -109,6 +112,46 @@ class DarwinTrustedPreflightTests(unittest.TestCase):
         )
         self.assertIn("ROOT_EXTENDED_METADATA_PRESENT", result["blockers"])
         self.assertIn("ROOT_FILESYSTEM_NOT_LOCAL_SUPPORTED", result["blockers"])
+
+    def test_immutable_root_flag_fails_closed(self) -> None:
+        def runner(argv):
+            if argv[0:3] == ("/usr/bin/stat", "-f", "%Sf"):
+                return MODULE.CommandResult(0, "uchg\n")
+            return self.runner(argv)
+
+        result = MODULE.build_preflight(
+            root=self.root, installed_binary=self.binary,
+            state_database=self.database, runner=runner, system="Darwin",
+        )
+        self.assertEqual(result["verdict"], "HOLD")
+        self.assertIn("ROOT_FILE_FLAGS_PRESENT", result["blockers"])
+
+    def test_command_failures_return_incomplete_observations(self) -> None:
+        failures = (
+            (subprocess.TimeoutExpired(("probe",), 10), 124, "COMMAND_TIMEOUT"),
+            (OSError("unavailable"), 127, "COMMAND_EXEC_FAILED"),
+        )
+        for error, returncode, token in failures:
+            with self.subTest(token=token), \
+                 mock.patch.object(MODULE.subprocess, "run", side_effect=error):
+                result = MODULE.run_command(("/usr/bin/true",))
+            self.assertEqual(result.returncode, returncode)
+            self.assertEqual(result.stderr, token)
+            self.assertFalse(result.observation_complete)
+
+    def test_incomplete_launchd_observation_is_a_blocker(self) -> None:
+        def runner(argv):
+            if argv[0:2] == ("/bin/launchctl", "print"):
+                return MODULE.CommandResult(124, "", "COMMAND_TIMEOUT", False)
+            return self.runner(argv)
+
+        result = MODULE.build_preflight(
+            root=self.root, installed_binary=self.binary,
+            state_database=self.database, runner=runner, system="Darwin",
+        )
+        self.assertEqual(result["verdict"], "HOLD")
+        self.assertIn("LAUNCHD_INVENTORY_INCOMPLETE", result["blockers"])
+        self.assertIsNone(result["checks"]["launchd"]["facts"]["services"][0]["loaded"])
 
     def test_sqlite_sidecar_and_open_descriptor_fail_closed(self) -> None:
         Path(str(self.database) + "-wal").write_bytes(b"wal")

@@ -38,15 +38,21 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str = ""
+    observation_complete: bool = True
 
 
 Runner = Callable[[Sequence[str]], CommandResult]
 
 
 def run_command(argv: Sequence[str]) -> CommandResult:
-    completed = subprocess.run(
-        list(argv), capture_output=True, text=True, timeout=10, check=False
-    )
+    try:
+        completed = subprocess.run(
+            list(argv), capture_output=True, text=True, timeout=10, check=False
+        )
+    except subprocess.TimeoutExpired:
+        return CommandResult(124, "", "COMMAND_TIMEOUT", False)
+    except OSError:
+        return CommandResult(127, "", "COMMAND_EXEC_FAILED", False)
     return CommandResult(completed.returncode, completed.stdout, completed.stderr)
 
 
@@ -135,19 +141,38 @@ def _root_check(root: Path, runner: Runner) -> tuple[dict[str, Any], list[str]]:
         if stat.S_IMODE(value.st_mode) != 0o700:
             blockers.append("ROOT_MODE_NOT_0700")
         details = runner(("/bin/ls", "-ldeO@", raw))
-        facts["metadata_inspection_complete"] = details.returncode == 0
-        if details.returncode != 0:
+        facts["metadata_inspection_complete"] = (
+            details.observation_complete and details.returncode == 0
+        )
+        if not facts["metadata_inspection_complete"]:
             blockers.append("ROOT_METADATA_UNREADABLE")
         else:
             lines = [line for line in details.stdout.splitlines()[1:] if line.strip()]
             facts["extended_metadata_lines"] = len(lines)
             if lines:
                 blockers.append("ROOT_EXTENDED_METADATA_PRESENT")
+        flags_result = runner(("/usr/bin/stat", "-f", "%Sf", raw))
+        flags = (
+            flags_result.stdout.strip()
+            if flags_result.observation_complete and flags_result.returncode == 0
+            else None
+        )
+        facts["file_flags"] = flags
+        if flags is None:
+            blockers.append("ROOT_FLAGS_UNREADABLE")
+        elif flags != "-":
+            blockers.append("ROOT_FILE_FLAGS_PRESENT")
         fs = runner(("/usr/bin/stat", "-f", "%T", raw))
-        filesystem = fs.stdout.strip().lower() if fs.returncode == 0 else None
+        filesystem = (
+            fs.stdout.strip().lower()
+            if fs.observation_complete and fs.returncode == 0
+            else None
+        )
         facts["filesystem"] = filesystem
         facts["filesystem_local_supported"] = filesystem in LOCAL_FILESYSTEMS
-        if filesystem not in LOCAL_FILESYSTEMS:
+        if filesystem is None:
+            blockers.append("ROOT_FILESYSTEM_INSPECTION_INCOMPLETE")
+        elif filesystem not in LOCAL_FILESYSTEMS:
             blockers.append("ROOT_FILESYSTEM_NOT_LOCAL_SUPPORTED")
         capacity = os.statvfs(root)
         facts["capacity_free_bytes"] = capacity.f_bavail * capacity.f_frsize
@@ -171,10 +196,14 @@ def _binary_check(path: Path, runner: Runner) -> tuple[dict[str, Any], list[str]
         return _check("FAIL", facts), ["INSTALLED_BINARY_UNSAFE_OR_UNREADABLE"]
     verify = runner(("/usr/bin/codesign", "--verify", "--strict", str(path)))
     display = runner(("/usr/bin/codesign", "-dv", "--verbose=4", str(path)))
-    facts["signature_valid"] = verify.returncode == 0
+    inspection_complete = verify.observation_complete and display.observation_complete
+    facts["signature_inspection_complete"] = inspection_complete
+    facts["signature_valid"] = verify.observation_complete and verify.returncode == 0
     identity_match = re.search(r"^Identifier=(.+)$", display.stderr, re.MULTILINE)
     facts["signature_identifier"] = identity_match.group(1) if identity_match else None
-    if verify.returncode != 0:
+    if not inspection_complete:
+        blockers.append("INSTALLED_BINARY_SIGNATURE_INSPECTION_INCOMPLETE")
+    elif verify.returncode != 0:
         blockers.append("INSTALLED_BINARY_SIGNATURE_INVALID")
     return _check("PASS" if not blockers else "FAIL", facts), blockers
 
@@ -185,6 +214,10 @@ def _launchd_check(labels: Sequence[str], runner: Runner) -> tuple[dict[str, Any
     domain = f"gui/{os.geteuid()}"
     for label in labels:
         result = runner(("/bin/launchctl", "print", f"{domain}/{label}"))
+        if not result.observation_complete:
+            rows.append({"label": label, "loaded": None, "inspection_complete": False})
+            blockers.append("LAUNCHD_INVENTORY_INCOMPLETE")
+            continue
         if result.returncode != 0:
             rows.append({"label": label, "loaded": False})
             continue
@@ -226,11 +259,13 @@ def _state_check(database: Path, runner: Runner) -> tuple[dict[str, Any], list[s
         blockers.append("SQLITE_UNKNOWN_SIDECAR_PRESENT")
     if database.exists():
         holders = runner(("/usr/sbin/lsof", "-n", "-Fpcufn", "--", *(str(path) for path in family)))
-        facts["writer_inventory_complete"] = holders.returncode in (0, 1)
+        facts["writer_inventory_complete"] = (
+            holders.observation_complete and holders.returncode in (0, 1)
+        )
         facts["open_descriptor_process_count"] = sum(
             1 for line in holders.stdout.splitlines() if line.startswith("p")
         )
-        if holders.returncode not in (0, 1):
+        if not facts["writer_inventory_complete"]:
             blockers.append("SQLITE_WRITER_INVENTORY_INCOMPLETE")
         elif facts["open_descriptor_process_count"]:
             blockers.append("SQLITE_OPEN_DESCRIPTOR_PRESENT")
