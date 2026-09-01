@@ -1927,6 +1927,54 @@ def copy_file_exact(source: SourceFile, stage: str) -> None:
         fail("sidecar copy digest mismatch")
 
 
+def remove_obsolete_sqlite_shm(source: str) -> None:
+    """Remove only the stale SHM left after a proven WAL-to-DELETE transition."""
+    shm = source + "-shm"
+    if not os.path.lexists(shm):
+        return
+    if os.path.lexists(source + "-wal") or os.path.lexists(source + "-journal"):
+        fail("obsolete SQLite SHM cannot be removed while WAL or journal exists")
+    require_sqlite_super_journals_absent(source, "normalized legacy SQLite database")
+
+    parent = os.path.dirname(source)
+    name = os.path.basename(shm)
+    parent_st = require_legacy_directory(parent, "legacy SQLite parent")
+    try:
+        parent_fd = os.open(
+            parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+    except OSError:
+        fail("cannot open the legacy SQLite parent for SHM cleanup")
+    try:
+        opened_parent = os.fstat(parent_fd)
+        if (opened_parent.st_dev, opened_parent.st_ino) != (
+            parent_st.st_dev,
+            parent_st.st_ino,
+        ):
+            fail("legacy SQLite parent changed before SHM cleanup")
+        try:
+            shm_st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError:
+            fail("cannot inspect obsolete SQLite SHM through its fixed parent")
+        if (
+            not stat.S_ISREG(shm_st.st_mode)
+            or stat.S_ISLNK(shm_st.st_mode)
+            or shm_st.st_uid not in (0, os.geteuid())
+            or shm_st.st_nlink != 1
+        ):
+            fail("obsolete SQLite SHM must be a single-link physical regular file")
+        try:
+            os.unlink(name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except OSError:
+            fail("cannot durably remove obsolete SQLite SHM")
+    finally:
+        os.close(parent_fd)
+    if os.path.lexists(shm):
+        fail("obsolete SQLite SHM remained after cleanup")
+
+
 def sqlite_checkpoint_and_backup(
     source: str, target: str
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
@@ -1943,6 +1991,9 @@ def sqlite_checkpoint_and_backup(
         checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         if checkpoint is None or len(checkpoint) != 3 or checkpoint[0] != 0:
             fail("legacy SQLite WAL checkpoint was busy")
+        source_journal_mode = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        if source_journal_mode != ("delete",):
+            fail("legacy SQLite journal mode could not be normalized to DELETE")
         check_runtime_gate_during_sqlite()
         destination = sqlite3.connect(target, timeout=0.0, isolation_level=None)
         destination.execute("PRAGMA journal_mode=DELETE")
@@ -1957,6 +2008,9 @@ def sqlite_checkpoint_and_backup(
         target_integrity = destination.execute("PRAGMA integrity_check").fetchall()
         if target_integrity != [("ok",)]:
             fail("staged SQLite integrity check did not return exactly ok")
+        target_journal_mode = destination.execute("PRAGMA journal_mode").fetchone()
+        if target_journal_mode != ("delete",):
+            fail("staged SQLite backup did not retain DELETE journal mode")
         destination.close()
         destination = None
         connection.close()
@@ -1970,6 +2024,8 @@ def sqlite_checkpoint_and_backup(
             destination.close()
         if connection is not None:
             connection.close()
+    check_runtime_gate_during_sqlite()
+    remove_obsolete_sqlite_shm(source)
     os.chmod(target, 0o600, follow_symlinks=False)
     for suffix in SQLITE_SIDECAR_SUFFIXES:
         family = target + suffix
@@ -2611,9 +2667,9 @@ def migrate(context: Context, confirmation: str | None) -> dict[str, Any]:
             context.plan.sqlite_source, sqlite_target
         )
         full_gate()  # after checkpoint and backup have closed every DB handle
-        # WAL checkpointing is the one intentional legacy-source byte change.
-        # Bind the receipt to the post-checkpoint source image so standalone
-        # verify and idempotent replay observe the same immutable baseline.
+        # WAL checkpointing plus journal-mode normalization are the intentional
+        # legacy-source changes. Bind the receipt to that stable DELETE image so
+        # standalone verify and idempotent replay observe one immutable baseline.
         refreshed_sources = refresh_retained_sources(context)
         context.plan.source_manifest_digest = refreshed_sources.source_manifest_digest
         assert_source_inputs_stable(

@@ -347,6 +347,16 @@ disposable migration fixture then injects failure immediately before receipt
 publication and proves the established automatic exchange-back restores the
 empty runtime skeleton with no receipt or stage residue.
 
+The third source-only slice qualifies Apple Python 3.9's WAL backup behavior.
+After a successful bounded checkpoint, the frozen legacy database is explicitly
+normalized to `journal_mode=DELETE` before backup so SQLite does not propagate
+WAL mode into the staged target. After both SQLite handles close and the fixed
+writer/descriptor gate is rechecked, the tool removes only an obsolete source
+SHM whose WAL and journal are absent and whose inode is a single-link physical
+regular file beneath the already bound source directory; the directory is then
+fsynced. Symlink, hardlink, surviving WAL/journal, or journal-mode normalization
+failure stops without activation or receipt publication.
+
 These source-only slices do not stop any production job, migrate production
 state, activate the production Darwin runtime-state root, install/adopt a
 plist, publish, deploy, or accept D4. Those remain separate gates.

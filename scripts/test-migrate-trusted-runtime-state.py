@@ -313,10 +313,12 @@ os._exit(0)
         inherited_lock_fd: int | None = None,
         unit_state=inactive_unit,
         fd_scan=None,
-        platform: str = "linux",
+        platform: str | None = None,
     ):
         if fd_scan is None:
             fd_scan = lambda _paths: None
+        if platform is None:
+            platform = "darwin" if sys.platform == "darwin" else "linux"
         with mock.patch.object(
             MIGRATION, "running_script_path", return_value=str(self.installed_script)
         ), mock.patch.object(
@@ -555,6 +557,74 @@ class MigrationTests(unittest.TestCase):
             (MIGRATION.SQLITE_BUSY_CODE, MIGRATION.SQLITE_LOCKED_CODE),
         )
 
+    def test_wal_backup_normalizes_delete_mode_and_removes_sidecars(self) -> None:
+        fixture = self.fixture(wal=True)
+        target = fixture.base / "backup.db"
+        input_sha = sha256(fixture.database)
+        observed_input_sha, source_fact, target_fact = (
+            MIGRATION.sqlite_checkpoint_and_backup(str(fixture.database), str(target))
+        )
+        self.assertEqual(observed_input_sha, input_sha)
+        self.assertEqual(source_fact["path"], str(fixture.database))
+        self.assertEqual(target_fact["path"], MIGRATION.SQLITE_TARGET)
+        for database in (fixture.database, target):
+            for suffix in MIGRATION.SQLITE_SIDECAR_SUFFIXES:
+                self.assertFalse(Path(str(database) + suffix).exists())
+            connection = sqlite3.connect(database)
+            try:
+                self.assertEqual(
+                    connection.execute("PRAGMA journal_mode").fetchone(),
+                    ("delete",),
+                )
+                self.assertEqual(
+                    [
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT body FROM memories ORDER BY id"
+                        )
+                    ],
+                    ["base-row", "wal-row"],
+                )
+            finally:
+                connection.close()
+
+    def test_obsolete_shm_cleanup_rejects_symlink_and_hardlink(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ab-obsolete-shm-") as base:
+            source = Path(base) / "state.db"
+            source.write_bytes(b"database")
+            shm = Path(str(source) + "-shm")
+            shm.write_bytes(b"shm")
+            wal = Path(str(source) + "-wal")
+            wal.write_bytes(b"wal")
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "while WAL or journal exists",
+            )
+            self.assertTrue(shm.exists())
+            wal.unlink()
+            journal = Path(str(source) + "-journal")
+            journal.write_bytes(b"journal")
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "while WAL or journal exists",
+            )
+            self.assertTrue(shm.exists())
+            journal.unlink()
+            shm.unlink()
+            shm.symlink_to(source)
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "single-link physical regular file",
+            )
+            shm.unlink()
+            anchor = Path(base) / "anchor"
+            anchor.write_bytes(b"shm")
+            os.link(anchor, shm)
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "single-link physical regular file",
+            )
+
     def assert_rejected(self, callback, fragment: str | None = None) -> str:
         with self.assertRaises(MIGRATION.MigrationError) as caught:
             callback()
@@ -565,21 +635,26 @@ class MigrationTests(unittest.TestCase):
 
     def test_happy_wal_backup_sidecar_verify_and_idempotent_replay(self) -> None:
         fixture = self.fixture(wal=True)
+        platform = "darwin" if sys.platform == "darwin" else "linux"
         wal = Path(str(fixture.database) + "-wal")
         self.assertGreater(wal.stat().st_size, 0)
         before_preflight = snapshot([fixture.root, fixture.legacy])
-        preflight = fixture.execute("preflight")
+        preflight = fixture.execute("preflight", platform=platform)
         self.assertEqual(preflight["status"], "ready_quiesced")
         self.assertEqual(
             preflight["sqlite_integrity"], "deferred_wal_to_confirmed_migrate"
         )
         self.assertEqual(before_preflight, snapshot([fixture.root, fixture.legacy]))
         self.assert_rejected(
-            lambda: fixture.execute("migrate", confirmation="WRONG-CONFIRMATION"),
+            lambda: fixture.execute(
+                "migrate", confirmation="WRONG-CONFIRMATION", platform=platform
+            ),
             "confirmation",
         )
         self.assertEqual(before_preflight, snapshot([fixture.root, fixture.legacy]))
-        migrated = fixture.execute("migrate", confirmation=fixture.confirmation)
+        migrated = fixture.execute(
+            "migrate", confirmation=fixture.confirmation, platform=platform
+        )
         self.assertEqual(migrated["status"], "migrated_quiesced")
         self.assertFalse(Path(str(fixture.database) + "-wal").exists())
         self.assertFalse(Path(str(fixture.database) + "-shm").exists())
@@ -593,10 +668,12 @@ class MigrationTests(unittest.TestCase):
             (fixture.root / "runtime-state/data/agent-bridge/sidecars/events.jsonl").read_bytes(),
             fixture.events.read_bytes(),
         )
-        verified = fixture.execute("verify")
+        verified = fixture.execute("verify", platform=platform)
         self.assertEqual(verified["receipt_digest"], migrated["receipt_digest"])
         before = snapshot([fixture.root / "runtime-state", fixture.root / "publisher-state/migrations"])
-        replay = fixture.execute("migrate", confirmation=fixture.confirmation)
+        replay = fixture.execute(
+            "migrate", confirmation=fixture.confirmation, platform=platform
+        )
         self.assertEqual(replay["status"], "already_migrated")
         self.assertEqual(
             before,
@@ -748,7 +825,10 @@ class MigrationTests(unittest.TestCase):
             return values
 
         self.assert_rejected(
-            lambda: fixture.execute("preflight", unit_state=active_service), "not fully quiesced"
+            lambda: fixture.execute(
+                "preflight", unit_state=active_service, platform="linux"
+            ),
+            "not fully quiesced",
         )
 
         positive_timer_shapes = (
@@ -765,7 +845,12 @@ class MigrationTests(unittest.TestCase):
                         values["UnitFileState"] = unit_file
                     return values
 
-                self.assertEqual(fixture.execute("preflight", unit_state=shape)["status"], "ready_quiesced")
+                self.assertEqual(
+                    fixture.execute(
+                        "preflight", unit_state=shape, platform="linux"
+                    )["status"],
+                    "ready_quiesced",
+                )
 
         for load, unit_file in (("loaded", "enabled"), ("loaded", "masked"), ("masked", "disabled")):
             with self.subTest(rejected=(load, unit_file)):
@@ -777,7 +862,9 @@ class MigrationTests(unittest.TestCase):
                     return values
 
                 self.assert_rejected(
-                    lambda: fixture.execute("preflight", unit_state=bad_shape),
+                    lambda: fixture.execute(
+                        "preflight", unit_state=bad_shape, platform="linux"
+                    ),
                     "enabled or triggerable",
                 )
 
@@ -794,10 +881,16 @@ class MigrationTests(unittest.TestCase):
         self.addCleanup(child.kill)
         assert child.stdout is not None
         self.assertEqual(child.stdout.readline().strip(), "ready")
+        if sys.platform == "darwin":
+            fd_scan = REAL_SCAN_OPEN_FDS
+        else:
+            fd_scan = lambda paths: REAL_SCAN_OPEN_FDS(
+                paths, pid_inventory=[child.pid]
+            )
         self.assert_rejected(
             lambda: fixture.execute(
                 "preflight",
-                fd_scan=lambda paths: REAL_SCAN_OPEN_FDS(paths, pid_inventory=[child.pid]),
+                fd_scan=fd_scan,
             ),
             "external process",
         )
@@ -808,15 +901,16 @@ class MigrationTests(unittest.TestCase):
         assert child.stderr is not None
         child.stderr.close()
 
-        with mock.patch.object(
-            MIGRATION, "open_proc_pid_directory", side_effect=PermissionError
-        ), mock.patch.object(MIGRATION.os, "stat", side_effect=PermissionError):
-            self.assert_rejected(
-                lambda: REAL_SCAN_OPEN_FDS(
-                    {str(fixture.database)}, pid_inventory=[999999]
-                ),
-                "cannot determine the owner",
-            )
+        if sys.platform.startswith("linux"):
+            with mock.patch.object(
+                MIGRATION, "open_proc_pid_directory", side_effect=PermissionError
+            ), mock.patch.object(MIGRATION.os, "stat", side_effect=PermissionError):
+                self.assert_rejected(
+                    lambda: REAL_SCAN_OPEN_FDS(
+                        {str(fixture.database)}, pid_inventory=[999999]
+                    ),
+                    "cannot determine the owner",
+                )
 
     def test_yama_exception_recognizes_only_exact_user_systemd_manager(self) -> None:
         fixture = self.fixture()
@@ -859,6 +953,9 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(MIGRATION.is_exact_user_manager_infrastructure(pam_pid, str(proc)))
         (proc / str(pam_pid) / "cgroup").write_text("0::/user.slice/attacker.scope\n", encoding="ascii")
         self.assertFalse(MIGRATION.is_exact_user_manager_infrastructure(pam_pid, str(proc)))
+
+        if not sys.platform.startswith("linux"):
+            return
 
         code = (
             "import ctypes,sys; "
@@ -966,11 +1063,16 @@ class MigrationTests(unittest.TestCase):
 
     def test_fault_before_receipt_rolls_runtime_back(self) -> None:
         fixture = self.fixture(wal=True)
+        platform = "darwin" if sys.platform == "darwin" else "linux"
         with mock.patch.object(
             MIGRATION, "publish_receipt", side_effect=MIGRATION.MigrationError("injected before receipt")
         ):
             self.assert_rejected(
-                lambda: fixture.execute("migrate", confirmation=fixture.confirmation),
+                lambda: fixture.execute(
+                    "migrate",
+                    confirmation=fixture.confirmation,
+                    platform=platform,
+                ),
                 "injected before receipt",
             )
         self.assertFalse((fixture.root / "publisher-state/migrations/current.json").exists())
@@ -981,7 +1083,7 @@ class MigrationTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "requires Darwin renameatx_np")
     def test_darwin_fault_before_receipt_rolls_runtime_back(self) -> None:
-        fixture = self.fixture()
+        fixture = self.fixture(wal=True)
         with mock.patch.object(
             MIGRATION,
             "publish_receipt",
