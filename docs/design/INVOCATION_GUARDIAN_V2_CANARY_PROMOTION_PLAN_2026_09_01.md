@@ -1,7 +1,7 @@
 # AB Invocation Guardian v2：单入口 Canary 与晋级计划
 
 日期：2026-09-01
-状态：**C0 协议与 C1 默认关闭源码 canary 已实现并通过定向验证；C2—C4 未实现、未部署；production `enforce` 继续 HOLD**
+状态：**C0/C1 已通过；C2 可执行隔离预检包已实现，但真实身份/部署证据未执行，C2—C4 与 production `enforce` 继续 HOLD**
 
 ## 1. 决策
 
@@ -273,6 +273,15 @@ provider receipt 和独立 v2 bounded wire protocol；C1 已完成默认关闭�
 - 没有在任何安装或 production profile 中启用 canary；
 - 没有改变 production `enforce`、capabilities 或发布结论。
 
-下一 gate 是 C2：必须在真实部署中建立独立 guardian UID/IPC，并用权限、FD
-继承、socket 替换和 ptrace 探针证明隔离。C1 的本地 fake/map、测试私钥、marker
-和 stdio 通过结果都不能替代 C2/C3 外部证据。
+C2 目前具备默认关闭的 Linux probe helper 与 root-only transient-systemd
+harness：它要求三个既有、不同的非 root UID 和一个专用 socket group，实际探测
+`SO_PEERCRED`、state read/write/unlink/rename、socket
+unlink/rename/replace、ptrace 和 listener-FD 继承。harness 不创建用户、组、持久
+unit 或 production path，所有变更限制在新的 `/run/ab-invocation-guardian-c2.*`
+目录并在退出时清理。
+
+当前主机只有一个普通用户，当前会话也没有免密 root，因此仅完成非特权 host
+preflight，结果为 `HOLD`。即使临时隔离 substrate 后续通过，它仍运行一个明确
+non-authoritative、protocol-free helper；在实际 v2 guardian composition 以同一
+service-manager/UID/IPC 配置运行并重复探针前，不得把 substrate PASS 升格为 C2
+PASS。C1 的 fake/map、测试私钥、marker 和 stdio 结果也不能替代 C2/C3 外部证据。

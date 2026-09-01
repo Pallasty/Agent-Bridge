@@ -53,6 +53,9 @@ invocation-guardian-v2-canary = [
     "invocation-guardian-lab",
     "ab-mcp/invocation-guardian-v2-canary",
 ]
+# Default-off Linux deployment-isolation probe. This verifies an ephemeral OS
+# substrate only; it is not the v2 guardian or a protected witness.
+invocation-guardian-v2-isolation-probe = ["invocation-guardian-v2-canary"]
 
 [dependencies]
 ab-core.workspace = true
@@ -138,3 +141,8 @@ required-features = ["invocation-guardian-lab"]
 name = "invocation-guardian-canary-mcp"
 path = "src/bin/invocation_guardian_canary_mcp.rs"
 required-features = ["invocation-guardian-v2-canary"]
+
+[[bin]]
+name = "invocation-guardian-isolation-probe"
+path = "src/bin/invocation_guardian_isolation_probe.rs"
+required-features = ["invocation-guardian-v2-isolation-probe"]
