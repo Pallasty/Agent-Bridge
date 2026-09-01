@@ -89,8 +89,12 @@ pub mod invocation_guardian_client;
 #[cfg(unix)]
 pub mod invocation_guardian_protocol;
 #[cfg(unix)]
+pub mod invocation_guardian_protocol_v2;
+#[cfg(unix)]
 pub mod invocation_guardian_service;
 pub mod invocation_lease;
+#[cfg(unix)]
+pub mod invocation_lease_scope;
 pub mod llm_client;
 pub mod locks;
 pub mod lswr_interaction_feedback;
