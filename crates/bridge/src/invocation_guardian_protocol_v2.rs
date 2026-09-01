@@ -1,8 +1,12 @@
 //! Independent bounded wire protocol for the Invocation Guardian v2 canary.
 //!
 //! It intentionally shares neither magic nor disposition bits with the v1
-//! volatile-lab protocol. Only `FreshCommitted` can carry a live grant.
+//! volatile-lab protocol. Decoding never grants dispatch authority.
 
+use crate::invocation_guardian_receipt_v2::{
+    ExpectedProviderReceipt, ProviderReceipt, ProviderTrustPins, ReceiptDisposition, ReceiptError,
+    SignedProviderReceipt, VerifiedProviderReceipt,
+};
 use crate::invocation_lease_scope::{
     CanaryLeaseScope, Commitment, ObservedCanaryInvocation, ScopeError, SignedCanaryLease,
     SIGNATURE_BYTES,
@@ -18,6 +22,7 @@ const OUTCOME_TAG: u8 = 0x81;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConsumeCanaryRequest {
     pub request_challenge: Commitment,
+    pub guardian_session_commitment: Commitment,
     pub observed: ObservedCanaryInvocation,
     pub lease: SignedCanaryLease,
 }
@@ -27,27 +32,38 @@ pub struct ConsumeCanaryRequest {
 pub enum CanaryOutcomeKind {
     FreshCommitted = 1,
     AlreadyCommitted = 2,
-    Conflict = 3,
-    Expired = 4,
-    Indeterminate = 5,
-    Hold = 6,
+    LookupCommitted = 3,
+    Conflict = 4,
+    Exhausted = 5,
+    Expired = 6,
+    Revoked = 7,
+    Indeterminate = 8,
+    Hold = 9,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanaryOutcomeResponse {
     pub request_challenge: Commitment,
+    pub guardian_session_commitment: Commitment,
     pub kind: CanaryOutcomeKind,
     pub exact_scope_commitment: Commitment,
-    pub provider_receipt: Vec<u8>,
+    pub provider_receipt: Option<SignedProviderReceipt>,
 }
 
-impl CanaryOutcomeResponse {
-    pub fn grants_current_dispatch(&self) -> bool {
-        self.kind == CanaryOutcomeKind::FreshCommitted
-            && nonzero(&self.request_challenge)
-            && nonzero(&self.exact_scope_commitment)
-            && !self.provider_receipt.is_empty()
-    }
+#[derive(Clone, Debug)]
+pub struct ExpectedCanaryOutcome {
+    pub request_challenge: Commitment,
+    pub guardian_session_commitment: Commitment,
+    pub token_commitment: Commitment,
+    pub exact_scope_commitment: Commitment,
+}
+
+/// Verified protocol result. This is evidence only; C0 defines no permit.
+#[derive(Debug)]
+pub enum VerifiedCanaryOutcome {
+    FreshCommitted(VerifiedProviderReceipt),
+    AlreadyCommitted(VerifiedProviderReceipt),
+    Denied(CanaryOutcomeKind),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -60,6 +76,10 @@ pub enum ProtocolV2Error {
     InvalidFrame,
     #[error("invalid_scope")]
     InvalidScope,
+    #[error("invalid_receipt")]
+    InvalidReceipt,
+    #[error("request_binding_mismatch")]
+    RequestBindingMismatch,
 }
 
 impl From<ScopeError> for ProtocolV2Error {
@@ -68,13 +88,66 @@ impl From<ScopeError> for ProtocolV2Error {
     }
 }
 
+impl From<ReceiptError> for ProtocolV2Error {
+    fn from(_: ReceiptError) -> Self {
+        Self::InvalidReceipt
+    }
+}
+
+pub fn verify_outcome(
+    response: CanaryOutcomeResponse,
+    pins: &ProviderTrustPins,
+    expected: &ExpectedCanaryOutcome,
+) -> Result<VerifiedCanaryOutcome, ProtocolV2Error> {
+    if response.request_challenge != expected.request_challenge
+        || response.guardian_session_commitment != expected.guardian_session_commitment
+    {
+        return Err(ProtocolV2Error::RequestBindingMismatch);
+    }
+    let disposition = match response.kind {
+        CanaryOutcomeKind::FreshCommitted => Some(ReceiptDisposition::FreshCommitted),
+        CanaryOutcomeKind::AlreadyCommitted => Some(ReceiptDisposition::AlreadyCommitted),
+        _ => None,
+    };
+    let Some(disposition) = disposition else {
+        if nonzero(&response.exact_scope_commitment) || response.provider_receipt.is_some() {
+            return Err(ProtocolV2Error::InvalidFrame);
+        }
+        return Ok(VerifiedCanaryOutcome::Denied(response.kind));
+    };
+    if response.exact_scope_commitment != expected.exact_scope_commitment {
+        return Err(ProtocolV2Error::RequestBindingMismatch);
+    }
+    let signed = response
+        .provider_receipt
+        .ok_or(ProtocolV2Error::InvalidReceipt)?;
+    let verified = signed.verify(
+        pins,
+        &ExpectedProviderReceipt {
+            disposition,
+            token_commitment: expected.token_commitment,
+            exact_scope_commitment: expected.exact_scope_commitment,
+            request_challenge: expected.request_challenge,
+            guardian_session_commitment: expected.guardian_session_commitment,
+        },
+    )?;
+    Ok(match disposition {
+        ReceiptDisposition::FreshCommitted => VerifiedCanaryOutcome::FreshCommitted(verified),
+        ReceiptDisposition::AlreadyCommitted => VerifiedCanaryOutcome::AlreadyCommitted(verified),
+    })
+}
+
 pub fn encode_consume(request: &ConsumeCanaryRequest) -> Result<Vec<u8>, ProtocolV2Error> {
-    if !nonzero(&request.request_challenge) || request.observed.transport_kind != "stdio" {
+    if !nonzero(&request.request_challenge)
+        || !nonzero(&request.guardian_session_commitment)
+        || request.observed.transport_kind != "stdio"
+    {
         return Err(ProtocolV2Error::InvalidFrame);
     }
     let scope = request.lease.scope.canonical_bytes()?;
     let mut body = header(CONSUME_TAG);
     body.extend_from_slice(&request.request_challenge);
+    body.extend_from_slice(&request.guardian_session_commitment);
     string(&mut body, &request.observed.tool_name)?;
     body.extend_from_slice(&request.observed.arguments_jcs_sha256);
     body.extend_from_slice(&request.observed.target_sha256);
@@ -83,6 +156,7 @@ pub fn encode_consume(request: &ConsumeCanaryRequest) -> Result<Vec<u8>, Protoco
     string(&mut body, &request.observed.principal_kind)?;
     body.extend_from_slice(&request.observed.principal_commitment);
     string(&mut body, &request.observed.transport_kind)?;
+    string(&mut body, &request.observed.connection_context_kind)?;
     body.extend_from_slice(&request.observed.connection_commitment);
     bytes(&mut body, &scope)?;
     body.extend_from_slice(&request.lease.signature);
@@ -94,6 +168,7 @@ pub fn decode_consume_body(body: &[u8]) -> Result<ConsumeCanaryRequest, Protocol
     let mut decoder = Decoder::new(&body[HEADER_BYTES..]);
     let request = ConsumeCanaryRequest {
         request_challenge: decoder.fixed()?,
+        guardian_session_commitment: decoder.fixed()?,
         observed: ObservedCanaryInvocation {
             tool_name: decoder.string()?,
             arguments_jcs_sha256: decoder.fixed()?,
@@ -103,6 +178,7 @@ pub fn decode_consume_body(body: &[u8]) -> Result<ConsumeCanaryRequest, Protocol
             principal_kind: decoder.string()?,
             principal_commitment: decoder.fixed()?,
             transport_kind: decoder.string()?,
+            connection_context_kind: decoder.string()?,
             connection_commitment: decoder.fixed()?,
         },
         lease: SignedCanaryLease {
@@ -117,29 +193,46 @@ pub fn decode_consume_body(body: &[u8]) -> Result<ConsumeCanaryRequest, Protocol
 }
 
 pub fn encode_outcome(response: &CanaryOutcomeResponse) -> Result<Vec<u8>, ProtocolV2Error> {
+    let committed = matches!(
+        response.kind,
+        CanaryOutcomeKind::FreshCommitted | CanaryOutcomeKind::AlreadyCommitted
+    );
     if !nonzero(&response.request_challenge)
-        || (matches!(
-            response.kind,
-            CanaryOutcomeKind::FreshCommitted | CanaryOutcomeKind::AlreadyCommitted
-        ) && (!nonzero(&response.exact_scope_commitment)
-            || response.provider_receipt.is_empty()))
-        || (!matches!(
-            response.kind,
-            CanaryOutcomeKind::FreshCommitted | CanaryOutcomeKind::AlreadyCommitted
-        ) && !response.provider_receipt.is_empty())
+        || !nonzero(&response.guardian_session_commitment)
+        || (committed
+            && (!nonzero(&response.exact_scope_commitment) || response.provider_receipt.is_none()))
+        || (!committed
+            && (nonzero(&response.exact_scope_commitment) || response.provider_receipt.is_some()))
     {
         return Err(ProtocolV2Error::InvalidFrame);
     }
+    if let Some(signed) = &response.provider_receipt {
+        let expected_disposition = match response.kind {
+            CanaryOutcomeKind::FreshCommitted => ReceiptDisposition::FreshCommitted,
+            CanaryOutcomeKind::AlreadyCommitted => ReceiptDisposition::AlreadyCommitted,
+            _ => return Err(ProtocolV2Error::InvalidFrame),
+        };
+        if signed.receipt.disposition != expected_disposition
+            || signed.receipt.request_challenge != response.request_challenge
+            || signed.receipt.guardian_session_commitment != response.guardian_session_commitment
+            || signed.receipt.exact_scope_commitment != response.exact_scope_commitment
+        {
+            return Err(ProtocolV2Error::InvalidFrame);
+        }
+    }
     let mut body = header(OUTCOME_TAG);
     body.extend_from_slice(&response.request_challenge);
+    body.extend_from_slice(&response.guardian_session_commitment);
     body.push(response.kind as u8);
-    body.push(match response.kind {
-        CanaryOutcomeKind::FreshCommitted => 1,
-        CanaryOutcomeKind::AlreadyCommitted => 2,
-        _ => 0,
-    });
     body.extend_from_slice(&response.exact_scope_commitment);
-    bytes(&mut body, &response.provider_receipt)?;
+    match &response.provider_receipt {
+        Some(signed) => {
+            body.push(signed.receipt.disposition as u8);
+            bytes(&mut body, &signed.receipt.canonical_bytes()?)?;
+            body.extend_from_slice(&signed.signature);
+        }
+        None => body.push(0),
+    }
     frame(body)
 }
 
@@ -147,28 +240,32 @@ pub fn decode_outcome_body(body: &[u8]) -> Result<CanaryOutcomeResponse, Protoco
     validate_header(body, OUTCOME_TAG)?;
     let mut decoder = Decoder::new(&body[HEADER_BYTES..]);
     let request_challenge = decoder.fixed()?;
+    let guardian_session_commitment = decoder.fixed()?;
     let kind = match decoder.u8()? {
         1 => CanaryOutcomeKind::FreshCommitted,
         2 => CanaryOutcomeKind::AlreadyCommitted,
-        3 => CanaryOutcomeKind::Conflict,
-        4 => CanaryOutcomeKind::Expired,
-        5 => CanaryOutcomeKind::Indeterminate,
-        6 => CanaryOutcomeKind::Hold,
+        3 => CanaryOutcomeKind::LookupCommitted,
+        4 => CanaryOutcomeKind::Conflict,
+        5 => CanaryOutcomeKind::Exhausted,
+        6 => CanaryOutcomeKind::Expired,
+        7 => CanaryOutcomeKind::Revoked,
+        8 => CanaryOutcomeKind::Indeterminate,
+        9 => CanaryOutcomeKind::Hold,
         _ => return Err(ProtocolV2Error::InvalidFrame),
     };
-    let receipt_disposition = decoder.u8()?;
-    let expected_disposition = match kind {
-        CanaryOutcomeKind::FreshCommitted => 1,
-        CanaryOutcomeKind::AlreadyCommitted => 2,
-        _ => 0,
-    };
-    if receipt_disposition != expected_disposition {
-        return Err(ProtocolV2Error::InvalidFrame);
-    }
     let exact_scope_commitment = decoder.fixed()?;
-    let provider_receipt = decoder.bytes()?.to_vec();
+    let receipt_disposition = decoder.u8()?;
+    let provider_receipt = match receipt_disposition {
+        0 => None,
+        1 | 2 => Some(SignedProviderReceipt {
+            receipt: ProviderReceipt::decode_canonical(decoder.bytes()?)?,
+            signature: decoder.signature()?,
+        }),
+        _ => return Err(ProtocolV2Error::InvalidFrame),
+    };
     let response = CanaryOutcomeResponse {
         request_challenge,
+        guardian_session_commitment,
         kind,
         exact_scope_commitment,
         provider_receipt,
@@ -297,15 +394,21 @@ mod tests {
     use crate::invocation_guardian_protocol::{
         decode_request_body as decode_v1, encode_request as encode_v1, GuardianRequest,
     };
-    use crate::invocation_lease_scope::{domain_hash, CanaryLeaseScope};
-    use ring::rand::SystemRandom;
+    use crate::invocation_guardian_receipt_v2::{
+        provider_key_commitment, ProviderReceipt, ProviderTrustPins, ReceiptDisposition,
+        SignedProviderReceipt,
+    };
+    use crate::invocation_lease_scope::{
+        domain_hash, CanaryLeaseScope, CANARY_CONNECTION_CONTEXT_KIND, CANARY_ISSUANCE_LANE,
+        CANARY_PRINCIPAL_KIND, CANARY_TOOL_NAME, CANARY_TRANSPORT_KIND,
+    };
     use ring::signature::{Ed25519KeyPair, KeyPair as _};
 
     fn request() -> ConsumeCanaryRequest {
-        let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-        let key = Ed25519KeyPair::from_pkcs8(doc.as_ref()).unwrap();
+        let key = Ed25519KeyPair::from_seed_unchecked(&[17; 32]).unwrap();
         let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
         let scope = CanaryLeaseScope {
+            issuance_lane: CANARY_ISSUANCE_LANE.into(),
             key_generation: 1,
             issuer_key_commitment: domain_hash(
                 b"agent_bridge.invocation_guardian.issuer_key.v2\0",
@@ -314,13 +417,15 @@ mod tests {
             ledger_generation: [2; 32],
             token_commitment: [3; 32],
             lease_id: "lease-1".into(),
-            tool_name: "invocation_guardian_canary_write".into(),
+            tool_name: CANARY_TOOL_NAME.into(),
             arguments_jcs_sha256: [4; 32],
             target_sha256: [5; 32],
             registry_sha256: [6; 32],
             namespace: "canary/test".into(),
-            principal_kind: "service".into(),
+            principal_kind: CANARY_PRINCIPAL_KIND.into(),
             principal_commitment: [7; 32],
+            transport_kind: CANARY_TRANSPORT_KIND.into(),
+            connection_context_kind: CANARY_CONNECTION_CONTEXT_KIND.into(),
             connection_commitment: [8; 32],
             issued_at_unix: 10,
             not_before_unix: 10,
@@ -335,13 +440,79 @@ mod tests {
             namespace: scope.namespace.clone(),
             principal_kind: scope.principal_kind.clone(),
             principal_commitment: [7; 32],
-            transport_kind: "stdio".into(),
+            transport_kind: scope.transport_kind.clone(),
+            connection_context_kind: scope.connection_context_kind.clone(),
             connection_commitment: [8; 32],
         };
         ConsumeCanaryRequest {
             request_challenge: [9; 32],
+            guardian_session_commitment: [10; 32],
             observed,
             lease: SignedCanaryLease::sign(scope, &key).unwrap(),
+        }
+    }
+
+    fn receipt(disposition: ReceiptDisposition) -> SignedProviderReceipt {
+        let key = Ed25519KeyPair::from_seed_unchecked(&[23; 32]).unwrap();
+        let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+        SignedProviderReceipt::sign(
+            ProviderReceipt {
+                provider_key_generation: 4,
+                provider_key_commitment: provider_key_commitment(&public),
+                provider_identity_commitment: [11; 32],
+                namespace: "canary/test".into(),
+                epoch: 8,
+                revision: 21,
+                previous_head: [12; 32],
+                new_head: [13; 32],
+                token_commitment: [3; 32],
+                use_index: 1,
+                exact_scope_commitment: [14; 32],
+                request_challenge: [9; 32],
+                guardian_session_commitment: [10; 32],
+                provider_time_unix: 1_788_261_200,
+                disposition,
+            },
+            &key,
+        )
+        .unwrap()
+    }
+
+    fn committed(kind: CanaryOutcomeKind) -> CanaryOutcomeResponse {
+        let disposition = match kind {
+            CanaryOutcomeKind::FreshCommitted => ReceiptDisposition::FreshCommitted,
+            CanaryOutcomeKind::AlreadyCommitted => ReceiptDisposition::AlreadyCommitted,
+            _ => panic!("committed fixture requires committed outcome"),
+        };
+        CanaryOutcomeResponse {
+            request_challenge: [9; 32],
+            guardian_session_commitment: [10; 32],
+            kind,
+            exact_scope_commitment: [14; 32],
+            provider_receipt: Some(receipt(disposition)),
+        }
+    }
+
+    fn provider_pins() -> ProviderTrustPins {
+        let key = Ed25519KeyPair::from_seed_unchecked(&[23; 32]).unwrap();
+        let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+        ProviderTrustPins {
+            provider_key_generation: 4,
+            provider_verify_key: public,
+            provider_key_commitment: provider_key_commitment(&public),
+            provider_identity_commitment: [11; 32],
+            namespace: "canary/test".into(),
+            minimum_epoch: 8,
+            minimum_revision: 20,
+        }
+    }
+
+    fn expected_outcome() -> ExpectedCanaryOutcome {
+        ExpectedCanaryOutcome {
+            request_challenge: [9; 32],
+            guardian_session_commitment: [10; 32],
+            token_commitment: [3; 32],
+            exact_scope_commitment: [14; 32],
         }
     }
 
@@ -373,50 +544,92 @@ mod tests {
     }
 
     #[test]
-    fn only_fresh_committed_can_grant_and_disposition_cannot_flip() {
-        let already = CanaryOutcomeResponse {
-            request_challenge: [1; 32],
-            kind: CanaryOutcomeKind::AlreadyCommitted,
-            exact_scope_commitment: [2; 32],
-            provider_receipt: vec![3],
-        };
-        assert!(!decode_outcome_body(
-            decode_frame_prefix(&encode_outcome(&already).unwrap()).unwrap()
-        )
-        .unwrap()
-        .grants_current_dispatch());
+    fn committed_receipts_are_typed_and_disposition_cannot_flip() {
         for kind in [
+            CanaryOutcomeKind::FreshCommitted,
+            CanaryOutcomeKind::AlreadyCommitted,
+        ] {
+            let response = committed(kind);
+            let decoded = decode_outcome_body(
+                decode_frame_prefix(&encode_outcome(&response).unwrap()).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(decoded, response);
+            match verify_outcome(decoded, &provider_pins(), &expected_outcome()).unwrap() {
+                VerifiedCanaryOutcome::FreshCommitted(receipt) => {
+                    assert_eq!(receipt.disposition(), ReceiptDisposition::FreshCommitted);
+                    assert_eq!(kind, CanaryOutcomeKind::FreshCommitted);
+                }
+                VerifiedCanaryOutcome::AlreadyCommitted(receipt) => {
+                    assert_eq!(receipt.disposition(), ReceiptDisposition::AlreadyCommitted);
+                    assert_eq!(kind, CanaryOutcomeKind::AlreadyCommitted);
+                }
+                VerifiedCanaryOutcome::Denied(_) => panic!("committed response became denied"),
+            }
+        }
+
+        for kind in [
+            CanaryOutcomeKind::LookupCommitted,
             CanaryOutcomeKind::Conflict,
+            CanaryOutcomeKind::Exhausted,
             CanaryOutcomeKind::Expired,
+            CanaryOutcomeKind::Revoked,
             CanaryOutcomeKind::Indeterminate,
             CanaryOutcomeKind::Hold,
         ] {
             let response = CanaryOutcomeResponse {
-                request_challenge: [1; 32],
+                request_challenge: [9; 32],
+                guardian_session_commitment: [10; 32],
                 kind,
-                exact_scope_commitment: [2; 32],
-                provider_receipt: Vec::new(),
+                exact_scope_commitment: [0; 32],
+                provider_receipt: None,
             };
-            assert!(!decode_outcome_body(
-                decode_frame_prefix(&encode_outcome(&response).unwrap()).unwrap()
+            let decoded = decode_outcome_body(
+                decode_frame_prefix(&encode_outcome(&response).unwrap()).unwrap(),
             )
-            .unwrap()
-            .grants_current_dispatch());
+            .unwrap();
+            assert_eq!(decoded, response);
+            assert!(matches!(
+                verify_outcome(decoded, &provider_pins(), &expected_outcome()).unwrap(),
+                VerifiedCanaryOutcome::Denied(denied) if denied == kind
+            ));
         }
-        let fresh = CanaryOutcomeResponse {
-            request_challenge: [1; 32],
-            kind: CanaryOutcomeKind::FreshCommitted,
-            exact_scope_commitment: [2; 32],
-            provider_receipt: vec![3],
-        };
-        assert!(decode_outcome_body(
-            decode_frame_prefix(&encode_outcome(&fresh).unwrap()).unwrap()
-        )
-        .unwrap()
-        .grants_current_dispatch());
+
+        let fresh = committed(CanaryOutcomeKind::FreshCommitted);
         let mut frame = encode_outcome(&fresh).unwrap();
-        frame[4 + HEADER_BYTES + 32] = CanaryOutcomeKind::AlreadyCommitted as u8;
+        frame[4 + HEADER_BYTES + 64] = CanaryOutcomeKind::AlreadyCommitted as u8;
         assert!(decode_outcome_body(decode_frame_prefix(&frame).unwrap()).is_err());
+
+        let mut mismatched = fresh;
+        mismatched
+            .provider_receipt
+            .as_mut()
+            .unwrap()
+            .receipt
+            .request_challenge[0] ^= 1;
+        assert_eq!(
+            encode_outcome(&mismatched),
+            Err(ProtocolV2Error::InvalidFrame)
+        );
+
+        let mut forged = committed(CanaryOutcomeKind::FreshCommitted);
+        forged.provider_receipt.as_mut().unwrap().signature[0] ^= 1;
+        assert_eq!(
+            verify_outcome(forged, &provider_pins(), &expected_outcome()).unwrap_err(),
+            ProtocolV2Error::InvalidReceipt
+        );
+
+        let mut old_request = expected_outcome();
+        old_request.request_challenge[0] ^= 1;
+        assert_eq!(
+            verify_outcome(
+                committed(CanaryOutcomeKind::FreshCommitted),
+                &provider_pins(),
+                &old_request,
+            )
+            .unwrap_err(),
+            ProtocolV2Error::RequestBindingMismatch
+        );
     }
 
     #[test]

@@ -11,6 +11,11 @@ pub const COMMITMENT_BYTES: usize = 32;
 pub const SIGNATURE_BYTES: usize = 64;
 pub const MAX_CANARY_TTL_SECS: i64 = 60;
 pub const MAX_CANONICAL_ENVELOPE_BYTES: usize = 2048;
+pub const CANARY_ISSUANCE_LANE: &str = "protected-marker-canary-v2";
+pub const CANARY_TOOL_NAME: &str = "invocation_guardian_canary_write";
+pub const CANARY_TRANSPORT_KIND: &str = "stdio";
+pub const CANARY_CONNECTION_CONTEXT_KIND: &str = "server-created-stdio-connection-v1";
+pub const CANARY_PRINCIPAL_KIND: &str = "bridge-service";
 const SCHEMA: &[u8] = b"agent_bridge.invocation_guardian.canary_lease.v2";
 const SIGNATURE_DOMAIN: &[u8] = b"agent_bridge.invocation_guardian.canary_signature.v2\0";
 
@@ -18,6 +23,7 @@ pub type Commitment = [u8; COMMITMENT_BYTES];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanaryLeaseScope {
+    pub issuance_lane: String,
     pub key_generation: u64,
     pub issuer_key_commitment: Commitment,
     pub ledger_generation: Commitment,
@@ -30,6 +36,8 @@ pub struct CanaryLeaseScope {
     pub namespace: String,
     pub principal_kind: String,
     pub principal_commitment: Commitment,
+    pub transport_kind: String,
+    pub connection_context_kind: String,
     pub connection_commitment: Commitment,
     pub issued_at_unix: i64,
     pub not_before_unix: i64,
@@ -53,6 +61,7 @@ pub struct ObservedCanaryInvocation {
     pub principal_kind: String,
     pub principal_commitment: Commitment,
     pub transport_kind: String,
+    pub connection_context_kind: String,
     pub connection_commitment: Commitment,
 }
 
@@ -88,6 +97,7 @@ impl CanaryLeaseScope {
         validate_scope(self)?;
         let mut out = Vec::with_capacity(512);
         field(&mut out, SCHEMA)?;
+        field(&mut out, self.issuance_lane.as_bytes())?;
         out.extend_from_slice(&self.key_generation.to_be_bytes());
         fixed_fields(
             &mut out,
@@ -109,10 +119,10 @@ impl CanaryLeaseScope {
         );
         field(&mut out, self.namespace.as_bytes())?;
         field(&mut out, self.principal_kind.as_bytes())?;
-        fixed_fields(
-            &mut out,
-            &[&self.principal_commitment, &self.connection_commitment],
-        );
+        out.extend_from_slice(&self.principal_commitment);
+        field(&mut out, self.transport_kind.as_bytes())?;
+        field(&mut out, self.connection_context_kind.as_bytes())?;
+        out.extend_from_slice(&self.connection_commitment);
         out.extend_from_slice(&self.issued_at_unix.to_be_bytes());
         out.extend_from_slice(&self.not_before_unix.to_be_bytes());
         out.extend_from_slice(&self.expires_at_unix.to_be_bytes());
@@ -132,6 +142,7 @@ impl CanaryLeaseScope {
             return Err(ScopeError::InvalidEncoding);
         }
         let scope = Self {
+            issuance_lane: input.string()?,
             key_generation: input.u64()?,
             issuer_key_commitment: input.fixed()?,
             ledger_generation: input.fixed()?,
@@ -144,6 +155,8 @@ impl CanaryLeaseScope {
             namespace: input.string()?,
             principal_kind: input.string()?,
             principal_commitment: input.fixed()?,
+            transport_kind: input.string()?,
+            connection_context_kind: input.string()?,
             connection_commitment: input.fixed()?,
             issued_at_unix: input.i64()?,
             not_before_unix: input.i64()?,
@@ -188,10 +201,11 @@ impl SignedCanaryLease {
         UnparsedPublicKey::new(&ED25519, pins.issuer_verify_key)
             .verify(&signature_message(&canonical), &self.signature)
             .map_err(|_| ScopeError::InvalidSignature)?;
-        if now_unix < self.scope.not_before_unix || now_unix > self.scope.expires_at_unix {
+        if now_unix < self.scope.not_before_unix || now_unix >= self.scope.expires_at_unix {
             return Err(ScopeError::OutsideTimeWindow);
         }
-        if observed.transport_kind != "stdio"
+        if observed.transport_kind != self.scope.transport_kind
+            || observed.connection_context_kind != self.scope.connection_context_kind
             || observed.tool_name != self.scope.tool_name
             || observed.arguments_jcs_sha256 != self.scope.arguments_jcs_sha256
             || observed.target_sha256 != self.scope.target_sha256
@@ -226,16 +240,24 @@ fn signature_message(canonical: &[u8]) -> Vec<u8> {
 
 fn validate_scope(scope: &CanaryLeaseScope) -> Result<(), ScopeError> {
     let strings = [
+        scope.issuance_lane.as_str(),
         scope.lease_id.as_str(),
         scope.tool_name.as_str(),
         scope.namespace.as_str(),
         scope.principal_kind.as_str(),
+        scope.transport_kind.as_str(),
+        scope.connection_context_kind.as_str(),
     ];
     if scope.key_generation == 0
         || scope.max_uses != 1
+        || scope.issuance_lane != CANARY_ISSUANCE_LANE
+        || scope.tool_name != CANARY_TOOL_NAME
+        || scope.principal_kind != CANARY_PRINCIPAL_KIND
+        || scope.transport_kind != CANARY_TRANSPORT_KIND
+        || scope.connection_context_kind != CANARY_CONNECTION_CONTEXT_KIND
         || scope.issued_at_unix < 0
         || scope.not_before_unix < scope.issued_at_unix
-        || scope.expires_at_unix < scope.not_before_unix
+        || scope.expires_at_unix <= scope.not_before_unix
         || scope.expires_at_unix - scope.not_before_unix > MAX_CANARY_TTL_SECS
         || strings.iter().any(|value| {
             value.is_empty()
@@ -337,12 +359,11 @@ impl<'a> Decoder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ring::rand::SystemRandom;
     use ring::signature::KeyPair as _;
+    use sha2::{Digest, Sha256};
 
-    fn key() -> Ed25519KeyPair {
-        let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-        Ed25519KeyPair::from_pkcs8(doc.as_ref()).unwrap()
+    fn key(seed: u8) -> Ed25519KeyPair {
+        Ed25519KeyPair::from_seed_unchecked(&[seed; 32]).unwrap()
     }
 
     fn fixture(
@@ -352,18 +373,21 @@ mod tests {
         let key_commitment =
             domain_hash(b"agent_bridge.invocation_guardian.issuer_key.v2\0", &public);
         let scope = CanaryLeaseScope {
+            issuance_lane: CANARY_ISSUANCE_LANE.into(),
             key_generation: 7,
             issuer_key_commitment: key_commitment,
             ledger_generation: [2; 32],
             token_commitment: [3; 32],
             lease_id: "lease-1".into(),
-            tool_name: "invocation_guardian_canary_write".into(),
+            tool_name: CANARY_TOOL_NAME.into(),
             arguments_jcs_sha256: [4; 32],
             target_sha256: [5; 32],
             registry_sha256: [6; 32],
             namespace: "canary/test".into(),
-            principal_kind: "service".into(),
+            principal_kind: CANARY_PRINCIPAL_KIND.into(),
             principal_commitment: [7; 32],
+            transport_kind: CANARY_TRANSPORT_KIND.into(),
+            connection_context_kind: CANARY_CONNECTION_CONTEXT_KIND.into(),
             connection_commitment: [8; 32],
             issued_at_unix: 100,
             not_before_unix: 101,
@@ -385,7 +409,8 @@ mod tests {
             namespace: scope.namespace.clone(),
             principal_kind: scope.principal_kind.clone(),
             principal_commitment: [7; 32],
-            transport_kind: "stdio".into(),
+            transport_kind: scope.transport_kind.clone(),
+            connection_context_kind: scope.connection_context_kind.clone(),
             connection_commitment: [8; 32],
         };
         (scope, pins, observed)
@@ -393,10 +418,18 @@ mod tests {
 
     #[test]
     fn canonical_round_trip_and_exact_verification() {
-        let key = key();
+        let key = key(31);
         let (scope, pins, observed) = fixture(&key);
         let bytes = scope.canonical_bytes().unwrap();
         assert_eq!(CanaryLeaseScope::decode_canonical(&bytes).unwrap(), scope);
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        assert_eq!(
+            digest,
+            [
+                88, 97, 194, 102, 240, 54, 66, 246, 226, 229, 220, 147, 183, 55, 149, 83, 25, 163,
+                43, 127, 214, 37, 42, 142, 247, 141, 154, 244, 116, 46, 188, 41,
+            ]
+        );
         assert_ne!(
             SignedCanaryLease::sign(scope, &key)
                 .unwrap()
@@ -408,7 +441,7 @@ mod tests {
 
     #[test]
     fn every_observed_binding_and_trust_pin_fails_closed() {
-        let key = key();
+        let key = key(31);
         let (scope, pins, observed) = fixture(&key);
         let signed = SignedCanaryLease::sign(scope, &key).unwrap();
         let mut cases = Vec::new();
@@ -436,6 +469,9 @@ mod tests {
         let mut changed = observed.clone();
         changed.transport_kind = "unix".into();
         cases.push(changed);
+        let mut changed = observed.clone();
+        changed.connection_context_kind.push('x');
+        cases.push(changed);
         let mut changed = observed;
         changed.connection_commitment[0] ^= 1;
         cases.push(changed);
@@ -455,8 +491,8 @@ mod tests {
 
     #[test]
     fn wrong_key_signature_time_and_noncanonical_bytes_are_rejected() {
-        let signing_key = key();
-        let wrong = key();
+        let signing_key = key(31);
+        let wrong = key(32);
         let (scope, pins, observed) = fixture(&signing_key);
         let signed = SignedCanaryLease::sign(scope.clone(), &wrong).unwrap();
         assert_eq!(
@@ -468,11 +504,91 @@ mod tests {
             signed.verify(&pins, &observed, 99),
             Err(ScopeError::OutsideTimeWindow)
         );
+        assert_eq!(
+            signed.verify(&pins, &observed, 160),
+            Err(ScopeError::OutsideTimeWindow)
+        );
         let mut bytes = signed.scope.canonical_bytes().unwrap();
         bytes.push(0);
         assert_eq!(
             CanaryLeaseScope::decode_canonical(&bytes),
             Err(ScopeError::InvalidEncoding)
         );
+
+        let (mut zero_ttl, _, _) = fixture(&signing_key);
+        zero_ttl.expires_at_unix = zero_ttl.not_before_unix;
+        assert_eq!(zero_ttl.canonical_bytes(), Err(ScopeError::InvalidScope));
+    }
+
+    #[test]
+    fn every_signed_scope_field_is_load_bearing() {
+        let key = key(31);
+        let (scope, pins, observed) = fixture(&key);
+        let signed = SignedCanaryLease::sign(scope, &key).unwrap();
+        let mut cases = Vec::new();
+        let mut changed = signed.clone();
+        changed.scope.issuance_lane.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.key_generation += 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.issuer_key_commitment[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.ledger_generation[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.token_commitment[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.lease_id.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.tool_name.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.arguments_jcs_sha256[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.target_sha256[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.registry_sha256[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.namespace.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.principal_kind.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.principal_commitment[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.transport_kind.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.connection_context_kind.push('x');
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.connection_commitment[0] ^= 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.issued_at_unix += 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.not_before_unix += 1;
+        cases.push(changed);
+        let mut changed = signed.clone();
+        changed.scope.expires_at_unix -= 1;
+        cases.push(changed);
+        let mut changed = signed;
+        changed.scope.max_uses = 2;
+        cases.push(changed);
+
+        for changed in cases {
+            assert!(changed.verify(&pins, &observed, 120).is_err());
+        }
     }
 }

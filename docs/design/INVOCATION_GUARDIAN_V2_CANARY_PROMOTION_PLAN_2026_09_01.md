@@ -163,7 +163,7 @@ v2 canary 采用严格的 at-most-once dispatch 规则：
 这些工作可以在无生产外部服务时完成，但只能使用 mock/volatile adapter 验证协议，不产生 protected-witness 声明：
 
 1. 提取共享、唯一的 signed scope/envelope canonicalization 与 verifier，避免 issuer、guardian 和 client 各自实现一套字段顺序。
-2. 新增独立 v2 protocol module；保留 v1 文件和 lab disposition 不变。
+2. 新增独立 v2 protocol 与 provider-receipt module；保留 v1 文件和 lab disposition 不变。
 3. 新增 v2 client 配置与 canary permit，固定 guardian UID/GID、provider verify key、namespace 和 issuer trust-root commitment。
 4. 新增 async protected-witness trait、受控 fake adapter 与 fault injection；production constructor 在真实 provider 未配置时继续 HOLD。
 5. 新增专用 canary tool/profile、guardian-backed guard policy snapshot 和 default-off Cargo feature。
@@ -172,6 +172,7 @@ v2 canary 采用严格的 at-most-once dispatch 规则：
 建议的代码归属：
 
 - `crates/bridge/src/invocation_lease_scope.rs`：signed self-contained scope/envelope、domain separation、唯一 verifier；
+- `crates/bridge/src/invocation_guardian_receipt_v2.rs`：canonical signed provider receipt、provider pins、request/session binding 和唯一 verifier；
 - `crates/bridge/src/invocation_guardian_protocol_v2.rs`：v2 bounded wire schema；
 - `crates/bridge/src/invocation_guardian_client.rs`：独立 v2 canary client/type；
 - `crates/bridge/src/invocation_guardian_service.rs` 与可拆分的 protected-witness adapter：v2 service/async provider seam；
@@ -180,7 +181,8 @@ v2 canary 采用严格的 at-most-once dispatch 规则：
 - `crates/bridge/src/mcp_tools.rs`：仅专用 profile 注册固定 marker tool；
 - `crates/bridge/tests/` 与现有 module tests：协议、故障和真实 stdio E2E。
 
-文件名是实施建议，不表示它们已经创建。
+C0 的 scope、receipt 和 protocol 文件已经创建；client、service、witness、tool
+与 E2E 文件仍只是后续实施建议，不能从文件名推断其存在或晋级状态。
 
 ### 9.2 外部部署切片
 
@@ -239,14 +241,22 @@ C4 通过后仍必须保持：
 
 ## 12. 当前阶段状态
 
-截至本文日期，C0 已在源码层冻结 signed self-contained scope 和独立 v2
-bounded wire protocol：
+截至本文日期，C0 已在源码层冻结 signed self-contained scope、signed
+provider receipt 和独立 v2 bounded wire protocol：
 
 - `invocation_lease_scope.rs` 是 envelope canonicalization、Ed25519 signing
-  message 和 exact observed-invocation verifier 的唯一实现；
+  message 和 exact observed-invocation verifier 的唯一实现；canary lane、tool、
+  principal kind、stdio transport、server-created connection-context kind、正 TTL
+  与 exclusive expiry 都是签名语义中的固定条件；
+- `invocation_guardian_receipt_v2.rs` 是 provider receipt canonicalization、
+  domain-separated signature 与 pinned verifier 的唯一实现；receipt 绑定 provider
+  identity/key generation、namespace、epoch/revision、previous/new head、token、
+  `use_index=1`、exact scope、当前 request challenge、guardian session 和 provider time；
 - `invocation_guardian_protocol_v2.rs` 使用独立 `ABI2` magic、封闭 outcome
-  和 receipt-disposition 一致性校验；v1/v2 cross-decode、未知 tag/reserved
-  bit、截断、oversize、wrong key/time/pin 与 observed binding 漂移均被测试拒绝；
+  与 typed signed receipt；wire decode 只产生未验证响应，不提供 dispatch/grant
+  predicate。只有 receipt verifier 能形成不可 `Clone` 的 verified evidence，且它仍
+  不是 permit；v1/v2 cross-decode、未知 tag/reserved bit、截断、oversize、wrong
+  key/time/pin、所有 scope/receipt/request binding 漂移均被测试拒绝；
 - 该源码不包含 v2 client permit、async protected witness、canary tool、marker
   effect 或任何 production constructor，因此 C0 通过不等于 C1；
 - 没有 protected witness provider；

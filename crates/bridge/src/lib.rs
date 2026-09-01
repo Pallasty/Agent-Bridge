@@ -89,12 +89,17 @@ pub mod invocation_guardian_client;
 #[cfg(unix)]
 pub mod invocation_guardian_protocol;
 #[cfg(unix)]
-pub mod invocation_guardian_protocol_v2;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod invocation_guardian_protocol_v2;
+#[cfg(unix)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod invocation_guardian_receipt_v2;
 #[cfg(unix)]
 pub mod invocation_guardian_service;
 pub mod invocation_lease;
 #[cfg(unix)]
-pub mod invocation_lease_scope;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod invocation_lease_scope;
 pub mod llm_client;
 pub mod locks;
 pub mod lswr_interaction_feedback;
