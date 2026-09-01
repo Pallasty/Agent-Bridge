@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import platform
+import plistlib
 import re
 import stat
 import subprocess
@@ -115,6 +116,36 @@ def _physical_ancestors(path: Path) -> tuple[bool, list[str]]:
     return not blockers, sorted(set(blockers))
 
 
+def _filesystem_type(path: Path, runner: Runner) -> tuple[str | None, str | None]:
+    """Return the Darwin filesystem type and its backing device.
+
+    BSD stat's ``%T`` formats the mount point on current macOS releases, not
+    the filesystem type. Resolve the backing device with POSIX df and ask
+    diskutil for the typed plist field instead.
+    """
+    usage = runner(("/bin/df", "-P", str(path)))
+    if not usage.observation_complete or usage.returncode != 0:
+        return None, None
+    lines = [line for line in usage.stdout.splitlines() if line.strip()]
+    if len(lines) != 2:
+        return None, None
+    fields = lines[1].split()
+    if len(fields) < 6:
+        return None, None
+    device = fields[0]
+    details = runner(("/usr/sbin/diskutil", "info", "-plist", device))
+    if not details.observation_complete or details.returncode != 0:
+        return None, device
+    try:
+        payload = plistlib.loads(details.stdout.encode("utf-8"))
+    except (UnicodeError, plistlib.InvalidFileException):
+        return None, device
+    filesystem = payload.get("FilesystemType") if isinstance(payload, dict) else None
+    if not isinstance(filesystem, str) or not filesystem.strip():
+        return None, device
+    return filesystem.strip().lower(), device
+
+
 def _root_check(root: Path, runner: Runner) -> tuple[dict[str, Any], list[str]]:
     blockers: list[str] = []
     raw = str(root)
@@ -162,13 +193,9 @@ def _root_check(root: Path, runner: Runner) -> tuple[dict[str, Any], list[str]]:
             blockers.append("ROOT_FLAGS_UNREADABLE")
         elif flags != "-":
             blockers.append("ROOT_FILE_FLAGS_PRESENT")
-        fs = runner(("/usr/bin/stat", "-f", "%T", raw))
-        filesystem = (
-            fs.stdout.strip().lower()
-            if fs.observation_complete and fs.returncode == 0
-            else None
-        )
+        filesystem, filesystem_device = _filesystem_type(root, runner)
         facts["filesystem"] = filesystem
+        facts["filesystem_device"] = filesystem_device
         facts["filesystem_local_supported"] = filesystem in LOCAL_FILESYSTEMS
         if filesystem is None:
             blockers.append("ROOT_FILESYSTEM_INSPECTION_INCOMPLETE")

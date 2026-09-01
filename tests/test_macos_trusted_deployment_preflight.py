@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -28,8 +29,15 @@ class FakeRunner:
         self.commands.append(command)
         if command[:3] == ("/bin/ls", "-ldeO@", command[2]):
             return MODULE.CommandResult(0, "drwx------  2 owner staff 64 root\n")
-        if command[:3] == ("/usr/bin/stat", "-f", "%T"):
-            return MODULE.CommandResult(0, "apfs\n")
+        if command[:2] == ("/bin/df", "-P"):
+            return MODULE.CommandResult(
+                0, "Filesystem 512-blocks Used Available Capacity Mounted on\n"
+                "/dev/disk-fixture 1000 1 999 1% /fixture\n",
+            )
+        if command[:4] == ("/usr/sbin/diskutil", "info", "-plist", "/dev/disk-fixture"):
+            return MODULE.CommandResult(
+                0, plistlib.dumps({"FilesystemType": "apfs"}).decode("utf-8"),
+            )
         if command[:3] == ("/usr/bin/stat", "-f", "%Sf"):
             return MODULE.CommandResult(0, "-\n")
         if command[:3] == ("/usr/bin/codesign", "--verify", "--strict"):
@@ -102,8 +110,10 @@ class DarwinTrustedPreflightTests(unittest.TestCase):
         def runner(argv):
             if argv[0:2] == ("/bin/ls", "-ldeO@"):
                 return MODULE.CommandResult(0, "drwx------ root\n 0: group:everyone deny delete\n")
-            if argv[0:3] == ("/usr/bin/stat", "-f", "%T"):
-                return MODULE.CommandResult(0, "nfs\n")
+            if argv[0:4] == ("/usr/sbin/diskutil", "info", "-plist", "/dev/disk-fixture"):
+                return MODULE.CommandResult(
+                    0, plistlib.dumps({"FilesystemType": "nfs"}).decode("utf-8"),
+                )
             return self.runner(argv)
 
         result = MODULE.build_preflight(
@@ -112,6 +122,18 @@ class DarwinTrustedPreflightTests(unittest.TestCase):
         )
         self.assertIn("ROOT_EXTENDED_METADATA_PRESENT", result["blockers"])
         self.assertIn("ROOT_FILESYSTEM_NOT_LOCAL_SUPPORTED", result["blockers"])
+
+    def test_incomplete_filesystem_observation_fails_closed(self) -> None:
+        def runner(argv):
+            if argv[0:2] == ("/bin/df", "-P"):
+                return MODULE.CommandResult(124, "", "COMMAND_TIMEOUT", False)
+            return self.runner(argv)
+
+        result = MODULE.build_preflight(
+            root=self.root, installed_binary=self.binary,
+            state_database=self.database, runner=runner, system="Darwin",
+        )
+        self.assertIn("ROOT_FILESYSTEM_INSPECTION_INCOMPLETE", result["blockers"])
 
     def test_immutable_root_flag_fails_closed(self) -> None:
         def runner(argv):
