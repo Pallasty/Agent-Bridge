@@ -20,7 +20,8 @@ use ab_bridge::invocation_guardian_canary::{
 };
 use ab_bridge::invocation_lease_scope::{
     domain_hash, CanaryLeaseScope, CanaryTrustPins, SignedCanaryLease,
-    CANARY_CONNECTION_CONTEXT_KIND, CANARY_ISSUANCE_LANE, CANARY_TRANSPORT_KIND,
+    CANARY_CONNECTION_CONTEXT_KIND, CANARY_ISSUANCE_LANE, CANARY_PRINCIPAL_KIND,
+    CANARY_TRANSPORT_KIND,
 };
 
 #[test]
@@ -51,7 +52,7 @@ fn actual_stdio_tools_call_creates_at_most_one_marker() {
     let parent_registry = build_canary_registry(CanarySourceConfig {
         enabled: true,
         trust_pins: pins.clone(),
-        principal_kind: "service".into(),
+        principal_kind: CANARY_PRINCIPAL_KIND.into(),
         principal_commitment,
         provider_key_generation: 1,
         provider_signing_key: provider.clone(),
@@ -83,7 +84,7 @@ fn actual_stdio_tools_call_creates_at_most_one_marker() {
         target_sha256: canary_target_sha256(),
         registry_sha256: registry_digest,
         namespace: namespace.clone(),
-        principal_kind: "service".into(),
+        principal_kind: CANARY_PRINCIPAL_KIND.into(),
         principal_commitment,
         transport_kind: CANARY_TRANSPORT_KIND.into(),
         connection_context_kind: CANARY_CONNECTION_CONTEXT_KIND.into(),
