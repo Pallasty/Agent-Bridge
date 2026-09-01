@@ -14,7 +14,7 @@ use ring::signature::Ed25519KeyPair;
 use ab_bridge::invocation_guardian_canary::{
     build_canary_registry, CanarySourceConfig, FakeProtectedWitness,
 };
-use ab_bridge::invocation_lease_scope::{domain_hash, CanaryTrustPins};
+use ab_bridge::invocation_lease_scope::{domain_hash, CanaryTrustPins, CANARY_PRINCIPAL_KIND};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             ledger_generation,
             namespace,
         },
-        principal_kind: "service".into(),
+        principal_kind: CANARY_PRINCIPAL_KIND.into(),
         principal_commitment,
         provider_key_generation,
         provider_signing_key,
