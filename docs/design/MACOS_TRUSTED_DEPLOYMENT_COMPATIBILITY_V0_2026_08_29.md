@@ -338,9 +338,18 @@ SQLite status API. Focused Darwin tests, the 20-test D1/D2 suite, and the
 `HOLD` for the loaded daemon and open production SQLite descriptors without
 changing the database or installed-binary identities.
 
-This slice does not stop any job, run the migration writer, activate a Darwin
-runtime-state exchange, install/adopt a plist, publish, deploy, or accept D4.
-Those remain separate gates.
+The second source-only slice platform-dispatches the existing atomic
+runtime-state exchange. Darwin binds `renameatx_np(AT_FDCWD, ..., RENAME_SWAP)`
+with `AT_FDCWD=-2` and `RENAME_SWAP=0x00000002`; Linux retains
+`renameat2(..., RENAME_EXCHANGE)` with `AT_FDCWD=-100`. A real Darwin test uses
+only disposable directories to prove inode/content exchange and reversal. A
+disposable migration fixture then injects failure immediately before receipt
+publication and proves the established automatic exchange-back restores the
+empty runtime skeleton with no receipt or stage residue.
+
+These source-only slices do not stop any production job, migrate production
+state, activate the production Darwin runtime-state root, install/adopt a
+plist, publish, deploy, or accept D4. Those remain separate gates.
 
 ## 9. Required negative tests
 

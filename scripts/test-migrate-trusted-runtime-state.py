@@ -64,6 +64,18 @@ def inactive_unit(unit: str) -> dict[str, str]:
     }
 
 
+def unloaded_launchd_jobs() -> list[dict[str, object]]:
+    return [
+        {
+            "domain": f"gui/{os.geteuid()}",
+            "loaded": False,
+            "name": label,
+            "type": "launchd",
+        }
+        for label in MIGRATION.DARWIN_LAUNCHD_JOBS
+    ]
+
+
 class Fixture:
     def __init__(self, *, wal: bool = False) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="ab-r9-m1-")
@@ -301,6 +313,7 @@ os._exit(0)
         inherited_lock_fd: int | None = None,
         unit_state=inactive_unit,
         fd_scan=None,
+        platform: str = "linux",
     ):
         if fd_scan is None:
             fd_scan = lambda _paths: None
@@ -310,7 +323,9 @@ os._exit(0)
             MIGRATION, "query_unit_state", side_effect=unit_state
         ), mock.patch.object(
             MIGRATION, "scan_open_fds", side_effect=fd_scan
-        ), mock.patch.object(MIGRATION, "runtime_platform", return_value="linux"):
+        ), mock.patch.object(
+            MIGRATION, "collect_launchd_quiescence", return_value=unloaded_launchd_jobs()
+        ), mock.patch.object(MIGRATION, "runtime_platform", return_value=platform):
             return MIGRATION.execute(
                 command,
                 str(self.root),
@@ -384,6 +399,64 @@ class MigrationTests(unittest.TestCase):
                  mock.patch.object(MIGRATION.subprocess, "run", return_value=completed):
                 with self.assertRaises(MIGRATION.MigrationError):
                     MIGRATION.system_python_executable()
+
+    def test_darwin_rename_exchange_binds_fixed_abi_and_fails_closed(self) -> None:
+        class FakeRename:
+            argtypes = None
+            restype = None
+
+            def __init__(self) -> None:
+                self.arguments = None
+
+            def __call__(self, *arguments):
+                self.arguments = arguments
+                MIGRATION.ctypes.set_errno(MIGRATION.errno.EXDEV)
+                return -1
+
+        rename = FakeRename()
+        libc = types.SimpleNamespace(renameatx_np=rename)
+        with mock.patch.object(MIGRATION, "runtime_platform", return_value="darwin"), \
+             mock.patch.object(MIGRATION.ctypes, "CDLL", return_value=libc):
+            self.assert_rejected(
+                lambda: MIGRATION.rename_exchange("/private/left", "/private/right"),
+                "renameatx_np swap",
+            )
+        self.assertEqual(
+            rename.arguments,
+            (-2, b"/private/left", -2, b"/private/right", 0x00000002),
+        )
+        self.assertEqual(rename.restype, MIGRATION.ctypes.c_int)
+
+        with mock.patch.object(MIGRATION, "runtime_platform", return_value="darwin"), \
+             mock.patch.object(
+                 MIGRATION.ctypes, "CDLL", return_value=types.SimpleNamespace()
+             ):
+            self.assert_rejected(
+                lambda: MIGRATION.rename_exchange("/private/left", "/private/right"),
+                "renameatx_np swap is required",
+            )
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin renameatx_np")
+    def test_darwin_atomic_directory_exchange_and_reversal(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ab-darwin-swap-") as base:
+            left = Path(base) / "left"
+            right = Path(base) / "right"
+            private_dir(left)
+            private_dir(right)
+            (left / "marker").write_text("left\n", encoding="ascii")
+            (right / "marker").write_text("right\n", encoding="ascii")
+            left_inode = left.stat().st_ino
+            right_inode = right.stat().st_ino
+
+            MIGRATION.rename_exchange(str(left), str(right))
+            self.assertEqual(left.stat().st_ino, right_inode)
+            self.assertEqual(right.stat().st_ino, left_inode)
+            self.assertEqual((left / "marker").read_text(encoding="ascii"), "right\n")
+            self.assertEqual((right / "marker").read_text(encoding="ascii"), "left\n")
+
+            MIGRATION.rename_exchange(str(left), str(right))
+            self.assertEqual(left.stat().st_ino, left_inode)
+            self.assertEqual(right.stat().st_ino, right_inode)
 
     def fixture(self, *, wal: bool = False) -> Fixture:
         value = Fixture(wal=wal)
@@ -903,6 +976,32 @@ class MigrationTests(unittest.TestCase):
         self.assertFalse((fixture.root / "publisher-state/migrations/current.json").exists())
         runtime = fixture.root / "runtime-state"
         self.assertEqual(set(path.name for path in runtime.iterdir()), set(MIGRATION.RUNTIME_LEAVES))
+        self.assertTrue(all(not any(path.iterdir()) for path in runtime.iterdir()))
+        self.assertFalse(any(fixture.root.glob("runtime-state.migration-stage.*")))
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin renameatx_np")
+    def test_darwin_fault_before_receipt_rolls_runtime_back(self) -> None:
+        fixture = self.fixture()
+        with mock.patch.object(
+            MIGRATION,
+            "publish_receipt",
+            side_effect=MIGRATION.MigrationError("injected before Darwin receipt"),
+        ):
+            self.assert_rejected(
+                lambda: fixture.execute(
+                    "migrate",
+                    confirmation=fixture.confirmation,
+                    platform="darwin",
+                ),
+                "injected before Darwin receipt",
+            )
+        self.assertFalse(
+            (fixture.root / "publisher-state/migrations/current.json").exists()
+        )
+        runtime = fixture.root / "runtime-state"
+        self.assertEqual(
+            {path.name for path in runtime.iterdir()}, set(MIGRATION.RUNTIME_LEAVES)
+        )
         self.assertTrue(all(not any(path.iterdir()) for path in runtime.iterdir()))
         self.assertFalse(any(fixture.root.glob("runtime-state.migration-stage.*")))
 

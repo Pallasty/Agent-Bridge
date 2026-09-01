@@ -2086,13 +2086,27 @@ def assert_target_tree_stable(
 
 def rename_exchange(left: str, right: str) -> None:
     libc = ctypes.CDLL(None, use_errno=True)
-    function = getattr(libc, "renameat2", None)
+    platform = runtime_platform()
+    if platform == "darwin":
+        function = getattr(libc, "renameatx_np", None)
+        at_fdcwd = -2
+        rename_exchange_flag = 0x00000002  # RENAME_SWAP
+        primitive = "renameatx_np swap"
+    else:
+        function = getattr(libc, "renameat2", None)
+        at_fdcwd = -100
+        rename_exchange_flag = 2  # RENAME_EXCHANGE
+        primitive = "renameat2 exchange"
     if function is None:
-        fail("Linux renameat2 is required for atomic runtime-state activation")
-    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        fail(f"{primitive} is required for atomic runtime-state activation")
+    function.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
     function.restype = ctypes.c_int
-    at_fdcwd = -100
-    rename_exchange_flag = 2
     result = function(
         at_fdcwd,
         os.fsencode(left),
@@ -2103,7 +2117,7 @@ def rename_exchange(left: str, right: str) -> None:
     if result != 0:
         error = ctypes.get_errno()
         if error in (errno.ENOSYS, errno.EINVAL, errno.EXDEV, errno.EOPNOTSUPP):
-            fail("filesystem does not support atomic renameat2 exchange")
+            fail(f"filesystem does not support atomic {primitive}")
         fail("atomic runtime-state exchange failed")
 
 
