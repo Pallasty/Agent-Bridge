@@ -89,3 +89,18 @@ Until one input exists, the smallest correct next action is HOLD. Either input
 reopens only its matching evidence run, not general source expansion. C4 review,
 installation, service restart, marker enablement and global enforcement are not
 admissible next steps.
+
+## Pre-PR currentness refresh
+
+Before publication, the candidate was refreshed from upstream `a5ba8f8b` to
+`c45ffd53`. The upstream delta changes only five macOS trusted-deployment shell
+scripts and does not overlap Guardian paths. Merge `429aa213` was conflict-free.
+
+Post-refresh checks:
+
+- C3 provider lab: 1 passed, 0 failed;
+- default-off `ab-bridge` check: PASS;
+- `git diff --check`: PASS;
+- accepted provider-lab commit `468f235f` remains included;
+- frozen experimental commits `ca6110f7`, `f043320c`, `5816f710` and
+  `090a849d` remain excluded.
