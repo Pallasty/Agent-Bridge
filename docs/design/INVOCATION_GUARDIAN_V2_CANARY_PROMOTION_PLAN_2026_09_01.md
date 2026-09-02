@@ -1,7 +1,12 @@
 # AB Invocation Guardian v2：单入口 Canary 与晋级计划
 
 日期：2026-09-01
-状态：**C0/C1 已通过；C2 隔离预检与 C3 protected-witness 源码合同已实现；真实部署/provider 证据未执行，C2—C4 与 production `enforce` 继续 HOLD**
+状态：**SOURCE LANE FROZEN；C0/C1 已通过；C2 隔离预检与 C3 protected-witness 源码合同已实现；真实部署/provider 证据未执行，C2—C4 与 production `enforce` 继续 HOLD**
+
+冻结说明（2026-09-02）：C0—C3 已经覆盖当前可由本地源码诚实验证的边界。
+在出现真实的多 UID transient-systemd 执行环境或独立 anti-rollback
+provider 之前，不再增加 adapter、daemon、ledger、gate、模拟器或新的里程碑。
+缺陷修复与既有回归验证不受影响。详见当前性结果报告中的止漂审计。
 
 ## 1. 决策
 

@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Status: **C0-C3 source evidence current; C2 host environment, C3 external provider, C4 and production HOLD**
+Status: **SOURCE LANE FROZEN; C0-C3 source evidence current; C2 host environment, C3 external provider, C4 and production HOLD**
 
 ## Decision
 
@@ -52,6 +52,29 @@ were checked without changing repository or production state:
 Therefore C2 remains `HOLD` for a technical environment prerequisite, not for
 owner authorization. No substitute harness or synthetic PASS was added.
 
+## Drift and overengineering audit
+
+The security objective has not drifted: the implementation still targets one
+default-off, fixed marker ingress and makes no global authority claim. The work
+pattern, however, would drift if local source artifacts continued to be added
+after all remaining gates became external-evidence gates.
+
+The stop-drift fields are:
+
+| Field | Current evidence |
+| --- | --- |
+| recent real problem | The motivating external incident is real; no analogous AB incident has been observed. |
+| 30-day occurrences | No positive AB occurrence evidence is available. |
+| owner cost per occurrence | Unmeasured because no AB occurrence has been recorded. |
+| smallest owner-visible closure | Default-off C0-C3 source/lab invariants and explicit fail-closed boundaries already exist. |
+| next increment | Run C2 or C3 against real external prerequisites; do not add source substitutes. |
+| cost of doing nothing | The candidate remains dormant and production behavior stays unchanged. |
+
+Verdict: further local implementation would increase proof machinery without
+closing an observable AB gap. The Guardian source lane is therefore frozen.
+Defect repair and regression checks remain admissible; new framework work does
+not.
+
 ## Stop boundary
 
 The source lane stops here. No further framework work is justified without one
@@ -62,6 +85,7 @@ of the already-defined external inputs:
 2. C3 execution: an independently operated anti-rollback provider, endpoint,
    trust pins, credentials and recovery-test window.
 
-Until one input exists, the smallest correct next action is HOLD. C4 review,
+Until one input exists, the smallest correct next action is HOLD. Either input
+reopens only its matching evidence run, not general source expansion. C4 review,
 installation, service restart, marker enablement and global enforcement are not
 admissible next steps.
