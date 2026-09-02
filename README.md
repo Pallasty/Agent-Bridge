@@ -779,9 +779,9 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | | `memory_auto_curate` | Scope-bounded batch curation from `session_handoff` memories; persists inferred confidence and source lineage (v0.12) |
 | multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6; Niche since the 2026-07 prune — the forum tools are the live path) |
 | | `agent_inbox` | Fetch inbox rows (`since_id`, `unread_only`, `limit`; Niche since the 2026-07 prune) |
-| plan | `plan_save` | Persist a structured task plan (steps, deps, per-step status) to SQLite (W5) |
-| | `plan_load` | Load plan + `progress` / `next_step_id` summary |
-| | `plan_update` | Set one step's status by id |
+| plan | `plan_save` | Persist a validated structured task plan (steps, dependencies, contracts, Store-owned terminal anchors, and completion references) to SQLite (W5) |
+| | `plan_load` | Load the plan plus dependency-aware progress; legacy evidence-free `done` and completion-integrity failures are distinguished |
+| | `plan_update` | Atomically update one step; entering terminal `done` requires a contract-bound, harness-verified task-outcome record |
 | session | `session_bootstrap` | Build a scoped memory bootstrap; an explicit query is a targeted recovery packet on every frontend and omits global letters and auxiliary analysis panels |
 | | `session_curate` | Extract structured memories from conversation text; lifecycle calls inherit project scope and mark outputs inferred (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
@@ -807,6 +807,14 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | | `warp_open_settings` | `warp://action/open_settings_page` (best-effort) |
 | | `warp_launch_workflow` | `warp://launch/<configuration_name>` — saved Launch Configuration |
 | | `warp_status` | Env / opener / IPC bridge socket / `oz` on PATH — does not open UI |
+
+> **Plan-completion rollout hold:** this source tree contains the v1 trusted
+> completion gate, but the deployed public outcome route can produce only
+> `agent_reported` records. A natural task must first pass the reopen gate; its
+> resulting bounded independent producer must then pass the rollout gate.
+> Until both occur, deploying this change into the ordinary plan workflow would
+> intentionally make every new `done` transition unavailable.
+> See `docs/design/PLAN_COMPLETION_EVIDENCE_GATE_2026_08_30.md`.
 
 ### Memory recall scopes (single-user, not ACLs)
 

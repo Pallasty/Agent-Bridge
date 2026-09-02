@@ -26,7 +26,7 @@ use ab_core::{Error, NotifyEvent, NotifySeverity, NotifySource, Result, SessionI
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::{
@@ -695,8 +695,9 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    agent_world_capture_digest, agent_world_capture_row_hash, memory_scope_visible_in_context,
-    AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, AgentWorldCaptureRow,
+    agent_world_capture_digest, agent_world_capture_row_hash, canonical_plan_status,
+    memory_scope_visible_in_context, plan_step_contract_id, AgentMessageRecord,
+    AgentPresenceRecord, AgentPresenceUpsert, AgentWorldCaptureRow,
     AgentWorldWorkspaceSummaryCapture, CoactivationEdge, CoactivationStats, CodebaseIndexStats,
     CodebaseIndexStatus, CodebaseSymbol, CompactPolicy, DecayUnusedStats, EmbeddingProfile,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
@@ -707,13 +708,15 @@ use crate::{
     MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot, MemoryEvidenceSnapshotLimits,
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta, MemoryPeekResult,
     MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
-    MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord, OverlapPair, PlanRecord,
-    PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory,
+    MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord, OverlapPair,
+    PlanMutationRejection, PlanMutationRejectionCode, PlanRecord, PlanSaveOutcome, PlanStep,
+    PlanStepCompletionContract, PlanStepCompletionEvidenceRef, PlanUpdateOutcome,
+    ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory,
     RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts, SessionFilter,
     SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
     AGENT_WORLD_CAPTURE_RING_CAP, AMBIENT_SURFACING_MODE, FUSION_SHADOW_RING_CAP,
     MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
-    RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
+    PLAN_STEP_COMPLETION_CONTRACT_REVISION, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -7854,6 +7857,648 @@ fn validate_agent_task_outcome_record(
     Ok(())
 }
 
+enum ExactAgentTaskOutcome {
+    Missing,
+    Invalid,
+    Valid(crate::AgentTaskOutcomeRecord),
+}
+
+fn load_agent_task_outcome_exact(
+    connection: &rusqlite::Connection,
+    outcome_id: &str,
+) -> RusqliteResult<ExactAgentTaskOutcome> {
+    let row = connection
+        .query_row(
+            "SELECT outcome_id, recorded_at, contract_id,
+                    contract_revision, status, verification_status,
+                    verification_method, evidence_sha256, user_acceptance,
+                    acceptance_provenance, manual_interventions,
+                    owner_restatements, repeated_authorization_prompts,
+                    rollback_status, provenance, agent_id, body_id,
+                    environment_id, schema_version, record_sha256
+               FROM agent_task_outcomes
+              WHERE outcome_id = ?1",
+            params![outcome_id],
+            |row| {
+                let evidence: String = row.get(7)?;
+                let evidence_sha256 = serde_json::from_str(&evidence)
+                    .unwrap_or_else(|_| vec!["invalid_persisted_evidence".to_string()]);
+                Ok(crate::AgentTaskOutcomeRecord {
+                    schema_version: row.get(18)?,
+                    outcome_id: row.get(0)?,
+                    recorded_at: row.get(1)?,
+                    contract_id: row.get(2)?,
+                    contract_revision: row.get(3)?,
+                    status: row.get(4)?,
+                    verification_status: row.get(5)?,
+                    verification_method: row.get(6)?,
+                    evidence_sha256,
+                    user_acceptance: row.get(8)?,
+                    acceptance_provenance: row.get(9)?,
+                    manual_interventions: row.get(10)?,
+                    owner_restatements: row.get(11)?,
+                    repeated_authorization_prompts: row.get(12)?,
+                    rollback_status: row.get(13)?,
+                    provenance: row.get(14)?,
+                    agent_id: row.get(15)?,
+                    body_id: row.get(16)?,
+                    environment_id: row.get(17)?,
+                    record_sha256: row.get(19)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(match row {
+        None => ExactAgentTaskOutcome::Missing,
+        Some(record) if validate_agent_task_outcome_record(&record).is_ok() => {
+            ExactAgentTaskOutcome::Valid(record)
+        }
+        Some(_) => ExactAgentTaskOutcome::Invalid,
+    })
+}
+
+fn plan_rejection(code: PlanMutationRejectionCode, step_id: Option<&str>) -> PlanMutationRejection {
+    let mut rejection = PlanMutationRejection::new(code);
+    rejection.step_id = step_id.map(str::to_string);
+    rejection
+}
+
+fn expected_plan_step_contract(plan_id: &str, step: &PlanStep) -> PlanStepCompletionContract {
+    PlanStepCompletionContract {
+        contract_id: plan_step_contract_id(plan_id, &step.id, &step.desc, &step.deps),
+        revision: PLAN_STEP_COMPLETION_CONTRACT_REVISION,
+    }
+}
+
+fn hydrate_missing_plan_contracts(plan_id: &str, steps: &mut [PlanStep]) {
+    for step in steps {
+        if step.completion_contract.is_none() {
+            step.completion_contract = Some(expected_plan_step_contract(plan_id, step));
+        }
+    }
+}
+
+fn project_plan_steps(
+    connection: &rusqlite::Connection,
+    plan_id: &str,
+    persisted_steps: &[PlanStep],
+) -> RusqliteResult<(Vec<PlanStep>, Vec<PlanMutationRejection>)> {
+    let mut projected = persisted_steps.to_vec();
+    let mut diagnostics = Vec::new();
+    for step in &mut projected {
+        let expected_contract = expected_plan_step_contract(plan_id, step);
+        let anchor_exists = step.completion_anchor || step.completion_evidence.is_some();
+        let rejection =
+            if anchor_exists && (step.status != "done" || step.completion_evidence.is_none()) {
+                let mut rejection = plan_rejection(
+                    PlanMutationRejectionCode::CompletionAnchorInvalid,
+                    Some(&step.id),
+                );
+                rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+                rejection.existing_outcome_id = step
+                    .completion_evidence
+                    .as_ref()
+                    .map(|evidence| evidence.outcome_id.clone());
+                Some(rejection)
+            } else if let Some(evidence) = step.completion_evidence.as_ref() {
+                if step.completion_contract.as_ref() != Some(&expected_contract) {
+                    let mut rejection = plan_rejection(
+                        PlanMutationRejectionCode::CompletionContractMismatch,
+                        Some(&step.id),
+                    );
+                    rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+                    rejection.outcome_id = Some(evidence.outcome_id.clone());
+                    Some(rejection)
+                } else {
+                    match validate_plan_completion_evidence(
+                        connection,
+                        &step.id,
+                        &expected_contract,
+                        evidence,
+                    )? {
+                        Err(rejection) => Some(rejection),
+                        Ok(record_sha256) if evidence.record_sha256 != record_sha256 => {
+                            let mut rejection = plan_rejection(
+                                PlanMutationRejectionCode::CompletionEvidenceDigestMismatch,
+                                Some(&step.id),
+                            );
+                            rejection.expected_contract_id =
+                                Some(expected_contract.contract_id.clone());
+                            rejection.outcome_id = Some(evidence.outcome_id.clone());
+                            Some(rejection)
+                        }
+                        Ok(_) => None,
+                    }
+                }
+            } else {
+                None
+            };
+        step.completion_anchor = anchor_exists;
+        if let Some(rejection) = rejection {
+            // Projection-only fail-closed downgrade. Keep the raw row untouched
+            // so audit and repair remain possible.
+            step.completion_evidence = None;
+            diagnostics.push(rejection);
+        }
+        // Every read projection tells callers which current contract a repair
+        // outcome must target, even when raw JSON was stale or legacy.
+        step.completion_contract = Some(expected_contract);
+    }
+    Ok((projected, diagnostics))
+}
+
+fn has_persisted_completion_anchor(step: &PlanStep) -> bool {
+    // The additive Store marker survives status/reference corruption. A legacy
+    // evidence ref also freezes the step before its marker has been backfilled.
+    // Exact trust remains separate for reads and dependency satisfaction.
+    step.completion_anchor || step.completion_evidence.is_some()
+}
+
+fn completion_outcome_trust_rejection(
+    record: &crate::AgentTaskOutcomeRecord,
+    expected_contract: &PlanStepCompletionContract,
+) -> Option<PlanMutationRejectionCode> {
+    if record.status != "achieved"
+        || record.verification_status != "verified"
+        || record.verification_method == "none"
+        || record.evidence_sha256.is_empty()
+        || record.provenance != "harness_verified"
+    {
+        return Some(PlanMutationRejectionCode::CompletionOutcomeUntrusted);
+    }
+    if record.contract_id != expected_contract.contract_id {
+        return Some(PlanMutationRejectionCode::CompletionOutcomeContractMismatch);
+    }
+    if record.contract_revision != expected_contract.revision {
+        return Some(PlanMutationRejectionCode::CompletionOutcomeRevisionMismatch);
+    }
+    None
+}
+
+fn validate_plan_completion_evidence(
+    connection: &rusqlite::Connection,
+    step_id: &str,
+    expected_contract: &PlanStepCompletionContract,
+    evidence: &PlanStepCompletionEvidenceRef,
+) -> RusqliteResult<std::result::Result<String, PlanMutationRejection>> {
+    if !ledger_identifier(&evidence.outcome_id) {
+        let mut rejection = plan_rejection(
+            PlanMutationRejectionCode::CompletionOutcomeIdInvalid,
+            Some(step_id),
+        );
+        rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+        rejection.outcome_id = Some(evidence.outcome_id.clone());
+        return Ok(Err(rejection));
+    }
+    let record = match load_agent_task_outcome_exact(connection, &evidence.outcome_id)? {
+        ExactAgentTaskOutcome::Missing => {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionOutcomeNotFound,
+                Some(step_id),
+            );
+            rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+            rejection.outcome_id = Some(evidence.outcome_id.clone());
+            return Ok(Err(rejection));
+        }
+        ExactAgentTaskOutcome::Invalid => {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionOutcomeInvalid,
+                Some(step_id),
+            );
+            rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+            rejection.outcome_id = Some(evidence.outcome_id.clone());
+            return Ok(Err(rejection));
+        }
+        ExactAgentTaskOutcome::Valid(record) => record,
+    };
+    if let Some(code) = completion_outcome_trust_rejection(&record, expected_contract) {
+        let mut rejection = plan_rejection(code, Some(step_id));
+        rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+        rejection.outcome_id = Some(evidence.outcome_id.clone());
+        return Ok(Err(rejection));
+    }
+    if !evidence.record_sha256.is_empty() && evidence.record_sha256 != record.record_sha256 {
+        let mut rejection = plan_rejection(
+            PlanMutationRejectionCode::CompletionEvidenceDigestMismatch,
+            Some(step_id),
+        );
+        rejection.expected_contract_id = Some(expected_contract.contract_id.clone());
+        rejection.outcome_id = Some(evidence.outcome_id.clone());
+        return Ok(Err(rejection));
+    }
+    Ok(Ok(record.record_sha256))
+}
+
+fn is_current_evidence_gated_done(
+    connection: &rusqlite::Connection,
+    plan_id: &str,
+    step: &PlanStep,
+) -> RusqliteResult<bool> {
+    if step.status != "done" {
+        return Ok(false);
+    }
+    let expected_contract = expected_plan_step_contract(plan_id, step);
+    if step.completion_contract.as_ref() != Some(&expected_contract) {
+        return Ok(false);
+    }
+    let Some(evidence) = step.completion_evidence.as_ref() else {
+        return Ok(false);
+    };
+    Ok(matches!(
+        validate_plan_completion_evidence(connection, &step.id, &expected_contract, evidence)?,
+        Ok(record_sha256) if record_sha256 == evidence.record_sha256
+    ))
+}
+
+fn persisted_completion_anchor_integrity_rejection(
+    connection: &rusqlite::Connection,
+    plan_id: &str,
+    step: &PlanStep,
+) -> RusqliteResult<Option<PlanMutationRejection>> {
+    let expected_contract = expected_plan_step_contract(plan_id, step);
+    let Some(evidence) = step.completion_evidence.as_ref() else {
+        let mut rejection = plan_rejection(
+            PlanMutationRejectionCode::CompletionAnchorInvalid,
+            Some(&step.id),
+        );
+        rejection.expected_contract_id = Some(expected_contract.contract_id);
+        return Ok(Some(rejection));
+    };
+    if step.completion_contract.as_ref() != Some(&expected_contract) {
+        let mut rejection = plan_rejection(
+            PlanMutationRejectionCode::CompletionContractMismatch,
+            Some(&step.id),
+        );
+        rejection.expected_contract_id = Some(expected_contract.contract_id);
+        rejection.outcome_id = Some(evidence.outcome_id.clone());
+        return Ok(Some(rejection));
+    }
+    let record_sha256 = match validate_plan_completion_evidence(
+        connection,
+        &step.id,
+        &expected_contract,
+        evidence,
+    )? {
+        Ok(record_sha256) => record_sha256,
+        Err(rejection) => return Ok(Some(rejection)),
+    };
+    if evidence.record_sha256 != record_sha256 {
+        let mut rejection = plan_rejection(
+            PlanMutationRejectionCode::CompletionEvidenceDigestMismatch,
+            Some(&step.id),
+        );
+        rejection.expected_contract_id = Some(expected_contract.contract_id);
+        rejection.outcome_id = Some(evidence.outcome_id.clone());
+        return Ok(Some(rejection));
+    }
+    Ok(None)
+}
+
+fn validate_plan_structure(
+    plan_id: &str,
+    steps: &[PlanStep],
+) -> std::result::Result<Vec<PlanStep>, PlanMutationRejection> {
+    if plan_id.trim().is_empty() {
+        return Err(plan_rejection(
+            PlanMutationRejectionCode::InvalidPlanId,
+            None,
+        ));
+    }
+    if steps.is_empty() {
+        return Err(plan_rejection(PlanMutationRejectionCode::EmptySteps, None));
+    }
+
+    let mut prepared = steps.to_vec();
+    for step in &mut prepared {
+        step.id = step.id.trim().to_string();
+        for dependency in &mut step.deps {
+            *dependency = dependency.trim().to_string();
+        }
+        // This marker is Store-owned. A caller may roundtrip it, but cannot
+        // mint an irreversible completion anchor without trusted evidence.
+        step.completion_anchor = false;
+    }
+    let mut ids = BTreeSet::new();
+    for step in &prepared {
+        if step.id.trim().is_empty() {
+            return Err(plan_rejection(
+                PlanMutationRejectionCode::EmptyStepId,
+                Some(&step.id),
+            ));
+        }
+        if step.desc.trim().is_empty() {
+            return Err(plan_rejection(
+                PlanMutationRejectionCode::EmptyStepDescription,
+                Some(&step.id),
+            ));
+        }
+        if !ids.insert(step.id.clone()) {
+            return Err(plan_rejection(
+                PlanMutationRejectionCode::DuplicateStepId,
+                Some(&step.id),
+            ));
+        }
+    }
+
+    for step in &prepared {
+        let mut dependencies = BTreeSet::new();
+        for dependency in &step.deps {
+            if dependency.trim().is_empty() {
+                return Err(plan_rejection(
+                    PlanMutationRejectionCode::EmptyDependencyId,
+                    Some(&step.id),
+                ));
+            }
+            if !dependencies.insert(dependency.clone()) {
+                let mut rejection = plan_rejection(
+                    PlanMutationRejectionCode::DuplicateDependency,
+                    Some(&step.id),
+                );
+                rejection.related_step_ids.push(dependency.clone());
+                return Err(rejection);
+            }
+            if dependency == &step.id {
+                let mut rejection =
+                    plan_rejection(PlanMutationRejectionCode::SelfDependency, Some(&step.id));
+                rejection.related_step_ids.push(dependency.clone());
+                return Err(rejection);
+            }
+            if !ids.contains(dependency) {
+                let mut rejection =
+                    plan_rejection(PlanMutationRejectionCode::UnknownDependency, Some(&step.id));
+                rejection.related_step_ids.push(dependency.clone());
+                return Err(rejection);
+            }
+        }
+    }
+
+    let mut dependency_counts: BTreeMap<String, usize> = prepared
+        .iter()
+        .map(|step| (step.id.clone(), step.deps.len()))
+        .collect();
+    let mut dependents: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for step in &prepared {
+        for dependency in &step.deps {
+            dependents
+                .entry(dependency.clone())
+                .or_default()
+                .push(step.id.clone());
+        }
+    }
+    let mut ready: BTreeSet<String> = dependency_counts
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(step_id, _)| step_id.clone())
+        .collect();
+    let mut visited = 0usize;
+    while let Some(step_id) = ready.pop_first() {
+        visited += 1;
+        if let Some(step_dependents) = dependents.get(&step_id) {
+            for dependent in step_dependents {
+                let count = dependency_counts
+                    .get_mut(dependent)
+                    .expect("validated dependency target must exist");
+                *count -= 1;
+                if *count == 0 {
+                    ready.insert(dependent.clone());
+                }
+            }
+        }
+    }
+    if visited != prepared.len() {
+        let mut rejection = plan_rejection(PlanMutationRejectionCode::DependencyCycle, None);
+        rejection.related_step_ids = dependency_counts
+            .into_iter()
+            .filter_map(|(step_id, count)| (count > 0).then_some(step_id))
+            .collect();
+        return Err(rejection);
+    }
+
+    for step in &mut prepared {
+        let Some(status) = canonical_plan_status(&step.status) else {
+            return Err(plan_rejection(
+                PlanMutationRejectionCode::UnsupportedStatus,
+                Some(&step.id),
+            ));
+        };
+        step.status = status.to_string();
+        let expected_contract = expected_plan_step_contract(plan_id, step);
+        if (step.status == "done" || step.completion_evidence.is_some())
+            && step
+                .completion_contract
+                .as_ref()
+                .is_some_and(|contract| contract != &expected_contract)
+        {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionContractMismatch,
+                Some(&step.id),
+            );
+            rejection.expected_contract_id = Some(expected_contract.contract_id);
+            return Err(rejection);
+        }
+        step.completion_contract = Some(expected_contract);
+        if step.status != "done" && step.completion_evidence.is_some() {
+            return Err(plan_rejection(
+                PlanMutationRejectionCode::CompletionEvidenceForbidden,
+                Some(&step.id),
+            ));
+        }
+        if step.status == "done" && step.completion_evidence.is_none() {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionEvidenceRequired,
+                Some(&step.id),
+            );
+            rejection.expected_contract_id = step
+                .completion_contract
+                .as_ref()
+                .map(|contract| contract.contract_id.clone());
+            return Err(rejection);
+        }
+    }
+    Ok(prepared)
+}
+
+fn prepare_plan_steps(
+    connection: &rusqlite::Connection,
+    plan_id: &str,
+    steps: &[PlanStep],
+) -> RusqliteResult<std::result::Result<Vec<PlanStep>, PlanMutationRejection>> {
+    let mut prepared = match validate_plan_structure(plan_id, steps) {
+        Ok(prepared) => prepared,
+        Err(rejection) => return Ok(Err(rejection)),
+    };
+
+    for step in &mut prepared {
+        if step.status != "done" {
+            continue;
+        }
+        let contract = step
+            .completion_contract
+            .as_ref()
+            .expect("validated steps always have completion contracts");
+        let evidence = step
+            .completion_evidence
+            .as_ref()
+            .expect("validated DONE steps always have evidence");
+        let record_sha256 =
+            match validate_plan_completion_evidence(connection, &step.id, contract, evidence)? {
+                Ok(record_sha256) => record_sha256,
+                Err(rejection) => return Ok(Err(rejection)),
+            };
+        step.completion_evidence = Some(PlanStepCompletionEvidenceRef {
+            outcome_id: evidence.outcome_id.clone(),
+            record_sha256,
+        });
+    }
+
+    let by_id: BTreeMap<&str, &PlanStep> = prepared
+        .iter()
+        .map(|step| (step.id.as_str(), step))
+        .collect();
+    for step in &prepared {
+        if step.status != "done" {
+            continue;
+        }
+        for dependency_id in &step.deps {
+            let dependency = by_id
+                .get(dependency_id.as_str())
+                .expect("validated dependency must exist");
+            if dependency.status != "done"
+                || !is_current_evidence_gated_done(connection, plan_id, dependency)?
+            {
+                let mut rejection = plan_rejection(
+                    PlanMutationRejectionCode::DependencyNotCompleted,
+                    Some(&step.id),
+                );
+                rejection.related_step_ids.push(dependency_id.clone());
+                return Ok(Err(rejection));
+            }
+        }
+    }
+    for step in &mut prepared {
+        step.completion_anchor = step.status == "done";
+    }
+    Ok(Ok(prepared))
+}
+
+fn backfill_valid_completion_anchor_markers(
+    connection: &rusqlite::Connection,
+    plan_id: &str,
+    steps: &mut [PlanStep],
+) -> RusqliteResult<()> {
+    for step in steps {
+        if step.completion_anchor || step.status != "done" {
+            continue;
+        }
+        let expected_contract = expected_plan_step_contract(plan_id, step);
+        if step.completion_contract.as_ref() != Some(&expected_contract) {
+            continue;
+        }
+        let Some(evidence) = step.completion_evidence.as_ref() else {
+            continue;
+        };
+        if matches!(
+            validate_plan_completion_evidence(
+                connection,
+                &step.id,
+                &expected_contract,
+                evidence,
+            )?,
+            Ok(record_sha256) if record_sha256 == evidence.record_sha256
+        ) {
+            step.completion_anchor = true;
+        }
+    }
+    Ok(())
+}
+
+fn completion_reopen_rejection(
+    plan_id: &str,
+    old_steps: &[PlanStep],
+    new_steps: &[PlanStep],
+) -> Option<PlanMutationRejection> {
+    let new_by_id: BTreeMap<String, &PlanStep> = new_steps
+        .iter()
+        .map(|step| (step.id.trim().to_string(), step))
+        .collect();
+    for old_step in old_steps {
+        if !has_persisted_completion_anchor(old_step) {
+            continue;
+        }
+        let remains_done = new_by_id
+            .get(&old_step.id)
+            .and_then(|step| canonical_plan_status(&step.status))
+            == Some("done");
+        if !remains_done {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionReopenForbidden,
+                Some(&old_step.id),
+            );
+            rejection.expected_contract_id =
+                Some(expected_plan_step_contract(plan_id, old_step).contract_id);
+            rejection.existing_outcome_id = old_step
+                .completion_evidence
+                .as_ref()
+                .map(|evidence| evidence.outcome_id.clone());
+            return Some(rejection);
+        }
+    }
+    None
+}
+
+fn completion_anchor_replacement_rejection(
+    connection: &rusqlite::Connection,
+    plan_id: &str,
+    old_steps: &[PlanStep],
+    new_steps: &[PlanStep],
+) -> RusqliteResult<Option<PlanMutationRejection>> {
+    let new_by_id: BTreeMap<&str, &PlanStep> = new_steps
+        .iter()
+        .map(|step| (step.id.as_str(), step))
+        .collect();
+    for old_step in old_steps {
+        if !has_persisted_completion_anchor(old_step) {
+            continue;
+        }
+        let Some(new_step) = new_by_id.get(old_step.id.as_str()) else {
+            continue;
+        };
+        if new_step.status != "done" {
+            continue;
+        }
+        let Some(old_evidence) = old_step.completion_evidence.as_ref() else {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionAnchorInvalid,
+                Some(&old_step.id),
+            );
+            rejection.expected_contract_id =
+                Some(expected_plan_step_contract(plan_id, old_step).contract_id);
+            return Ok(Some(rejection));
+        };
+        let new_evidence = new_step
+            .completion_evidence
+            .as_ref()
+            .expect("validated new DONE step must have evidence");
+        if old_evidence.outcome_id != new_evidence.outcome_id {
+            let mut rejection = plan_rejection(
+                PlanMutationRejectionCode::CompletionOutcomeConflict,
+                Some(&old_step.id),
+            );
+            rejection.existing_outcome_id = Some(old_evidence.outcome_id.clone());
+            rejection.outcome_id = Some(new_evidence.outcome_id.clone());
+            rejection.expected_contract_id =
+                Some(expected_plan_step_contract(plan_id, old_step).contract_id);
+            return Ok(Some(rejection));
+        }
+        if let Some(rejection) =
+            persisted_completion_anchor_integrity_rejection(connection, plan_id, old_step)?
+        {
+            return Ok(Some(rejection));
+        }
+    }
+    Ok(None)
+}
+
 fn object_has_exact_keys(value: &serde_json::Value, expected: &[&str]) -> bool {
     let Some(object) = value.as_object() else {
         return false;
@@ -8850,6 +9495,35 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|error| Error::Backend(format!("recent_agent_task_outcomes: {error}")))
+    }
+
+    async fn load_agent_task_outcome(
+        &self,
+        outcome_id: &str,
+    ) -> Result<Option<crate::AgentTaskOutcomeRecord>> {
+        if !ledger_identifier(outcome_id) {
+            return Err(Error::InvalidArgument("invalid task outcome_id".into()));
+        }
+        let outcome_id = outcome_id.to_string();
+        self.conn
+            .call(
+                move |connection| match load_agent_task_outcome_exact(connection, &outcome_id)? {
+                    ExactAgentTaskOutcome::Missing => Ok(None),
+                    ExactAgentTaskOutcome::Valid(record) => Ok(Some(record)),
+                    ExactAgentTaskOutcome::Invalid => {
+                        Err(rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "task outcome canonical record is invalid",
+                            )),
+                        ))
+                    }
+                },
+            )
+            .await
+            .map_err(|error| Error::Backend(format!("load_agent_task_outcome: {error}")))
     }
 
     async fn record_body_operation_receipt(
@@ -15855,125 +16529,360 @@ impl StateStore for SqliteStore {
 
     // ─── W5: plans ───────────────────────────────────────────────────────
 
-    async fn plan_save(&self, plan_id: &str, title: &str, steps: &[PlanStep]) -> Result<()> {
+    async fn plan_save(
+        &self,
+        plan_id: &str,
+        title: &str,
+        steps: &[PlanStep],
+    ) -> Result<PlanSaveOutcome> {
+        if plan_id.trim().is_empty() {
+            return Ok(PlanSaveOutcome::Rejected {
+                reason: plan_rejection(PlanMutationRejectionCode::InvalidPlanId, None),
+            });
+        }
         let pid = plan_id.to_string();
         let ttl = title.to_string();
-        let steps_json = serde_json::to_string(steps).map_err(Error::Serde)?;
+        let submitted_steps = steps.to_vec();
         self.conn
-            .call(move |c| -> RusqliteResult<()> {
-                let now = now_secs();
-                let cnt: i64 = c.query_row(
-                    "SELECT COUNT(*) FROM plans WHERE plan_id = ?1",
-                    params![&pid],
-                    |r| r.get(0),
+            .call(move |connection| -> RusqliteResult<PlanSaveOutcome> {
+                let transaction = connection.transaction_with_behavior(
+                    rusqlite::TransactionBehavior::Immediate,
                 )?;
-                if cnt > 0 {
-                    c.execute(
+                let existing = transaction
+                    .query_row(
+                        "SELECT steps_json, created_at FROM plans WHERE plan_id = ?1",
+                        params![&pid],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                    )
+                    .optional()?;
+                let old_steps = existing
+                    .as_ref()
+                    .map(|(steps_json, _)| {
+                        serde_json::from_str::<Vec<PlanStep>>(steps_json).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })
+                    })
+                    .transpose()?;
+                if let Some(old_steps) = old_steps.as_ref() {
+                    if let Some(reason) =
+                        completion_reopen_rejection(&pid, old_steps, &submitted_steps)
+                    {
+                        return Ok(PlanSaveOutcome::Rejected { reason });
+                    }
+                }
+                let prepared = match prepare_plan_steps(&transaction, &pid, &submitted_steps)? {
+                    Ok(prepared) => prepared,
+                    Err(reason) => return Ok(PlanSaveOutcome::Rejected { reason }),
+                };
+                if let Some(old_steps) = old_steps.as_ref() {
+                    if let Some(reason) = completion_anchor_replacement_rejection(
+                        &transaction,
+                        &pid,
+                        old_steps,
+                        &prepared,
+                    )? {
+                        return Ok(PlanSaveOutcome::Rejected { reason });
+                    }
+                }
+
+                let steps_json = serde_json::to_string(&prepared)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                let now = now_secs();
+                let created_at = existing
+                    .as_ref()
+                    .map(|(_, created_at)| *created_at)
+                    .unwrap_or(now);
+                if existing.is_some() {
+                    transaction.execute(
                         "UPDATE plans SET title = ?2, steps_json = ?3, updated_at = ?4 WHERE plan_id = ?1",
                         params![&pid, &ttl, &steps_json, now],
                     )?;
                 } else {
-                    c.execute(
+                    transaction.execute(
                         "INSERT INTO plans (plan_id, title, steps_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![&pid, &ttl, &steps_json, now, now],
+                        params![&pid, &ttl, &steps_json, created_at, now],
                     )?;
                 }
-                Ok(())
+                let plan = PlanRecord {
+                    plan_id: pid,
+                    title: ttl,
+                    steps: prepared,
+                    completion_diagnostics: Vec::new(),
+                    created_at,
+                    updated_at: now,
+                };
+                transaction.commit()?;
+                Ok(PlanSaveOutcome::Saved { plan })
             })
             .await
-            .map_err(|e| Error::Backend(format!("plan_save: {e}")))?;
-        Ok(())
+            .map_err(|error| Error::Backend(format!("plan_save: {error}")))
     }
 
     async fn plan_load(&self, plan_id: &str) -> Result<Option<PlanRecord>> {
         let pid = plan_id.to_string();
-        let row = self
-            .conn
-            .call(move |c| -> RusqliteResult<Option<(String, String, String, i64, i64)>> {
-                let mut stmt = c.prepare(
-                    "SELECT plan_id, title, steps_json, created_at, updated_at FROM plans WHERE plan_id = ?",
-                )?;
-                let mut rows = stmt.query(params![pid])?;
-                if let Some(r) = rows.next()? {
-                    Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
-                } else {
-                    Ok(None)
-                }
-            })
-            .await
-            .map_err(|e| Error::Backend(format!("plan_load: {e}")))?;
-
-        Ok(match row {
-            Some((plan_id, title, steps_json, created_at, updated_at)) => {
-                let steps: Vec<PlanStep> = serde_json::from_str(&steps_json)
-                    .map_err(|e| Error::Backend(format!("plan_load: corrupt steps_json: {e}")))?;
-                Some(PlanRecord {
+        self.conn
+            .call(move |connection| -> RusqliteResult<Option<PlanRecord>> {
+                let row = connection
+                    .query_row(
+                        "SELECT plan_id, title, steps_json, created_at, updated_at FROM plans WHERE plan_id = ?1",
+                        params![pid],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, i64>(3)?,
+                                row.get::<_, i64>(4)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                let Some((plan_id, title, steps_json, created_at, updated_at)) = row else {
+                    return Ok(None);
+                };
+                let steps: Vec<PlanStep> =
+                    serde_json::from_str(&steps_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                let (steps, completion_diagnostics) =
+                    project_plan_steps(connection, &plan_id, &steps)?;
+                Ok(Some(PlanRecord {
                     plan_id,
                     title,
                     steps,
+                    completion_diagnostics,
                     created_at,
                     updated_at,
-                })
-            }
-            None => None,
-        })
+                }))
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("plan_load: {error}")))
     }
 
-    async fn plan_update_step(&self, plan_id: &str, step_id: &str, status: &str) -> Result<bool> {
+    async fn plan_update_step(
+        &self,
+        plan_id: &str,
+        step_id: &str,
+        status: &str,
+        outcome_id: Option<&str>,
+    ) -> Result<PlanUpdateOutcome> {
+        if plan_id.trim().is_empty() {
+            return Ok(PlanUpdateOutcome::Rejected {
+                reason: plan_rejection(PlanMutationRejectionCode::InvalidPlanId, None),
+            });
+        }
+        let step_id = step_id.trim();
+        if step_id.is_empty() {
+            return Ok(PlanUpdateOutcome::Rejected {
+                reason: plan_rejection(PlanMutationRejectionCode::EmptyStepId, None),
+            });
+        }
+        let Some(canonical_status) = canonical_plan_status(status) else {
+            return Ok(PlanUpdateOutcome::Rejected {
+                reason: plan_rejection(PlanMutationRejectionCode::UnsupportedStatus, Some(step_id)),
+            });
+        };
+        if canonical_status == "done" && outcome_id.is_none() {
+            return Ok(PlanUpdateOutcome::Rejected {
+                reason: plan_rejection(
+                    PlanMutationRejectionCode::CompletionEvidenceRequired,
+                    Some(step_id),
+                ),
+            });
+        }
+
         let pid = plan_id.to_string();
         let sid = step_id.to_string();
-        let st = status.to_string();
+        let canonical_status = canonical_status.to_string();
+        let outcome_id = outcome_id.map(str::to_string);
+        self.conn
+            .call(move |connection| -> RusqliteResult<PlanUpdateOutcome> {
+                let transaction = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let row = transaction
+                    .query_row(
+                        "SELECT title, steps_json, created_at FROM plans WHERE plan_id = ?1",
+                        params![&pid],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, i64>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                let Some((title, steps_json, created_at)) = row else {
+                    return Ok(PlanUpdateOutcome::Rejected {
+                        reason: plan_rejection(PlanMutationRejectionCode::PlanNotFound, None),
+                    });
+                };
+                let mut steps: Vec<PlanStep> =
+                    serde_json::from_str(&steps_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            1,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                let matching_indices: Vec<usize> = steps
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, step)| (step.id == sid).then_some(index))
+                    .collect();
+                if matching_indices.is_empty() {
+                    return Ok(PlanUpdateOutcome::Rejected {
+                        reason: plan_rejection(PlanMutationRejectionCode::StepNotFound, Some(&sid)),
+                    });
+                }
+                if matching_indices.len() != 1 {
+                    return Err(rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "plan contains duplicate step ids",
+                        )),
+                    ));
+                }
+                let target_index = matching_indices[0];
 
-        let maybe_json = self
-            .conn
-            .call({
-                let pid = pid.clone();
-                move |c| -> RusqliteResult<Option<String>> {
-                    let mut stmt = c.prepare("SELECT steps_json FROM plans WHERE plan_id = ?")?;
-                    let mut rows = stmt.query(params![pid])?;
-                    if let Some(r) = rows.next()? {
-                        Ok(Some(r.get::<_, String>(0)?))
-                    } else {
-                        Ok(None)
+                if canonical_status == "done"
+                    && has_persisted_completion_anchor(&steps[target_index])
+                {
+                    let Some(existing_evidence) = steps[target_index].completion_evidence.as_ref()
+                    else {
+                        let expected_contract =
+                            expected_plan_step_contract(&pid, &steps[target_index]);
+                        let mut reason = plan_rejection(
+                            PlanMutationRejectionCode::CompletionAnchorInvalid,
+                            Some(&sid),
+                        );
+                        reason.expected_contract_id = Some(expected_contract.contract_id);
+                        reason.outcome_id = outcome_id.clone();
+                        return Ok(PlanUpdateOutcome::Rejected { reason });
+                    };
+                    let existing_outcome_id = existing_evidence.outcome_id.clone();
+                    if outcome_id.as_deref() != Some(existing_outcome_id.as_str()) {
+                        let mut reason = plan_rejection(
+                            PlanMutationRejectionCode::CompletionOutcomeConflict,
+                            Some(&sid),
+                        );
+                        reason.existing_outcome_id = Some(existing_outcome_id);
+                        reason.outcome_id = outcome_id.clone();
+                        reason.expected_contract_id = steps[target_index]
+                            .completion_contract
+                            .as_ref()
+                            .map(|contract| contract.contract_id.clone());
+                        return Ok(PlanUpdateOutcome::Rejected { reason });
+                    }
+                    if let Some(reason) = persisted_completion_anchor_integrity_rejection(
+                        &transaction,
+                        &pid,
+                        &steps[target_index],
+                    )? {
+                        return Ok(PlanUpdateOutcome::Rejected { reason });
                     }
                 }
-            })
-            .await
-            .map_err(|e| Error::Backend(format!("plan_update_step(select): {e}")))?;
 
-        let Some(steps_json) = maybe_json else {
-            return Ok(false);
-        };
+                if canonical_status != "done"
+                    && has_persisted_completion_anchor(&steps[target_index])
+                {
+                    let mut proposed = steps.clone();
+                    proposed[target_index].status = canonical_status.clone();
+                    proposed[target_index].completion_evidence = None;
+                    if let Some(reason) = completion_reopen_rejection(&pid, &steps, &proposed) {
+                        return Ok(PlanUpdateOutcome::Rejected { reason });
+                    }
+                }
+                if canonical_status != "done" && outcome_id.is_some() {
+                    return Ok(PlanUpdateOutcome::Rejected {
+                        reason: plan_rejection(
+                            PlanMutationRejectionCode::CompletionEvidenceForbidden,
+                            Some(&sid),
+                        ),
+                    });
+                }
 
-        let mut steps: Vec<PlanStep> = serde_json::from_str(&steps_json)
-            .map_err(|e| Error::Backend(format!("plan_update_step: corrupt steps_json: {e}")))?;
+                let expected_contract = expected_plan_step_contract(&pid, &steps[target_index]);
+                let completion_evidence = if canonical_status == "done" {
+                    for dependency_id in &steps[target_index].deps {
+                        let dependency = steps.iter().find(|step| step.id == *dependency_id);
+                        if dependency.is_none_or(|dependency| {
+                            dependency.id == sid || dependency.status != "done"
+                        }) || !is_current_evidence_gated_done(
+                            &transaction,
+                            &pid,
+                            dependency.expect("checked dependency presence"),
+                        )? {
+                            let mut reason = plan_rejection(
+                                PlanMutationRejectionCode::DependencyNotCompleted,
+                                Some(&sid),
+                            );
+                            reason.related_step_ids.push(dependency_id.clone());
+                            return Ok(PlanUpdateOutcome::Rejected { reason });
+                        }
+                    }
+                    let submitted = PlanStepCompletionEvidenceRef {
+                        outcome_id: outcome_id
+                            .as_ref()
+                            .expect("DONE preflight requires outcome id")
+                            .clone(),
+                        record_sha256: String::new(),
+                    };
+                    let record_sha256 = match validate_plan_completion_evidence(
+                        &transaction,
+                        &sid,
+                        &expected_contract,
+                        &submitted,
+                    )? {
+                        Ok(record_sha256) => record_sha256,
+                        Err(reason) => return Ok(PlanUpdateOutcome::Rejected { reason }),
+                    };
+                    Some(PlanStepCompletionEvidenceRef {
+                        outcome_id: submitted.outcome_id,
+                        record_sha256,
+                    })
+                } else {
+                    None
+                };
 
-        let mut found = false;
-        for step in &mut steps {
-            if step.id == sid {
-                step.status = st.clone();
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            return Ok(false);
-        }
-
-        let new_json = serde_json::to_string(&steps).map_err(Error::Serde)?;
-        let now = now_secs();
-        self.conn
-            .call(move |c| -> RusqliteResult<()> {
-                c.execute(
+                steps[target_index].status = canonical_status;
+                steps[target_index].completion_anchor = steps[target_index].status == "done";
+                steps[target_index].completion_contract = Some(expected_contract);
+                steps[target_index].completion_evidence = completion_evidence;
+                backfill_valid_completion_anchor_markers(&transaction, &pid, &mut steps)?;
+                hydrate_missing_plan_contracts(&pid, &mut steps);
+                let new_json = serde_json::to_string(&steps)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                let now = now_secs();
+                transaction.execute(
                     "UPDATE plans SET steps_json = ?2, updated_at = ?3 WHERE plan_id = ?1",
-                    params![pid, new_json, now],
+                    params![&pid, &new_json, now],
                 )?;
-                Ok(())
+                let (projected_steps, completion_diagnostics) =
+                    project_plan_steps(&transaction, &pid, &steps)?;
+                let plan = PlanRecord {
+                    plan_id: pid,
+                    title,
+                    steps: projected_steps,
+                    completion_diagnostics,
+                    created_at,
+                    updated_at: now,
+                };
+                transaction.commit()?;
+                Ok(PlanUpdateOutcome::Updated { plan })
             })
             .await
-            .map_err(|e| Error::Backend(format!("plan_update_step(update): {e}")))?;
-
-        Ok(true)
+            .map_err(|error| Error::Backend(format!("plan_update_step: {error}")))
     }
 
     // ─── W6: agent_messages ────────────────────────────────────────────────
@@ -19831,18 +20740,25 @@ mod tests {
                 desc: "first".into(),
                 status: "pending".into(),
                 deps: vec![],
+                completion_anchor: false,
+                completion_contract: None,
+                completion_evidence: None,
             },
             PlanStep {
                 id: "b".into(),
                 desc: "second".into(),
-                status: "done".into(),
+                status: "NOT_YET".into(),
                 deps: vec!["a".into()],
+                completion_anchor: false,
+                completion_contract: None,
+                completion_evidence: None,
             },
         ];
-        store
+        let saved = store
             .plan_save("p1", "title", &steps)
             .await
             .expect("plan_save");
+        assert!(matches!(saved, crate::PlanSaveOutcome::Saved { .. }));
 
         let loaded = store
             .plan_load("p1")
@@ -19854,24 +20770,32 @@ mod tests {
         assert_eq!(loaded.created_at, loaded.updated_at);
 
         let ok = store
-            .plan_update_step("p1", "a", "done")
+            .plan_update_step("p1", "a", "IN_PROGRESS", None)
             .await
             .expect("plan_update_step");
-        assert!(ok);
+        assert!(matches!(ok, crate::PlanUpdateOutcome::Updated { .. }));
 
         let loaded2 = store
             .plan_load("p1")
             .await
             .expect("plan_load2")
             .expect("row");
-        assert_eq!(loaded2.steps[0].status, "done");
+        assert_eq!(loaded2.steps[0].status, "in_progress");
         assert!(loaded2.updated_at >= loaded2.created_at);
 
         let missing = store
-            .plan_update_step("p1", "nope", "done")
+            .plan_update_step("p1", "nope", "pending", None)
             .await
             .expect("plan_update_step missing");
-        assert!(!missing);
+        assert!(matches!(
+            missing,
+            crate::PlanUpdateOutcome::Rejected {
+                reason: crate::PlanMutationRejection {
+                    code: crate::PlanMutationRejectionCode::StepNotFound,
+                    ..
+                }
+            }
+        ));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

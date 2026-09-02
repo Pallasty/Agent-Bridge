@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+invocation-guardian-v2-canary = []
+
 [dependencies]
 ab-core.workspace = true
 ab-store.workspace = true
@@ -15,6 +19,7 @@ jsonwebtoken = { version = "9.3", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10"
 tokio.workspace = true
 tracing.workspace = true

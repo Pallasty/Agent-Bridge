@@ -44,6 +44,23 @@ g14-wasi-component-runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
 # `ab-seed-bridge`; CLI/MCP surfaces report build-time disabled. Build the
 # standalone `crates/seed-bridge` crate for historical replay experiments.
 seed-substrate = []
+# Default-off, non-authoritative invocation guardian lab. This feature contains
+# no production monotonic witness and cannot grant InvocationLease authority.
+invocation-guardian-lab = []
+# Default-off source canary. It uses an in-process fake witness and therefore
+# cannot satisfy protected-witness or production deployment claims.
+invocation-guardian-v2-canary = [
+    "invocation-guardian-lab",
+    "ab-mcp/invocation-guardian-v2-canary",
+]
+# Default-off Linux deployment-isolation probe. This verifies an ephemeral OS
+# substrate only; it is not the v2 guardian or a protected witness.
+invocation-guardian-v2-isolation-probe = ["invocation-guardian-v2-canary"]
+# Default-off C3 protected-witness contract and verifier. No production
+# transport or provider implementation is included.
+invocation-guardian-v2-protected-witness-contract = []
+# Default-off fake remote-provider laboratory. It cannot satisfy C3.
+invocation-guardian-v2-provider-lab = ["invocation-guardian-v2-protected-witness-contract"]
 
 [dependencies]
 ab-core.workspace = true
@@ -64,6 +81,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10"
+ring = "0.17"
 thiserror.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
@@ -104,7 +122,6 @@ wayland-client = { version = "0.31", optional = true }
 
 [dev-dependencies]
 flate2 = "1"
-ring = "0.17"
 tempfile = "3"
 
 [[bin]]
@@ -119,3 +136,18 @@ required-features = ["episode-observation-c2c-keychain-macos-live-lab"]
 [[bin]]
 name = "mobile-projection-host"
 path = "src/bin/mobile_projection_host.rs"
+
+[[bin]]
+name = "invocation-guardian"
+path = "src/bin/invocation_guardian.rs"
+required-features = ["invocation-guardian-lab"]
+
+[[bin]]
+name = "invocation-guardian-canary-mcp"
+path = "src/bin/invocation_guardian_canary_mcp.rs"
+required-features = ["invocation-guardian-v2-canary"]
+
+[[bin]]
+name = "invocation-guardian-isolation-probe"
+path = "src/bin/invocation_guardian_isolation_probe.rs"
+required-features = ["invocation-guardian-v2-isolation-probe"]

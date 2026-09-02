@@ -1902,16 +1902,104 @@ impl Default for MemoryListSort {
     }
 }
 
+/// Revision of the completion contract bound to a persisted plan step.
+pub const PLAN_STEP_COMPLETION_CONTRACT_REVISION: u64 = 1;
+
+/// Derive the stable completion contract for one plan step.
+///
+/// The digest binds the plan identity, step identity and description, and the
+/// dependency set in lexicographic order. Dependency order in caller JSON is
+/// therefore not semantically significant. The revision and a domain tag are
+/// framed into the digest so a future contract format cannot collide with v1.
+pub fn plan_step_contract_id(plan_id: &str, step_id: &str, desc: &str, deps: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+
+    fn frame(hasher: &mut Sha256, bytes: &[u8]) {
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(bytes);
+    }
+
+    let mut sorted_deps: Vec<&str> = deps.iter().map(String::as_str).collect();
+    sorted_deps.sort_unstable();
+
+    let mut hasher = Sha256::new();
+    frame(
+        &mut hasher,
+        b"agent_bridge.plan_step_completion_contract.v1",
+    );
+    frame(
+        &mut hasher,
+        &PLAN_STEP_COMPLETION_CONTRACT_REVISION.to_be_bytes(),
+    );
+    frame(&mut hasher, plan_id.as_bytes());
+    frame(&mut hasher, step_id.as_bytes());
+    frame(&mut hasher, desc.as_bytes());
+    frame(&mut hasher, &(sorted_deps.len() as u64).to_be_bytes());
+    for dependency in sorted_deps {
+        frame(&mut hasher, dependency.as_bytes());
+    }
+    format!("plan-step:{:x}", hasher.finalize())
+}
+
+/// Canonicalize a status accepted by the plan write surfaces.
+///
+/// Existing rows are decoded without rewriting their status. Every save or
+/// update, however, uses this closed set and persists the canonical lowercase
+/// form.
+pub fn canonical_plan_status(status: &str) -> Option<&'static str> {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "not_yet" | "pending" => Some("pending"),
+        "in_progress" => Some("in_progress"),
+        "done" => Some("done"),
+        "blocked" => Some("blocked"),
+        "obsolete" | "cancelled" | "canceled" => Some("obsolete"),
+        _ => None,
+    }
+}
+
+/// Definition snapshot to which completion evidence must be bound.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStepCompletionContract {
+    pub contract_id: String,
+    pub revision: u64,
+}
+
+/// Durable reference to the harness-verified task outcome that closed a step.
+///
+/// On write, `outcome_id` is authoritative and the Store fills
+/// `record_sha256` from the immutable outcome ledger. The digest is retained in
+/// `steps_json` so later readers can detect replacement or corruption without
+/// copying raw evidence into the plan.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStepCompletionEvidenceRef {
+    pub outcome_id: String,
+    #[serde(default)]
+    pub record_sha256: String,
+}
+
 /// One step in a persisted agent task plan (W5 — DESIGN-warp-first-agent-shell).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanStep {
     pub id: String,
     pub desc: String,
-    /// Typical values: `pending` | `in_progress` | `done` | `cancelled` (free-form allowed).
+    /// Canonical values: `pending` | `in_progress` | `done` | `blocked` |
+    /// `obsolete`. Uppercase Recuris spellings and the documented aliases are
+    /// accepted on new writes and normalized before persistence.
     #[serde(default = "default_plan_status")]
     pub status: String,
     #[serde(default)]
     pub deps: Vec<String>,
+    /// Store-owned irreversible closure marker. Callers may deserialize this
+    /// field for roundtrips, but write validation always recomputes it.
+    #[serde(default)]
+    pub completion_anchor: bool,
+    /// Absent in legacy JSON. Save and update bind new writes to the current
+    /// contract; load derives it for display but never invents evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_contract: Option<PlanStepCompletionContract>,
+    /// Absent for every non-DONE step and for legacy DONE rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_evidence: Option<PlanStepCompletionEvidenceRef>,
 }
 
 fn default_plan_status() -> String {
@@ -1924,8 +2012,91 @@ pub struct PlanRecord {
     pub plan_id: String,
     pub title: String,
     pub steps: Vec<PlanStep>,
+    /// Read-projection diagnostics for completion anchors that failed exact
+    /// validation. This is never persisted inside `steps_json`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completion_diagnostics: Vec<PlanMutationRejection>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// Stable machine-readable reason a plan mutation was refused.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanMutationRejectionCode {
+    InvalidPlanId,
+    EmptySteps,
+    EmptyStepId,
+    EmptyStepDescription,
+    DuplicateStepId,
+    EmptyDependencyId,
+    DuplicateDependency,
+    UnknownDependency,
+    SelfDependency,
+    DependencyCycle,
+    UnsupportedStatus,
+    CompletionContractMismatch,
+    CompletionEvidenceForbidden,
+    CompletionEvidenceRequired,
+    CompletionOutcomeIdInvalid,
+    CompletionOutcomeNotFound,
+    CompletionOutcomeInvalid,
+    CompletionOutcomeUntrusted,
+    CompletionOutcomeContractMismatch,
+    CompletionOutcomeRevisionMismatch,
+    CompletionEvidenceDigestMismatch,
+    CompletionOutcomeConflict,
+    CompletionAnchorInvalid,
+    CompletionReopenForbidden,
+    DependencyNotCompleted,
+    PlanNotFound,
+    StepNotFound,
+}
+
+/// Structured rejection detail shared by save and update.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanMutationRejection {
+    pub code: PlanMutationRejectionCode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related_step_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_contract_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_outcome_id: Option<String>,
+}
+
+impl PlanMutationRejection {
+    pub fn new(code: PlanMutationRejectionCode) -> Self {
+        Self {
+            code,
+            step_id: None,
+            related_step_ids: Vec::new(),
+            expected_contract_id: None,
+            outcome_id: None,
+            existing_outcome_id: None,
+        }
+    }
+}
+
+/// Result of a validated plan save. Validation failures are values rather than
+/// backend errors so MCP and CLI callers can return stable structured details.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum PlanSaveOutcome {
+    Saved { plan: PlanRecord },
+    Rejected { reason: PlanMutationRejection },
+}
+
+/// Result of an atomic plan-step transition.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum PlanUpdateOutcome {
+    Updated { plan: PlanRecord },
+    Rejected { reason: PlanMutationRejection },
 }
 
 /// One persisted agent-to-agent message row (W6 — multi-session inbox).
@@ -3524,6 +3695,19 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Exact immutable-ledger lookup by `outcome_id`.
+    ///
+    /// Implementations must validate the canonical record digest before
+    /// returning a row; a corrupt row is an error, not trusted evidence.
+    async fn load_agent_task_outcome(
+        &self,
+        _outcome_id: &str,
+    ) -> Result<Option<AgentTaskOutcomeRecord>> {
+        Err(ab_core::Error::Backend(
+            "agent task outcome ledger is not supported by this store".into(),
+        ))
+    }
+
     /// Atomically admit one immutable body-operation receipt. The operation
     /// ID is globally unique in the node-local ledger; identical canonical
     /// facts deduplicate and different facts conflict without overwrite.
@@ -4770,15 +4954,30 @@ pub trait StateStore: Send + Sync {
 
     // ─── W5: structured plans (SQLite `plans` table) ─────────────────────
 
-    /// Insert or replace a plan (`plan_id` primary key). Updates `updated_at`;
-    /// preserves `created_at` on existing rows.
-    async fn plan_save(&self, plan_id: &str, title: &str, steps: &[PlanStep]) -> Result<()>;
+    /// Insert or replace a validated plan (`plan_id` primary key). Updates
+    /// `updated_at`; preserves `created_at` on existing rows.
+    async fn plan_save(
+        &self,
+        plan_id: &str,
+        title: &str,
+        steps: &[PlanStep],
+    ) -> Result<PlanSaveOutcome>;
 
     /// Load a plan by id.
     async fn plan_load(&self, plan_id: &str) -> Result<Option<PlanRecord>>;
 
-    /// Set `steps[id].status`. Returns `Ok(false)` if plan or step id is missing.
-    async fn plan_update_step(&self, plan_id: &str, step_id: &str, status: &str) -> Result<bool>;
+    /// Atomically set `steps[id].status`. A DONE transition accepts only an
+    /// immutable outcome id; the Store resolves and persists its canonical
+    /// digest. An evidence-anchored DONE is terminal in v1. Other non-DONE
+    /// transitions must pass `None`, and legacy evidence-free DONE may be
+    /// repaired or downgraded.
+    async fn plan_update_step(
+        &self,
+        plan_id: &str,
+        step_id: &str,
+        status: &str,
+        outcome_id: Option<&str>,
+    ) -> Result<PlanUpdateOutcome>;
 
     // ─── W6: agent_messages (multi-session) ────────────────────────────────
 

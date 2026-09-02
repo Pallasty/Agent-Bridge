@@ -1294,11 +1294,12 @@ fn compact_instinct_observer_status_omits_per_session_details() {
 
 #[tokio::test]
 async fn compact_mobile_capabilities_defer_adb_device_probe() {
-    let mobile = mobile_capabilities_json(ToolPolicy::from_env(), false).await;
+    let mobile = mobile_capabilities_json(&["mobile_health".to_string()], false).await;
 
     assert_eq!(mobile["devices"]["probed"], json!(false));
     assert_eq!(mobile["devices"]["status"], json!("not_probed"));
     assert!(mobile["default_serial"].is_null());
+    assert_eq!(mobile["exposed_tools"], json!(["mobile_health"]));
 }
 
 #[test]
@@ -9216,7 +9217,12 @@ fn chatgpt_forum_surface_requires_explicit_normalized_tags() {
 
     let policy = ToolPolicy::from_values(Some("chatgpt-read"), None, None, None);
     let hub = Hub::builder().build();
-    let mut registry = build_registry_with_policy(hub.clone(), policy);
+    let mut registry = build_registry_builder_with_policy_surface(
+        hub.clone(),
+        policy,
+        HostSurface::all_available(),
+        false,
+    );
     register_chatgpt_forum_tools(&mut registry, &hub, policy, vec!["agent-bridge".into()]);
     let descriptors = registry.descriptors();
     let names: Vec<_> = descriptors
@@ -9263,7 +9269,12 @@ fn tool_policy_chatgpt_collab_is_explicit_bounded_and_default_off() {
     );
 
     let hub = Hub::builder().build();
-    let mut without_channel = build_registry_with_policy(hub.clone(), policy);
+    let mut without_channel = build_registry_builder_with_policy_surface(
+        hub.clone(),
+        policy,
+        HostSurface::all_available(),
+        false,
+    );
     register_chatgpt_forum_tools(
         &mut without_channel,
         &hub,
@@ -9287,7 +9298,12 @@ fn tool_policy_chatgpt_collab_is_explicit_bounded_and_default_off() {
         .any(|name| name.starts_with("operator_request_")));
 
     let temp = tempfile::tempdir().unwrap();
-    let mut registry = build_registry_with_policy(hub.clone(), policy);
+    let mut registry = build_registry_builder_with_policy_surface(
+        hub.clone(),
+        policy,
+        HostSurface::all_available(),
+        false,
+    );
     register_chatgpt_forum_tools(&mut registry, &hub, policy, vec!["agent-bridge".into()]);
     register_chatgpt_collab_tools_with(
         &mut registry,
@@ -9992,14 +10008,19 @@ fn gos_lite_snapshot_schema_exposes_compact_human_gated_projection() {
 #[tokio::test]
 async fn gos_lite_snapshot_tool_returns_human_gate_packet_and_can_omit_graph() {
     let (hub, temp_dir) = mk_test_hub_with_store().await;
-    let tool = GosLiteSnapshotTool::new(hub);
+    let registry = build_registry_with_policy(
+        hub,
+        ToolPolicy::from_values(None, None, None, Some("all")),
+    );
 
-    let out = tool
-        .execute(
+    let out = registry
+        .invoke(
+            "gos_lite_snapshot",
             json!({"include_graph": false, "limit": 2}),
             &ToolContext::default(),
         )
         .await
+        .expect("gos_lite_snapshot is registered")
         .expect("execute");
     let payload = result_text_as_json(&out);
 
@@ -10102,15 +10123,28 @@ fn registry_exposes_mcp_lifecycle_digest_tool() {
 
 #[tokio::test]
 async fn mcp_lifecycle_digest_defaults_to_stdio_only_runtime_boundary() {
-    let payload = mcp_lifecycle_digest_payload(
-        &json!({
+    let hub = Hub::builder().build();
+    let registry = build_registry_with_policy(
+        hub,
+        ToolPolicy::from_values(Some("codex-lean"), None, None, None),
+    );
+    let result = registry
+        .invoke(
+            "mcp_lifecycle_digest",
+            json!({
             "repo_root": env!("CARGO_MANIFEST_DIR"),
             "window_secs": 60,
             "include_runtime_health": false
-        }),
-        &Hub::builder().build(),
-    )
-    .await;
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("mcp_lifecycle_digest is registered")
+        .expect("mcp_lifecycle_digest executes");
+    let ContentBlock::Text { text } = &result.content[0] else {
+        panic!("expected text result")
+    };
+    let payload: Value = serde_json::from_str(text).expect("lifecycle digest JSON");
 
     assert_eq!(payload["schema"], "agent_bridge.mcp_lifecycle_digest.v0");
     assert_eq!(payload["read_only"], json!(true));
@@ -10131,6 +10165,31 @@ async fn mcp_lifecycle_digest_defaults_to_stdio_only_runtime_boundary() {
             .as_str()
             .unwrap_or("")
             .contains("include_runtime_health=true")));
+}
+
+#[tokio::test]
+async fn direct_mcp_lifecycle_digest_keeps_unknown_registry_counts_null() {
+    let payload = mcp_lifecycle_digest_payload(
+        &json!({
+            "repo_root": env!("CARGO_MANIFEST_DIR"),
+            "window_secs": 60,
+            "include_runtime_health": false
+        }),
+        &Hub::builder().build(),
+        &ToolContext::default(),
+    )
+    .await;
+
+    assert_eq!(payload["lifecycle_state"], "unbound_registry_snapshot");
+    assert_eq!(
+        payload["summary"]["tool_count_source"],
+        "unbound_direct_tool_invocation"
+    );
+    assert!(payload["summary"]["current_tool_count"].is_null());
+    assert!(payload["summary"]["failing_tool_count"].is_null());
+    assert!(payload["sections"]["tool_telemetry"]["summary"]
+        ["current_tool_count"]
+        .is_null());
 }
 
 #[test]
@@ -10264,10 +10323,546 @@ fn collaboration_write_schemas_expose_observed_argument_contracts() {
         plan["properties"]["steps"]["items"]["properties"]["desc"]["minLength"],
         json!(1)
     );
+    assert_eq!(plan["additionalProperties"], json!(false));
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["additionalProperties"],
+        json!(false)
+    );
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["properties"]["completion_contract"]
+            ["additionalProperties"],
+        json!(false)
+    );
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["properties"]["completion_evidence"]["required"],
+        json!(["outcome_id"])
+    );
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["properties"]["completion_anchor"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["properties"]["completion_anchor"]["default"],
+        false
+    );
+    assert!(
+        plan["properties"]["steps"]["items"]["properties"]["completion_anchor"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("grants no authority"))
+    );
+    assert!(
+        plan["properties"]["steps"]["items"]["properties"]["status"]["enum"]
+            .as_array()
+            .is_some_and(|values| values.contains(&json!("not_yet")))
+    );
+    assert!(PlanSaveTool::new(hub.clone())
+        .schema()
+        .description
+        .contains("cannot mint trusted outcomes"));
+
+    let update = PlanUpdateTool::new(hub.clone()).schema();
+    assert_eq!(update.input_schema["additionalProperties"], json!(false));
+    assert_eq!(
+        update.input_schema["properties"]["completion_evidence"]["additionalProperties"],
+        json!(false)
+    );
+    assert_eq!(
+        update.input_schema["properties"]["completion_evidence"]["properties"]
+            .as_object()
+            .expect("completion evidence properties")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["outcome_id"]
+    );
+    assert!(update.input_schema["properties"]["status"]["enum"]
+        .as_array()
+        .is_some_and(|values| values.contains(&json!("not_yet"))));
+    assert!(update
+        .description
+        .contains("cannot mint that trusted outcome"));
 
     let topology = GitTopologyPreflightTool::new(hub).schema().input_schema;
     assert_eq!(topology["properties"]["target"]["minLength"], json!(1));
     assert_eq!(topology["properties"]["source"]["minLength"], json!(1));
+}
+
+#[test]
+fn plan_enrichment_never_promotes_legacy_done_or_skips_dependencies() {
+    let rec = PlanRecord {
+        plan_id: "legacy-plan".into(),
+        title: "Legacy plan".into(),
+        steps: vec![
+            PlanStep {
+                id: "legacy-done".into(),
+                desc: "Old self-reported closure".into(),
+                status: "done".into(),
+                deps: vec![],
+                completion_contract: None,
+                completion_evidence: None,
+                completion_anchor: false,
+            },
+            PlanStep {
+                id: "depends-on-legacy".into(),
+                desc: "Must stay gated".into(),
+                status: "pending".into(),
+                deps: vec!["legacy-done".into()],
+                completion_contract: None,
+                completion_evidence: None,
+                completion_anchor: false,
+            },
+            PlanStep {
+                id: "ready".into(),
+                desc: "Independent work".into(),
+                status: "pending".into(),
+                deps: vec![],
+                completion_contract: None,
+                completion_evidence: None,
+                completion_anchor: false,
+            },
+        ],
+        completion_diagnostics: Vec::new(),
+        created_at: 1,
+        updated_at: 2,
+    };
+
+    let payload = enrich_plan_json(&rec);
+    assert_eq!(payload["done_count"], 0);
+    assert_eq!(payload["verified_done_count"], 0);
+    assert_eq!(payload["legacy_unverified_done_count"], 1);
+    assert_eq!(
+        payload["legacy_unverified_done_step_ids"],
+        json!(["legacy-done"])
+    );
+    assert_eq!(payload["completion_gate"], "legacy_unverified");
+    assert_eq!(payload["completion_diagnostics"], json!([]));
+    assert_eq!(payload["completion_integrity_failure_count"], 0);
+    assert_eq!(payload["completion_integrity_failure_step_ids"], json!([]));
+    assert_eq!(payload["next_step_id"], "legacy-done");
+    assert_eq!(payload["progress"], "0/3 evidence-gated done");
+
+    let mut diagnostic = ab_store::PlanMutationRejection::new(
+        ab_store::PlanMutationRejectionCode::CompletionOutcomeInvalid,
+    );
+    diagnostic.step_id = Some("corrupt-done".into());
+    diagnostic.outcome_id = Some("corrupt-outcome".into());
+    let mut corrupt = rec;
+    corrupt.steps.insert(
+        0,
+        PlanStep {
+            id: "corrupt-done".into(),
+            desc: "Persisted evidence failed integrity validation".into(),
+            status: "done".into(),
+            deps: vec![],
+            completion_contract: None,
+            completion_evidence: None,
+            completion_anchor: false,
+        },
+    );
+    corrupt.completion_diagnostics.push(diagnostic);
+
+    let payload = enrich_plan_json(&corrupt);
+    assert_eq!(payload["done_count"], 0);
+    assert_eq!(payload["legacy_unverified_done_count"], 1);
+    assert_eq!(
+        payload["legacy_unverified_done_step_ids"],
+        json!(["legacy-done"]),
+        "integrity failures must not be disguised as legacy unverified rows"
+    );
+    assert_eq!(payload["completion_integrity_failure_count"], 1);
+    assert_eq!(
+        payload["completion_integrity_failure_step_ids"],
+        json!(["corrupt-done"])
+    );
+    assert_eq!(payload["completion_gate"], "integrity_failure");
+    assert_eq!(
+        payload["completion_diagnostics"][0]["step_id"],
+        "corrupt-done"
+    );
+    assert_eq!(payload["next_step_id"], "corrupt-done");
+    assert_eq!(payload["progress"], "0/4 evidence-gated done");
+}
+
+fn harness_plan_outcome(
+    outcome_id: &str,
+    contract_id: String,
+    provenance: crate::agent_task_outcome::AgentTaskOutcomeProvenance,
+) -> crate::agent_task_outcome::AgentTaskOutcome {
+    use crate::agent_task_outcome::{
+        AgentTaskAcceptanceProvenance, AgentTaskOperatorCounts, AgentTaskOutcome,
+        AgentTaskOutcomeStatus, AgentTaskOutcomeVerification, AgentTaskOutcomeVerificationMethod,
+        AgentTaskRollbackStatus, AgentTaskUserAcceptance, AGENT_TASK_OUTCOME_SCHEMA_V1,
+    };
+
+    AgentTaskOutcome {
+        schema_version: AGENT_TASK_OUTCOME_SCHEMA_V1.into(),
+        outcome_id: outcome_id.into(),
+        contract_id,
+        revision: ab_store::PLAN_STEP_COMPLETION_CONTRACT_REVISION,
+        status: AgentTaskOutcomeStatus::Achieved,
+        verification: AgentTaskOutcomeVerification::Verified,
+        verification_method: AgentTaskOutcomeVerificationMethod::Tests,
+        user_acceptance: AgentTaskUserAcceptance::Unknown,
+        acceptance_provenance: AgentTaskAcceptanceProvenance::Unavailable,
+        rollback_status: AgentTaskRollbackStatus::NotNeeded,
+        provenance,
+        agent_id: Some("trusted-plan-test-harness".into()),
+        body_id: None,
+        environment_id: Some("plan-test".into()),
+        evidence_sha256: vec![format!("sha256:{}", "a".repeat(64))],
+        counts: AgentTaskOperatorCounts::default(),
+    }
+}
+
+#[tokio::test]
+async fn plan_mcp_completion_is_store_gated_and_roundtrips_trusted_evidence() {
+    use crate::agent_task_outcome::AgentTaskOutcomeProvenance;
+
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let ctx = ToolContext::default();
+
+    for (args, expected_error) in [
+        (
+            json!({
+                "plan_id": "unknown-top-level",
+                "title": "Reject unknown top level",
+                "steps": [{"id": "s1", "desc": "Shape check"}],
+                "provenance": "harness_verified"
+            }),
+            "plan_save contains unsupported field 'provenance'",
+        ),
+        (
+            json!({
+                "plan_id": "unknown-step-field",
+                "title": "Reject unknown step field",
+                "steps": [{
+                    "id": "s1",
+                    "desc": "Shape check",
+                    "verification_method": "tests"
+                }]
+            }),
+            "steps[0] contains unsupported field 'verification_method'",
+        ),
+    ] {
+        let rejected = PlanSaveTool::new(hub.clone())
+            .execute(args, &ctx)
+            .await
+            .expect("unknown plan field rejection");
+        assert!(rejected.is_error);
+        assert!(result_text(&rejected).contains(expected_error));
+    }
+
+    let invalid_anchor_type = PlanSaveTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "invalid-anchor-type",
+                "title": "Reject non-boolean marker",
+                "steps": [{
+                    "id": "s1",
+                    "desc": "Shape check",
+                    "completion_anchor": "true"
+                }]
+            }),
+            &ctx,
+        )
+        .await
+        .expect("invalid completion anchor type rejection");
+    assert!(invalid_anchor_type.is_error);
+    assert!(result_text(&invalid_anchor_type).contains("invalid 'steps'"));
+
+    let direct_done = PlanSaveTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "direct-done",
+                "title": "Must reject direct done",
+                "steps": [{
+                    "id": "s1",
+                    "desc": "Unproved",
+                    "status": "done",
+                    "completion_anchor": true
+                }]
+            }),
+            &ctx,
+        )
+        .await
+        .expect("direct done rejection");
+    assert!(direct_done.is_error);
+    assert_eq!(
+        result_text_as_json(&direct_done)["reason"]["code"],
+        "completion_evidence_required"
+    );
+    assert!(store
+        .plan_load("direct-done")
+        .await
+        .expect("load rejected plan")
+        .is_none());
+
+    let saved = PlanSaveTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "evidence-plan",
+                "title": "Evidence plan",
+                "steps": [
+                    {
+                        "id": "s1",
+                        "desc": "First postcondition",
+                        "status": "not_yet",
+                        "completion_anchor": true
+                    },
+                    {"id": "s2", "desc": "Dependent postcondition", "deps": ["s1"]}
+                ]
+            }),
+            &ctx,
+        )
+        .await
+        .expect("nonterminal plan save");
+    assert!(!saved.is_error, "{}", result_text(&saved));
+    let saved_payload = result_text_as_json(&saved);
+    assert_eq!(saved_payload["status"], "ok");
+    assert_eq!(saved_payload["plan"]["steps"][0]["status"], "pending");
+    assert_eq!(
+        saved_payload["plan"]["steps"][0]["completion_anchor"], false,
+        "a caller marker must be recomputed instead of granting completion"
+    );
+    assert!(saved_payload["plan"]["steps"][0]["completion_contract"].is_object());
+
+    let unknown_update_field = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "evidence-plan",
+                "step_id": "s1",
+                "status": "pending",
+                "verdict": "verified"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("unknown update field rejection");
+    assert!(unknown_update_field.is_error);
+    assert!(result_text(&unknown_update_field)
+        .contains("plan_update contains unsupported field 'verdict'"));
+
+    let in_progress = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": " evidence-plan ",
+                "step_id": " s1 ",
+                "status": " IN_PROGRESS "
+            }),
+            &ctx,
+        )
+        .await
+        .expect("nonterminal update");
+    assert!(!in_progress.is_error, "{}", result_text(&in_progress));
+    assert_eq!(
+        result_text_as_json(&in_progress)["plan"]["steps"][0]["status"],
+        "in_progress"
+    );
+
+    let missing = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({"plan_id": "evidence-plan", "step_id": "s1", "status": "done"}),
+            &ctx,
+        )
+        .await
+        .expect("missing evidence rejection");
+    assert!(missing.is_error);
+    let missing_payload = result_text_as_json(&missing);
+    assert_eq!(missing_payload["status"], "rejected");
+    assert_eq!(
+        missing_payload["reason"]["code"],
+        "completion_evidence_required"
+    );
+    assert_eq!(
+        store
+            .plan_load("evidence-plan")
+            .await
+            .expect("load unchanged plan")
+            .expect("plan")
+            .steps[0]
+            .status,
+        "in_progress"
+    );
+
+    let malformed_outcome_id = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "evidence-plan",
+                "step_id": "s1",
+                "status": "done",
+                "completion_evidence": {"outcome_id": "bad outcome id"}
+            }),
+            &ctx,
+        )
+        .await
+        .expect("malformed outcome id rejection");
+    assert!(malformed_outcome_id.is_error);
+    assert_eq!(
+        result_text_as_json(&malformed_outcome_id)["reason"]["code"],
+        "completion_outcome_id_invalid"
+    );
+
+    let caller_forgery = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "evidence-plan",
+                "step_id": "s1",
+                "status": "done",
+                "completion_evidence": {
+                    "outcome_id": "caller-invented",
+                    "provenance": "harness_verified"
+                }
+            }),
+            &ctx,
+        )
+        .await
+        .expect("caller provenance rejection");
+    assert!(caller_forgery.is_error);
+    assert!(result_text(&caller_forgery).contains("exactly one field: outcome_id"));
+
+    let s1_contract =
+        ab_store::plan_step_contract_id("evidence-plan", "s1", "First postcondition", &[]);
+    let s2_contract = ab_store::plan_step_contract_id(
+        "evidence-plan",
+        "s2",
+        "Dependent postcondition",
+        &["s1".to_string()],
+    );
+    for claim in [
+        harness_plan_outcome(
+            "agent-reported-s1",
+            s1_contract.clone(),
+            AgentTaskOutcomeProvenance::AgentReported,
+        ),
+        harness_plan_outcome(
+            "wrong-contract-s1",
+            ab_store::plan_step_contract_id("different-plan", "s1", "First postcondition", &[]),
+            AgentTaskOutcomeProvenance::HarnessVerified,
+        ),
+        harness_plan_outcome(
+            "trusted-s1",
+            s1_contract,
+            AgentTaskOutcomeProvenance::HarnessVerified,
+        ),
+        harness_plan_outcome(
+            "trusted-s2",
+            s2_contract,
+            AgentTaskOutcomeProvenance::HarnessVerified,
+        ),
+    ] {
+        let record = claim.to_store_record(100).expect("valid fixture outcome");
+        assert_eq!(
+            store
+                .record_agent_task_outcome(record)
+                .await
+                .expect("seed fixture outcome"),
+            ab_store::AgentTaskOutcomeWriteStatus::Inserted
+        );
+    }
+
+    for (outcome_id, expected_code) in [
+        ("agent-reported-s1", "completion_outcome_untrusted"),
+        ("wrong-contract-s1", "completion_outcome_contract_mismatch"),
+    ] {
+        let rejected = PlanUpdateTool::new(hub.clone())
+            .execute(
+                json!({
+                    "plan_id": "evidence-plan",
+                    "step_id": "s1",
+                    "status": "done",
+                    "completion_evidence": {"outcome_id": outcome_id}
+                }),
+                &ctx,
+            )
+            .await
+            .expect("evidence rejection");
+        assert!(rejected.is_error);
+        assert_eq!(
+            result_text_as_json(&rejected)["reason"]["code"],
+            expected_code
+        );
+    }
+
+    let dependency_rejected = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "evidence-plan",
+                "step_id": "s2",
+                "status": "done",
+                "completion_evidence": {"outcome_id": "trusted-s2"}
+            }),
+            &ctx,
+        )
+        .await
+        .expect("dependency rejection");
+    assert!(dependency_rejected.is_error);
+    assert_eq!(
+        result_text_as_json(&dependency_rejected)["reason"]["code"],
+        "dependency_not_completed"
+    );
+
+    for (step_index, step_id, outcome_id, expected_done, expected_next) in [
+        (0, "s1", "trusted-s1", 1, Some("s2")),
+        (1, "s2", "trusted-s2", 2, None),
+    ] {
+        let completed = PlanUpdateTool::new(hub.clone())
+            .execute(
+                json!({
+                    "plan_id": "evidence-plan",
+                    "step_id": step_id,
+                    "status": "DONE",
+                    "completion_evidence": {"outcome_id": outcome_id}
+                }),
+                &ctx,
+            )
+            .await
+            .expect("trusted completion");
+        assert!(!completed.is_error, "{}", result_text(&completed));
+        let payload = result_text_as_json(&completed);
+        assert_eq!(payload["plan"]["done_count"], expected_done);
+        assert_eq!(payload["plan"]["verified_done_count"], expected_done);
+        assert_eq!(
+            payload["plan"]["steps"][step_index]["completion_anchor"],
+            true
+        );
+        assert_eq!(
+            payload["plan"]["next_step_id"],
+            expected_next.map_or(Value::Null, |id| json!(id))
+        );
+    }
+
+    let loaded = PlanLoadTool::new(hub.clone())
+        .execute(json!({"plan_id": " evidence-plan "}), &ctx)
+        .await
+        .expect("load completed plan");
+    let loaded = result_text_as_json(&loaded);
+    assert_eq!(loaded["completion_gate"], "evidence_gated");
+    assert_eq!(loaded["legacy_unverified_done_count"], 0);
+    assert_eq!(loaded["steps"][0]["completion_anchor"], true);
+    assert_eq!(loaded["steps"][1]["completion_anchor"], true);
+    assert!(loaded["steps"][0]["completion_evidence"]["record_sha256"]
+        .as_str()
+        .is_some_and(|digest| digest.starts_with("sha256:")));
+
+    let roundtrip = PlanSaveTool::new(hub)
+        .execute(
+            json!({
+                "plan_id": "evidence-plan",
+                "title": "Evidence plan",
+                "steps": loaded["steps"].clone()
+            }),
+            &ctx,
+        )
+        .await
+        .expect("completed plan roundtrip");
+    assert!(!roundtrip.is_error, "{}", result_text(&roundtrip));
+    let roundtrip = result_text_as_json(&roundtrip);
+    assert_eq!(roundtrip["plan"]["done_count"], 2);
+    assert_eq!(roundtrip["plan"]["steps"][0]["completion_anchor"], true);
+    assert_eq!(roundtrip["plan"]["steps"][1]["completion_anchor"], true);
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
 #[tokio::test]
@@ -22114,6 +22709,268 @@ async fn agent_kill_routes_to_session_owning_runtime_not_primary() {
         "owner's interactive session must be killed — kill routed to the session's runtime"
     );
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn agent_spawn_governor_caps_expires_and_releases_local_workload() {
+    let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = base_hub.store.as_ref().expect("store").clone();
+    let governor = crate::agent_spawn_governor::AgentSpawnGovernor::enabled(1, 1, 0)
+        .expect("valid test governor");
+    let runtime =
+        Arc::new(ab_agent::ClaudeCodeRuntime::with_binary("/bin/cat").with_store(store.clone()));
+    let hub = crate::Hub::builder()
+        .store(store)
+        .agent(runtime.clone())
+        .agent_spawn_governor(governor.clone())
+        .build();
+    let tool = AgentSpawnTool::new(hub.clone());
+    let spawn_args = json!({
+        "cwd": temp_dir.display().to_string(),
+        "prompt": "governed interactive probe",
+        "backend": "claude-code",
+        "interactive": true
+    });
+
+    let first = tool
+        .execute(spawn_args.clone(), &ToolContext::default())
+        .await
+        .expect("first governed spawn");
+    assert!(!first.is_error, "first spawn should succeed: {first:?}");
+    let first_payload = result_text_as_json(&first);
+    assert_eq!(first_payload["agent_spawn_governor"]["mode"], "enforce");
+    assert_eq!(
+        first_payload["agent_spawn_governor"]["lease_kind"],
+        "process_local_capacity"
+    );
+    assert_eq!(
+        first_payload["agent_spawn_governor"]["grants_authority"],
+        false
+    );
+    assert_eq!(first_payload["agent_spawn_governor"]["ttl_secs"], 1);
+    assert!(
+        first_payload["agent_spawn_governor"].get("pid").is_none(),
+        "governor receipt must not expose process custody"
+    );
+    assert_eq!(governor.active_count(), 1);
+    assert_eq!(governor.occupied_slots(), 1);
+
+    let second = tool
+        .execute(spawn_args.clone(), &ToolContext::default())
+        .await
+        .expect("capacity rejection");
+    assert!(second.is_error, "second spawn must be capped");
+    assert!(
+        result_text(&second).contains("capacity exhausted"),
+        "got: {}",
+        result_text(&second)
+    );
+    assert_eq!(
+        governor.snapshot().capacity_rejections_total,
+        1,
+        "the second request must be rejected at atomic slot acquisition"
+    );
+
+    let mut expired_and_released = false;
+    for _ in 0..120 {
+        if runtime.interactive_count() == 0 && governor.occupied_slots() == 0 {
+            expired_and_released = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        expired_and_released,
+        "TTL must stop the exact local workload and release only after terminal: {:?}",
+        governor.snapshot()
+    );
+    let after_expiry = governor.snapshot();
+    assert_eq!(after_expiry.ttl_expirations_total, 1);
+    assert_eq!(after_expiry.term_requests_total, 1);
+    assert_eq!(after_expiry.terminal_releases_total, 1);
+
+    let reusable = governor.reserve().expect("slot reusable after terminal");
+    assert_eq!(governor.occupied_slots(), 1);
+    drop(reusable);
+    assert_eq!(governor.occupied_slots(), 0);
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn agent_spawn_governor_releases_after_explicit_kill() {
+    let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = base_hub.store.as_ref().expect("store").clone();
+    let governor = crate::agent_spawn_governor::AgentSpawnGovernor::enabled(1, 30, 0)
+        .expect("valid test governor");
+    let runtime =
+        Arc::new(ab_agent::ClaudeCodeRuntime::with_binary("/bin/cat").with_store(store.clone()));
+    let hub = crate::Hub::builder()
+        .store(store)
+        .agent(runtime.clone())
+        .agent_spawn_governor(governor.clone())
+        .build();
+    let spawned = AgentSpawnTool::new(hub.clone())
+        .execute(
+            json!({
+                "cwd": temp_dir.display().to_string(),
+                "prompt": "explicit recovery probe",
+                "backend": "claude-code",
+                "interactive": true
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("governed spawn");
+    assert!(!spawned.is_error, "spawn should succeed: {spawned:?}");
+    let payload = result_text_as_json(&spawned);
+    let session_id = payload["id"].as_str().expect("session id");
+    assert_eq!(governor.active_count(), 1);
+
+    // Recovery controls stay outside the admission gate: stopping a drifting
+    // task must never require another lease or a free capacity slot.
+    let killed = AgentKillTool::new(hub)
+        .execute(json!({"id": session_id}), &ToolContext::default())
+        .await
+        .expect("explicit recovery kill");
+    assert!(
+        !killed.is_error,
+        "agent_kill must remain available: {killed:?}"
+    );
+    for _ in 0..120 {
+        if runtime.interactive_count() == 0 && governor.occupied_slots() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(runtime.interactive_count(), 0);
+    assert_eq!(governor.occupied_slots(), 0);
+    assert_eq!(governor.snapshot().terminal_releases_total, 1);
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn agent_spawn_governor_releases_naturally_finished_one_shot() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = base_hub.store.as_ref().expect("store").clone();
+    let script = temp_dir.join("natural-agent-exit.sh");
+    std::fs::write(&script, "#!/bin/sh\nsleep 0.2\nexit 0\n").expect("write stand-in agent");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
+        .expect("make stand-in executable");
+    let governor = crate::agent_spawn_governor::AgentSpawnGovernor::enabled(1, 30, 0)
+        .expect("valid test governor");
+    let runtime = Arc::new(
+        ab_agent::ClaudeCodeRuntime::with_binary(script.display().to_string())
+            .with_store(store.clone()),
+    );
+    let hub = crate::Hub::builder()
+        .store(store)
+        .agent(runtime)
+        .agent_spawn_governor(governor.clone())
+        .build();
+    let spawned = AgentSpawnTool::new(hub)
+        .execute(
+            json!({
+                "cwd": temp_dir.display().to_string(),
+                "prompt": "finish naturally",
+                "backend": "claude-code"
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("natural one-shot spawn");
+    assert!(!spawned.is_error, "spawn should succeed: {spawned:?}");
+    for _ in 0..120 {
+        if governor.occupied_slots() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let snapshot = governor.snapshot();
+    assert_eq!(snapshot.occupied_slots, 0);
+    assert_eq!(snapshot.terminal_releases_total, 1);
+    assert_eq!(snapshot.ttl_expirations_total, 0);
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn agent_spawn_governor_releases_failed_spawn_reservation() {
+    let governor = crate::agent_spawn_governor::AgentSpawnGovernor::enabled(1, 30, 0)
+        .expect("valid test governor");
+    let runtime = Arc::new(ab_agent::ClaudeCodeRuntime::with_binary(
+        "/definitely/not/an-agent-runtime",
+    ));
+    let hub = crate::Hub::builder()
+        .agent(runtime)
+        .agent_spawn_governor(governor.clone())
+        .build();
+    let out = AgentSpawnTool::new(hub)
+        .execute(
+            json!({
+                "cwd": "/tmp",
+                "prompt": "must fail to spawn",
+                "backend": "claude-code"
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("failed spawn result");
+    assert!(out.is_error);
+    assert_eq!(governor.occupied_slots(), 0, "failed spawn leaked a slot");
+    assert_eq!(governor.snapshot().quarantined_slots, 0);
+}
+
+#[tokio::test]
+async fn agent_spawn_governor_quarantines_success_without_trusted_custody() {
+    let governor = crate::agent_spawn_governor::AgentSpawnGovernor::enabled(1, 30, 0)
+        .expect("valid test governor");
+    let hub = crate::Hub::builder()
+        .agent(mock("uncustodied", false))
+        .agent_spawn_governor(governor.clone())
+        .build();
+    let out = AgentSpawnTool::new(hub)
+        .execute(
+            json!({
+                "cwd": "/tmp",
+                "prompt": "mock reports success without custody",
+                "backend": "uncustodied"
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("uncustodied spawn result");
+    assert!(out.is_error, "uncustodied success must fail closed");
+    assert!(result_text(&out).contains("no trusted process custody"));
+    let snapshot = governor.snapshot();
+    assert_eq!(snapshot.activation_rejections_total, 1);
+    assert_eq!(snapshot.quarantined_slots, 1);
+    assert_eq!(snapshot.occupied_slots, 1);
+}
+
+#[tokio::test]
+async fn agent_spawn_governor_blocks_unmanaged_steer_launcher() {
+    let governor = crate::agent_spawn_governor::AgentSpawnGovernor::enabled(1, 30, 0)
+        .expect("valid test governor");
+    let hub = crate::Hub::builder()
+        .agent_spawn_governor(governor.clone())
+        .build();
+    let out = AgentSteerLaunchTool::new(hub)
+        .execute(
+            json!({
+                "project": "governor-test",
+                "role": "must-not-launch",
+                "command": "false"
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("unmanaged launcher rejection");
+    assert!(out.is_error);
+    assert!(result_text(&out).contains("unmanaged launch surface 'agent_steer_launch'"));
+    assert_eq!(governor.occupied_slots(), 0);
+    assert_eq!(governor.snapshot().preflight_rejections_total, 1);
 }
 
 #[test]
@@ -41463,6 +42320,18 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert_eq!(report.continuation.median_followup_secs, Some(12));
     assert_eq!(report.completion.finalize_signals, 1);
     assert_eq!(report.completion.plan_update_signals, 1);
+    assert!(report
+        .completion
+        .interpretation
+        .contains("plan-mutation activity"));
+    assert!(report
+        .completion
+        .interpretation
+        .contains("operational proxies"));
+    assert!(!report
+        .completion
+        .interpretation
+        .contains("completion signals"));
     assert_eq!(report.recovery.failures_followed_by_success, 2);
     assert_eq!(report.recovery.repeated_failure_loops, 1);
     assert_eq!(
@@ -42744,4 +43613,353 @@ fn s4_default_full_projection_still_carries_record_and_content() {
     assert_eq!(rec["content"], "full body here");
     assert_eq!(rec["key"], "s4_key");
     assert!(v.get("content_preview").is_none());
+}
+
+#[tokio::test]
+async fn agent_steer_kill_off_mode_preserves_legacy_namespace_behavior() {
+    let mut hub = Hub::builder()
+        .agent_spawn_governor(crate::agent_spawn_governor::AgentSpawnGovernor::disabled())
+        .build();
+    hub.security.allow_agent_spawn = false;
+    let tool = AgentSteerKillTool::new(hub);
+    let owned_session = format!("ab__lease-recovery-{}__test", std::process::id());
+
+    let result = tool
+        .execute(json!({ "session": owned_session }), &ToolContext::default())
+        .await
+        .expect("recovery control executes");
+
+    assert!(!result.is_error, "off mode preserves the legacy behavior");
+    assert!(result_text(&result).contains("not_found"));
+}
+
+#[tokio::test]
+async fn agent_steer_kill_rejects_non_bridge_owned_sessions() {
+    let tool = AgentSteerKillTool::new(Hub::builder().build());
+
+    let result = tool
+        .execute(
+            json!({ "session": "unrelated-user-session" }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("tool result");
+
+    assert!(result.is_error);
+    assert!(result_text(&result).contains("AB-owned"));
+}
+
+#[tokio::test]
+async fn registry_invocation_guard_denies_shell_before_any_effect() {
+    let directory = tempfile::tempdir().expect("lease test directory");
+    let authority = crate::invocation_lease::ProvisionedInvocationLeaseAuthority::provision(
+        &directory.path().join("leases.sqlite3"),
+        crate::invocation_lease::InvocationLeaseMode::Enforce,
+        &[],
+    )
+    .expect("provision test-only authority");
+    let sentinel = directory.path().join("must-not-exist");
+    let mut hub = Hub::builder()
+        .invocation_lease_authorizer(authority.authorizer)
+        .build();
+    hub.security = Default::default();
+    let registry = build_registry_with_policy_surface(
+        hub,
+        ToolPolicy::from_values(Some("all-dev"), None, None, None),
+        HostSurface::all_available(),
+        true,
+    );
+    let result = registry
+        .invoke(
+            "shell_exec",
+            json!({
+                "cmd": "printf forbidden > must-not-exist",
+                "cwd": directory.path().to_string_lossy()
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("shell tool exposed")
+        .expect("guard returns an MCP result");
+
+    assert!(result.is_error);
+    assert!(result_text(&result).contains("authorization denied"));
+    assert!(
+        !sentinel.exists(),
+        "the registry guard must deny before shell_exec starts"
+    );
+}
+
+#[tokio::test]
+async fn registry_invocation_guard_does_not_mistake_bridge_visibility_for_caller_custody() {
+    let directory = tempfile::tempdir().expect("lease test directory");
+    let authority = crate::invocation_lease::ProvisionedInvocationLeaseAuthority::provision(
+        &directory.path().join("leases.sqlite3"),
+        crate::invocation_lease::InvocationLeaseMode::Enforce,
+        &[],
+    )
+    .expect("provision test-only authority");
+    let mut hub = Hub::builder()
+        .invocation_lease_authorizer(authority.authorizer)
+        .build();
+    hub.security = Default::default();
+    hub.security.allow_agent_spawn = false;
+    let registry = build_registry_with_policy_surface(
+        hub,
+        ToolPolicy::from_values(Some("all-dev"), None, None, None),
+        HostSurface::all_available(),
+        true,
+    );
+    let result = registry
+        .invoke(
+            "agent_kill",
+            json!({ "id": "missing-custodied-session" }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("recovery tool exposed")
+        .expect("recovery result");
+
+    assert!(result.is_error);
+    assert!(result_text(&result).contains("authorization denied"));
+    assert!(
+        !result_text(&result).contains("no store configured"),
+        "the guard must deny before a Bridge-visible target is treated as caller-owned"
+    );
+}
+
+#[tokio::test]
+async fn registry_invocation_guard_gates_remote_steer_kill_without_custody_proof() {
+    let directory = tempfile::tempdir().expect("lease test directory");
+    let authority = crate::invocation_lease::ProvisionedInvocationLeaseAuthority::provision(
+        &directory.path().join("leases.sqlite3"),
+        crate::invocation_lease::InvocationLeaseMode::Enforce,
+        &[],
+    )
+    .expect("provision test-only authority");
+    let mut hub = Hub::builder()
+        .invocation_lease_authorizer(authority.authorizer)
+        .build();
+    hub.security = Default::default();
+    let registry = build_registry_with_policy_surface(
+        hub,
+        ToolPolicy::from_values(Some("all-dev"), None, None, None),
+        HostSurface::all_available(),
+        true,
+    );
+    let session = format!("ab__unproven-custody-{}__test", std::process::id());
+
+    let result = registry
+        .invoke(
+            "agent_steer_kill",
+            json!({ "session": session }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("steer kill tool exposed")
+        .expect("guard result");
+
+    assert!(result.is_error);
+    assert!(result_text(&result).contains("authorization denied"));
+}
+
+#[test]
+fn finalized_registry_snapshot_is_derived_from_exact_final_descriptor_set() {
+    let directory = tempfile::tempdir().expect("lease test directory");
+    let authority = crate::invocation_lease::ProvisionedInvocationLeaseAuthority::provision(
+        &directory.path().join("leases.sqlite3"),
+        crate::invocation_lease::InvocationLeaseMode::Enforce,
+        &[],
+    )
+    .expect("provision test-only authority");
+    let hub = Hub::builder()
+        .invocation_lease_authorizer(authority.authorizer)
+        .build();
+    let registry = build_registry_with_policy_surface(
+        hub,
+        ToolPolicy::from_values(Some("codex-essential"), None, None, None),
+        HostSurface::all_available(),
+        false,
+    );
+    let snapshot = registry.snapshot();
+    assert_eq!(
+        snapshot.descriptors(),
+        registry.descriptors().as_slice(),
+        "the serving snapshot and tools/list data must share one frozen descriptor set"
+    );
+    assert_eq!(
+        snapshot.guard_policy()["inventory_digest_sha256"],
+        snapshot.security_projection()["effect_inventory"]["summary"]["digest_sha256"]
+    );
+    assert_eq!(
+        snapshot.security_projection()["serving_registry_boundary"]
+            ["post_finalization_registration_available"],
+        false
+    );
+    assert_eq!(
+        snapshot.security_projection()["serving_registry_boundary"]
+            ["same_process_direct_tool_or_backend_invocation_closed"],
+        false
+    );
+}
+
+#[test]
+fn finalized_registry_digest_commits_the_static_security_policy() {
+    let build = |allow_shell_exec| {
+        let mut hub = Hub::builder().build();
+        hub.security.allow_shell_exec = allow_shell_exec;
+        let policy = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let surface = HostSurface::all_available();
+        let mut builder = ToolRegistryBuilder::new();
+        builder.register(Box::new(CapabilitiesTool::new(hub.clone())));
+        finalize_effect_registry(
+            builder,
+            &hub,
+            policy,
+            surface,
+            false,
+            "security_policy_digest_test",
+        )
+        .0
+    };
+
+    let permissive = build(true);
+    let restricted = build(false);
+    assert_ne!(
+        permissive.snapshot().digest_sha256(),
+        restricted.snapshot().digest_sha256(),
+        "a changed inner-execution security ceiling must change the composite registry digest"
+    );
+    assert_eq!(
+        restricted.snapshot().security_projection()["static_security_policy"]
+            ["allow_shell_exec"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn capabilities_projects_the_exact_dispatching_finalized_registry_without_claiming_transport() {
+    let hub = Hub::builder().build();
+    let policy = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+    let surface = HostSurface::all_available();
+    let builder = build_registry_builder_with_policy_surface(
+        hub.clone(),
+        policy,
+        surface,
+        false,
+    );
+    let registry = finalize_effect_registry(
+        builder,
+        &hub,
+        policy,
+        surface,
+        false,
+        "test_registry_build",
+    )
+    .0;
+    let snapshot = registry.snapshot();
+    let expected_count = registry.list().len();
+    let result = registry
+        .invoke(
+            "capabilities",
+            json!({ "compact": true }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("capabilities exposed")
+        .expect("capabilities executes");
+    let payload: Value = serde_json::from_str(&result_text(&result)).expect("capabilities JSON");
+
+    assert_eq!(payload["mcp"]["exposed_tool_count"], expected_count);
+    assert_eq!(
+        payload["mcp"]["exposed_tool_count_source"],
+        "finalized_registry_dispatch_snapshot"
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["finalized_registry_digest_sha256"],
+        snapshot.digest_sha256()
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["registry_instance_id"],
+        snapshot.registry_instance_id()
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["live_serving_registry_bound"],
+        false
+    );
+    assert_eq!(
+        payload["security"]["effect_inventory"]["capability_projection_source"],
+        "finalized_registry_dispatch_snapshot"
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["transport_serving_registry_attested"],
+        false
+    );
+    assert_eq!(
+        payload["security"]["effect_inventory"]["finalized_registry_binding"]
+            ["registry_guard_replacement_locked_by_finalized_type"],
+        true
+    );
+    assert!(payload["security"]["effect_inventory"]
+        .get("mcp_descriptors")
+        .is_none());
+    assert!(payload["mcp"]["finalized_registry"]["security_projection"]
+        ["effect_inventory"]
+        .get("mcp_descriptors")
+        .is_none());
+    assert_eq!(
+        payload["security"]["effect_inventory"]["mcp_descriptors_omitted"],
+        true
+    );
+}
+
+#[tokio::test]
+async fn direct_capabilities_call_does_not_claim_a_live_registry_binding() {
+    let tool = CapabilitiesTool::new(Hub::builder().build());
+    let result = tool
+        .execute(json!({ "compact": true }), &ToolContext::default())
+        .await
+        .expect("capabilities executes directly");
+    let payload: Value = serde_json::from_str(&result_text(&result)).expect("capabilities JSON");
+
+    assert!(payload["mcp"]["exposed_tool_count"].is_null());
+    assert_eq!(
+        payload["mcp"]["exposed_tool_count_source"],
+        "unbound_direct_tool_invocation"
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["live_serving_registry_bound"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn what_if_finalized_registry_does_not_claim_to_be_the_live_server() {
+    let registry = build_registry_with_policy(
+        Hub::builder().build(),
+        ToolPolicy::from_values(Some("codex-lean"), None, None, None),
+    );
+    let result = registry
+        .invoke(
+            "capabilities",
+            json!({ "compact": true }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("capabilities exposed")
+        .expect("capabilities executes");
+    let payload: Value = serde_json::from_str(&result_text(&result)).expect("capabilities JSON");
+
+    assert_eq!(
+        payload["mcp"]["exposed_tool_count_source"],
+        "finalized_registry_dispatch_snapshot"
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["dispatching_finalized_registry_bound"],
+        true
+    );
+    assert_eq!(
+        payload["mcp"]["finalized_registry"]["live_serving_registry_bound"],
+        false
+    );
 }

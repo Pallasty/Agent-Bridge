@@ -200,16 +200,22 @@ boundaries so a new agent can resume exactly where the last one stopped.
 
 ```
 plan_save(plan_id="warp-w1", steps=[
-  { "id": "caps-trait",   "desc": "Add TerminalCapabilities", "status": "done" },
+  { "id": "caps-trait",   "desc": "Add TerminalCapabilities", "status": "pending" },
   { "id": "caps-warp",    "desc": "Implement for WarpBackend", "status": "in_progress" },
   { "id": "caps-mcp",     "desc": "Expose in capabilities tool", "status": "pending" }
 ])
 
 plan_load(plan_id="warp-w1")
-→ { steps: [...], progress: "1/3 done", next: "caps-warp" }
+→ { steps: [...], progress: "0/3 evidence-gated done", next_step_id: "caps-trait" }
 ```
 
 Implementation: new `plans` table in SQLite (`plan_id TEXT, steps_json TEXT, updated_at TEXT`). Lightweight — no new crate needed.
+
+As of 2026-08-30, `done` is no longer a free-form self-report. The Store admits
+it only with a content-bound, immutable, harness-verified task outcome after all
+dependencies are evidence-gated complete. An admitted `done` is terminal in v1
+so an old outcome cannot be replayed after a reopen. See
+`docs/design/PLAN_COMPLETION_EVIDENCE_GATE_2026_08_30.md`.
 
 `**changes_digest**` — Agent-friendly git diff summary.
 
@@ -345,9 +351,10 @@ bootstrap / curate / finalize into one dispatcher.
 
 - New `plans` table in SQLite: `plan_id TEXT PK, title TEXT, steps_json TEXT, created_at TEXT, updated_at TEXT`.
 - MCP tools:
-  - `plan_save(plan_id, title, steps=[{id, desc, status, deps?}])`
+  - `plan_save(plan_id, title, steps=[{id, desc, status, deps?, completion_anchor?, completion_contract?, completion_evidence?}])`
   - `plan_load(plan_id)` → steps + progress summary + next action
-  - `plan_update(plan_id, step_id, status)` — atomic step status update
+  - `plan_update(plan_id, step_id, status, completion_evidence?)` — atomic,
+    dependency-aware status update; `done` requires a trusted outcome ID
 - `context_budget(conversation_turns?, text_sample?)` → estimated token
 count, model limit, percentage, recommendation enum
 (`nominal | suggest_curate | urgent_handoff`).
@@ -538,4 +545,3 @@ The `agent-bridge` MCP side uses **IPC-first Warp backend** for the three key op
 4. Run `mcp__agent-bridge__terminal_send_keys` + `terminal_read_output` roundtrip
 5. Close a terminal pane → session disappears from list (alive flag cleared)
 6. Add integration smoke test for list/send/read roundtrip to CI
-

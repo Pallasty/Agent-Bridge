@@ -11,8 +11,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 
+use crate::agent_spawn_governor::AgentSpawnGovernor;
 #[cfg(feature = "episode-observation-slice-c1")]
 use crate::episode_observation_curation_batch::CurationBatchObservationCapability;
+use crate::invocation_lease::InvocationLeaseAuthorizer;
 use crate::security::SecurityPolicy;
 
 #[derive(Clone)]
@@ -35,6 +37,14 @@ pub struct Hub {
     /// Process-local body write ownership. It is deliberately not persisted
     /// or acquired by background work; a restart therefore clears the lease.
     pub embodiment_leases: Arc<tokio::sync::Mutex<WriteLeaseRegistry>>,
+    /// Default-off, process-local damping for sibling-agent expansion. When
+    /// enabled it owns bounded concurrency slots until a locally-custodied
+    /// workload is terminal, and enforces a monotonic runtime TTL.
+    pub agent_spawn_governor: AgentSpawnGovernor,
+    /// Default-off verifier/consumer for exact effectful-call authority.
+    /// This type deliberately cannot mint leases; trusted issuance remains
+    /// outside every tool-visible Hub.
+    pub invocation_leases: InvocationLeaseAuthorizer,
     /// Transaction-scoped serialization for lease-mediated body writes. A
     /// lease identifies the owning session; participating mutating tools hold
     /// this guard across precondition, action, postcondition, and receipt.
@@ -82,6 +92,8 @@ pub struct HubBuilder {
     browser: Option<Arc<dyn BrowserBackend>>,
     agent: Option<Arc<dyn AgentRuntime>>,
     agents: HashMap<String, Arc<dyn AgentRuntime>>,
+    agent_spawn_governor: Option<AgentSpawnGovernor>,
+    invocation_leases: Option<InvocationLeaseAuthorizer>,
     worktree: Option<Arc<GitWorktreeManager>>,
 }
 
@@ -126,6 +138,19 @@ impl HubBuilder {
         self.agents.insert(a.id().to_string(), a);
         self
     }
+    /// Override the process-local agent expansion governor. Primarily useful
+    /// for deterministic embedding and tests; production normally loads its
+    /// default-off configuration from the environment at build time.
+    pub fn agent_spawn_governor(mut self, governor: AgentSpawnGovernor) -> Self {
+        self.agent_spawn_governor = Some(governor);
+        self
+    }
+    /// Override the exact invocation verifier/consumer. The corresponding
+    /// issuer is intentionally a different type and cannot be installed here.
+    pub fn invocation_lease_authorizer(mut self, authorizer: InvocationLeaseAuthorizer) -> Self {
+        self.invocation_leases = Some(authorizer);
+        self
+    }
     pub fn worktree(mut self, w: Arc<GitWorktreeManager>) -> Self {
         self.worktree = Some(w);
         self
@@ -141,6 +166,12 @@ impl HubBuilder {
             agent: self.agent,
             agents: self.agents,
             embodiment_leases: Arc::new(tokio::sync::Mutex::new(WriteLeaseRegistry::default())),
+            agent_spawn_governor: self
+                .agent_spawn_governor
+                .unwrap_or_else(AgentSpawnGovernor::from_env),
+            invocation_leases: self
+                .invocation_leases
+                .unwrap_or_else(InvocationLeaseAuthorizer::from_env),
             embodiment_lease_action_lock: Arc::new(tokio::sync::Mutex::new(())),
             worktree: self.worktree,
             memory_embed_cache: Arc::new(tokio::sync::Mutex::new(None)),

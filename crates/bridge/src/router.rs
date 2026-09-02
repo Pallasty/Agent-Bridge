@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::hub::Hub;
+use crate::invocation_lease::rpc_capability;
 
 #[derive(Clone)]
 pub struct Router {
@@ -16,6 +17,57 @@ impl Router {
     }
 
     pub async fn dispatch(&self, req: RpcRequest) -> RpcResponse {
+        self.dispatch_from_peer(req, None).await
+    }
+
+    /// Dispatch a request received from a Unix peer.
+    ///
+    /// Authorization metadata belongs only at the top level of JSON-RPC
+    /// `params`. It is removed before the request reaches an effect handler so
+    /// no backend can accidentally interpret transport authority as an effect
+    /// argument.
+    pub async fn dispatch_from_peer(
+        &self,
+        mut req: RpcRequest,
+        peer_uid: Option<u32>,
+    ) -> RpcResponse {
+        let authorization_metadata = take_authorization_metadata(&mut req.params);
+
+        if let Err(response) = self
+            .pre_dispatch(&req, peer_uid, authorization_metadata.as_ref())
+            .await
+        {
+            return response;
+        }
+
+        self.dispatch_effect(req).await
+    }
+
+    async fn pre_dispatch(
+        &self,
+        req: &RpcRequest,
+        peer_uid: Option<u32>,
+        authorization_metadata: Option<&Value>,
+    ) -> Result<(), RpcResponse> {
+        if let Some(capability) = rpc_capability(&req.method) {
+            if let Err(error) = self.hub.security.check(capability) {
+                return Err(RpcResponse::fail(req.id, -32003, error));
+            }
+        }
+
+        let arguments = req.params.clone().unwrap_or(Value::Null);
+        if let Err(error) = self
+            .hub
+            .invocation_leases
+            .authorize_unix(&req.method, &arguments, peer_uid, authorization_metadata)
+            .await
+        {
+            return Err(RpcResponse::fail(req.id, -32003, error.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn dispatch_effect(&self, req: RpcRequest) -> RpcResponse {
         debug!(method = %req.method, id = req.id, "dispatch");
 
         match req.method.as_str() {
@@ -62,6 +114,7 @@ impl Router {
                 "store": self.hub.store.is_some(),
                 "terminal": self.hub.terminal.as_ref().map(|t| t.id()),
                 "browser": self.hub.browser.as_ref().map(|b| b.id()),
+                "invocation_lease": self.hub.invocation_leases.snapshot(),
             }),
         )
     }
@@ -292,6 +345,13 @@ impl Router {
     }
 }
 
+fn take_authorization_metadata(params: &mut Option<Value>) -> Option<Value> {
+    params
+        .as_mut()
+        .and_then(Value::as_object_mut)
+        .and_then(|params| params.remove("_meta"))
+}
+
 fn build_notify(params: Value) -> NotifyEvent {
     let title = params
         .get("title")
@@ -327,4 +387,227 @@ fn parse_severity(s: &str) -> Option<NotifySeverity> {
         "attention" => NotifySeverity::Attention,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_spawn_governor::AgentSpawnGovernor;
+    use crate::invocation_lease::{
+        InvocationLeaseMode, LeasePrincipal, ProvisionedInvocationLeaseAuthority,
+    };
+
+    fn backend_free_router() -> Router {
+        Router::new(
+            Hub::builder()
+                .agent_spawn_governor(AgentSpawnGovernor::disabled())
+                .build(),
+        )
+    }
+
+    #[test]
+    fn authorization_metadata_is_only_taken_from_top_level_params() {
+        let mut params = Some(json!({
+            "_meta": { "lease": "opaque" },
+            "limit": 7,
+            "arguments": { "_meta": { "not_transport_metadata": true } }
+        }));
+
+        let metadata = take_authorization_metadata(&mut params);
+
+        assert_eq!(metadata, Some(json!({ "lease": "opaque" })));
+        let effect_args = params.expect("effect args remain");
+        assert!(effect_args.get("_meta").is_none());
+        assert_eq!(effect_args["limit"], 7);
+        assert_eq!(
+            effect_args["arguments"]["_meta"]["not_transport_metadata"],
+            true
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_dispatch_with_metadata_preserves_ping() {
+        let response = backend_free_router()
+            .dispatch_from_peer(
+                RpcRequest::new(
+                    41,
+                    "system.ping",
+                    Some(json!({ "_meta": { "lease": "opaque" } })),
+                ),
+                Some(1000),
+            )
+            .await;
+
+        assert!(response.ok);
+        assert_eq!(response.result, Some(json!({ "pong": true })));
+    }
+
+    #[tokio::test]
+    async fn peer_dispatch_with_metadata_preserves_read_path() {
+        let response = backend_free_router()
+            .dispatch_from_peer(
+                RpcRequest::new(
+                    42,
+                    "system.capabilities",
+                    Some(json!({ "_meta": { "lease": "opaque" } })),
+                ),
+                Some(1000),
+            )
+            .await;
+
+        assert!(response.ok);
+        let capabilities = response.result.expect("capabilities result");
+        assert_eq!(capabilities["store"], false);
+        assert_eq!(capabilities["terminal"], Value::Null);
+        assert_eq!(capabilities["browser"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn compatibility_dispatch_still_routes_requests() {
+        let response = backend_free_router()
+            .dispatch(RpcRequest::new(43, "system.ping", None))
+            .await;
+
+        assert!(response.ok);
+        assert_eq!(response.result, Some(json!({ "pong": true })));
+    }
+
+    #[tokio::test]
+    async fn unix_effect_requires_exact_uid_lease_and_consumes_before_handler() {
+        let directory = tempfile::tempdir().expect("lease directory");
+        let authority = ProvisionedInvocationLeaseAuthority::provision(
+            &directory.path().join("leases.sqlite3"),
+            InvocationLeaseMode::Enforce,
+            &[],
+        )
+        .expect("provision lease authority");
+        let uid = unsafe { libc::geteuid() };
+        let exact_arguments = json!({ "pane": "pane-1", "keys": "echo exact" });
+        let issued = authority
+            .issuer
+            .issue_exact(
+                LeasePrincipal::UnixUid { uid },
+                "terminal.send_keys",
+                &exact_arguments,
+                60,
+                1,
+            )
+            .await
+            .expect("issue exact Unix lease");
+
+        let mut hub = Hub::builder()
+            .agent_spawn_governor(AgentSpawnGovernor::disabled())
+            .invocation_lease_authorizer(authority.authorizer.clone())
+            .build();
+        hub.security = Default::default();
+        let router = Router::new(hub);
+
+        let mut wrong_arguments = json!({ "pane": "pane-1", "keys": "echo changed" });
+        wrong_arguments
+            .as_object_mut()
+            .expect("object")
+            .insert("_meta".into(), issued.authorization_meta());
+        let wrong = router
+            .dispatch_from_peer(
+                RpcRequest::new(44, "terminal.send_keys", Some(wrong_arguments)),
+                Some(uid),
+            )
+            .await;
+        assert_eq!(wrong.error.expect("wrong scope denied").code, -32003);
+
+        let mut exact_with_meta = exact_arguments.clone();
+        exact_with_meta
+            .as_object_mut()
+            .expect("object")
+            .insert("_meta".into(), issued.authorization_meta());
+        let authorized = router
+            .dispatch_from_peer(
+                RpcRequest::new(45, "terminal.send_keys", Some(exact_with_meta.clone())),
+                Some(uid),
+            )
+            .await;
+        assert_eq!(
+            authorized
+                .error
+                .expect("handler reached without backend")
+                .code,
+            -32005,
+            "authorization must consume before the effect handler runs"
+        );
+
+        let replay = router
+            .dispatch_from_peer(
+                RpcRequest::new(46, "terminal.send_keys", Some(exact_with_meta)),
+                Some(uid),
+            )
+            .await;
+        assert_eq!(replay.error.expect("replay denied").code, -32003);
+    }
+
+    #[tokio::test]
+    async fn static_security_policy_is_a_hard_ceiling_before_unix_dispatch() {
+        let directory = tempfile::tempdir().expect("lease directory");
+        let authority = ProvisionedInvocationLeaseAuthority::provision(
+            &directory.path().join("leases.sqlite3"),
+            InvocationLeaseMode::Enforce,
+            &[],
+        )
+        .expect("provision lease authority");
+        let uid = unsafe { libc::geteuid() };
+        let arguments = json!({ "page": "p", "url": "https://example.invalid" });
+        let issued = authority
+            .issuer
+            .issue_exact(
+                LeasePrincipal::UnixUid { uid },
+                "browser.navigate",
+                &arguments,
+                60,
+                1,
+            )
+            .await
+            .expect("issue browser lease");
+        let mut arguments_with_meta = arguments;
+        arguments_with_meta
+            .as_object_mut()
+            .expect("object")
+            .insert("_meta".into(), issued.authorization_meta());
+
+        let mut hub = Hub::builder()
+            .agent_spawn_governor(AgentSpawnGovernor::disabled())
+            .invocation_lease_authorizer(authority.authorizer.clone())
+            .build();
+        hub.security = Default::default();
+        hub.security.allow_browser = false;
+
+        let response = Router::new(hub)
+            .dispatch_from_peer(
+                RpcRequest::new(47, "browser.navigate", Some(arguments_with_meta.clone())),
+                Some(uid),
+            )
+            .await;
+
+        let error = response.error.expect("policy denial");
+        assert_eq!(error.code, -32003);
+        assert!(error.message.contains("AB_ALLOW_BROWSER"));
+
+        let mut allowed_hub = Hub::builder()
+            .agent_spawn_governor(AgentSpawnGovernor::disabled())
+            .invocation_lease_authorizer(authority.authorizer)
+            .build();
+        allowed_hub.security = Default::default();
+        let after_policy_denial = Router::new(allowed_hub)
+            .dispatch_from_peer(
+                RpcRequest::new(48, "browser.navigate", Some(arguments_with_meta)),
+                Some(uid),
+            )
+            .await;
+        assert_eq!(
+            after_policy_denial
+                .error
+                .expect("authorized handler has no browser backend")
+                .code,
+            -32006,
+            "a static-policy denial must happen before and must not consume the lease"
+        );
+    }
 }
