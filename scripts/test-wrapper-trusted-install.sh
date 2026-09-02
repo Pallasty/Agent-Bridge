@@ -177,7 +177,7 @@ esac
 [ ! -e "$text_root/bin/agent-bridge.real" ] ||
     fail "non-native text file was moved into real-binary custody"
 
-install_root="$TEST_ROOT/positive"
+install_root="$TEST_ROOT/positive root"
 mkdir -p "$install_root"
 prepare_root "$install_root"
 before="$(find "$install_root" -mindepth 1 -printf '%P %m\n' | sort)"

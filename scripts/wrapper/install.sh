@@ -108,8 +108,10 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 validate_trusted_deploy_root() {
     local raw="$1" canonical euid owner mode numeric ancestor
     [ -n "$raw" ] || fail "AGENT_BRIDGE_DEPLOY_ROOT must not be empty"
+    # Permit literal spaces for the standard macOS Application Support path;
+    # all remaining path trust checks are retained below.
     case "$raw" in
-        *[!A-Za-z0-9._/-]*)
+        *[!A-Za-z0-9._/\ -]*)
             fail "AGENT_BRIDGE_DEPLOY_ROOT contains an unsupported character"
             ;;
     esac

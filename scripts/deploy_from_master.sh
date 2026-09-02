@@ -558,8 +558,11 @@ mode_value() {
 validate_trusted_deploy_root() {
     local raw="$1" canonical euid owner mode numeric ancestor
     [ -n "$raw" ] || die "AGENT_BRIDGE_DEPLOY_ROOT must not be empty"
+    # macOS's standard Application Support location contains literal spaces.
+    # Arguments are always quoted and canonicality/ownership checks below still
+    # bind the physical path, so permit only ordinary spaces—not shell syntax.
     case "$raw" in
-        *[!A-Za-z0-9._/-]*)
+        *[!A-Za-z0-9._/\ -]*)
             die "AGENT_BRIDGE_DEPLOY_ROOT contains an unsupported character"
             ;;
     esac
@@ -656,7 +659,7 @@ validate_trusted_agent_socket_path() {
         *) die "$label path must be absolute: $path" ;;
     esac
     case "$path" in
-        *[!A-Za-z0-9._/-]*|*//*|*/./*|*/../*|*/.|*/..|*/)
+        *[!A-Za-z0-9._/\ -]*|*//*|*/./*|*/../*|*/.|*/..|*/)
             die "$label path is not canonical and shell-safe: $path"
             ;;
     esac
