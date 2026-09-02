@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Status: **C0-C3 source evidence current; C2 host, C3 external provider, C4 and production HOLD**
+Status: **C0-C3 source evidence current; C2 host environment, C3 external provider, C4 and production HOLD**
 
 ## Decision
 
@@ -35,13 +35,30 @@ All commands used debug builds, `-j1`, and `--no-default-features`.
 The read-only C2 host preflight reproduced `HOLD`: euid 1000, one available
 non-root user, `ptrace_scope=1`, systemd running, and no production authority.
 
+## Reversible C2 execution-path check
+
+The owner has authorized autonomous execution of reversible work, so permission
+to run a transient probe is no longer a blocker. The available disposable paths
+were checked without changing repository or production state:
+
+- passwordless elevation is unavailable;
+- Docker, Podman, LXC, Incus and `systemd-nspawn` are absent;
+- rootless user-namespace creation fails with `Operation not permitted`, despite
+  configured subordinate UID/GID ranges;
+- the user systemd manager cannot switch to another UID (`216/GROUP`), while the
+  system manager correctly requires unavailable elevation; and
+- the host still exposes only one ordinary non-root identity.
+
+Therefore C2 remains `HOLD` for a technical environment prerequisite, not for
+owner authorization. No substitute harness or synthetic PASS was added.
+
 ## Stop boundary
 
 The source lane stops here. No further framework work is justified without one
 of the already-defined external inputs:
 
-1. C2 execution: operator-provided distinct guardian, Bridge and Agent service
-   identities plus authorization for the transient root probe; or
+1. C2 execution: an environment with distinct guardian, Bridge and Agent service
+   identities and a root-capable transient-systemd execution context; or
 2. C3 execution: an independently operated anti-rollback provider, endpoint,
    trust pins, credentials and recovery-test window.
 
