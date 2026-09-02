@@ -1,7 +1,7 @@
 # AB Invocation Guardian v2：单入口 Canary 与晋级计划
 
 日期：2026-09-01
-状态：**C0/C1 已通过；C2 可执行隔离预检包已实现，但真实身份/部署证据未执行，C2—C4 与 production `enforce` 继续 HOLD**
+状态：**C0/C1 已通过；C2 隔离预检与 C3 protected-witness 源码合同已实现；真实部署/provider 证据未执行，C2—C4 与 production `enforce` 继续 HOLD**
 
 ## 1. 决策
 
@@ -285,3 +285,9 @@ preflight，结果为 `HOLD`。即使临时隔离 substrate 后续通过，它�
 non-authoritative、protocol-free helper；在实际 v2 guardian composition 以同一
 service-manager/UID/IPC 配置运行并重复探针前，不得把 substrate PASS 升格为 C2
 PASS。C1 的 fake/map、测试私钥、marker 和 stdio 结果也不能替代 C2/C3 外部证据。
+
+C3 目前新增默认关闭的 async protected-witness contract 与动态单调 floor
+verifier。它复用 C0 signed receipt，拒绝 provider position/time rollback、history
+fork、revision gap、epoch jump 和不连续 failover；`AlreadyCommitted` 仍只是证据。
+当前源码不包含外部 provider、凭据、endpoint、durable backend 或可成功构造的
+production transport，因此这只构成 C3 contract candidate，不构成 C3 PASS。

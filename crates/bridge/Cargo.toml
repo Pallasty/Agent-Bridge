@@ -56,6 +56,9 @@ invocation-guardian-v2-canary = [
 # Default-off Linux deployment-isolation probe. This verifies an ephemeral OS
 # substrate only; it is not the v2 guardian or a protected witness.
 invocation-guardian-v2-isolation-probe = ["invocation-guardian-v2-canary"]
+# Default-off C3 protected-witness contract and verifier. No production
+# transport or provider implementation is included.
+invocation-guardian-v2-protected-witness-contract = []
 
 [dependencies]
 ab-core.workspace = true
