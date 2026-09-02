@@ -1,6 +1,6 @@
 # Runtime alignment deployment preflight — 2026-09-02
 
-Status: `SOURCE_BUILD_PASS_DEPLOYMENT_HOLD`
+Status: `SOURCE_BUILD_PASS_MAINTENANCE_RELEASE_NO_GO`
 
 ## Decision
 
@@ -53,3 +53,29 @@ authorizes a deployment:
 
 Guardian source expansion remains frozen. This result does not reopen C2, C3,
 Resident attention, scheduler, push, effect-authority, or proof-protocol work.
+
+## Default-runtime maintenance release audit
+
+The second gate above was evaluated and rejected. The installed-to-master range
+contains 72 commits across 109 files, with 55,565 added and 1,221 removed lines.
+It is not a narrow maintenance delta.
+
+More importantly, R9 is present in ordinary runtime paths rather than only in
+default-off laboratory binaries:
+
+- `SqliteStore::open` admits the immutable workload-receipt ledger schema;
+- `build_hub` invokes startup workload-receipt reconciliation;
+- body task-span completion can atomically commit and acknowledge durable
+  workload receipts when a bound receipt is present; and
+- Doctor inspects the durable receipt root.
+
+The Guardian canary, isolation, protected-witness, and provider-lab features
+remaining default-off does not remove this R9 deployment boundary. Adding a
+new ambient runtime switch solely to make this broad binary installable would
+create another configuration state without completing the trusted-root,
+migration, service-adoption, and rollback evidence that R9 already requires.
+
+Therefore the exact maintenance-release decision is `NO_GO`. Keep the installed
+binary unchanged. Reconsider deployment only through the existing R9 adoption
+sequence or after a future, independently justified runtime release starts from
+a newly measured narrow delta.
