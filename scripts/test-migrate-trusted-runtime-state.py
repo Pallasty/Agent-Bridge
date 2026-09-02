@@ -19,6 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -61,6 +62,18 @@ def inactive_unit(unit: str) -> dict[str, str]:
         "MainPID": "0",
         "SubState": "dead",
     }
+
+
+def unloaded_launchd_jobs() -> list[dict[str, object]]:
+    return [
+        {
+            "domain": f"gui/{os.geteuid()}",
+            "loaded": False,
+            "name": label,
+            "type": "launchd",
+        }
+        for label in MIGRATION.DARWIN_LAUNCHD_JOBS
+    ]
 
 
 class Fixture:
@@ -300,14 +313,21 @@ os._exit(0)
         inherited_lock_fd: int | None = None,
         unit_state=inactive_unit,
         fd_scan=None,
+        platform: str | None = None,
     ):
         if fd_scan is None:
             fd_scan = lambda _paths: None
+        if platform is None:
+            platform = "darwin" if sys.platform == "darwin" else "linux"
         with mock.patch.object(
             MIGRATION, "running_script_path", return_value=str(self.installed_script)
         ), mock.patch.object(
             MIGRATION, "query_unit_state", side_effect=unit_state
-        ), mock.patch.object(MIGRATION, "scan_open_fds", side_effect=fd_scan):
+        ), mock.patch.object(
+            MIGRATION, "scan_open_fds", side_effect=fd_scan
+        ), mock.patch.object(
+            MIGRATION, "collect_launchd_quiescence", return_value=unloaded_launchd_jobs()
+        ), mock.patch.object(MIGRATION, "runtime_platform", return_value=platform):
             return MIGRATION.execute(
                 command,
                 str(self.root),
@@ -352,10 +372,258 @@ def snapshot(paths: list[Path]) -> dict[str, tuple[object, ...]]:
 class MigrationTests(unittest.TestCase):
     maxDiff = None
 
+    def test_darwin_system_python_binds_xcrun_selected_interpreter(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["/usr/bin/xcrun", "--find", "python3"],
+            returncode=0,
+            stdout=b"/Applications/Xcode.app/Contents/Developer/usr/bin/python3\n",
+            stderr=b"",
+        )
+        interpreter = mock.Mock(st_mode=0o100755, st_uid=0)
+        with mock.patch.object(MIGRATION.sys, "platform", "darwin"), \
+             mock.patch.object(MIGRATION.subprocess, "run", return_value=completed), \
+             mock.patch.object(MIGRATION.os, "stat", return_value=interpreter), \
+             mock.patch.object(MIGRATION.os, "access", return_value=True):
+            observed = MIGRATION.system_python_executable()
+        self.assertEqual(
+            observed,
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+        )
+
+    def test_darwin_system_python_resolution_fails_closed(self) -> None:
+        cases = (
+            subprocess.CompletedProcess([], 1, b"", b"unavailable"),
+            subprocess.CompletedProcess([], 0, b"relative/python3\n", b""),
+        )
+        for completed in cases:
+            with self.subTest(returncode=completed.returncode, stdout=completed.stdout), \
+                 mock.patch.object(MIGRATION.sys, "platform", "darwin"), \
+                 mock.patch.object(MIGRATION.subprocess, "run", return_value=completed):
+                with self.assertRaises(MIGRATION.MigrationError):
+                    MIGRATION.system_python_executable()
+
+    def test_darwin_rename_exchange_binds_fixed_abi_and_fails_closed(self) -> None:
+        class FakeRename:
+            argtypes = None
+            restype = None
+
+            def __init__(self) -> None:
+                self.arguments = None
+
+            def __call__(self, *arguments):
+                self.arguments = arguments
+                MIGRATION.ctypes.set_errno(MIGRATION.errno.EXDEV)
+                return -1
+
+        rename = FakeRename()
+        libc = types.SimpleNamespace(renameatx_np=rename)
+        with mock.patch.object(MIGRATION, "runtime_platform", return_value="darwin"), \
+             mock.patch.object(MIGRATION.ctypes, "CDLL", return_value=libc):
+            self.assert_rejected(
+                lambda: MIGRATION.rename_exchange("/private/left", "/private/right"),
+                "renameatx_np swap",
+            )
+        self.assertEqual(
+            rename.arguments,
+            (-2, b"/private/left", -2, b"/private/right", 0x00000002),
+        )
+        self.assertEqual(rename.restype, MIGRATION.ctypes.c_int)
+
+        with mock.patch.object(MIGRATION, "runtime_platform", return_value="darwin"), \
+             mock.patch.object(
+                 MIGRATION.ctypes, "CDLL", return_value=types.SimpleNamespace()
+             ):
+            self.assert_rejected(
+                lambda: MIGRATION.rename_exchange("/private/left", "/private/right"),
+                "renameatx_np swap is required",
+            )
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin renameatx_np")
+    def test_darwin_atomic_directory_exchange_and_reversal(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ab-darwin-swap-") as base:
+            left = Path(base) / "left"
+            right = Path(base) / "right"
+            private_dir(left)
+            private_dir(right)
+            (left / "marker").write_text("left\n", encoding="ascii")
+            (right / "marker").write_text("right\n", encoding="ascii")
+            left_inode = left.stat().st_ino
+            right_inode = right.stat().st_ino
+
+            MIGRATION.rename_exchange(str(left), str(right))
+            self.assertEqual(left.stat().st_ino, right_inode)
+            self.assertEqual(right.stat().st_ino, left_inode)
+            self.assertEqual((left / "marker").read_text(encoding="ascii"), "right\n")
+            self.assertEqual((right / "marker").read_text(encoding="ascii"), "left\n")
+
+            MIGRATION.rename_exchange(str(left), str(right))
+            self.assertEqual(left.stat().st_ino, left_inode)
+            self.assertEqual(right.stat().st_ino, right_inode)
+
     def fixture(self, *, wal: bool = False) -> Fixture:
         value = Fixture(wal=wal)
         self.addCleanup(value.close)
         return value
+
+    def test_darwin_launchd_quiescence_requires_fixed_jobs_unloaded(self) -> None:
+        missing = subprocess.CompletedProcess(
+            args=("/bin/launchctl",),
+            returncode=113,
+            stdout="",
+            stderr='Could not find service "fixture" in domain for user gui: 501\n',
+        )
+        with mock.patch.object(
+            MIGRATION.subprocess, "run", return_value=missing
+        ) as run:
+            baseline = MIGRATION.collect_launchd_quiescence()
+        self.assertEqual(len(baseline), len(MIGRATION.DARWIN_LAUNCHD_JOBS))
+        self.assertEqual(
+            [record["name"] for record in baseline],
+            list(MIGRATION.DARWIN_LAUNCHD_JOBS),
+        )
+        self.assertTrue(all(record["loaded"] is False for record in baseline))
+        self.assertEqual(run.call_count, len(MIGRATION.DARWIN_LAUNCHD_JOBS))
+        with mock.patch.object(MIGRATION, "runtime_platform", return_value="darwin"):
+            self.assertIs(MIGRATION.validate_unit_baseline(baseline), baseline)
+            tampered = [dict(record) for record in baseline]
+            tampered[0]["loaded"] = True
+            self.assert_rejected(
+                lambda: MIGRATION.validate_unit_baseline(tampered),
+                "exact quiesced job set",
+            )
+
+        loaded = subprocess.CompletedProcess(
+            args=("/bin/launchctl",), returncode=0, stdout="state = running\n", stderr=""
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=loaded):
+            self.assert_rejected(
+                MIGRATION.collect_launchd_quiescence,
+                "loaded or triggerable",
+            )
+
+    def test_darwin_launchd_inventory_failure_is_not_unloaded(self) -> None:
+        failure = subprocess.CompletedProcess(
+            args=("/bin/launchctl",), returncode=1, stdout="", stderr="unexpected\n"
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=failure):
+            self.assert_rejected(
+                lambda: MIGRATION.query_launchd_loaded(
+                    MIGRATION.DARWIN_LAUNCHD_JOBS[0]
+                ),
+                "cannot query",
+            )
+
+    def test_darwin_lsof_inventory_fails_closed_on_external_holder(self) -> None:
+        path = "/private/var/tmp/agent-bridge/state.db"
+        empty = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",), returncode=1, stdout="", stderr=""
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=empty):
+            MIGRATION.scan_darwin_open_fds({path})
+
+        own = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",),
+            returncode=0,
+            stdout=f"p{os.getpid()}\ncpython3\nu{os.geteuid()}\nf5u\nn{path}\n",
+            stderr="",
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=own):
+            MIGRATION.scan_darwin_open_fds({path})
+
+        external = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",),
+            returncode=0,
+            stdout=f"p{os.getpid() + 1}\ncagent-bridge\nu{os.geteuid()}\nf12u\nn{path}\n",
+            stderr="",
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=external):
+            self.assert_rejected(
+                lambda: MIGRATION.scan_darwin_open_fds({path}),
+                "external process",
+            )
+
+        incomplete = subprocess.CompletedProcess(
+            args=("/usr/sbin/lsof",), returncode=2, stdout="", stderr="denied\n"
+        )
+        with mock.patch.object(MIGRATION.subprocess, "run", return_value=incomplete):
+            self.assert_rejected(
+                lambda: MIGRATION.scan_darwin_open_fds({path}),
+                "cannot enumerate",
+            )
+
+    def test_sqlite_busy_statuses_support_apple_python_39(self) -> None:
+        self.assertEqual(
+            MIGRATION.sqlite_busy_statuses(types.SimpleNamespace()),
+            (MIGRATION.SQLITE_BUSY_CODE, MIGRATION.SQLITE_LOCKED_CODE),
+        )
+
+    def test_wal_backup_normalizes_delete_mode_and_removes_sidecars(self) -> None:
+        fixture = self.fixture(wal=True)
+        target = fixture.base / "backup.db"
+        input_sha = sha256(fixture.database)
+        observed_input_sha, source_fact, target_fact = (
+            MIGRATION.sqlite_checkpoint_and_backup(str(fixture.database), str(target))
+        )
+        self.assertEqual(observed_input_sha, input_sha)
+        self.assertEqual(source_fact["path"], str(fixture.database))
+        self.assertEqual(target_fact["path"], MIGRATION.SQLITE_TARGET)
+        for database in (fixture.database, target):
+            for suffix in MIGRATION.SQLITE_SIDECAR_SUFFIXES:
+                self.assertFalse(Path(str(database) + suffix).exists())
+            connection = sqlite3.connect(database)
+            try:
+                self.assertEqual(
+                    connection.execute("PRAGMA journal_mode").fetchone(),
+                    ("delete",),
+                )
+                self.assertEqual(
+                    [
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT body FROM memories ORDER BY id"
+                        )
+                    ],
+                    ["base-row", "wal-row"],
+                )
+            finally:
+                connection.close()
+
+    def test_obsolete_shm_cleanup_rejects_symlink_and_hardlink(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ab-obsolete-shm-") as base:
+            source = Path(base) / "state.db"
+            source.write_bytes(b"database")
+            shm = Path(str(source) + "-shm")
+            shm.write_bytes(b"shm")
+            wal = Path(str(source) + "-wal")
+            wal.write_bytes(b"wal")
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "while WAL or journal exists",
+            )
+            self.assertTrue(shm.exists())
+            wal.unlink()
+            journal = Path(str(source) + "-journal")
+            journal.write_bytes(b"journal")
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "while WAL or journal exists",
+            )
+            self.assertTrue(shm.exists())
+            journal.unlink()
+            shm.unlink()
+            shm.symlink_to(source)
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "single-link physical regular file",
+            )
+            shm.unlink()
+            anchor = Path(base) / "anchor"
+            anchor.write_bytes(b"shm")
+            os.link(anchor, shm)
+            self.assert_rejected(
+                lambda: MIGRATION.remove_obsolete_sqlite_shm(str(source)),
+                "single-link physical regular file",
+            )
 
     def assert_rejected(self, callback, fragment: str | None = None) -> str:
         with self.assertRaises(MIGRATION.MigrationError) as caught:
@@ -367,21 +635,26 @@ class MigrationTests(unittest.TestCase):
 
     def test_happy_wal_backup_sidecar_verify_and_idempotent_replay(self) -> None:
         fixture = self.fixture(wal=True)
+        platform = "darwin" if sys.platform == "darwin" else "linux"
         wal = Path(str(fixture.database) + "-wal")
         self.assertGreater(wal.stat().st_size, 0)
         before_preflight = snapshot([fixture.root, fixture.legacy])
-        preflight = fixture.execute("preflight")
+        preflight = fixture.execute("preflight", platform=platform)
         self.assertEqual(preflight["status"], "ready_quiesced")
         self.assertEqual(
             preflight["sqlite_integrity"], "deferred_wal_to_confirmed_migrate"
         )
         self.assertEqual(before_preflight, snapshot([fixture.root, fixture.legacy]))
         self.assert_rejected(
-            lambda: fixture.execute("migrate", confirmation="WRONG-CONFIRMATION"),
+            lambda: fixture.execute(
+                "migrate", confirmation="WRONG-CONFIRMATION", platform=platform
+            ),
             "confirmation",
         )
         self.assertEqual(before_preflight, snapshot([fixture.root, fixture.legacy]))
-        migrated = fixture.execute("migrate", confirmation=fixture.confirmation)
+        migrated = fixture.execute(
+            "migrate", confirmation=fixture.confirmation, platform=platform
+        )
         self.assertEqual(migrated["status"], "migrated_quiesced")
         self.assertFalse(Path(str(fixture.database) + "-wal").exists())
         self.assertFalse(Path(str(fixture.database) + "-shm").exists())
@@ -395,10 +668,12 @@ class MigrationTests(unittest.TestCase):
             (fixture.root / "runtime-state/data/agent-bridge/sidecars/events.jsonl").read_bytes(),
             fixture.events.read_bytes(),
         )
-        verified = fixture.execute("verify")
+        verified = fixture.execute("verify", platform=platform)
         self.assertEqual(verified["receipt_digest"], migrated["receipt_digest"])
         before = snapshot([fixture.root / "runtime-state", fixture.root / "publisher-state/migrations"])
-        replay = fixture.execute("migrate", confirmation=fixture.confirmation)
+        replay = fixture.execute(
+            "migrate", confirmation=fixture.confirmation, platform=platform
+        )
         self.assertEqual(replay["status"], "already_migrated")
         self.assertEqual(
             before,
@@ -550,7 +825,10 @@ class MigrationTests(unittest.TestCase):
             return values
 
         self.assert_rejected(
-            lambda: fixture.execute("preflight", unit_state=active_service), "not fully quiesced"
+            lambda: fixture.execute(
+                "preflight", unit_state=active_service, platform="linux"
+            ),
+            "not fully quiesced",
         )
 
         positive_timer_shapes = (
@@ -567,7 +845,12 @@ class MigrationTests(unittest.TestCase):
                         values["UnitFileState"] = unit_file
                     return values
 
-                self.assertEqual(fixture.execute("preflight", unit_state=shape)["status"], "ready_quiesced")
+                self.assertEqual(
+                    fixture.execute(
+                        "preflight", unit_state=shape, platform="linux"
+                    )["status"],
+                    "ready_quiesced",
+                )
 
         for load, unit_file in (("loaded", "enabled"), ("loaded", "masked"), ("masked", "disabled")):
             with self.subTest(rejected=(load, unit_file)):
@@ -579,7 +862,9 @@ class MigrationTests(unittest.TestCase):
                     return values
 
                 self.assert_rejected(
-                    lambda: fixture.execute("preflight", unit_state=bad_shape),
+                    lambda: fixture.execute(
+                        "preflight", unit_state=bad_shape, platform="linux"
+                    ),
                     "enabled or triggerable",
                 )
 
@@ -596,10 +881,16 @@ class MigrationTests(unittest.TestCase):
         self.addCleanup(child.kill)
         assert child.stdout is not None
         self.assertEqual(child.stdout.readline().strip(), "ready")
+        if sys.platform == "darwin":
+            fd_scan = REAL_SCAN_OPEN_FDS
+        else:
+            fd_scan = lambda paths: REAL_SCAN_OPEN_FDS(
+                paths, pid_inventory=[child.pid]
+            )
         self.assert_rejected(
             lambda: fixture.execute(
                 "preflight",
-                fd_scan=lambda paths: REAL_SCAN_OPEN_FDS(paths, pid_inventory=[child.pid]),
+                fd_scan=fd_scan,
             ),
             "external process",
         )
@@ -610,15 +901,16 @@ class MigrationTests(unittest.TestCase):
         assert child.stderr is not None
         child.stderr.close()
 
-        with mock.patch.object(
-            MIGRATION, "open_proc_pid_directory", side_effect=PermissionError
-        ), mock.patch.object(MIGRATION.os, "stat", side_effect=PermissionError):
-            self.assert_rejected(
-                lambda: REAL_SCAN_OPEN_FDS(
-                    {str(fixture.database)}, pid_inventory=[999999]
-                ),
-                "cannot determine the owner",
-            )
+        if sys.platform.startswith("linux"):
+            with mock.patch.object(
+                MIGRATION, "open_proc_pid_directory", side_effect=PermissionError
+            ), mock.patch.object(MIGRATION.os, "stat", side_effect=PermissionError):
+                self.assert_rejected(
+                    lambda: REAL_SCAN_OPEN_FDS(
+                        {str(fixture.database)}, pid_inventory=[999999]
+                    ),
+                    "cannot determine the owner",
+                )
 
     def test_yama_exception_recognizes_only_exact_user_systemd_manager(self) -> None:
         fixture = self.fixture()
@@ -661,6 +953,9 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(MIGRATION.is_exact_user_manager_infrastructure(pam_pid, str(proc)))
         (proc / str(pam_pid) / "cgroup").write_text("0::/user.slice/attacker.scope\n", encoding="ascii")
         self.assertFalse(MIGRATION.is_exact_user_manager_infrastructure(pam_pid, str(proc)))
+
+        if not sys.platform.startswith("linux"):
+            return
 
         code = (
             "import ctypes,sys; "
@@ -768,16 +1063,47 @@ class MigrationTests(unittest.TestCase):
 
     def test_fault_before_receipt_rolls_runtime_back(self) -> None:
         fixture = self.fixture(wal=True)
+        platform = "darwin" if sys.platform == "darwin" else "linux"
         with mock.patch.object(
             MIGRATION, "publish_receipt", side_effect=MIGRATION.MigrationError("injected before receipt")
         ):
             self.assert_rejected(
-                lambda: fixture.execute("migrate", confirmation=fixture.confirmation),
+                lambda: fixture.execute(
+                    "migrate",
+                    confirmation=fixture.confirmation,
+                    platform=platform,
+                ),
                 "injected before receipt",
             )
         self.assertFalse((fixture.root / "publisher-state/migrations/current.json").exists())
         runtime = fixture.root / "runtime-state"
         self.assertEqual(set(path.name for path in runtime.iterdir()), set(MIGRATION.RUNTIME_LEAVES))
+        self.assertTrue(all(not any(path.iterdir()) for path in runtime.iterdir()))
+        self.assertFalse(any(fixture.root.glob("runtime-state.migration-stage.*")))
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin renameatx_np")
+    def test_darwin_fault_before_receipt_rolls_runtime_back(self) -> None:
+        fixture = self.fixture(wal=True)
+        with mock.patch.object(
+            MIGRATION,
+            "publish_receipt",
+            side_effect=MIGRATION.MigrationError("injected before Darwin receipt"),
+        ):
+            self.assert_rejected(
+                lambda: fixture.execute(
+                    "migrate",
+                    confirmation=fixture.confirmation,
+                    platform="darwin",
+                ),
+                "injected before Darwin receipt",
+            )
+        self.assertFalse(
+            (fixture.root / "publisher-state/migrations/current.json").exists()
+        )
+        runtime = fixture.root / "runtime-state"
+        self.assertEqual(
+            {path.name for path in runtime.iterdir()}, set(MIGRATION.RUNTIME_LEAVES)
+        )
         self.assertTrue(all(not any(path.iterdir()) for path in runtime.iterdir()))
         self.assertFalse(any(fixture.root.glob("runtime-state.migration-stage.*")))
 

@@ -1,6 +1,6 @@
 # macOS Trusted Deployment Compatibility V0
 
-Status: **D1 AND D2 ACCEPTED / D3 EXISTING-PUBLISHER ADAPTATION STARTED / NO DEPLOYMENT**
+Status: **D1 AND D2 ACCEPTED / D3 EXISTING-PUBLISHER ADAPTATION STARTED / D4 MIGRATION ADAPTATION STARTED / NO DEPLOYMENT**
 
 Date: 2026-08-29
 
@@ -327,6 +327,39 @@ improves or a separately authorized transport-design gate changes the contract.
 Run an explicitly authorized writer freeze, migrate and verify state, install
 canonical plists, adopt services in order, prove inode/health convergence,
 and close with fresh-MCP exact-SHA admission.
+
+The first source-only D4 migration slice keeps the established migration tool
+and dispatches its quiescence and open-descriptor gates by platform. Darwin
+requires the fixed service, sync, maintenance, and avatar job set to be fully
+unloaded rather than merely idle; it uses bounded fixed-path `lsof` inventory,
+binds those Darwin facts into the receipt shape, and accepts Apple Python 3.9's
+SQLite status API. Focused Darwin tests, the 20-test D1/D2 suite, and the
+7-test publisher/seed suite pass. A real read-only probe correctly returned
+`HOLD` for the loaded daemon and open production SQLite descriptors without
+changing the database or installed-binary identities.
+
+The second source-only slice platform-dispatches the existing atomic
+runtime-state exchange. Darwin binds `renameatx_np(AT_FDCWD, ..., RENAME_SWAP)`
+with `AT_FDCWD=-2` and `RENAME_SWAP=0x00000002`; Linux retains
+`renameat2(..., RENAME_EXCHANGE)` with `AT_FDCWD=-100`. A real Darwin test uses
+only disposable directories to prove inode/content exchange and reversal. A
+disposable migration fixture then injects failure immediately before receipt
+publication and proves the established automatic exchange-back restores the
+empty runtime skeleton with no receipt or stage residue.
+
+The third source-only slice qualifies Apple Python 3.9's WAL backup behavior.
+After a successful bounded checkpoint, the frozen legacy database is explicitly
+normalized to `journal_mode=DELETE` before backup so SQLite does not propagate
+WAL mode into the staged target. After both SQLite handles close and the fixed
+writer/descriptor gate is rechecked, the tool removes only an obsolete source
+SHM whose WAL and journal are absent and whose inode is a single-link physical
+regular file beneath the already bound source directory; the directory is then
+fsynced. Symlink, hardlink, surviving WAL/journal, or journal-mode normalization
+failure stops without activation or receipt publication.
+
+These source-only slices do not stop any production job, migrate production
+state, activate the production Darwin runtime-state root, install/adopt a
+plist, publish, deploy, or accept D4. Those remain separate gates.
 
 ## 9. Required negative tests
 

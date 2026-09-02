@@ -7,8 +7,8 @@ Production entry point (the interpreter flags are part of the trust boundary):
         preflight|migrate|verify --deploy-root /private/agent-bridge
 
 The tool deliberately never controls a service.  An operator must quiesce the
-complete fixed unit set before every command, and a successful migration leaves
-that unit set quiesced.  ``preflight`` and ``verify`` perform no filesystem
+complete fixed platform job set before every command, and a successful migration
+leaves that job set quiesced.  ``preflight`` and ``verify`` perform no filesystem
 mutation.  ``migrate`` is the only writing command and requires a confirmation
 string bound to the publisher candidate and pending-admission digest.
 """
@@ -91,6 +91,20 @@ UNITS = (
     "agent-bridge-day2-audit.timer",
 )
 
+# A migration freeze must make recurring launchd jobs untriggerable, not merely
+# observe them between invocations.  These are the fixed Agent Bridge jobs on
+# the Darwin host that can write or consume migrated runtime-state leaves.
+DARWIN_LAUNCHD_JOBS = (
+    "com.pallasting.agent-bridge.daemon",
+    "com.pallasting.agent-bridge.daemon-http",
+    "com.pallasting.agent-bridge.palace",
+    "com.agentbridge.sync",
+    "com.agentbridge.daily-hygiene",
+    "com.agentbridge.avatar-heartbeat.agent-bridge",
+    "com.agentbridge.avatar-heartbeat-alert.agent-bridge",
+    "com.agentbridge.avatar-cortex.agent-bridge",
+)
+
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -102,10 +116,20 @@ MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 HARD_MAX_FILES = 1_000_000
 HARD_MAX_BYTES = 1 << 40  # 1 TiB is an implementation safety ceiling.
 BACKUP_BUSY_DEADLINE_SECONDS = 10.0
+SQLITE_BUSY_CODE = 5
+SQLITE_LOCKED_CODE = 6
 
 
 class MigrationError(RuntimeError):
     """Expected fail-closed rejection."""
+
+
+def runtime_platform() -> str:
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform == "darwin":
+        return "darwin"
+    fail("trusted runtime-state migration is unsupported on this platform")
 
 
 @dataclass(frozen=True)
@@ -1229,7 +1253,7 @@ def query_unit_state(unit: str) -> dict[str, str]:
     return values
 
 
-def collect_quiescence() -> list[dict[str, Any]]:
+def collect_systemd_quiescence() -> list[dict[str, Any]]:
     baseline: list[dict[str, Any]] = []
     for unit in UNITS:
         values = query_unit_state(unit)
@@ -1268,6 +1292,58 @@ def collect_quiescence() -> list[dict[str, Any]]:
                 }
             )
     return baseline
+
+
+def query_launchd_loaded(label: str) -> bool:
+    domain = f"gui/{os.geteuid()}"
+    command = ("/bin/launchctl", "print", f"{domain}/{label}")
+    try:
+        result = subprocess.run(
+            command,
+            env={
+                "HOME": "/nonexistent",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=15,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("cannot query the fixed launchd user-job gate")
+    if result.returncode == 0:
+        return True
+    missing = result.stdout + "\n" + result.stderr
+    if result.returncode == 113 and "Could not find service" in missing:
+        return False
+    fail("cannot query the fixed launchd user-job gate")
+
+
+def collect_launchd_quiescence() -> list[dict[str, Any]]:
+    domain = f"gui/{os.geteuid()}"
+    baseline: list[dict[str, Any]] = []
+    for label in DARWIN_LAUNCHD_JOBS:
+        if query_launchd_loaded(label):
+            fail(f"required launchd job remains loaded or triggerable: {label}")
+        baseline.append(
+            {
+                "domain": domain,
+                "loaded": False,
+                "name": label,
+                "type": "launchd",
+            }
+        )
+    return baseline
+
+
+def collect_quiescence() -> list[dict[str, Any]]:
+    if runtime_platform() == "darwin":
+        return collect_launchd_quiescence()
+    return collect_systemd_quiescence()
 
 
 def check_quiescence() -> None:
@@ -1415,7 +1491,7 @@ def is_exact_user_manager_infrastructure(pid: int, proc_root: str = "/proc") -> 
         os.close(directory_fd)
 
 
-def scan_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -> None:
+def scan_proc_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -> None:
     wanted = {os.path.normpath(path) for path in paths}
     database_bases = {
         path
@@ -1496,6 +1572,53 @@ def scan_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -
                 os.close(fd_dir)
         finally:
             os.close(proc_fd)
+
+
+def scan_darwin_open_fds(paths: set[str]) -> None:
+    wanted = sorted({os.path.normpath(path) for path in paths})
+    if not wanted or any(not os.path.isabs(path) for path in wanted):
+        fail("Darwin SQLite descriptor inventory requires absolute paths")
+    try:
+        result = subprocess.run(
+            ("/usr/sbin/lsof", "-nP", "-Fpcufn", "--", *wanted),
+            env={
+                "HOME": "/nonexistent",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=15,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("cannot enumerate Darwin open database descriptors")
+    if result.returncode not in (0, 1):
+        fail("cannot enumerate Darwin open database descriptors")
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        if not line or line[0] not in "pcufn":
+            fail("Darwin lsof returned an unknown descriptor-inventory shape")
+        if line[0] == "p":
+            if not line[1:].isdigit() or int(line[1:]) <= 0:
+                fail("Darwin lsof returned an invalid process identity")
+            pids.append(int(line[1:]))
+    if result.returncode == 0 and not pids:
+        fail("Darwin lsof omitted process identities from a successful inventory")
+    if any(pid != os.getpid() for pid in pids):
+        fail("an external process still holds a legacy or destination SQLite descriptor")
+
+
+def scan_open_fds(paths: set[str], pid_inventory: Iterable[int] | None = None) -> None:
+    # Explicit PID inventories are a Linux-test seam and retain the hardened
+    # /proc implementation even when that isolated suite runs on a Mac host.
+    if pid_inventory is not None or runtime_platform() == "linux":
+        scan_proc_open_fds(paths, pid_inventory)
+        return
+    scan_darwin_open_fds(paths)
 
 
 def check_runtime_gates(plan: PreparedPlan, root: str) -> None:
@@ -1804,6 +1927,54 @@ def copy_file_exact(source: SourceFile, stage: str) -> None:
         fail("sidecar copy digest mismatch")
 
 
+def remove_obsolete_sqlite_shm(source: str) -> None:
+    """Remove only the stale SHM left after a proven WAL-to-DELETE transition."""
+    shm = source + "-shm"
+    if not os.path.lexists(shm):
+        return
+    if os.path.lexists(source + "-wal") or os.path.lexists(source + "-journal"):
+        fail("obsolete SQLite SHM cannot be removed while WAL or journal exists")
+    require_sqlite_super_journals_absent(source, "normalized legacy SQLite database")
+
+    parent = os.path.dirname(source)
+    name = os.path.basename(shm)
+    parent_st = require_legacy_directory(parent, "legacy SQLite parent")
+    try:
+        parent_fd = os.open(
+            parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+    except OSError:
+        fail("cannot open the legacy SQLite parent for SHM cleanup")
+    try:
+        opened_parent = os.fstat(parent_fd)
+        if (opened_parent.st_dev, opened_parent.st_ino) != (
+            parent_st.st_dev,
+            parent_st.st_ino,
+        ):
+            fail("legacy SQLite parent changed before SHM cleanup")
+        try:
+            shm_st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError:
+            fail("cannot inspect obsolete SQLite SHM through its fixed parent")
+        if (
+            not stat.S_ISREG(shm_st.st_mode)
+            or stat.S_ISLNK(shm_st.st_mode)
+            or shm_st.st_uid not in (0, os.geteuid())
+            or shm_st.st_nlink != 1
+        ):
+            fail("obsolete SQLite SHM must be a single-link physical regular file")
+        try:
+            os.unlink(name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except OSError:
+            fail("cannot durably remove obsolete SQLite SHM")
+    finally:
+        os.close(parent_fd)
+    if os.path.lexists(shm):
+        fail("obsolete SQLite SHM remained after cleanup")
+
+
 def sqlite_checkpoint_and_backup(
     source: str, target: str
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
@@ -1820,19 +1991,26 @@ def sqlite_checkpoint_and_backup(
         checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         if checkpoint is None or len(checkpoint) != 3 or checkpoint[0] != 0:
             fail("legacy SQLite WAL checkpoint was busy")
+        source_journal_mode = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        if source_journal_mode != ("delete",):
+            fail("legacy SQLite journal mode could not be normalized to DELETE")
         check_runtime_gate_during_sqlite()
         destination = sqlite3.connect(target, timeout=0.0, isolation_level=None)
         destination.execute("PRAGMA journal_mode=DELETE")
         deadline = time.monotonic() + BACKUP_BUSY_DEADLINE_SECONDS
+        busy_statuses = sqlite_busy_statuses()
 
         def progress(status: int, _remaining: int, _total: int) -> None:
-            if status in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) and time.monotonic() > deadline:
+            if status in busy_statuses and time.monotonic() > deadline:
                 raise MigrationError("SQLite backup remained busy beyond its bounded deadline")
 
         connection.backup(destination, pages=256, progress=progress, sleep=0.01)
         target_integrity = destination.execute("PRAGMA integrity_check").fetchall()
         if target_integrity != [("ok",)]:
             fail("staged SQLite integrity check did not return exactly ok")
+        target_journal_mode = destination.execute("PRAGMA journal_mode").fetchone()
+        if target_journal_mode != ("delete",):
+            fail("staged SQLite backup did not retain DELETE journal mode")
         destination.close()
         destination = None
         connection.close()
@@ -1846,6 +2024,8 @@ def sqlite_checkpoint_and_backup(
             destination.close()
         if connection is not None:
             connection.close()
+    check_runtime_gate_during_sqlite()
+    remove_obsolete_sqlite_shm(source)
     os.chmod(target, 0o600, follow_symlinks=False)
     for suffix in SQLITE_SIDECAR_SUFFIXES:
         family = target + suffix
@@ -1866,9 +2046,17 @@ def sqlite_checkpoint_and_backup(
     return source_sha_before, source_fact, target_fact
 
 
+def sqlite_busy_statuses(api: Any = sqlite3) -> tuple[int, int]:
+    """Return SQLite busy statuses on both Apple Python 3.9 and newer Python."""
+    return (
+        getattr(api, "SQLITE_BUSY", SQLITE_BUSY_CODE),
+        getattr(api, "SQLITE_LOCKED", SQLITE_LOCKED_CODE),
+    )
+
+
 # This indirection is intentionally patchable by the isolated stdlib test
 # harness.  Production replaces it for the duration of migrate with a closure
-# that re-runs the fixed unit and /proc gates.
+# that re-runs the fixed platform quiescence and descriptor gates.
 def check_runtime_gate_during_sqlite() -> None:
     return None
 
@@ -1954,13 +2142,27 @@ def assert_target_tree_stable(
 
 def rename_exchange(left: str, right: str) -> None:
     libc = ctypes.CDLL(None, use_errno=True)
-    function = getattr(libc, "renameat2", None)
+    platform = runtime_platform()
+    if platform == "darwin":
+        function = getattr(libc, "renameatx_np", None)
+        at_fdcwd = -2
+        rename_exchange_flag = 0x00000002  # RENAME_SWAP
+        primitive = "renameatx_np swap"
+    else:
+        function = getattr(libc, "renameat2", None)
+        at_fdcwd = -100
+        rename_exchange_flag = 2  # RENAME_EXCHANGE
+        primitive = "renameat2 exchange"
     if function is None:
-        fail("Linux renameat2 is required for atomic runtime-state activation")
-    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        fail(f"{primitive} is required for atomic runtime-state activation")
+    function.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
     function.restype = ctypes.c_int
-    at_fdcwd = -100
-    rename_exchange_flag = 2
     result = function(
         at_fdcwd,
         os.fsencode(left),
@@ -1971,7 +2173,7 @@ def rename_exchange(left: str, right: str) -> None:
     if result != 0:
         error = ctypes.get_errno()
         if error in (errno.ENOSYS, errno.EINVAL, errno.EXDEV, errno.EOPNOTSUPP):
-            fail("filesystem does not support atomic renameat2 exchange")
+            fail(f"filesystem does not support atomic {primitive}")
         fail("atomic runtime-state exchange failed")
 
 
@@ -2046,7 +2248,7 @@ def build_receipt(
         "mappings_digest": context.plan.mappings_digest,
         "open_fd_baseline": {
             "database_family_open_descriptors": 0,
-            "scope": "same_euid_proc_fd_exact_user_manager_infrastructure_exception",
+            "scope": open_fd_scope(),
         },
         "pending_admission": {
             "challenge": context.pending["challenge"],
@@ -2152,6 +2354,26 @@ def validate_manifest_json(value: Any, label: str) -> list[dict[str, Any]]:
 
 
 def validate_unit_baseline(value: Any) -> list[dict[str, Any]]:
+    if runtime_platform() == "darwin":
+        if not isinstance(value, list) or len(value) != len(DARWIN_LAUNCHD_JOBS):
+            fail("receipt unit baseline must cover the exact fixed launchd job set")
+        expected_domain = f"gui/{os.geteuid()}"
+        for index, (record_value, expected_name) in enumerate(
+            zip(value, DARWIN_LAUNCHD_JOBS)
+        ):
+            record = require_exact_keys(
+                record_value,
+                ("domain", "loaded", "name", "type"),
+                f"receipt launchd baseline {index}",
+            )
+            if record != {
+                "domain": expected_domain,
+                "loaded": False,
+                "name": expected_name,
+                "type": "launchd",
+            }:
+                fail("receipt launchd baseline is not the exact quiesced job set")
+        return value
     if not isinstance(value, list) or len(value) != len(UNITS):
         fail("receipt unit baseline must cover the exact fixed unit set")
     for index, (record_value, expected_name) in enumerate(zip(value, UNITS)):
@@ -2196,6 +2418,12 @@ def validate_unit_baseline(value: Any) -> list[dict[str, Any]]:
     return value
 
 
+def open_fd_scope() -> str:
+    if runtime_platform() == "darwin":
+        return "darwin_lsof_exact_database_family"
+    return "same_euid_proc_fd_exact_user_manager_infrastructure_exception"
+
+
 def load_receipt(path: str) -> tuple[dict[str, Any], FileIdentity]:
     raw, identity = read_regular_bytes(
         path, "state migration receipt", exact_mode=0o600, maximum=MAX_RECEIPT_BYTES
@@ -2237,7 +2465,7 @@ def load_receipt(path: str) -> tuple[dict[str, Any], FileIdentity]:
     )
     if open_fds != {
         "database_family_open_descriptors": 0,
-        "scope": "same_euid_proc_fd_exact_user_manager_infrastructure_exception",
+        "scope": open_fd_scope(),
     }:
         fail("receipt open-fd baseline is not the exact zero-open-descriptor state")
     rollback = require_exact_keys(
@@ -2439,9 +2667,9 @@ def migrate(context: Context, confirmation: str | None) -> dict[str, Any]:
             context.plan.sqlite_source, sqlite_target
         )
         full_gate()  # after checkpoint and backup have closed every DB handle
-        # WAL checkpointing is the one intentional legacy-source byte change.
-        # Bind the receipt to the post-checkpoint source image so standalone
-        # verify and idempotent replay observe the same immutable baseline.
+        # WAL checkpointing plus journal-mode normalization are the intentional
+        # legacy-source changes. Bind the receipt to that stable DELETE image so
+        # standalone verify and idempotent replay observe one immutable baseline.
         refreshed_sources = refresh_retained_sources(context)
         context.plan.source_manifest_digest = refreshed_sources.source_manifest_digest
         assert_source_inputs_stable(
@@ -2590,9 +2818,58 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return args
 
 
+def system_python_executable() -> str:
+    """Resolve the OS-controlled Python executable used for migration.
+
+    On current macOS releases ``/usr/bin/python3`` is an Apple toolchain shim:
+    after exec, ``sys.executable`` names the selected Xcode Python instead of
+    the shim. Bind the running interpreter to xcrun's fixed system resolution
+    rather than to an argv spelling that is no longer observable.
+    """
+    if sys.platform != "darwin":
+        return "/usr/bin/python3"
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/xcrun", "--find", "python3"],
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail("cannot resolve the fixed Darwin system Python interpreter")
+    if completed.returncode != 0:
+        fail("cannot resolve the fixed Darwin system Python interpreter")
+    try:
+        expected = completed.stdout.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        fail("Darwin system Python resolution is malformed")
+    if not expected.startswith("/") or "\n" in expected or os.path.normpath(expected) != expected:
+        fail("Darwin system Python resolution is malformed")
+    try:
+        value = os.stat(expected)
+    except OSError:
+        fail("Darwin system Python interpreter is unavailable")
+    if (
+        not stat.S_ISREG(value.st_mode)
+        or value.st_uid != 0
+        or stat.S_IMODE(value.st_mode) & 0o022
+        or not os.access(expected, os.X_OK)
+    ):
+        fail("Darwin system Python interpreter custody is invalid")
+    return expected
+
+
 def validate_production_interpreter() -> None:
-    if sys.executable != "/usr/bin/python3":
-        fail("production migration requires the fixed /usr/bin/python3 interpreter")
+    expected = system_python_executable()
+    try:
+        same_interpreter = os.path.samefile(sys.executable, expected)
+    except OSError:
+        same_interpreter = False
+    if not same_interpreter:
+        fail("production migration requires the fixed system Python interpreter")
     if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
         fail("production migration requires /usr/bin/python3 -I -B")
 
