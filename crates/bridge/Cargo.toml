@@ -59,6 +59,8 @@ invocation-guardian-v2-isolation-probe = ["invocation-guardian-v2-canary"]
 # Default-off C3 protected-witness contract and verifier. No production
 # transport or provider implementation is included.
 invocation-guardian-v2-protected-witness-contract = []
+# Default-off fake remote-provider laboratory. It cannot satisfy C3.
+invocation-guardian-v2-provider-lab = ["invocation-guardian-v2-protected-witness-contract"]
 
 [dependencies]
 ab-core.workspace = true

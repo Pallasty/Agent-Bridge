@@ -94,6 +94,8 @@ pub mod invocation_guardian_protocol;
 pub(crate) mod invocation_guardian_protocol_v2;
 #[cfg(all(unix, feature = "invocation-guardian-v2-protected-witness-contract"))]
 pub(crate) mod invocation_guardian_protected_witness_v2;
+#[cfg(all(unix, feature = "invocation-guardian-v2-provider-lab"))]
+pub(crate) mod invocation_guardian_provider_lab_v2;
 #[cfg(unix)]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod invocation_guardian_receipt_v2;

@@ -291,3 +291,7 @@ verifier。它复用 C0 signed receipt，拒绝 provider position/time rollback�
 fork、revision gap、epoch jump 和不连续 failover；`AlreadyCommitted` 仍只是证据。
 当前源码不包含外部 provider、凭据、endpoint、durable backend 或可成功构造的
 production transport，因此这只构成 C3 contract candidate，不构成 C3 PASS。
+
+默认关闭的 `invocation-guardian-v2-provider-lab` 现已覆盖 response-loss lookup
+恢复、stale replica rollback 拒绝和连续 epoch failover。它使用进程内状态与测试
+私钥，只验证合同和恢复向量，不是外部 anti-rollback provider，C3 仍为 HOLD。
