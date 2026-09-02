@@ -108,7 +108,9 @@ validate_trusted_deploy_root() {
             ;;
     esac
     case "$raw" in
-        *[!A-Za-z0-9._/-]*)
+        # Keep this grammar aligned with the publisher and wrapper: an
+        # ordinary space is safe when the path remains canonical and physical.
+        *[!A-Za-z0-9._/\ -]*)
             die "AGENT_BRIDGE_DEPLOY_ROOT contains an unsupported character"
             ;;
     esac

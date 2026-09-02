@@ -880,6 +880,24 @@ set -e
 case "$output" in *"contains an unsupported character"*) ;; *) fail "unsafe-character rejection reason missing" ;; esac
 [ ! -e "$injected_root/publisher-state" ] || fail "unsafe-character root formed publisher state before rejection"
 
+# Literal spaces are required by the standard macOS Application Support path.
+# They must pass the same physical-root and fixed-checkout gates; the missing
+# candidate proves this reaches candidate validation rather than character
+# rejection, without allowing a deployment.
+space_root="$TEST_ROOT/production accepted root"
+write_production_checkout_fixture \
+    "$space_root" git@gitlab.com:pallasting/agent-bridge.git
+set +e
+output="$(run_production_checkout_fixture \
+    "$PRODUCTION_FIXTURE_ROOT" "$PRODUCTION_FIXTURE_DEPLOY" use-binary 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "space-root fixture unexpectedly deployed a missing binary"
+case "$output" in *"--use-binary path not found"*) ;; *)
+    fail "space-root fixture did not reach candidate validation" ;;
+esac
+[ ! -e "$space_root/bin" ] || fail "space-root missing candidate formed bin custody"
+
 # A private root alone cannot bootstrap publisher authority. The orchestrator
 # must itself execute from the one root-bound checkout, and this rejection must
 # happen before the publisher creates either canonical state or bin custody.
