@@ -124,12 +124,22 @@ msgs = [
 ]
 
 out_dir = os.environ["TMPDIR_RUN"]
-inp_path = os.path.join(out_dir, "in.jsonl")
-with open(inp_path, "w") as f:
-    for m in msgs:
-        f.write(json.dumps(m) + "\n")
+# MCP requests may complete out of order. Persist prerequisites in a first
+# server run so plan_load and agent_inbox cannot race plan_save/agent_message.
+prerequisite_ids = {15, 19}
+handshake = msgs[:2]
+tool_msgs = msgs[2:]
+phases = (
+    ("prerequisite-in.jsonl", handshake + [m for m in tool_msgs if m.get("id") in prerequisite_ids]),
+    ("in.jsonl", handshake + [m for m in tool_msgs if m.get("id") not in prerequisite_ids]),
+)
+for filename, phase_msgs in phases:
+    with open(os.path.join(out_dir, filename), "w") as f:
+        for m in phase_msgs:
+            f.write(json.dumps(m) + "\n")
 PY
 
+run_mcp "${TMPDIR_RUN}/prerequisite-in.jsonl" "${TMPDIR_RUN}/prerequisite-out.jsonl"
 run_mcp "${TMPDIR_RUN}/in.jsonl" "${TMPDIR_RUN}/out.jsonl"
 
 python3 <<'PY'
@@ -138,6 +148,7 @@ import os
 import sys
 
 OUT = os.path.join(os.environ["TMPDIR_RUN"], "out.jsonl")
+PREREQUISITE_OUT = os.path.join(os.environ["TMPDIR_RUN"], "prerequisite-out.jsonl")
 
 
 def parse_responses(path):
@@ -182,10 +193,15 @@ def parse_inner_json(result, msg):
         raise AssertionError(f"{msg}: expected JSON in text block: {e}; head={text[:200]!r}")
 
 
-by_id = parse_responses(OUT)
+by_id = parse_responses(PREREQUISITE_OUT)
+by_id.update(parse_responses(OUT))
 if not by_id:
-    raw = open(OUT).read()
-    err = open(OUT + ".stderr").read() if os.path.isfile(OUT + ".stderr") else ""
+    raw = "\n".join(open(path).read() for path in (PREREQUISITE_OUT, OUT))
+    err = "\n".join(
+        open(path + ".stderr").read()
+        for path in (PREREQUISITE_OUT, OUT)
+        if os.path.isfile(path + ".stderr")
+    )
     print("FAIL: no JSON-RPC responses on stdout", file=sys.stderr)
     if raw.strip():
         print("--- stdout ---", file=sys.stderr)
