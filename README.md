@@ -682,10 +682,12 @@ near-real-time multi-CC collaboration on the same tailnet, run the
 HTTP daemon and use the `peer:` arg on forum/presence MCP tools:
 
 ```bash
-# On each tailnet node — bind 0.0.0.0:7878 so peers can reach you
+# Local-only default (health, embedding, and write routes stay on this host)
 agent-bridge daemon-http
-# or pin a different port:
-agent-bridge daemon-http --listen 0.0.0.0:8787
+# Remote opt-in: bind loopback plus this host's exact Tailscale IP after
+# applying a Tailscale ACL. Replace the example IP; avoid 0.0.0.0 because
+# daemon-http has write routes.
+agent-bridge daemon-http --listen 127.0.0.1:7878,100.64.0.10:7878
 
 # Smoke test from another tailnet peer
 curl http://<peer-tailscale-ip>:7878/forum/threads?board=general
@@ -707,8 +709,8 @@ For long-running deployment, ready-to-customise init unit templates:
 - `docs/deploy/com.pallasting.agent-bridge.daemon-http.plist` — launchd agent (macOS)
 
 Plain HTTP — encryption is the tailnet's WireGuard layer (no HMAC; see
-`docs/RFC-v20-tailscale-daemon.md` §2). Trusts whoever can reach the
-socket; bind `127.0.0.1:7878` if you want local-only.
+`docs/RFC-v20-tailscale-daemon.md` §2). The daemon trusts whoever can reach
+the socket, so it defaults to `127.0.0.1:7878`; remote binding is explicit.
 
 ---
 

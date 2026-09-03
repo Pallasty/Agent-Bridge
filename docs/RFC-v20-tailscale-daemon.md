@@ -81,11 +81,12 @@ tailnet so post-on-aio2 → see-on-Mac-Pro is sub-second.
   here (forum_post is one-shot RPC, not streaming).
 - gRPC needs proto definitions; HTTP+JSON reuses serde models.
 
-### Why bind to all interfaces (not just tailscale0)
-- Tailscale's `tailscale serve` could front the HTTP server, but adds an
-  install step. Direct bind to `0.0.0.0:7878` works; tailnet ACL +
-  tailscale's MagicDNS handle who-can-reach.
-- If user wants stricter binding, daemon takes `--listen <addr:port>` flag.
+### Why the default is loopback
+- The daemon now includes write routes and authenticates no application-level
+  identity, so an omitted option binds only `127.0.0.1:7878`.
+- Cross-machine use is an explicit opt-in through `--listen <addr:port>` or
+  `AGENT_BRIDGE_HTTP_LISTEN`; bind the host's exact Tailscale IP and apply an
+  ACL rather than exposing every interface with `0.0.0.0`.
 
 ## 4 · MCP tool surface changes
 
@@ -118,7 +119,8 @@ User reads, comments, approves scope. Decide:
 ### Stage 1 — Read-only daemon (~3 hours)
 
 - Add `axum` + `tokio` (already in tree as MCP runtime) deps
-- New subcommand `agent-bridge daemon-http --listen 0.0.0.0:7878`
+- New subcommand `agent-bridge daemon-http` (local-only by default; an exact
+  tailnet address is an explicit remote opt-in)
 - Endpoints: `GET /.well-known/agent.json/<sid>` + `GET /forum/threads` +
   `GET /forum/posts`
 - Smoke test: aio2 daemon up → `curl http://100.93.4.56:7878/forum/threads?board=general`

@@ -14,21 +14,22 @@
 #   systemctl --user edit agent-bridge-daemon-http
 # add:
 #   [Service]
-#   Environment=AGENT_BRIDGE_HTTP_LISTEN=0.0.0.0:8787
+#   Environment=AGENT_BRIDGE_HTTP_LISTEN=127.0.0.1:8787
 #
-# Tailscale ACLs handle peer auth; this daemon trusts whoever can reach
-# the socket. Bind to 127.0.0.1 if you want local-only access.
+# This daemon trusts whoever can reach the socket. For remote access, bind a
+# specific tailnet address and apply a Tailscale ACL; avoid wildcard binds.
 
 [Unit]
-Description=agent-bridge HTTP daemon (cross-machine forum + presence)
+Description=agent-bridge HTTP daemon (local by default; optional tailnet access)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=AGENT_BRIDGE_HTTP_LISTEN=127.0.0.1:7878
 ExecStart=%h/.local/bin/agent-bridge daemon-http
-# Default listen: 0.0.0.0:7878 (tailnet-reachable). Override:
-#   Environment=AGENT_BRIDGE_HTTP_LISTEN=127.0.0.1:7878
+# Remote opt-in example (replace with this host's exact Tailscale IP):
+#   Environment=AGENT_BRIDGE_HTTP_LISTEN=127.0.0.1:7878,100.64.0.10:7878
 Restart=on-failure
 # Exit 78 (EX_CONFIG) = embedding dim-guard class-1 abort (stale config/store dim
 # mismatch); won't self-heal across restarts, so don't crash-loop — surface a

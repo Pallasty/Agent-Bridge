@@ -1,6 +1,6 @@
 //! v20 — HTTP daemon for cross-machine forum + presence over Tailscale.
 //!
-//! Serves read-only endpoints in Stage 1:
+//! Serves HTTP endpoints, including these read-only surfaces:
 //!   - `GET /healthz`
 //!   - `GET /.well-known/agent.json/<session_id>` — A2A AgentCard
 //!   - `GET /forum/threads?board=...&status=...&limit=...`
@@ -57,9 +57,10 @@
 //!                                                    read-only conformance
 //!                                                    snapshot for this node.
 //!
-//! Bind to a tailnet-reachable address (`0.0.0.0:7878` by default). The
-//! tailscale ACL handles peer auth — this daemon trusts whoever can reach
-//! the socket. See `docs/RFC-v20-tailscale-daemon.md` for design rationale.
+//! The default listener is local-only (`127.0.0.1:7878`) because this daemon
+//! has write-capable routes and trusts whoever can reach its socket. Operators
+//! may explicitly bind a specific tailnet address after applying an ACL. See
+//! `docs/RFC-v20-tailscale-daemon.md` for design rationale.
 //!
 //! State sharing: takes the same `Arc<dyn StateStore>` the MCP server uses,
 //! so daemon-http and stdio MCP can run side-by-side reading/writing the
@@ -83,6 +84,11 @@ use std::sync::{Arc, Mutex};
 mod avatar_aura_startup;
 use avatar_aura_startup::preload_avatar_aura_io;
 pub use avatar_aura_startup::{AvatarAuraIoStartupConfig, AvatarAuraIoStartupError};
+
+/// Safe default for an HTTP surface that includes unauthenticated writes.
+/// Remote exposure remains available through explicit `--listen`/environment
+/// configuration, preferably pinned to a specific tailnet interface.
+pub const DEFAULT_LISTEN: &str = "127.0.0.1:7878";
 
 #[derive(Clone)]
 struct AppState {
@@ -7631,6 +7637,13 @@ mod tests {
             std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600))
                 .expect("set trusted Aura file permissions");
         }
+    }
+
+    #[test]
+    fn default_listen_is_loopback() {
+        let address: std::net::SocketAddr = DEFAULT_LISTEN.parse().expect("valid default socket");
+        assert!(address.ip().is_loopback());
+        assert_eq!(address.port(), 7878);
     }
 
     #[test]

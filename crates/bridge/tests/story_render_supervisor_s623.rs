@@ -21,11 +21,26 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use story_render_supervisor::{
-    start_story_render_supervisor, StoryRenderSupervisorConfig, StoryRenderSupervisorError,
+    acquire_lock, start_story_render_supervisor, StoryRenderSupervisorConfig,
+    StoryRenderSupervisorError,
 };
 use tempfile::TempDir;
 
 const REQUEST: &[u8] = br#"{"protocol":"synthetic-s623"}"#;
+
+#[test]
+fn dropping_host_lock_unlocks_an_inherited_file_description() {
+    let root = TempDir::new().expect("temp root");
+    let lock_path = root.path().join("render-worker.lock");
+    let lock = acquire_lock(&lock_path).expect("acquire initial lock");
+    let inherited = lock.0.try_clone().expect("duplicate lock descriptor");
+
+    drop(lock);
+    let reacquired = acquire_lock(&lock_path).expect("reacquire after explicit unlock");
+
+    drop(inherited);
+    drop(reacquired);
+}
 
 fn python_executable() -> PathBuf {
     let path = PathBuf::from("/usr/bin/python3");

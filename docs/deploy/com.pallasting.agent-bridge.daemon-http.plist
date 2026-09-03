@@ -14,7 +14,7 @@
     launchctl unload ~/Library/LaunchAgents/com.pallasting.agent-bridge.daemon-http.plist
 
   To bind a different port (7878 collides with Sonarr/Radarr):
-  edit the EnvironmentVariables block below; default is 0.0.0.0:7878.
+  edit the EnvironmentVariables block below; default is 127.0.0.1:7878.
 
   Replace `pallasting` in the Label with your own reverse-DNS prefix if
   preferred.
@@ -33,9 +33,9 @@
 
   <key>EnvironmentVariables</key>
   <dict>
-    <!-- Default: 0.0.0.0:7878 (tailnet-reachable). Override here if needed. -->
+    <!-- Local-only default. Bind an exact tailnet IP only as an explicit opt-in. -->
     <key>AGENT_BRIDGE_HTTP_LISTEN</key>
-    <string>0.0.0.0:7878</string>
+    <string>127.0.0.1:7878</string>
   </dict>
 
   <key>RunAtLoad</key>

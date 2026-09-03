@@ -1,8 +1,13 @@
 # Agent-Bridge Capability Roadmap
 
+> **Historical product direction — superseded.** The L5/L6/L7 model remains
+> useful evidence, but it is not the current north star or an active backlog.
+> See `docs/ACTIVE-PRODUCT-ROADMAP.md`.
+
 **Date**: 2026-05-15
 **Author**: `maxiaodeMac-Pro.local:agent-bridge:main#0275dd57`
-**Status**: Strategic design memo. Defines agent-bridge's own north star **decoupled from Seed/v22 substrate**. No code in this commit.
+**Status**: Historical strategic design memo, superseded as product direction.
+It records agent-bridge's decoupling from Seed/v22; no code was in this commit.
 **Triggers**: capability-gap analysis on 2026-05-15 + the project-decoupling decision recorded in `decision_project_decoupling_seed_agent_bridge_20260515`.
 
 ---
@@ -205,7 +210,7 @@ This discipline is the within-agent-bridge analogue of what cross-project decoup
 - `docs/SEED-VALUE-ASSESSMENT-2026-05-15.md` — the analysis chain that surfaced this decoupling
 - `docs/DESIGN-COLLAB-PROTOCOL-v0.md` — L8 process discipline
 - `docs/DESIGN-v22-agent-bridge-memory-substrate.md` — v22 design, now parked at Phase 3 closed
-- AiOT side: `docs/memos/SEED_SELF_CRITIQUE_2026_05_15.md` — independent project, no longer load-bearing on agent-bridge
+- AiOT `SEED_SELF_CRITIQUE_2026_05_15.md` — historical external reference, not vendored in this repository and no longer load-bearing on agent-bridge
 - Memory anchors:
   - `decision_project_decoupling_seed_agent_bridge_20260515` — top-level decision
   - `project_agent_bridge_l5_l7_roadmap_20260515` — this doc

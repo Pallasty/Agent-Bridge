@@ -119,7 +119,7 @@ do
 done
 for command in \
     "$TEST_ROOT/bin/agent-bridge daemon" \
-    "$TEST_ROOT/bin/agent-bridge daemon-http --listen 0.0.0.0:7878" \
+    "$TEST_ROOT/bin/agent-bridge daemon-http --listen 127.0.0.1:7878" \
     "$TEST_ROOT/bin/agent-bridge palace serve --port 7979"
 do
     case "$output" in *"ExecStart=/usr/bin/env -i "*" $command"*) ;; *)

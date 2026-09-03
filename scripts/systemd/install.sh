@@ -12,7 +12,8 @@
 #   Services (always-on, ship 2026-05-20 #325 backlog after recurring soft-hang):
 #     - agent-bridge-daemon.service (state.db writer + P-α tick + C3 self-check)
 #     - agent-bridge-palace.service (UI on port 7979)
-#     - agent-bridge-daemon-http.service (cross-machine API on port 7878)
+#     - agent-bridge-daemon-http.service (local-default API on port 7878;
+#       optional exact tailnet binding is an explicit deployment choice)
 #
 # Usage:
 #   ./scripts/systemd/install.sh             # copy + reload + enable timers + services

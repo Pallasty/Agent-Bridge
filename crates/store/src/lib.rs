@@ -3593,10 +3593,11 @@ pub trait StateStore: Send + Sync {
     }
 
     /// L6 P2 — Row-level MCP tool-call telemetry within the last
-    /// `window_secs` seconds, sorted by `ts ASC` so callers can do
-    /// in-order time-window analysis (e.g. detect follow-up activity
-    /// after a high-yield call). Capped at `limit` rows. Default impl
-    /// returns empty so non-SQLite backends silently no-op the L6 P2
+    /// `window_secs` seconds. Implementations select the newest `limit`
+    /// matching rows, then return that selected sample by `(ts, id)` ascending
+    /// so callers can do in-order time-window analysis (e.g. detect follow-up
+    /// activity after a high-yield call). Default impl returns empty so
+    /// non-SQLite backends silently no-op the L6 P2
     /// `tool_call_attention_report` MCP tool.
     async fn recent_mcp_tool_calls(
         &self,
@@ -3686,6 +3687,8 @@ pub trait StateStore: Send + Sync {
         ))
     }
 
+    /// Select the newest `limit` task outcomes in the requested window and
+    /// return them newest first with a deterministic outcome-id tie-break.
     async fn recent_agent_task_outcomes(
         &self,
         window_secs: i64,

@@ -1,8 +1,20 @@
 # Agent-Bridge Active Product Roadmap
 
-Status: active product priorities for a single developer. This replaces research-chain sequencing as the default source of next goals; historical roadmaps and research reports remain evidence, not an automatic backlog.
+Status: active product priorities for a single developer, reconciled 2026-09-03.
+The current decision board below is the authority for starting work. Detailed
+lane records remain evidence, not an automatic backlog or deployment plan.
 
-## Product north star
+## Product direction
+
+### Mission
+
+Agent-Bridge lets the same Agent cross model, process, session, device, and body
+boundaries, recover the correct commitments, and close useful work reliably.
+The resident Agent is the final beneficiary. Owner restatement, coordination,
+waiting, and verification burden are observable proxies and guardrails, not a
+replacement beneficiary.
+
+### Strategy
 
 Agent-Bridge should sustain one resident subject across model, process, session,
 device, and body changes: preserve identity, commitments, experience, and
@@ -13,10 +25,37 @@ CLI window, voice, or Avatar the identity itself. The short definition is
 
 For the current owner-local system, that resident subject is Xiao Shu. This is
 an operational continuity goal, not a claim of consciousness, sentience, or
-uninterrupted subjective experience. The practical product test remains
-whether AB restores the right state, reduces owner restatement and coordination
-cost, and closes useful work without turning the owner into a research-program
-operator. See `docs/design/RESIDENT_XIAOSHU_V0.md`.
+uninterrupted subjective experience. See `docs/design/RESIDENT_XIAOSHU_V0.md`.
+
+### North-star metric
+
+The north-star metric is the **independently verified no-restatement continuity
+completion rate**: successful eligible natural tasks divided by all eligible
+natural tasks. An eligible task resumes useful work after at least one model,
+process, session, device, or body boundary. A success requires all of:
+
+- the correct current commitment and state were restored;
+- the owner did not repeat already-retained task context;
+- the intended postcondition was closed and independently checked; explicit
+  owner acceptance qualifies only when it is tied to the observed result; and
+- no stale or harmful recall, false-green completion, or unintended irreversible
+  effect occurred.
+
+Always publish the raw numerator and denominator. `agent_reported` outcomes may
+support diagnosis but do not enter the numerator without independent evidence.
+The R4 V1 continuity reducer also lacks independent verification provenance: it
+remains a diagnostic proxy and does not populate the north-star numerator.
+Track time to first valid action and owner interventions per task as supporting
+measures.
+
+### Guardrails
+
+- Harmful recall, false-green completion, unintended irreversible effects, and
+  lingering children after bounded work: **zero**.
+- Owner restatement and coordination burden must not regress against the
+  comparable natural-task baseline.
+- A score improvement never authorizes wider data, host, account, tool, or
+  execution authority.
 
 ## Priority lanes
 
@@ -25,7 +64,47 @@ operator. See `docs/design/RESIDENT_XIAOSHU_V0.md`.
 3. **Reversible bodies (about 10%)** — Avatar, bubbles, and voice only where an owner-visible expression need and attention-cost measure justify them. Presentation may be autonomous inside its admitted reversible boundary.
 4. **Research (at most 5%)** — world models, compressive/private-memory evaluation, trajectory learning, and broader embodiment. These remain default-frozen until a current user problem and measurable trial justify reopening one lane.
 
-## Active sequence
+## Current decision board
+
+This table is authoritative as of 2026-09-03. `Source` refers to this checkout's
+canonical GitHub `origin/master`; it says where code exists, not that every
+configured forge is synchronized or that code is valuable or deployed. `Live`
+means usable through the admitted ordinary path, not merely that the core daemon
+is healthy. Later historical detail cannot widen the `Allowed next action`
+column.
+
+| Lane | Source | Installed | Live | Natural value evidence | Allowed next action |
+| --- | --- | --- | --- | --- | --- |
+| R4 / R4-A benefit dogfood | Present on `master` | Bounded R4-A foreground slice installed | Foreground opt-in only; collection incomplete | Incomplete against the frozen benefit gates | `OBSERVE_ONLY`: use the already-admitted surface naturally; no service, automation, or authority widening |
+| R7 Resident Xiao Shu | Present on `master` | Earlier M0/M1 and M2-shadow slice installed | Available through the AB-pinned Codex 0.149.1 content snapshot restored on 2026-09-03; strict profile remains unadmitted | One owner-labeled useful M1 wake; M2 natural threshold incomplete | Natural explicit use and observation only; no scheduler, automatic candidate source, or M2 admission |
+| Invocation Guardian v2 | Default-off C0-C3 source present on `master` | No | No | No analogous AB incident observed in 30 days; owner cost unmeasured | `FROZEN`: only defect/permanent-damage repair or the already-defined C2/C3 run when its genuine external prerequisite exists; no local substitute, C4, or deployment |
+| R9 durable workload receipts / trusted deployment root | Broad source present on `master` | No | No | No natural protected workload, attributable rerun, or owner-cost reduction observed | `FROZEN`: read-only incident/cost audit and retained defect/permanent-damage repair only; do not deploy to manufacture a sample |
+| R10 evidence-gated plan completion | Source contract present on `master` | No | No; producer is `NO-GO` | No natural task with an already-useful independent producer; retained outcomes are agent-reported | `INTEGRATION_HOLD`: wait for the recorded natural-task trigger; do not build or merge a producer, runner, or broader gate |
+| External Cognition controller | Value preflight plus default-off task-attempt collector exists only on off-`master` branch `session/external-cognition-task-attempt-join-20260902` | No | No | Zero trustworthy joined comparable natural tasks | `FROZEN`: retain off-`master`; read-only observation through existing surfaces only. Any collector merge or deployment requires a new explicit owner decision backed by a recurring task and measured cost |
+
+## Stop-drift operating rule
+
+The owner approved this lightweight portfolio rule on 2026-08-30. It is not a
+runtime gate or a new mechanism. Each lane may carry at most one unpaid value
+hypothesis. Before implementation,
+state in no more than one sentence each: the recent real problem, 30-day
+occurrence count, owner cost per occurrence, smallest owner-visible closure,
+one- or two-day next increment, and consequence of doing nothing. Missing
+evidence means `HOLD`; source, fixture, synthetic, or deployment-readiness PASS
+does not repay value debt.
+
+While value debt is unpaid, work is limited to read-only measurement, natural
+use through an already admitted surface, defects in a retained capability, and
+permanent-damage protection for secrets, retained data, accounts, external
+systems, or irreversible host actions. Do **not** add a scheduler, daemon,
+ledger, gate, general framework, authority surface, or numbered milestone to
+obtain the missing evidence, even if it is default-off. A permanent-damage fix
+does not count as value evidence.
+
+Review held lanes for at most 15 minutes weekly by updating this table. Do not
+create another dashboard, schema, service, or automated governance loop.
+
+## Historical lane record (not an executable queue)
 
 - **R0 — project truth and roadmap reset:** one read-only command reports source, remote, installed-binary, dirty-WIP, and alignment status. Preserve all dirty worktrees.
 - **R1 — real-task memory usefulness (decision complete):** the code-locked 20-task gate closed on 2026-08-11. The aggregate was a positive dogfood signal, so retain the current memory and continuity architecture without widening retrieval or opening another ranking/research lane. Routine positive sampling stops at the decision gate; record only meaningful missing, stale, or harmful recall events as regression evidence. See `docs/reports/goal-c-u/2026-08-11-r1-memory-usefulness-final-decision.md`.
@@ -38,7 +117,15 @@ operator. See `docs/design/RESIDENT_XIAOSHU_V0.md`.
 - **R7 — Resident Xiao Shu v0 (owner-reopened and deployed 2026-08-25; M0/M1, R7-E1, M2 shadow v0, and read-only shadow review PASS; owner label `useful`; one natural shadow sample collected; M2 runtime remains unadmitted; loss-tolerant M1 hardening deployed PASS):** the observed product gap is that Xiao Shu's apparent continuity still depends too much on a live interactive CLI/model session. AB now owns a provider-independent identity manifest, bounded wake packet, typed advisory intent, compact sleep digest, single-writer fence, exactly-once wake journal, and one explicit `resident cognition` CLI. The owner has superseded the unmerged strict-isolation proposal: this node has no Resident confidentiality gate, and recoverable crashes, deadlines, resource exhaustion, orphan cleanup, replay refusal, and rollback are accepted operational losses. Only irreversible host, retained-data, account, or external-system mutation remains a blocking class; it is denied through a content-hash-pinned native provider snapshot, a trusted Bubblewrap outer read-only host envelope with no workspace mount, ephemeral provider home/auth, explicit action-surface disabling, and a read-only `resident risk-preflight`. The strict zero-tool/privacy/cgroup/CAS profile remains truthfully unadmitted, but its privacy and recoverable-failure blockers no longer control owner-local M1. Cross-store subject reconciliation remains accepted technical debt because this advisory slice cannot act, schedule, promote memory, or destroy its retained source evidence. The installed `925cf3fe` binary and repository-matched wrapper passed read-only preflight with no remaining blocker; daemon, daemon-http, and Palace run the matching inode and both health endpoints are `ok`. Codex runs ephemerally with strict config, user config/rules/hooks and model-facing tool features disabled, read-only/no-approval bounds, stdin-only context, schema binding, a 120-second deadline, process-group custody, and fail-closed JSONL event auditing. A live sequence retained the same subject across fresh processes, recovered the expected compact provider claim, recorded five verified completions plus one deliberately non-green hardening failure, rejected replay and concurrency in 0.02 seconds without a second provider, persisted no raw owner event, and left no provider child. R7-E1 supplies the owner-only `resident evaluate` seam: it binds one fixed useful/neutral/distracting/harmful label to a completed wake's private hashes, makes same-label replay idempotent and conflicting labels fail closed, and lets the next explicit wake recover the label without pre-accepting its own result. The M0/M1 implementation and permission-capable durable-state-root fix were deployed at `cb01c6d6`. Owner-visible wake `wake-ef3781a1c2fe8366bd31a421a8b1a6ae` completed with zero provider tool events, after which the owner explicitly labeled it `useful`. The 0600 receipt passed all four hash/subject bindings and idempotent replay, yielding a positive M1 value signal with no stop rule. M2 shadow v0 is deployed at `513a70b4`: `resident shadow` deterministically evaluates only explicit typed, content-hashed commitment-due/recovery/failure candidates under frozen quiet-hour, foreground, evidence, freshness, deduplication, interval, daily-budget, severity, timeout, and later-stop-label controls. Preview is state-free; optional reports are private and no-replace. One installed current-state report correctly suppressed a fresh verified recovery candidate because this foreground session was active, with zero actual provider calls and wakes; exact replay was idempotent. Read-only `resident shadow-review` is deployed at `c2b8e047`: it requires invocation-local natural/mechanics classification of the complete report ledger, revalidates every useful-owner basis, and opens only a separate candidate-source-design owner review after at least three natural reports across two trigger kinds containing both an eligible and a suppressed decision. The installed review leaves all private bytes and metadata untouched. Complete-ledger evidence now contains three reports: one explicitly evidenced natural worktree-continuity recovery and two mechanics reports, including one concurrent report conservatively classified mechanics because natural provenance was unavailable. The natural candidate was correctly suppressed only because the owner session was active, so natural suppression evidence is now present. Status remains `collecting`; minimum natural count, second trigger kind, and a natural `would_wake=true` result remain blocked, and `m2_admitted=false`. All long-running AB services execute the matching installed binary; both health endpoints are `ok`. Doctor closed at zero failures; its sole warning was the owner-local display asleep, not an AB defect. This lane adds no automatic candidate discovery, daemon, scheduler, service, autostart, unattended wake, operation/tool authority, expression execution, automatic memory promotion, or general body runtime. The next gate is the remaining genuine natural real-task shadow evidence and the frozen owner review, not a scheduler or M2 admission. See `docs/design/RESIDENT_XIAOSHU_V0.md`, `docs/design/RESIDENT_XIAOSHU_M2_SHADOW_V0.md`, `docs/reports/goal-c-u/2026-08-25-r7-resident-xiaoshu-v0.md`, `docs/reports/goal-c-u/2026-08-25-r7-owner-evaluation-v0.md`, `docs/reports/goal-c-u/2026-08-25-r7-m2-shadow-v0.md`, `docs/reports/goal-c-u/2026-08-25-r7-m2-shadow-review-v0.md`, and `docs/reports/goal-c-u/2026-08-25-r7-m2-shadow-natural-sample-01.md`.
   - **R7 continuity correction (2026-08-27; deployed, anchored, and first new natural sample retained):** the previously described three-report review remains historical observation only because its two later report files and state-root identity are not retained. One-to-one private report digest anchors, a stable ledger identity, fail-closed missing/extra/mismatch review, and exact-replay legacy backfill are deployed at `db7203f2c`. Exact replay anchored the surviving mechanics report without rewriting it. A subsequent unplanned direct-`.real` wrapper-bypass failure in the real replay workflow produced one verified natural `failure` report; foreground activity correctly suppressed it. The durable ledger now contains one natural failure and one mechanics recovery with zero provider calls and wakes. Natural suppression is satisfied; fewer than three natural reports, fewer than two natural trigger kinds, and missing natural `would_wake=true` remain blocked. See `docs/reports/goal-c-u/2026-08-27-r7-shadow-evidence-continuity-audit.md` and `docs/reports/goal-c-u/2026-08-27-r7-m2-shadow-natural-failure-01.md`.
 - **R8 — native macOS semantic observation (deployed and live read-only acceptance PASS; profile extension closed 2026-08-27):** a real frontmost Codex task showed that the existing System Events/JXA path degraded on Apple Events status `-600` while direct `NSWorkspace + AXUIElement` observation read the same app and window. Native AX became the default read-only backend for probe/watch/verify and passed its original live acceptance at `8c913594d0bf`. The bounded profile extension landed at `daca14b9aea1`, was dual-remote published, and is active in the installed `db7203f2c048` build. A fresh Codex MCP reports `codex-ag-ui-readonly` with only `ag_ui_readonly_project`, `macos_ax_probe`, `macos_ax_verify`, and `macos_ax_watch` as profile extras. A fresh natural probe returned a complete native AX sample without Apple Events or System Events and kept windows without a stable `AXIdentifier` action-ineligible. Action admission, lease, focus transaction, screenshots, OCR, coordinate input, and desktop mutation remain outside this closure. The user-cost measure therefore passed. Retain this as the observation path and record only real regressions; do not widen action authority or open another observation framework from this result. See `docs/design/MACOS_NATIVE_SEMANTIC_OBSERVATION_V1_2026_08_26.md`, `docs/reports/goal-c-u/2026-08-26-r8-native-macos-live-acceptance.md`, and `docs/reports/goal-c-u/2026-08-27-r8-readonly-profile-live-closure.md`.
-- **R9 — durable workload-receipt reconciliation (owner-reopened 2026-08-27; trusted deployment-root framework source-ready locally, current installation failed closed, not deployed):** the delegated cgroup organ can seal complete workload-tree accounting, but a Bridge stop between supervisor sealing and semantic persistence can otherwise strand that evidence and force a rerun or an avoidable but truthful Unknown. The bounded closure is a private manifest-bound outbox, immutable SQLite receipt ledger plus one atomic semantic projection, replay-safe filesystem ACK, pre-START cleanup, capacity admission, and a producer lease that prevents another healthy Bridge from stealing a live span's receipt. Restart recovery proves standalone workload accounting only: it never fabricates body before/after samples or `task_span_closed`, and a missing receipt never becomes Complete. The user-cost measure is exact: a commit-boundary restart requires zero workload reruns; replay changes ledger/event counts by zero; and incomplete custody remains explicitly non-green. Clean source candidate `9bc924a2c1641983ac954ee9416e18ddb5fcdf77` adds the strict receipt-root Doctor organ, independent privacy-bounded installed verifier, and explicitly authorized isolated restart harness. Its exact local exercise binary (`f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c`) passed the bounded restart trial with one workload execution, one Duplicate replay, unchanged one-ledger/two-event rows, and no recovery event or residue. Implementation `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` adds the source-ready installation organ: one explicit private deployment root; authenticated GitLab/frozen-snapshot publisher; shared wrapper/publisher/systemd mutex; root-derived wrapper and private HOME/XDG/tmp; separate durable receipt and transient workload roots; strict machine-config data allowlist; and transactional complete current-boot units with UnitPath, drop-in, hook, an enumerated activation/reverse-relation allowlist, candidate, asset, clean-environment, and mount-hardening verification. Every production script entry remains bound to an outer clean interpreter launch. Debug/adversarial suites are green, including Python 62, `ab-agent` 157, wrapper, publisher, deploy race/parity, and systemd transaction gates. The current node remains an operational HOLD: the authoritative commit is unpublished, required root subtrees/toolchain/configuration are unprovisioned, HOME UnitPath is root-owned mode-0777 FUSE, two services retain foreign model drop-ins, unsafe SQLite/WAL and split body-state organs are unmigrated, no real hardened-service smoke has run, and external `Before`/`After` ordering edges plus failed-compensation manager-view recovery remain explicit residuals. No service or production state was changed. Publication, private-root provisioning, clean safe-clone advancement, wrapper/publisher install, quiesced SQLite/body-state migration, current-boot binding, explicit ordered service adoption, repeat exercise, installed verifier, and fresh-MCP admission remain pending; therefore no deployed/PASS claim is permitted. See `docs/design/INTEROCEPTION_DURABLE_WORKLOAD_RECEIPTS_2026_08_27.md`, `docs/reports/goal-c-u/2026-08-27-r9-durable-workload-receipt-reconciliation.md`, and `docs/reports/goal-c-u/2026-08-28-r9-installed-acceptance-gate.md`.
+- **R9 — durable workload-receipt reconciliation (owner-reopened 2026-08-27; trusted deployment-root framework source-ready locally, 2026-08-28 installation attempt failed closed, not deployed):** the delegated cgroup organ can seal complete workload-tree accounting, but a Bridge stop between supervisor sealing and semantic persistence can otherwise strand that evidence and force a rerun or an avoidable but truthful Unknown. The bounded closure is a private manifest-bound outbox, immutable SQLite receipt ledger plus one atomic semantic projection, replay-safe filesystem ACK, pre-START cleanup, capacity admission, and a producer lease that prevents another healthy Bridge from stealing a live span's receipt. Restart recovery proves standalone workload accounting only: it never fabricates body before/after samples or `task_span_closed`, and a missing receipt never becomes Complete. The user-cost measure is exact: a commit-boundary restart requires zero workload reruns; replay changes ledger/event counts by zero; and incomplete custody remains explicitly non-green. Clean source candidate `9bc924a2c1641983ac954ee9416e18ddb5fcdf77` adds the strict receipt-root Doctor organ, independent privacy-bounded installed verifier, and explicitly authorized isolated restart harness. Its exact local exercise binary (`f0b5fbdfe295d91f7c21f529aff0e9414bd4ebbe8948b1c4a258bdcb111dce4c`) passed the bounded restart trial with one workload execution, one Duplicate replay, unchanged one-ledger/two-event rows, and no recovery event or residue. Implementation `a4f4f4e153a5a824f28e6f1486c670af38c15ea5` adds the source-ready installation organ: one explicit private deployment root; authenticated GitLab/frozen-snapshot publisher; shared wrapper/publisher/systemd mutex; root-derived wrapper and private HOME/XDG/tmp; separate durable receipt and transient workload roots; strict machine-config data allowlist; and transactional complete current-boot units with UnitPath, drop-in, hook, an enumerated activation/reverse-relation allowlist, candidate, asset, clean-environment, and mount-hardening verification. Every production script entry remains bound to an outer clean interpreter launch. Debug/adversarial suites are green, including Python 62, `ab-agent` 157, wrapper, publisher, deploy race/parity, and systemd transaction gates. At that 2026-08-28 snapshot the node remained an operational HOLD: the authoritative commit was unpublished, required root subtrees/toolchain/configuration were unprovisioned, HOME UnitPath was root-owned mode-0777 FUSE, two services retained foreign model drop-ins, unsafe SQLite/WAL and split body-state organs were unmigrated, no real hardened-service smoke had run, and external `Before`/`After` ordering edges plus failed-compensation manager-view recovery remained explicit residuals. No service or production state was changed by that attempt. Publication, private-root provisioning, clean safe-clone advancement, wrapper/publisher install, complete body-state migration, current-boot binding, explicit ordered service adoption, repeat exercise, installed verifier, and fresh-MCP admission remain pending; therefore no R9 deployed/PASS claim is permitted. See `docs/design/INTEROCEPTION_DURABLE_WORKLOAD_RECEIPTS_2026_08_27.md`, `docs/reports/goal-c-u/2026-08-27-r9-durable-workload-receipt-reconciliation.md`, and `docs/reports/goal-c-u/2026-08-28-r9-installed-acceptance-gate.md`.
+
+  - **2026-09-03 runtime-safety correction (not R9 admission):** the live SQLite
+    database family was quiesced, integrity-checked, and moved from the
+    non-permission-capable HOME volume to the owner-controlled F2FS path under
+    `/Data/.agent-bridge-state/data`; the old database now has no live holders.
+    This closes only that narrow permanent-damage risk. It did not execute the
+    R9-M1 migrator, move body state, provision a trusted deployment root, adopt
+    R9 services, or widen R9's `FROZEN` decision-board authority.
 
   - **R9-M1 — trusted runtime-state migration (source-ready locally at `eda927d1837b50c6680ce3ea337456a79e52a965`; not deployed or live-executed; production `HOLD`):** this is the next bounded organ inside R9, not R10. It prevents the legacy HOME SQLite/body-state tree and `$ROOT/runtime-state` from becoming two writable bodies. The migrator defaults to read-only preflight; the writing `migrate` path requires an exact candidate/pending-bound confirmation and never stops, starts, reloads, enables, disables, or kills anything. Quiescence covers daemon, daemon-http, Palace, sync, decay, distill, digest, and conservatively day2 timer/oneshot units, plus external MCP/hook/manual-process descriptors to the legacy or destination SQLite family. SQLite uses checkpoint, backup API, and integrity checks; DB/WAL/SHM/journal/super-journal/locks are never raw-copied. Every sidecar leaf is explicitly retained, retired, or reconstructed, while unknown entries, symlinks, hard links, special files, unsafe type changes, and collisions fail closed. A private receipt binds candidate, pending admission, physical root, plan, source/target manifests, DB evidence, and the quiesced unit baseline; the binder verifies it before mutation, immediately before activation, and after reload together with typed writer quiescence. Implementation verification is green: migration `15/15`, installed-verifier/restart Python `62/62`, and wrapper, publisher, deployment race/parity, and systemd binder suites all pass; an independent adversarial review found no blocker, major, or minor defect. Production remains `HOLD`: authoritative publication completion, separate private-root/toolchain/config/credential provisioning, safe `UnitPath`, Yama-complete descriptor evidence, and replacement of three active deleted-inode services are unresolved. The authoritative order is publish → provision → publisher → explicit complete-writer quiescence → R9-M1 migrate/verify → archive old drop-ins/unit material and bind → ordered adoption → isolated harness and installed verifier → fresh MCP admission. See `docs/design/INTEROCEPTION_TRUSTED_RUNTIME_STATE_MIGRATION_2026_08_28.md`.
 

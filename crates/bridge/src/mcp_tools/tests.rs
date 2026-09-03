@@ -42353,6 +42353,71 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
 }
 
 #[test]
+fn practical_scorecard_exposes_window_coverage_and_sample_boundaries() {
+    let calls = vec![
+        mk_call(100, "session_bootstrap", true, 2_000),
+        mk_call(900, "memory_get", true, 500),
+    ];
+    let claim = serde_json::from_value::<crate::agent_task_outcome::AgentTaskOutcome>(
+        valid_task_outcome_json("outcome-scorecard-coverage"),
+    )
+    .expect("valid claim");
+    let outcome = claim.to_store_record(850).expect("valid store row");
+
+    let report =
+        compute_practical_workflow_scorecard_with_outcomes(&calls, &[outcome], 3_600, 600, 1_000);
+
+    assert_eq!(report.schema_version, 7);
+    assert_eq!(report.coverage.requested_start_ts, -2_600);
+    assert_eq!(report.coverage.as_of_ts, 1_000);
+    assert_eq!(report.coverage.max_rows_per_input, 50_000);
+    assert_eq!(report.coverage.tool_call_rows, 2);
+    assert_eq!(report.coverage.oldest_tool_call_ts, Some(100));
+    assert_eq!(report.coverage.newest_tool_call_ts, Some(900));
+    assert!(!report.coverage.tool_calls_truncated);
+    assert_eq!(report.coverage.task_outcome_rows, 1);
+    assert_eq!(report.coverage.oldest_task_outcome_ts, Some(850));
+    assert_eq!(report.coverage.newest_task_outcome_ts, Some(850));
+    assert!(!report.coverage.task_outcomes_truncated);
+}
+
+#[test]
+fn practical_scorecard_aggregates_more_than_two_thousand_rows() {
+    let calls = (0..2_005)
+        .map(|index| mk_call(index, "memory_get", index % 2 == 0, 500))
+        .collect::<Vec<_>>();
+
+    let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 3_000);
+
+    assert_eq!(report.total_calls, 2_005);
+    assert_eq!(report.successful_calls, 1_003);
+    assert_eq!(report.failed_calls, 1_002);
+    assert_eq!(report.coverage.tool_call_rows, 2_005);
+    assert!(!report.coverage.tool_calls_truncated);
+}
+
+#[test]
+fn practical_scorecard_makes_truncated_inputs_visible() {
+    let calls = vec![mk_call(100, "memory_get", true, 500)];
+    let report = compute_practical_workflow_scorecard_from_window(
+        &calls,
+        &[],
+        3_600,
+        600,
+        1_000,
+        true,
+        false,
+    );
+
+    assert!(report.coverage.tool_calls_truncated);
+    assert!(!report.coverage.task_outcomes_truncated);
+    assert!(report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("partial sample")));
+}
+
+#[test]
 fn practical_scorecard_reports_agent_claims_and_burden_coverage() {
     let claim = serde_json::from_value::<crate::agent_task_outcome::AgentTaskOutcome>(
         valid_task_outcome_json("outcome-scorecard-1"),
@@ -42370,7 +42435,7 @@ fn practical_scorecard_reports_agent_claims_and_burden_coverage() {
         1_000,
     );
 
-    assert_eq!(report.schema_version, 6);
+    assert_eq!(report.schema_version, 7);
     assert_eq!(report.completion.finalize_signals, 1);
     assert_eq!(report.task_outcomes.admitted_outcome_count, 1);
     assert_eq!(report.task_outcomes.agent_reported_provenance, 1);
@@ -42450,7 +42515,7 @@ fn practical_scorecard_flags_coordination_majority() {
 
     let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
 
-    assert_eq!(report.schema_version, 6);
+    assert_eq!(report.schema_version, 7);
     assert_eq!(report.coordination.calls, 18);
     assert_eq!(report.coordination.ratio, Some(0.9));
     assert_eq!(report.coordination.forum_reads, 6);
@@ -42792,23 +42857,17 @@ fn option_e_rate_limit_first_n_allowed_then_blocks() {
 
 // ── Phase 2.1 — embed_text MCP (raw encoder pass-through) ─────────
 
-// `AGENT_BRIDGE_EMBED_BACKEND` is process-global; as two separate tests these
-// raced under the parallel runner (one set "hash", the other "weirdvalue",
-// and `select_raw_encoder_kind` read whichever won), flaking `honors_hash_env`.
-// Merged into one sequential test so the env mutations can't race each other —
-// these are the only tests that touch this var, and the embed_text tests are
-// already backend-agnostic.
 #[test]
-fn select_raw_encoder_kind_honors_backend_env() {
-    std::env::set_var("AGENT_BRIDGE_EMBED_BACKEND", "hash");
-    assert_eq!(select_raw_encoder_kind(), "hash");
-    std::env::set_var("AGENT_BRIDGE_EMBED_BACKEND", "weirdvalue");
+fn select_raw_encoder_kind_is_pure_and_defaults_unknown_to_onnx() {
+    assert_eq!(select_raw_encoder_kind_from_value(Some("hash")), "hash");
+    assert_eq!(select_raw_encoder_kind_from_value(Some("HASH")), "hash");
+    assert_eq!(select_raw_encoder_kind_from_value(Some("onnx")), "onnx");
     assert_eq!(
-        select_raw_encoder_kind(),
+        select_raw_encoder_kind_from_value(Some("weirdvalue")),
         "onnx",
         "unknown backend value falls back to onnx"
     );
-    std::env::remove_var("AGENT_BRIDGE_EMBED_BACKEND");
+    assert_eq!(select_raw_encoder_kind_from_value(None), "onnx");
 }
 
 #[tokio::test]

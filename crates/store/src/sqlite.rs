@@ -70,6 +70,157 @@ use tracing::{info, warn};
 // below the services' 30-second startup deadline.
 const SQLITE_INIT_RETRY_DELAYS_MS: [u64; 3] = [25, 75, 200];
 
+#[cfg(unix)]
+const PRIVATE_STATE_DIRECTORY_MODE: u32 = 0o700;
+#[cfg(unix)]
+const PRIVATE_STATE_FILE_MODE: u32 = 0o600;
+
+#[cfg(unix)]
+fn sqlite_path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
+#[cfg(unix)]
+fn open_private_state_file(path: &Path, create: bool) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(create)
+        .mode(PRIVATE_STATE_FILE_MODE)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("state path is not a regular file: {}", path.display()),
+        ));
+    }
+    if metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "state file is not owned by the current user: {}",
+                path.display()
+            ),
+        ));
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(PRIVATE_STATE_FILE_MODE))?;
+    let observed = file.metadata()?.permissions().mode() & 0o777;
+    if observed != PRIVATE_STATE_FILE_MODE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "filesystem did not enforce mode 600 for {} (observed {observed:o})",
+                path.display()
+            ),
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn restrict_existing_state_file(path: &Path) -> std::io::Result<()> {
+    match open_private_state_file(path, false) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn restrict_sqlite_sidecars(path: &Path) -> std::io::Result<()> {
+    for suffix in ["-wal", "-shm", "-journal"] {
+        restrict_existing_state_file(&sqlite_path_with_suffix(path, suffix))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_private_state_directory(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    let metadata = directory.metadata()?;
+    if metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "state directory is not owned by the current user: {}",
+                path.display()
+            ),
+        ));
+    }
+    directory.set_permissions(std::fs::Permissions::from_mode(
+        PRIVATE_STATE_DIRECTORY_MODE,
+    ))?;
+    let observed = directory.metadata()?.permissions().mode() & 0o777;
+    if observed != PRIVATE_STATE_DIRECTORY_MODE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "filesystem did not enforce mode 700 for {} (observed {observed:o})",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+async fn prepare_sqlite_filesystem(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
+        let parent_was_missing = !parent.exists();
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| Error::Backend(format!("create db dir: {error}")))?;
+
+        // Restrict a directory this open created, or the exact platform-default
+        // state directory. A basename such as `agent-bridge` is not sufficient:
+        // an explicit DB may live in a repository or shared directory with that
+        // name, and opening a database must not chmod that existing parent.
+        #[cfg(unix)]
+        if should_restrict_private_state_directory(path, parent_was_missing, &default_db_path()) {
+            restrict_private_state_directory(parent).map_err(|error| {
+                Error::Backend(format!("secure db directory {}: {error}", parent.display()))
+            })?;
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        // Provision/restrict the main file before SQLite can create WAL/SHM;
+        // SQLite derives sidecar permissions from the database mode. Existing
+        // sidecars are repaired before SQLite is allowed to consume them.
+        open_private_state_file(path, true).map_err(|error| {
+            Error::Backend(format!("secure sqlite file {}: {error}", path.display()))
+        })?;
+        restrict_sqlite_sidecars(path).map_err(|error| {
+            Error::Backend(format!(
+                "secure sqlite sidecars for {}: {error}",
+                path.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn should_restrict_private_state_directory(
+    path: &Path,
+    parent_was_missing: bool,
+    default_path: &Path,
+) -> bool {
+    parent_was_missing || (default_path.is_absolute() && path == default_path)
+}
+
 fn sqlite_init_retry_delay(
     error: &tokio_rusqlite::Error,
     retries_completed: usize,
@@ -93,13 +244,12 @@ async fn acquire_sqlite_init_lock(path: &Path) -> Result<std::fs::File> {
     lock_name.push(".init.lock");
     let lock_path = PathBuf::from(lock_name);
     let lock_label = lock_path.display().to_string();
-    let file =
-        tokio::task::spawn_blocking(move || acquire_sqlite_init_lock_blocking(&lock_path))
-            .await
-            .map_err(|error| Error::Backend(format!("join sqlite init lock task: {error}")))?
-            .map_err(|error| {
-                Error::Backend(format!("acquire sqlite init lock {lock_label}: {error}"))
-            })?;
+    let file = tokio::task::spawn_blocking(move || acquire_sqlite_init_lock_blocking(&lock_path))
+        .await
+        .map_err(|error| Error::Backend(format!("join sqlite init lock task: {error}")))?
+        .map_err(|error| {
+            Error::Backend(format!("acquire sqlite init lock {lock_label}: {error}"))
+        })?;
     Ok(file)
 }
 
@@ -107,11 +257,7 @@ async fn acquire_sqlite_init_lock(path: &Path) -> Result<std::fs::File> {
 fn acquire_sqlite_init_lock_blocking(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::fd::AsRawFd;
 
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(path)?;
+    let file = open_private_state_file(path, true)?;
     for attempt in 0..800 {
         // SAFETY: flock only observes the live descriptor; `file` remains owned
         // by this function and is returned on success so the lock lifetime is
@@ -2892,19 +3038,20 @@ impl SqliteStore {
     }
 
     pub async fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| Error::Backend(format!("create db dir: {e}")))?;
-        }
+        prepare_sqlite_filesystem(path).await?;
         // Schema checks and migrations contain check-then-create sequences. A
         // cross-process advisory lock keeps daemon, daemon-http, Palace, and MCP
         // startup from racing those sequences. The file contains no state and
         // the OS releases the lock automatically if a process exits.
         let _init_lock = acquire_sqlite_init_lock(path).await?;
-        let conn = Connection::open(path)
-            .await
-            .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .await
+        .map_err(|e| Error::Backend(format!("sqlite open {path:?}: {e}")))?;
 
         let mut retries_completed = 0usize;
         loop {
@@ -2928,6 +3075,14 @@ impl SqliteStore {
                 }
             }
         }
+
+        #[cfg(unix)]
+        restrict_sqlite_sidecars(path).map_err(|error| {
+            Error::Backend(format!(
+                "secure initialized sqlite sidecars for {}: {error}",
+                path.display()
+            ))
+        })?;
 
         info!(path = %path.display(), "SqliteStore ready");
         Ok(Self {
@@ -9443,7 +9598,9 @@ impl StateStore for SqliteStore {
         limit: u32,
     ) -> Result<Vec<crate::AgentTaskOutcomeRecord>> {
         let cutoff = now_secs().saturating_sub(window_secs.clamp(60, 31_536_000));
-        let limit = limit.clamp(1, 2_000) as i64;
+        // Honour the caller's explicit safety limit. A hidden second cap made
+        // saturation impossible for consumers to detect.
+        let limit = limit.max(1) as i64;
         self.conn
             .call(move |connection| -> RusqliteResult<Vec<crate::AgentTaskOutcomeRecord>> {
                 let mut statement = connection.prepare(
@@ -9898,17 +10055,25 @@ impl StateStore for SqliteStore {
         limit: u32,
     ) -> Result<Vec<McpToolCallRow>> {
         let cutoff = now_secs() - window_secs.max(0);
-        let lim = limit.min(2000).max(1) as i64;
+        // The trait already carries an explicit caller-supplied limit. Do not
+        // hide a second 2,000-row cap here: consumers must be able to detect
+        // saturation against their own advertised report boundary.
+        let lim = limit.max(1) as i64;
         let rows = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallRow>> {
                 let mut stmt = c.prepare(
                     "SELECT id, ts, tool_name, duration_ms, ok, args_size, result_size,
                             mcp_session_id, source
-                     FROM mcp_tool_calls
-                     WHERE ts >= ?1
-                     ORDER BY ts ASC, id ASC
-                     LIMIT ?2",
+                       FROM (
+                            SELECT id, ts, tool_name, duration_ms, ok, args_size,
+                                   result_size, mcp_session_id, source
+                              FROM mcp_tool_calls
+                             WHERE ts >= ?1
+                             ORDER BY ts DESC, id DESC
+                             LIMIT ?2
+                       )
+                      ORDER BY ts ASC, id ASC",
                 )?;
                 let iter = stmt.query_map(params![cutoff, lim], |row| {
                     Ok(McpToolCallRow {
@@ -19155,6 +19320,172 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn writable_store_repairs_files_without_chmodding_existing_custom_parent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("state permission tempdir");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("set common root mode");
+        let state_dir = root.path().join("agent-bridge");
+        std::fs::create_dir(&state_dir).expect("create dedicated state directory");
+        std::fs::set_permissions(&state_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("set existing custom directory mode");
+        let database = state_dir.join("state.db");
+        std::fs::write(&database, []).expect("create empty database fixture");
+        std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o666))
+            .expect("make database permissive");
+
+        let store = SqliteStore::open(&database)
+            .await
+            .expect("open and secure writable store");
+        store
+            .conn
+            .call(|connection| -> RusqliteResult<()> {
+                connection.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS state_permission_probe(value INTEGER); \
+                     INSERT INTO state_permission_probe(value) VALUES(1);",
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("force WAL write");
+
+        let mode = |path: &Path| {
+            std::fs::metadata(path)
+                .unwrap_or_else(|error| panic!("stat {}: {error}", path.display()))
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode(root.path()), 0o755, "must not chmod the common root");
+        assert_eq!(
+            mode(&state_dir),
+            0o755,
+            "must not chmod an existing custom parent based on its basename"
+        );
+        assert_eq!(mode(&database), 0o600);
+        assert_eq!(
+            mode(&sqlite_path_with_suffix(&database, ".init.lock")),
+            0o600
+        );
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = sqlite_path_with_suffix(&database, suffix);
+            assert!(
+                sidecar.exists(),
+                "SQLite must have created {}",
+                sidecar.display()
+            );
+            assert_eq!(mode(&sidecar), 0o600, "private mode for {suffix}");
+        }
+
+        // A later process must also repair permissive files left by an older
+        // installation before SQLite consumes the existing WAL/SHM.
+        let init_lock = sqlite_path_with_suffix(&database, ".init.lock");
+        let wal = sqlite_path_with_suffix(&database, "-wal");
+        let shm = sqlite_path_with_suffix(&database, "-shm");
+        for path in [database.as_path(), init_lock.as_path(), wal.as_path(), shm.as_path()] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777))
+                .unwrap_or_else(|error| panic!("make {} permissive: {error}", path.display()));
+        }
+        let _reopened = SqliteStore::open(&database)
+            .await
+            .expect("reopen and repair existing private store files");
+        assert_eq!(mode(&state_dir), 0o755);
+        assert_eq!(mode(&database), 0o600);
+        assert_eq!(mode(&init_lock), 0o600);
+        assert_eq!(mode(&wal), 0o600);
+        assert_eq!(mode(&shm), 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_state_directory_policy_requires_new_or_exact_default_path() {
+        let root = Path::new("/private/test-root");
+        let default = root.join("data/agent-bridge/state.db");
+        let same_basename_custom = root.join("workspace/agent-bridge/state.db");
+        let relative_fallback = Path::new("./agent-bridge-state.db");
+
+        assert!(should_restrict_private_state_directory(
+            &default, false, &default
+        ));
+        assert!(should_restrict_private_state_directory(
+            &same_basename_custom,
+            true,
+            &default
+        ));
+        assert!(!should_restrict_private_state_directory(
+            &same_basename_custom,
+            false,
+            &default
+        ));
+        assert!(!should_restrict_private_state_directory(
+            relative_fallback,
+            false,
+            relative_fallback
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn writable_store_rejects_symlink_database_without_touching_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = tempfile::tempdir().expect("symlink database tempdir");
+        let target = root.path().join("target.db");
+        let database = root.path().join("state.db");
+        std::fs::write(&target, b"do-not-touch").expect("write symlink target");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644))
+            .expect("set target mode");
+        symlink(&target, &database).expect("create database symlink");
+
+        let error = SqliteStore::open(&database)
+            .await
+            .err()
+            .expect("symlink database must fail closed");
+
+        assert!(error.to_string().contains("secure sqlite file"));
+        assert_eq!(
+            std::fs::read(&target).expect("read untouched target"),
+            b"do-not-touch"
+        );
+        assert_eq!(
+            std::fs::metadata(&target)
+                .expect("stat untouched target")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o644
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn writable_store_privatises_only_a_new_custom_parent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("custom state parent tempdir");
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("set common root mode");
+        let private = root.path().join("custom-state");
+        let database = private.join("custom.db");
+
+        let _store = SqliteStore::open(&database)
+            .await
+            .expect("create writable custom store");
+        let mode = |path: &Path| {
+            std::fs::metadata(path)
+                .unwrap_or_else(|error| panic!("stat {}: {error}", path.display()))
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode(root.path()), 0o755, "must preserve the common root");
+        assert_eq!(mode(&private), 0o700);
+        assert_eq!(mode(&database), 0o600);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_fresh_store_initialization_recovers_in_process() {
         const OPENERS: usize = 8;
@@ -26329,6 +26660,173 @@ mod tests {
         assert_eq!(recent[0].message, "msg-101");
         assert_eq!(recent[1].message, "msg-100");
         assert_eq!(recent[2].message, "msg-99");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn recent_mcp_tool_calls_preserves_saturated_and_nested_windows() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mcp-call-window-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open sqlite store");
+        let now = now_secs();
+
+        store
+            .conn
+            .call(move |connection| -> RusqliteResult<()> {
+                let transaction = connection.transaction()?;
+                {
+                    let mut insert = transaction.prepare(
+                        "INSERT INTO mcp_tool_calls
+                           (ts, tool_name, duration_ms, ok, args_size, result_size)
+                         VALUES (?1, ?2, 1, ?3, NULL, NULL)",
+                    )?;
+                    for index in 0..2_005 {
+                        insert.execute(params![
+                            now - 120,
+                            format!("recent-{index}"),
+                            i64::from(index % 2 == 0)
+                        ])?;
+                    }
+                    for index in 0..7 {
+                        insert.execute(params![
+                            now - 10 * 86_400,
+                            format!("older-{index}"),
+                            1_i64
+                        ])?;
+                    }
+                    insert.execute(params![now - 31 * 86_400, "outside", 1_i64])?;
+                }
+                transaction.commit()?;
+                Ok(())
+            })
+            .await
+            .expect("seed saturated telemetry windows");
+
+        let seven_days = store
+            .recent_mcp_tool_calls(7 * 86_400, u32::MAX)
+            .await
+            .expect("seven-day complete window");
+        let thirty_days = store
+            .recent_mcp_tool_calls(30 * 86_400, u32::MAX)
+            .await
+            .expect("thirty-day complete window");
+
+        assert_eq!(seven_days.len(), 2_005, "must not silently cap at 2,000");
+        assert_eq!(thirty_days.len(), 2_012);
+        let thirty_day_ids = thirty_days
+            .iter()
+            .map(|call| call.id)
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            seven_days
+                .iter()
+                .all(|call| thirty_day_ids.contains(&call.id)),
+            "a wider window must contain every row from the nested narrower window"
+        );
+        assert!(thirty_days
+            .windows(2)
+            .all(|pair| { (pair[0].ts, pair[0].id) <= (pair[1].ts, pair[1].id) }));
+
+        let latest_three = store
+            .recent_mcp_tool_calls(30 * 86_400, 3)
+            .await
+            .expect("bounded recent sample");
+        assert_eq!(latest_three.len(), 3);
+        assert!(latest_three
+            .iter()
+            .all(|call| call.tool_name.starts_with("recent-")));
+        assert_eq!(
+            latest_three.iter().map(|call| call.id).collect::<Vec<_>>(),
+            vec![2_003, 2_004, 2_005],
+            "a limited read selects the newest rows, then returns them chronologically"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn recent_agent_task_outcomes_honors_explicit_limit_above_two_thousand() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-task-outcome-window-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open sqlite store");
+        let now = now_secs();
+
+        store
+            .conn
+            .call(move |connection| -> RusqliteResult<()> {
+                let transaction = connection.transaction()?;
+                {
+                    let mut insert = transaction.prepare(
+                        "INSERT INTO agent_task_outcomes
+                           (schema_version, outcome_id, recorded_at, contract_id,
+                            contract_revision, status, verification_status,
+                            verification_method, evidence_sha256, user_acceptance,
+                            acceptance_provenance, manual_interventions,
+                            owner_restatements, repeated_authorization_prompts,
+                            rollback_status, provenance, agent_id, body_id,
+                            environment_id, record_sha256)
+                         VALUES ('agent_bridge.agent_task_outcome.v1', ?1, ?2,
+                                 'coverage-contract', 1, 'achieved', 'unknown',
+                                 'none', '[]', 'unknown', 'unavailable', NULL,
+                                 NULL, NULL, 'not_needed', 'agent_reported',
+                                 NULL, NULL, NULL, ?3)",
+                    )?;
+                    for index in 0..2_005 {
+                        insert.execute(params![
+                            format!("outcome-{index:04}"),
+                            now - 120,
+                            format!("digest-{index:04}")
+                        ])?;
+                    }
+                    insert.execute(params!["latest-b", now - 30, "latest-b-digest"])?;
+                    insert.execute(params!["latest-a", now - 30, "latest-a-digest"])?;
+                    insert.execute(params!["second-latest", now - 60, "second-latest-digest"])?;
+                    insert.execute(params!["outside", now - 31 * 86_400, "outside-digest"])?;
+                }
+                transaction.commit()?;
+                Ok(())
+            })
+            .await
+            .expect("seed saturated outcome window");
+
+        let outcomes = store
+            .recent_agent_task_outcomes(30 * 86_400, u32::MAX)
+            .await
+            .expect("thirty-day complete outcome window");
+        assert_eq!(outcomes.len(), 2_008, "must not silently cap at 2,000");
+        assert!(outcomes
+            .iter()
+            .all(|outcome| outcome.outcome_id != "outside"));
+
+        let latest_three = store
+            .recent_agent_task_outcomes(30 * 86_400, 3)
+            .await
+            .expect("bounded recent outcome sample");
+        assert_eq!(
+            latest_three
+                .iter()
+                .map(|outcome| outcome.outcome_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["latest-a", "latest-b", "second-latest"],
+            "a bounded read selects the newest rows with a deterministic tie-break"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

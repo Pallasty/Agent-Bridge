@@ -1,5 +1,9 @@
 # Warp-First Agent Super Shell — Architecture Blueprint
 
+> **Historical product direction — superseded.** This document remains design
+> evidence, but it does not define current product priorities or the north star.
+> See `docs/ACTIVE-PRODUCT-ROADMAP.md`.
+>
 > Status: **Draft v2** · 2026-04-30
 >
 > Goal: Make `agent-bridge` + Warp the **best Linux CLI Agent workstation**,

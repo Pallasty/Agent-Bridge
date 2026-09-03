@@ -239,6 +239,17 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   consumed history before pending evidence.
 
 ### Changed
+- **Product authority now follows one north star and one decision board.** The
+  active roadmap defines independently verified no-restatement continuity
+  completion, its safety/owner-burden guardrails, and a lightweight stop-drift
+  rule. Historical research sequences remain evidence rather than executable
+  backlog, and held lanes cannot create new machinery merely to manufacture
+  value evidence.
+- **HTTP and SQLite now start from a private local baseline.** `daemon-http`
+  defaults to loopback while retaining explicit exact-address opt-in for
+  tailnet use. Writable SQLite state verifies current-user ownership, rejects
+  symlink/non-file targets, and enforces `0700` dedicated/new state directories
+  plus `0600` database, sidecar, and initialization-lock files on Unix.
 - **Automatic curation now preserves epistemic boundaries.** Lifecycle-driven
   `session_curate` inherits project scope, while `memory_auto_curate.scope`
   bounds both source selection and derived output (default global-only).
@@ -270,6 +281,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   `EmbeddingBackend` trait, and native version-vector sync.
 
 ### Fixed
+- **Practical scorecards no longer silently stop at 2,000 rows.** Store queries
+  honor the requested limit, bounded scorecard reads expose their time/row
+  coverage and truncation state, and limited telemetry reads select the newest
+  rows before restoring chronological order.
+- **Parallel regression tests are deterministic again.** CI pins the hash
+  encoder so save and search cannot cross vector spaces during ONNX cold start;
+  the raw-encoder selector test no longer mutates process-global environment,
+  and the story-render host lock explicitly unlocks inherited file descriptions
+  before close after fork/exec failures.
 - **Closed cross-project automatic-recall paths.** Semantic session bootstrap,
   warm/cold automatic evolution neighbors, and bootstrap BFS endpoint expansion
   now enforce path-segment-aware project/domain recall scope before ranking,

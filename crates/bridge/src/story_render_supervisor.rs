@@ -298,7 +298,21 @@ fn validate_config(config: &StoryRenderSupervisorConfig) -> Result<(), StoryRend
 
 pub(crate) struct HostLock(pub(crate) File);
 
-fn acquire_lock(path: &Path) -> Result<HostLock, StoryRenderSupervisorError> {
+impl Drop for HostLock {
+    fn drop(&mut self) {
+        // A failed fork/exec can briefly leave this file descriptor inherited by
+        // the child. Explicitly unlock the shared file description before close
+        // so a later request is not reported busy until that child exits.
+        loop {
+            let result = unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+            if result == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
+}
+
+pub(crate) fn acquire_lock(path: &Path) -> Result<HostLock, StoryRenderSupervisorError> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
