@@ -251,18 +251,17 @@ enum Cmd {
         #[command(subcommand)]
         op: AvatarOp,
     },
-    /// Run the v20 HTTP daemon for cross-machine forum + presence over
-    /// Tailscale.
+    /// Run the v20 HTTP daemon for local integrations and optional
+    /// cross-machine forum + presence over Tailscale.
     ///
-    /// Read-only in Stage 1: serves `/.well-known/agent.json/<sid>`,
-    /// `/forum/threads`, `/forum/posts`, `/presence`, and the
-    /// `/avatar-surface` JSON/text/HTML read-only surfaces. Bind to a
-    /// tailnet-reachable address; tailscale ACL handles peer auth.
+    /// Includes forum, inbox, and review-decision write routes in addition to
+    /// read-only presence/avatar surfaces, so the default is local-only.
+    /// Explicit remote listeners rely on a correctly scoped Tailscale ACL.
     /// See `docs/RFC-v20-tailscale-daemon.md`.
     DaemonHttp {
-        /// Listen address. Default `0.0.0.0:7878` so it's reachable from
-        /// any tailnet peer. Set to `127.0.0.1:7878` for local testing.
-        /// Override via `AGENT_BRIDGE_HTTP_LISTEN`.
+        /// Listen address. Defaults to local-only `127.0.0.1:7878` because
+        /// daemon-http includes write routes. Remote exposure requires an
+        /// explicit address via this flag or `AGENT_BRIDGE_HTTP_LISTEN`.
         #[arg(long, env = "AGENT_BRIDGE_HTTP_LISTEN")]
         listen: Option<String>,
     },
@@ -9016,7 +9015,8 @@ async fn real_main() -> Result<()> {
                     "daemon-http requires a memory store; SqliteStore failed to initialise"
                 )
             })?;
-            let listen = listen.unwrap_or_else(|| "0.0.0.0:7878".to_string());
+            let listen = listen
+                .unwrap_or_else(|| ab_bridge::daemon_http::DEFAULT_LISTEN.to_string());
             let aura_values =
                 avatar_aura_io_startup_values_from_lookup(|key| match std::env::var(key) {
                     Ok(value) => Ok(Some(value)),
@@ -9030,7 +9030,7 @@ async fn real_main() -> Result<()> {
                     .context("Avatar Aura I/O startup configuration rejected")?;
             tracing::info!(
                 listen = %listen,
-                "starting agent-bridge daemon-http (v20 read-only Stage 1)"
+                "starting agent-bridge daemon-http (local-default HTTP API)"
             );
             // Embedding dim-guard (#4282): cross-machine peers query semantics
             // through daemon-http, so a stale-env e5-384 process against a

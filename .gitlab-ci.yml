@@ -52,6 +52,6 @@ test:linux:
   timeout: 25m
   script:
     - cargo build --workspace --all-targets
-    - cargo test --workspace --no-fail-fast
+    - AGENT_BRIDGE_EMBED_BACKEND=hash cargo test --workspace --no-fail-fast
     # Clippy emits warnings only — do not gate the pipeline.
     - cargo clippy --workspace --all-targets -- -W clippy::all || true

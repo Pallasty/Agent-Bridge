@@ -1,20 +1,21 @@
-# systemd user unit — agent-bridge daemon-http (cross-machine API on 7878).
+# systemd user unit — agent-bridge daemon-http (local by default, port 7878).
 #
-# Tailnet-exposed HTTP endpoint for cross-machine forum + memory sync,
+# Local-only HTTP endpoint for forum + memory sync,
 # embed text dispatcher (`/embed`), and agent messaging primitives.
-# Listens on 0.0.0.0:7878 — protected by Tailscale ACL upstream.
+# Remote exposure must explicitly bind a specific tailnet address and apply an
+# ACL; do not expose the unauthenticated write routes on every interface.
 #
 # See agent-bridge-daemon.service for context on why these units exist.
 
 [Unit]
-Description=Agent-Bridge daemon-http (cross-machine API, port 7878)
+Description=Agent-Bridge daemon-http (local HTTP API, port 7878)
 Documentation=file://%h/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/lesson_kernel_vmap_softhang_2026_05_19.md
 After=network.target agent-bridge-daemon.service
 
 [Service]
 Type=simple
 WorkingDirectory=/Data/CascadeProjects/agent-bridge
-ExecStart=%h/.local/bin/agent-bridge daemon-http --listen 0.0.0.0:7878
+ExecStart=%h/.local/bin/agent-bridge daemon-http --listen 127.0.0.1:7878
 Restart=on-failure
 # Exit 78 (EX_CONFIG) = embedding dim-guard class-1 abort (stale config/store dim
 # mismatch); won't self-heal across restarts, so don't crash-loop — surface a

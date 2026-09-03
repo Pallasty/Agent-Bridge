@@ -32,6 +32,9 @@ jobs:
         run: cargo build -p ab-bridge --bin agent-bridge
 
       - name: Run workspace tests
+        env:
+          # Keep save/search on one deterministic encoder during parallel tests.
+          AGENT_BRIDGE_EMBED_BACKEND: hash
         run: cargo test --workspace
 
       - name: Run Warp integration verification

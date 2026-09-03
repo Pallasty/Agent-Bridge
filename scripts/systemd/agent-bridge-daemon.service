@@ -4,7 +4,7 @@
 # substrate-tick thread. Single writer to ~/.local/share/agent-bridge/
 # state.db. Companion services:
 #   - agent-bridge-palace.service (palace serve UI, port 7979)
-#   - agent-bridge-daemon-http.service (cross-machine HTTP, port 7878)
+#   - agent-bridge-daemon-http.service (local-default HTTP, port 7878)
 #
 # Reason this unit exists (2026-05-20):
 # Twice in <48h (5/19 07:31, 5/20 ~02:04) aio2 host kernel hit

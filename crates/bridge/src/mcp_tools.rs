@@ -49081,8 +49081,8 @@ impl McpTool for ToolCallAttentionReportTool {
             .unwrap_or(600)
             .clamp(30, 3600);
 
-        // Fetch row-level telemetry. Cap at 2000 to bound report cost
-        // even on noisy sessions; matches the trait's hard cap.
+        // Fetch at most the newest 2,000 rows, returned chronologically, to
+        // bound this attention report's cost even on noisy sessions.
         let calls = match store.recent_mcp_tool_calls(window_secs, 2000).await {
             Ok(c) => c,
             Err(e) => {
@@ -49107,6 +49107,7 @@ pub struct PracticalWorkflowScorecard {
     pub schema_version: u32,
     pub read_only: bool,
     pub window_secs: i64,
+    pub coverage: PracticalWorkflowCoverage,
     pub total_calls: usize,
     pub successful_calls: usize,
     pub failed_calls: usize,
@@ -49117,6 +49118,22 @@ pub struct PracticalWorkflowScorecard {
     pub task_outcomes: PracticalTaskOutcomeMetrics,
     pub operator_burden: PracticalOperatorBurdenMetrics,
     pub recommendations: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalWorkflowCoverage {
+    pub requested_start_ts: i64,
+    pub as_of_ts: i64,
+    pub max_rows_per_input: usize,
+    pub tool_call_rows: usize,
+    pub oldest_tool_call_ts: Option<i64>,
+    pub newest_tool_call_ts: Option<i64>,
+    pub tool_calls_truncated: bool,
+    pub task_outcome_rows: usize,
+    pub oldest_task_outcome_ts: Option<i64>,
+    pub newest_task_outcome_ts: Option<i64>,
+    pub task_outcomes_truncated: bool,
+    pub interpretation: &'static str,
 }
 
 #[derive(Debug, serde::Serialize, PartialEq)]
@@ -49230,6 +49247,26 @@ pub fn compute_practical_workflow_scorecard_with_outcomes(
     window_secs: i64,
     followup_window_secs: i64,
     as_of_ts: i64,
+) -> PracticalWorkflowScorecard {
+    compute_practical_workflow_scorecard_from_window(
+        calls,
+        outcomes,
+        window_secs,
+        followup_window_secs,
+        as_of_ts,
+        false,
+        false,
+    )
+}
+
+fn compute_practical_workflow_scorecard_from_window(
+    calls: &[ab_store::McpToolCallRow],
+    outcomes: &[ab_store::AgentTaskOutcomeRecord],
+    window_secs: i64,
+    followup_window_secs: i64,
+    as_of_ts: i64,
+    tool_calls_truncated: bool,
+    task_outcomes_truncated: bool,
 ) -> PracticalWorkflowScorecard {
     let successful_calls = calls.iter().filter(|call| call.ok).count();
     let failed_calls = calls.len().saturating_sub(successful_calls);
@@ -49379,6 +49416,9 @@ pub fn compute_practical_workflow_scorecard_with_outcomes(
             recommendations.push("Inspect outcome-reported manual interventions, owner restatements, and repeated authorization prompts for reducible operator burden.".into());
         }
     }
+    if tool_calls_truncated || task_outcomes_truncated {
+        recommendations.push("At least one scorecard input reached its query limit; treat the affected aggregate as a visible partial sample and narrow the window before comparison.".into());
+    }
 
     let verification_coverage = if task_outcomes.accepted_outcome_count == 0 {
         None
@@ -49403,9 +49443,23 @@ pub fn compute_practical_workflow_scorecard_with_outcomes(
     let as_usize = |value: u64| value.min(usize::MAX as u64) as usize;
 
     PracticalWorkflowScorecard {
-        schema_version: 6,
+        schema_version: 7,
         read_only: true,
         window_secs,
+        coverage: PracticalWorkflowCoverage {
+            requested_start_ts: as_of_ts.saturating_sub(window_secs),
+            as_of_ts,
+            max_rows_per_input: PRACTICAL_SCORECARD_MAX_WINDOW_ROWS,
+            tool_call_rows: calls.len(),
+            oldest_tool_call_ts: calls.iter().map(|call| call.ts).min(),
+            newest_tool_call_ts: calls.iter().map(|call| call.ts).max(),
+            tool_calls_truncated,
+            task_outcome_rows: outcomes.len(),
+            oldest_task_outcome_ts: outcomes.iter().map(|outcome| outcome.recorded_at).min(),
+            newest_task_outcome_ts: outcomes.iter().map(|outcome| outcome.recorded_at).max(),
+            task_outcomes_truncated,
+            interpretation: "The requested interval and returned row boundaries make data coverage inspectable. A true truncation flag means the aggregate is a latest-row partial sample; false means no omitted row was detected at query time.",
+        },
         total_calls: calls.len(),
         successful_calls,
         failed_calls,
@@ -49509,6 +49563,12 @@ pub struct PracticalWorkflowScorecardTool {
     hub: Hub,
 }
 
+// Large enough for the current 30-day telemetry volume while keeping this
+// read-only diagnostic predictably bounded. Fetching one extra row makes any
+// loss explicit instead of silently changing the aggregate.
+const PRACTICAL_SCORECARD_MAX_WINDOW_ROWS: usize = 50_000;
+const PRACTICAL_SCORECARD_FETCH_LIMIT: u32 = 50_001;
+
 impl PracticalWorkflowScorecardTool {
     pub fn new(hub: Hub) -> Self {
         Self { hub }
@@ -49524,7 +49584,7 @@ impl McpTool for PracticalWorkflowScorecardTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Read-only practical continuity scorecard over MCP telemetry plus the dedicated immutable task-outcome ledger. Reports anonymous same-MCP-session continuation proxies, agent-reported outcome and verification claims, failure recovery, retry loops, and per-field operator-burden coverage. Public session_finalize claims cannot assert owner acceptance or trusted harness provenance; all outcome values remain claims until a future authenticated producer verifies them. Missing burden remains unavailable rather than zero.".into(),
+            description: "Read-only practical continuity scorecard over bounded MCP telemetry and task-outcome windows. Reports query coverage and visible truncation, anonymous same-MCP-session continuation proxies, agent-reported outcome and verification claims, failure recovery, retry loops, and per-field operator-burden coverage. Public session_finalize claims cannot assert owner acceptance or trusted harness provenance; all outcome values remain claims until a future authenticated producer verifies them. Missing burden remains unavailable rather than zero.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -49558,11 +49618,19 @@ impl McpTool for PracticalWorkflowScorecardTool {
             .and_then(Value::as_i64)
             .unwrap_or(600)
             .clamp(30, 3_600);
-        let calls = match store.recent_mcp_tool_calls(window_secs, 2_000).await {
+        // The time window is capped at 30 days. Fetch one row beyond the
+        // advertised safety cap so a saturated query is visibly partial.
+        let mut calls = match store
+            .recent_mcp_tool_calls(window_secs, PRACTICAL_SCORECARD_FETCH_LIMIT)
+            .await
+        {
             Ok(calls) => calls,
             Err(error) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {error}"))),
         };
-        let outcomes = match store.recent_agent_task_outcomes(window_secs, 2_000).await {
+        let mut outcomes = match store
+            .recent_agent_task_outcomes(window_secs, PRACTICAL_SCORECARD_FETCH_LIMIT)
+            .await
+        {
             Ok(outcomes) => outcomes,
             Err(error) => {
                 return Ok(ToolResult::error(format!(
@@ -49570,7 +49638,16 @@ impl McpTool for PracticalWorkflowScorecardTool {
                 )))
             }
         };
-        let report = compute_practical_workflow_scorecard_with_outcomes(
+        let tool_calls_truncated = calls.len() > PRACTICAL_SCORECARD_MAX_WINDOW_ROWS;
+        if tool_calls_truncated {
+            // `recent_mcp_tool_calls` returns its newest limited sample in
+            // chronological order, so discard overflow from the oldest edge.
+            let overflow = calls.len() - PRACTICAL_SCORECARD_MAX_WINDOW_ROWS;
+            calls.drain(..overflow);
+        }
+        let task_outcomes_truncated = outcomes.len() > PRACTICAL_SCORECARD_MAX_WINDOW_ROWS;
+        outcomes.truncate(PRACTICAL_SCORECARD_MAX_WINDOW_ROWS);
+        let report = compute_practical_workflow_scorecard_from_window(
             &calls,
             &outcomes,
             window_secs,
@@ -49579,6 +49656,8 @@ impl McpTool for PracticalWorkflowScorecardTool {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
                 .unwrap_or(0),
+            tool_calls_truncated,
+            task_outcomes_truncated,
         );
         let payload = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
         Ok(ToolResult::json_text(&payload))
@@ -49597,12 +49676,16 @@ impl McpTool for PracticalWorkflowScorecardTool {
 ///
 /// Mirrors `seed_bridge::select_inner_kind()` so wrap and raw paths
 /// agree on which encoder produces the vectors.
-fn select_raw_encoder_kind() -> String {
-    std::env::var("AGENT_BRIDGE_EMBED_BACKEND")
-        .ok()
-        .map(|s| s.to_lowercase())
-        .filter(|s| s == "hash" || s == "onnx")
-        .unwrap_or_else(|| "onnx".to_string())
+fn select_raw_encoder_kind_from_value(configured: Option<&str>) -> &'static str {
+    match configured.map(str::to_ascii_lowercase).as_deref() {
+        Some("hash") => "hash",
+        _ => "onnx",
+    }
+}
+
+fn select_raw_encoder_kind() -> &'static str {
+    let configured = std::env::var("AGENT_BRIDGE_EMBED_BACKEND").ok();
+    select_raw_encoder_kind_from_value(configured.as_deref())
 }
 
 fn build_raw_encoder() -> Arc<dyn ab_store::EmbeddingBackend> {
@@ -49615,7 +49698,7 @@ fn build_raw_encoder() -> Arc<dyn ab_store::EmbeddingBackend> {
     if let Some(url) = crate::remote_embed::active_remote_url() {
         return Arc::new(crate::remote_embed::RemoteEmbedBackend::new(url));
     }
-    match select_raw_encoder_kind().as_str() {
+    match select_raw_encoder_kind() {
         "hash" => Arc::new(ab_store::HashBackend),
         // "onnx" or fallthrough — OnnxBackend carries its own hash
         // fallback on model-load failure, so unknown values are

@@ -747,7 +747,7 @@ units=(
 )
 commands=(
     "$WRAPPER daemon"
-    "$WRAPPER daemon-http --listen 0.0.0.0:7878"
+    "$WRAPPER daemon-http --listen 127.0.0.1:7878"
     "$WRAPPER palace serve --port 7979"
 )
 descriptions=(
