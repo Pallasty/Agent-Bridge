@@ -66,8 +66,9 @@ measures.
 
 ## Current decision board
 
-This table is authoritative as of 2026-09-03. `Source` refers to this checkout's
-canonical GitHub `origin/master`; it says where code exists, not that every
+This table is authoritative as of 2026-09-03. `Source` refers to the published
+project `master`; remote aliases are checkout-local (on the Mac, `origin` fetches
+GitLab and `github` fetches GitHub). It says where code exists, not that every
 configured forge is synchronized or that code is valuable or deployed. `Live`
 means usable through the admitted ordinary path, not merely that the core daemon
 is healthy. Later historical detail cannot widen the `Allowed next action`
