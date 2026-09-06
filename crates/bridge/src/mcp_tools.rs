@@ -26237,7 +26237,7 @@ fn memory_continuity_bootstrap_tier(
 /// current project state.  Priority is intentionally strict: an exact project
 /// scope, actionable continuity metadata, and a verified/non-stale source are
 /// required.  Auto-curated or identifier-unverified rows never qualify.
-fn bootstrap_handoff_priority_eligible(row: &MemoryRecord, cwd: &str) -> bool {
+pub(crate) fn bootstrap_handoff_priority_eligible(row: &MemoryRecord, cwd: &str) -> bool {
     if row.kind != "session_handoff" || row.status != "active" {
         return false;
     }
@@ -46120,9 +46120,11 @@ impl McpTool for SessionHandoffBriefTool {
         ToolSchema {
             name: self.name().into(),
             description: "Build a machine-readable session handoff brief for the next \
-                 agent: aggregates active todos, recent session_handoff memories, git \
-                 branch / last commit / working-tree files, plus optional narrative \
-                 fields. No new tables — memory + git only."
+                 agent: aggregates active exact-project todos and eligible handoffs, \
+                 git branch / last commit / working-tree files, plus optional narrative \
+                 fields. Reads at most 256 scoped candidates per kind; \
+                 candidate_limit_reached flags a potentially incomplete selection. \
+                 No new tables — memory + git only."
                 .into(),
             input_schema: json!({
                 "type": "object",
