@@ -122,6 +122,12 @@ estimates under this frozen shadow policy, not observed execution.
 
 ## Measurement and next gate
 
+Collection is not passive: without explicit submission no reports accrue.
+The working agent, rather than the owner, handles candidate identification
+and submission during ordinary foreground work using
+`../operations/R7_ASSISTED_SHADOW_COLLECTION.md`. This operating procedure
+does not add automatic candidate discovery or change the frozen policy.
+
 Retain only privacy-minimal reports for real, manually identified candidates.
 Classify every retained report explicitly at review time, then review:
 

@@ -85,6 +85,14 @@ column.
 
 ## Stop-drift operating rule
 
+R7 collection clarification (2026-09-05): waiting alone produces no samples.
+The working agent handles explicit submission at genuine task boundaries via
+`operations/R7_ASSISTED_SHADOW_COLLECTION.md`; the owner need not notice the
+event or type the command. This is foreground-assisted use of the existing
+evaluator, not an automatic candidate source. Natural workflow acceptance is
+pending the next qualifying event; no runtime deployment or M2 admission is
+claimed.
+
 The owner approved this lightweight portfolio rule on 2026-08-30. It is not a
 runtime gate or a new mechanism. Each lane may carry at most one unpaid value
 hypothesis. Before implementation,

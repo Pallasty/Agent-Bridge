@@ -29,6 +29,15 @@ none of them acts on any third-party system:
 
 ## Working in this repo
 
+- **Source sync**: do not trigger CI. Use SSH, include `[skip ci]` in sync
+  commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.
+
+- **R7 collection**: at real task failure, interrupted-task recovery, or an
+  explicit commitment becoming due, follow
+  `docs/operations/R7_ASSISTED_SHADOW_COLLECTION.md`. The working agent handles
+  preview and recording without waiting for an owner command reminder. This
+  is foreground-only, not a background collector or wake authorization.
+
 - **Layout**: Rust workspace. Main crates — `bridge` (MCP tools + daemon),
   `agent` (PTY-backed agent runtimes), `store` (SQLite memory), `browser`,
   `ab-tts`.
