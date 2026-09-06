@@ -135,9 +135,19 @@ telemetry wrote only to the selected temporary state. This establishes the
 real MCP entry with isolated fixtures, not the installed ordinary profile or
 a naturally resumed task.
 
-Source integration follows the existing GitHub PR and normal CI workflow,
-then a non-force fast-forward of the same merge commit to GitLab with both
-remote refs read back. Runtime deployment and tool-profile expansion are
+Source integration uses GitHub PR #121, then a non-force fast-forward of the
+same merge commit to GitLab with both remote refs read back. Normal GitHub CI
+was requested, but workflow dispatch returned HTTP 422, `Actions has been
+disabled for this user.` Repository workflows remain active; the account-level
+restriction prevented any run/check. CI is therefore **not run**, not passed.
+No account setting, status-check requirement or branch protection was bypassed.
+The server has no required status checks/reviews; CI protection is recommended
+in the repository docs. Independent review found no blocking source defect.
+The same 10 focused tests also passed with default features and hash embeddings
+on the local Mac before the normal merge request. These results support this
+bounded source repair but do not replace a Linux/macOS CI matrix.
+
+Runtime deployment and tool-profile expansion are
 excluded: the current ordinary profile does not expose this niche tool, and
 the retained telemetry has no natural call to justify replacing the runtime.
 Future use should record only an actual missing, stale or harmful recall
