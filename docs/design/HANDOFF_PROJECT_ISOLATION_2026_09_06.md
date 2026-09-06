@@ -108,3 +108,37 @@ deployment remain separate decisions; this defect repair does not reopen R1
 sampling or create another experimental lane.
 
 Rollback: revert this task's isolated commit; no persistent data migration.
+
+## MCP entry acceptance and source integration
+
+The 2026-09-06 continuation closes the existing repair's delivery path. It does
+not start another memory experiment. Both remote master refs were reread at
+the original base before integration; the repair is commit
+`74841b6084b3286aaa0954d3249a417f277d752f`.
+
+A newly compiled, ONNX-free debug binary reported `74841b6084b3` and SHA-256
+`b276e00582f36b5326933893db8fcf0dfeb81f4a3ac3dfc31e010db042a7bdd1`.
+One real `agent-bridge mcp` process passed JSONL initialize and one
+`session_handoff` call against 22 synthetic SQLite rows. Higher-ranked global,
+ancestor, lexical-prefix sibling, unrelated, stale, superseded, replaced,
+auto-curated and identifier-unverified records did not displace the current
+project's eligible records under one-row output limits. Git state, narrative
+fields and the additive candidate-limit flags survived MCP serialization.
+The memory/edge row snapshots were unchanged, telemetry contained exactly one
+`session_handoff` call, the process exited zero and its process group was absent.
+
+The probe used a fresh environment allowlist, hash embeddings, PTY backend and
+explicit temporary DB, state, receipt spool, browser and XDG directories. It
+did not inherit production credentials or remote embedding settings, change
+HOME, or invoke memory-write tools. Startup initialization and dispatch
+telemetry wrote only to the selected temporary state. This establishes the
+real MCP entry with isolated fixtures, not the installed ordinary profile or
+a naturally resumed task.
+
+Source integration follows the existing GitHub PR and normal CI workflow,
+then a non-force fast-forward of the same merge commit to GitLab with both
+remote refs read back. Runtime deployment and tool-profile expansion are
+excluded: the current ordinary profile does not expose this niche tool, and
+the retained telemetry has no natural call to justify replacing the runtime.
+Future use should record only an actual missing, stale or harmful recall
+regression; successful fixtures do not reopen routine positive sampling.
