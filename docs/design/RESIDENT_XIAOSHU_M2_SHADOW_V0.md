@@ -171,17 +171,29 @@ does not create, rewrite, relabel, or touch report files.
 
 Source tests and mechanics reports prove mechanics, not unattended-wake value.
 The 2026-08-25 worktree-continuity recovery remains a documented natural
-observation, but its original report bytes and state root are no longer
-available for current-ledger review and no `ledger_id` was captured. It therefore does not count toward the
-durable threshold. The current macOS ledger is anchored under a stable
+observation. The 2026-09-08 audit recovered matching original bytes in the
+legacy Linux root, but that root has no ledger identity or anchors. It still
+does not count toward the current Mac durable threshold and must not be
+silently merged into that ledger. The current macOS ledger is anchored under a stable
 `ledger_id`. It contains one legacy mechanics report and one durable natural
 failure report produced by an unplanned wrapper-bypass configuration failure
 in the real replay workflow. That natural report was suppressed because the
 owner session was active, so the natural-suppression criterion is satisfied.
-Collection still needs two more genuine natural reports, a second natural
-trigger kind, and one natural `would_wake=true` decision. Until the frozen
+The evidence gate still lacks two more genuine natural reports, a second natural
+trigger kind, and one natural `would_wake=true` decision. These are threshold
+gaps, not an obligation to keep an active sample-collection goal. Until the frozen
 threshold is met, adding discovery, a timer, a scheduler, or any real provider
 invocation is prohibited.
+
+On 2026-09-08, active M2 sample pursuit was placed on HOLD after the
+owner-authorized stagnation review. An active owner foreground session always
+adds a suppression reason, so the foreground-active path cannot
+close the natural-true criterion. Truthful inactive inputs remain possible in
+the code; global unreachability is not claimed. Existing M0/M1 use and natural
+foreground diagnostics remain available. The reopening condition is an
+independently occurring, costly, eligible inactive event through an existing
+admitted entry, with all original constraints intact. See
+[`2026-09-08-validation-collection-closeout.md`](../reports/goal-c-u/2026-09-08-validation-collection-closeout.md).
 
 Two increments without observed use-value refreeze the lane. Any stop label,
 raw-content persistence, unexpected provider/tool event, wake creation,

@@ -1,7 +1,14 @@
 # R7 agent-assisted shadow collection
 
 Date: 2026-09-05
-Status: foreground operating procedure; no runtime or policy change.
+Status: retained foreground diagnostic procedure; active M2 sample pursuit on
+HOLD after the owner-authorized 2026-09-08 closeout. No runtime policy change.
+
+The current decision board and
+[`2026-09-08-validation-collection-closeout.md`](../reports/goal-c-u/2026-09-08-validation-collection-closeout.md)
+govern whether a product lane is active. Routine status checks or repeated
+suppressed reports must not reopen a campaign to fill the sample threshold.
+Existing explicit M0/M1 use remains available.
 
 ## Problem and scope
 
@@ -29,7 +36,10 @@ means no report; do not create placeholder evidence or a second ledger.
 1. Check the current roadmap, installed CLI help, and useful owner basis in
    the admitted state root. Stop on an invalid basis, stop label, or integrity
    failure. Invoke `~/.local/bin/agent-bridge`, never bypass its state-injecting
-   wrapper by invoking `.real` directly.
+   wrapper by invoking `.real` directly. Verify the existing ledger identity
+   and anchors at that root. Legacy files found on another node do not
+   authorize creation of a replacement ledger or cross-node merging; retain
+   them separately and report the identity gap.
 2. Verify the event using evidence already available for the current task.
    Preserve the actual observation time and explicit due time. Hash stable,
    minimal signal metadata and exact evidence bytes locally; never pass raw
@@ -68,7 +78,8 @@ timezone offset, timestamp, or sample classification without verifying it.
 
 ## Acceptance and limits
 
-The next genuine qualifying event is the acceptance case: the working agent
+For retained ordinary-task diagnostics, the next genuine qualifying event
+can validate the foreground workflow: the working agent
 records it without an owner command reminder, its report passes readback and
 integrity review, and actual provider calls and wakes remain zero. The review
 may still report `collecting` and `ready_for_owner_review=false`; one valid
@@ -80,11 +91,22 @@ No running agent means no discovery or recording. Other checkouts or clients
 that have not loaded these instructions are not covered. It installs no hook,
 timer, scheduler, service, or automatic candidate source; M2 stays unadmitted.
 
-Active-session collection may produce only suppressed candidates. If the
-natural would-wake requirement remains unreachable, report that limitation
-and revisit the experiment design explicitly; never fabricate inactivity or
-silently relax the threshold. Two increments without use-value refreeze the
-lane under the existing roadmap rule.
+The 2026-09-08 source review established that an `active` owner foreground
+session is always suppressed. This subpath therefore cannot itself supply
+the natural `would_wake=true` required by the full M2 gate. The CLI also
+accepts truthful `inactive` candidates; this does not prove that an admitted
+natural workflow has produced one. Active pursuit of the full gate is on
+HOLD, rather than repeatedly collecting active-session samples as if that
+could close every missing criterion.
+
+Reconsider the active goal only when an already-admitted real task independently
+produces a new recovery, warning/critical failure, or explicit due commitment
+with verifiable owner cost, and an existing entry can submit it promptly while
+the owner foreground session is truly inactive. All original freshness,
+quiet-hour, basis, identity, and review requirements still apply. Do not add
+a scheduler or collector, wait to relabel an active event, fabricate inactivity,
+or relax thresholds to produce this trigger. Two increments without use-value
+refreeze the lane under the existing roadmap rule.
 
 Rollback removes the instruction links and this procedure. Existing private
 reports remain intact; no binary rebuild or MCP reconnect is required.

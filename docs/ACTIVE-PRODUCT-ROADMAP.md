@@ -1,6 +1,6 @@
 # Agent-Bridge Active Product Roadmap
 
-Status: active product priorities for a single developer, reconciled 2026-09-03.
+Status: active product priorities for a single developer, reconciled 2026-09-08.
 The current decision board below is the authority for starting work. Detailed
 lane records remain evidence, not an automatic backlog or deployment plan.
 
@@ -75,7 +75,7 @@ address recurring natural failures with measured cost.
 
 ## Current decision board
 
-This table is authoritative as of 2026-09-03. `Source` refers to the published
+This table is authoritative as of 2026-09-08. `Source` refers to the published
 project `master`; remote aliases are checkout-local (on the Mac, `origin` fetches
 GitLab and `github` fetches GitHub). It says where code exists, not that every
 configured forge is synchronized or that code is valuable or deployed. `Live`
@@ -85,8 +85,9 @@ column.
 
 | Lane | Source | Installed | Live | Natural value evidence | Allowed next action |
 | --- | --- | --- | --- | --- | --- |
-| R4 / R4-A benefit dogfood | Present on `master` | Bounded R4-A foreground slice installed | Foreground opt-in only; collection incomplete | Incomplete against the frozen benefit gates | `OBSERVE_ONLY`: use the already-admitted surface naturally; no service, automation, or authority widening |
-| R7 Resident Xiao Shu | Present on `master` | Earlier M0/M1 and M2-shadow slice installed | Available through the AB-pinned Codex 0.149.1 content snapshot restored on 2026-09-03; strict profile remains unadmitted | One owner-labeled useful M1 wake; M2 natural threshold incomplete | Natural explicit use and observation only; no scheduler, automatic candidate source, or M2 admission |
+| R4 benefit dogfood | Present on `master`; formal kickoff already authorized 2026-08-31 on the canonical Mac writer | Bound instrument available in four inspected Mac worktrees | Formal ledger absent; first-event clock has not started | No formal samples; legacy Linux rows are separate and predate authorization | `HOLD_TRIAL_TOPOLOGY`: end active pursuit of the first sample; Avatar/voice require Linux receipts with no admitted source route to the Mac writer. Preserve authorization and kickoff; resolve all four gate sources before repairing the recording route or starting the clock |
+| R4-A reversible Avatar expression | Present on `master` | Bounded foreground slice installed | Existing explicit foreground use retained | Two increments completed; sustained daily-use labels still absent | `FROZEN`: close active benefit-collection and expansion work; no third increment, wider observer, or new collection campaign without a recurring natural need and measurable owner cost |
+| R7 Resident Xiao Shu | Present on `master` | Earlier M0/M1 and M2-shadow slice installed | Existing explicit M0/M1 use and foreground diagnostics retained; M2 remains unadmitted | One owner-labeled useful M1 wake; anchored M2 evidence is one natural failure and one mechanics report | `HOLD` for active M2 sample pursuit: foreground-active submissions cannot supply natural `would_wake=true`; retain truthful natural diagnostics, reopen only on an independently occurring eligible inactive event through an existing admitted entry |
 | Invocation Guardian v2 | Default-off C0-C3 source present on `master` | No | No | No analogous AB incident observed in 30 days; owner cost unmeasured | `FROZEN`: only defect/permanent-damage repair or the already-defined C2/C3 run when its genuine external prerequisite exists; no local substitute, C4, or deployment |
 | R9 durable workload receipts / trusted deployment root | Broad source present on `master` | No | No | No natural protected workload, attributable rerun, or owner-cost reduction observed | `FROZEN`: read-only incident/cost audit and retained defect/permanent-damage repair only; do not deploy to manufacture a sample |
 | R10 evidence-gated plan completion | Source contract present on `master` | No | No; producer is `NO-GO` | No natural task with an already-useful independent producer; retained outcomes are agent-reported | `INTEGRATION_HOLD`: wait for the recorded natural-task trigger; do not build or merge a producer, runner, or broader gate |
@@ -94,12 +95,23 @@ column.
 
 ## Stop-drift operating rule
 
+The owner authorized the 2026-09-08 collection closeout after the waiting-time
+audit. R4-A expansion is refrozen, active R7 M2 sample pursuit is on hold, and
+R4's already-authorized trial is on hold because its complete receipt-source
+topology is unresolved. A missing foreground recording route is also observed,
+but fixing that alone would not make all four gates feasible. A reducer returning `collecting` does not keep a
+product goal active indefinitely. These are evidence and feasibility
+decisions, not claims that a calendar deadline expired or that existing
+on-demand capabilities have no value. See
+[the closeout and reopening conditions](reports/goal-c-u/2026-09-08-validation-collection-closeout.md).
+
 R7 collection clarification (2026-09-05): waiting alone produces no samples.
 The working agent handles explicit submission at genuine task boundaries via
 `operations/R7_ASSISTED_SHADOW_COLLECTION.md`; the owner need not notice the
 event or type the command. This is foreground-assisted use of the existing
-evaluator, not an automatic candidate source. Natural workflow acceptance is
-pending the next qualifying event; no runtime deployment or M2 admission is
+evaluator, not an automatic candidate source. After the 2026-09-08 review,
+this remains an ordinary-task diagnostic procedure; it is not an active
+campaign to fill the M2 threshold. No runtime deployment or M2 admission is
 claimed.
 
 The owner approved this lightweight portfolio rule on 2026-08-30. It is not a
@@ -123,6 +135,14 @@ Review held lanes for at most 15 minutes weekly by updating this table. Do not
 create another dashboard, schema, service, or automated governance loop.
 
 ## Historical lane record (not an executable queue)
+
+The R4/R4-A/R7 collection instructions and counts below describe their dated
+increments. The 2026-09-08 decision board supersedes their active next actions:
+R4 is `HOLD_TRIAL_TOPOLOGY`, R4-A is `FROZEN`, and active R7 M2 sample pursuit is
+`HOLD`. The R4 V1 specification remains byte-identical to the kickoff-bound
+contract; its source-stage "authorization pending" wording is historical.
+The actual 2026-08-31 authorization is retained. Old Linux counts are not the
+current anchored Mac ledger denominator.
 
 - **R0 — project truth and roadmap reset:** one read-only command reports source, remote, installed-binary, dirty-WIP, and alignment status. Preserve all dirty worktrees.
 - **R1 — real-task memory usefulness (decision complete):** the code-locked 20-task gate closed on 2026-08-11. The aggregate was a positive dogfood signal, so retain the current memory and continuity architecture without widening retrieval or opening another ranking/research lane. Routine positive sampling stops at the decision gate; record only meaningful missing, stale, or harmful recall events as regression evidence. See `docs/reports/goal-c-u/2026-08-11-r1-memory-usefulness-final-decision.md`.

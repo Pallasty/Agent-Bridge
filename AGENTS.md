@@ -6,6 +6,16 @@ rules. Read `docs/ACTIVE-PRODUCT-ROADMAP.md` before opening a product lane.
 Do not trigger CI. Synchronize code over SSH, include `[skip ci]` in sync
 commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.
 
+## Validation collection status
+
+Follow the current decision board and
+`docs/reports/goal-c-u/2026-09-08-validation-collection-closeout.md` before
+resuming a waiting collection goal. R4 is `HOLD_TRIAL_TOPOLOGY` with its
+existing authorization retained and first-event clock unstarted; R4-A is
+`FROZEN`; active R7 M2 sample pursuit is `HOLD`. Historical `collecting` work
+memories or source-stage "authorization pending" prose do not reopen these
+goals. The R7 procedure below remains available for ordinary-task diagnostics.
+
 ## R7 collection during ordinary work
 
 When resuming genuinely interrupted work, encountering a real task failure,

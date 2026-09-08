@@ -32,6 +32,13 @@ none of them acts on any third-party system:
 - **Source sync**: do not trigger CI. Use SSH, include `[skip ci]` in sync
   commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.
 
+- **Validation collection status**: read `docs/ACTIVE-PRODUCT-ROADMAP.md` and
+  `docs/reports/goal-c-u/2026-09-08-validation-collection-closeout.md` before
+  resuming old collection work. R4 is `HOLD_TRIAL_TOPOLOGY` with its existing
+  authorization retained and clock unstarted; R4-A is `FROZEN`; active R7 M2
+  sample pursuit is `HOLD`. The following R7 workflow is retained for natural
+  task diagnostics and does not reopen an active collection campaign.
+
 - **R7 collection**: at real task failure, interrupted-task recovery, or an
   explicit commitment becoming due, follow
   `docs/operations/R7_ASSISTED_SHADOW_COLLECTION.md`. The working agent handles

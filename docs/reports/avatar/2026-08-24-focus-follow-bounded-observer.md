@@ -4,6 +4,12 @@ Date: 2026-08-24
 
 Status: **merged and deployed; automated and bounded live dispatch passed; owner visual action accepted; persistent adoption not admitted**
 
+Current disposition, 2026-09-08: **R4-A FROZEN**. The two increments remain
+accepted implementation evidence, but the retained evidence does not establish
+sustained daily-use benefit. Active collection and expansion are closed;
+existing explicit foreground use remains available. See
+[the closeout and reopening condition](../goal-c-u/2026-09-08-validation-collection-closeout.md).
+
 ## Decision boundary
 
 This increment turns repeated manual recommendation checks into one bounded
