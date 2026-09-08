@@ -1,0 +1,193 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_candidate.v0",
+  "candidate_id": "contextual_memory_hand_authored_oracle",
+  "condition": "synthetic_reference",
+  "cases": [
+    {
+      "case_id": "audience_owner_detail",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "shared_commitment_summary",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_shared_commitment"
+          ]
+        },
+        {
+          "claim_id": "owner_detail",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_owner_detail"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "audience_collaborator_summary",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "shared_commitment_summary",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_shared_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "task_relevant",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "project_next_action",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_next_action"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "task_unrelated",
+      "abstained": true,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": []
+    },
+    {
+      "case_id": "deadline_before_update",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "current_commitment_deadline",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_deadline_v1"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "deadline_after_update",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "current_commitment_deadline",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_deadline_v2"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "entity_project_a",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_a_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "entity_project_b",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_b_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "revocation_current_action",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "current_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_plan_v2"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "revocation_retrospective",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "current_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_plan_v2"
+          ]
+        },
+        {
+          "claim_id": "revoked_plan_history",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_revocation_audit"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "provenance_inference_only",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "status_tentative_inference",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_agent_inference"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "provenance_externally_verified",
+      "abstained": false,
+      "context_tokens": 0,
+      "latency_ms": 0,
+      "claims": [
+        {
+          "claim_id": "status_verified_fact",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_external_check"
+          ]
+        }
+      ]
+    }
+  ]
+}

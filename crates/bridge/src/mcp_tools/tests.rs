@@ -669,7 +669,7 @@ fn session_bootstrap_schema_describes_targeted_policy_for_every_frontend() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble() {
+async fn session_bootstrap_contextual_feedback_preserves_relevance_across_output_modes() {
     let (hub, temp_dir) = mk_test_hub_with_store().await;
     let cwd = temp_dir.display().to_string();
     let store = hub.store.clone().expect("store");
@@ -718,28 +718,76 @@ async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble
         .await
         .expect("save feedback");
 
-    let out = SessionBootstrapTool::new(hub)
-        .execute(
-            json!({
-                "cwd": cwd,
-                "query": "practical compact recovery task",
-                "limit": 10,
-                "frontend": "warp",
-            }),
-            &ToolContext::default(),
-        )
+    store
+        .memory_save(&mk_mem_scoped(
+            "contextual_generic_feedback",
+            "feedback",
+            "Restaurant reservations require checking holiday opening hours.",
+            &[],
+            None,
+        ))
         .await
-        .expect("targeted compact bootstrap");
-    let text = result_text(&out);
-    assert!(text.contains("targeted_compact_task_state"), "{text}");
-    assert!(
-        text.contains("targeted_compact_semantic_feedback"),
-        "{text}"
-    );
-    assert!(text.contains("Continuity Kernel"), "{text}");
-    assert!(!text.contains("Feedback preamble"), "{text}");
+        .expect("save generic feedback");
+
+    // Hold the stored experience constant while changing task specificity
+    // and presentation. A targeted query omits the generic preamble on both
+    // frontends, while the relevant correction still reaches the main page.
+    for frontend in ["warp", "claude-code"] {
+        for targeted in [true, false] {
+            let mut args = json!({"cwd": cwd, "limit": 10, "frontend": frontend});
+            if targeted {
+                args["query"] = json!("practical compact recovery task");
+            }
+            let out = SessionBootstrapTool::new(hub.clone())
+                .execute(args, &ToolContext::default())
+                .await
+                .expect("paired feedback bootstrap");
+            let text = result_text(&out);
+            assert!(text.contains("targeted_compact_task_state"), "{text}");
+            assert!(
+                text.contains("targeted_compact_semantic_feedback"),
+                "task-relevant correction lost for {frontend}, targeted={targeted}: {text}"
+            );
+            assert!(text.contains("Continuity Kernel"), "{text}");
+            if targeted {
+                assert!(!text.contains("=== Feedback preamble"), "{text}");
+                assert!(!text.contains("=== Behavioral Feedback Preamble"), "{text}");
+            } else {
+                let header = if frontend == "warp" {
+                    "=== Feedback preamble"
+                } else {
+                    "=== Behavioral Feedback Preamble"
+                };
+                let preamble = bootstrap_test_section(&text, header);
+                assert!(
+                    preamble.contains("contextual_generic_feedback"),
+                    "{preamble}"
+                );
+                assert!(
+                    preamble.contains("targeted_compact_semantic_feedback"),
+                    "{preamble}"
+                );
+            }
+        }
+    }
+
+    // Omitting a preamble changes presentation, not the retained experience.
+    assert!(store
+        .memory_get("contextual_generic_feedback")
+        .await
+        .expect("read generic feedback")
+        .is_some());
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+fn bootstrap_test_section<'a>(text: &'a str, header: &str) -> &'a str {
+    let start = text
+        .find(header)
+        .unwrap_or_else(|| panic!("missing {header}: {text}"));
+    let tail = &text[start..];
+    let end = tail.find("\n=== ").unwrap_or(tail.len());
+    &tail[..end]
 }
 
 #[tokio::test]
@@ -3449,11 +3497,13 @@ async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_fo
 }
 
 #[tokio::test]
-async fn session_bootstrap_state_digest_keeps_only_priority_eligible_handoff() {
-    let (hub, _temp_dir) = mk_test_hub_with_store().await;
+async fn session_bootstrap_contextual_handoff_priority_follows_project_and_task() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
     let store = hub.store.clone().expect("store");
-    let cwd = "/tmp/bootstrap-state-digest-handoff";
-    let local_scope = format!("project:{cwd}");
+    let project_a = temp_dir.join("project-a").display().to_string();
+    let project_b = temp_dir.join("project-b").display().to_string();
+    let scope_a = format!("project:{project_a}");
+    let scope_b = format!("project:{project_b}");
     let actionable_tags = [
         "continuity_role:state",
         "continuity_actionability:plan_influence",
@@ -3462,69 +3512,139 @@ async fn session_bootstrap_state_digest_keeps_only_priority_eligible_handoff() {
 
     for row in [
         mk_mem_scoped(
-            "bootstrap_digest_exact_actionable",
+            "bootstrap_digest_project_a_current",
             "session_handoff",
-            "continue the exact project task",
+            "Orchard irrigation valve inspection awaits the pressure measurement.",
             &actionable_tags,
-            Some(&local_scope),
+            Some(&scope_a),
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_project_b_current",
+            "session_handoff",
+            "Planetarium telescope alignment needs a fresh calibration exposure.",
+            &actionable_tags,
+            Some(&scope_b),
         ),
         mk_mem_scoped(
             "bootstrap_digest_global_not_priority",
             "session_handoff",
-            "unrelated global historical handoff",
+            "Museum catalog provenance reconciliation archive transfer checklist.",
             &actionable_tags,
             None,
         ),
         mk_mem_scoped(
             "bootstrap_digest_stale_not_priority",
             "session_handoff",
-            "stale project handoff",
+            "Retired sprayer purchase estimate from the previous growing season.",
             &[
                 "continuity_role:state",
                 "continuity_actionability:plan_influence",
                 "continuity_confidence:stale",
             ],
-            Some(&local_scope),
+            Some(&scope_a),
         ),
     ] {
         store.memory_save(&row).await.expect("save handoff row");
     }
 
-    let out = SessionBootstrapTool::new(hub)
-        .execute(
-            json!({
+    // The same store must orient each project to its own commitment. The
+    // global row deliberately matches the query exactly: a one-row targeted
+    // page tests the unconditional handoff slot under real ranking pressure.
+    for (cwd, current, foreign) in [
+        (
+            &project_a,
+            "bootstrap_digest_project_a_current",
+            "bootstrap_digest_project_b_current",
+        ),
+        (
+            &project_b,
+            "bootstrap_digest_project_b_current",
+            "bootstrap_digest_project_a_current",
+        ),
+    ] {
+        for targeted in [true, false] {
+            let mut args = json!({
                 "cwd": cwd,
-                "limit": 10,
-                "frontend": "claude-code",
-            }),
-            &ToolContext::default(),
-        )
-        .await
-        .expect("bootstrap state digest");
-    let text = result_text(&out);
-    let digest_start = text
-        .find("=== Project State Digest")
-        .expect("state digest should be present");
-    let digest_tail = &text[digest_start..];
-    let digest_end = digest_tail
-        .get(1..)
-        .and_then(|tail| tail.find("\n=== "))
-        .map(|offset| offset + 1)
-        .unwrap_or(digest_tail.len());
-    let digest = &digest_tail[..digest_end];
+                "limit": if targeted { 1 } else { 10 },
+                "frontend": if targeted { "warp" } else { "claude-code" },
+            });
+            if targeted {
+                args["query"] =
+                    json!("Museum catalog provenance reconciliation archive transfer checklist.");
+            }
+            let out = SessionBootstrapTool::new(hub.clone())
+                .execute(args, &ToolContext::default())
+                .await
+                .expect("paired project bootstrap");
+            let text = result_text(&out);
+            let digest = bootstrap_test_section(
+                &text,
+                if targeted {
+                    "=== State digest"
+                } else {
+                    "=== Project State Digest"
+                },
+            );
+            assert!(
+                digest.contains(current),
+                "current project state lost: {digest}"
+            );
+            for excluded in [
+                foreign,
+                "bootstrap_digest_global_not_priority",
+                "bootstrap_digest_stale_not_priority",
+            ] {
+                assert!(
+                    !digest.contains(excluded),
+                    "{excluded} must not occupy project-digest priority: {digest}"
+                );
+            }
 
-    assert!(
-        digest.contains("bootstrap_digest_exact_actionable"),
-        "exact actionable handoff should orient the project digest: {digest}"
-    );
-    assert!(
-        !digest.contains("bootstrap_digest_global_not_priority"),
-        "global handoff must not receive project-digest priority: {digest}"
-    );
-    assert!(
-        !digest.contains("bootstrap_digest_stale_not_priority"),
-        "stale handoff must not receive project-digest priority: {digest}"
-    );
+            if targeted {
+                // The kernel is built from the selected main page. Check it
+                // separately from the independently assembled state digest.
+                let selected = bootstrap_test_section(&text, "=== Continuity Kernel");
+                assert!(
+                    selected.contains(current),
+                    "current handoff lost its prefix slot: {selected}"
+                );
+                for excluded in [
+                    foreign,
+                    "bootstrap_digest_global_not_priority",
+                    "bootstrap_digest_stale_not_priority",
+                ] {
+                    assert!(
+                        !selected.contains(excluded),
+                        "{excluded} displaced the current handoff: {selected}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Priority exclusion is not deletion: these historical/global records
+    // remain available through normal scoped search after all four calls.
+    for (key, query) in [
+        (
+            "bootstrap_digest_global_not_priority",
+            "Museum catalog provenance",
+        ),
+        (
+            "bootstrap_digest_stale_not_priority",
+            "Retired sprayer purchase",
+        ),
+    ] {
+        let hits = store
+            .memory_search_semantic_in_scope(query, &project_a, 10, 0.15)
+            .await
+            .expect("search non-priority history");
+        assert!(
+            hits.iter().any(|hit| hit.record.key == key),
+            "{key} must remain searchable"
+        );
+    }
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[tokio::test]

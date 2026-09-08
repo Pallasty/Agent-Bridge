@@ -64,6 +64,15 @@ measures.
 3. **Reversible bodies (about 10%)** — Avatar, bubbles, and voice only where an owner-visible expression need and attention-cost measure justify them. Presentation may be autonomous inside its admitted reversible boundary.
 4. **Research (at most 5%)** — world models, compressive/private-memory evaluation, trajectory learning, and broader embodiment. These remain default-frozen until a current user problem and measurable trial justify reopening one lane.
 
+On 2026-09-08 the owner endorsed incremental contextual memory work: retrieval
+scope, depth of use, and expression should improve through experience under
+audience, task, scene, and time conditions. The admitted first increment reuses
+the existing continuity scorer and isolated bootstrap tests to validate paired
+contexts. It establishes measurement, not a learned policy or production benefit.
+See [the scoped plan](design/CONTEXTUAL-MEMORY-EVOLUTION.md). The historical
+portfolio digest `NO_ADVANCE` remains in force; further behavior changes should
+address recurring natural failures with measured cost.
+
 ## Current decision board
 
 This table is authoritative as of 2026-09-03. `Source` refers to the published

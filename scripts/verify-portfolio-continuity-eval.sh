@@ -370,3 +370,6 @@ if missing_report:
 
 print("Portfolio continuity evaluation verification passed")
 PY
+
+# Keep the paired-context oracle checks on the existing evaluation entrypoint.
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/tests/test_contextual_memory_contract.py"
