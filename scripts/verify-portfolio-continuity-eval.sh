@@ -373,3 +373,4 @@ PY
 
 # Keep the paired-context oracle checks on the existing evaluation entrypoint.
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/tests/test_contextual_memory_contract.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/tests/test_contextual_memory_answer_trial.py"

@@ -1,0 +1,199 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_candidate.v0",
+  "candidate_id": "contextual_actual_answers_v2_reviewed",
+  "condition": "synthetic_actual_answers",
+  "cases": [
+    {
+      "case_id": "audience_owner_detail",
+      "abstained": false,
+      "context_tokens": 9750,
+      "latency_ms": 12296.686,
+      "claims": [
+        {
+          "claim_id": "shared_commitment_summary",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_shared_commitment"
+          ]
+        },
+        {
+          "claim_id": "owner_detail",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_owner_detail"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "audience_collaborator_summary",
+      "abstained": false,
+      "context_tokens": 9764,
+      "latency_ms": 9639.905,
+      "claims": [
+        {
+          "claim_id": "shared_commitment_summary",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_shared_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "task_relevant",
+      "abstained": false,
+      "context_tokens": 9557,
+      "latency_ms": 15055.755,
+      "claims": [
+        {
+          "claim_id": "project_next_action",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_next_action"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "task_unrelated",
+      "abstained": true,
+      "context_tokens": 9560,
+      "latency_ms": 11194.729,
+      "claims": []
+    },
+    {
+      "case_id": "deadline_before_update",
+      "abstained": false,
+      "context_tokens": 9901,
+      "latency_ms": 8888.655,
+      "claims": [
+        {
+          "claim_id": "current_commitment_deadline",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_deadline_v1"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "deadline_after_update",
+      "abstained": false,
+      "context_tokens": 9904,
+      "latency_ms": 10388.977,
+      "claims": [
+        {
+          "claim_id": "current_commitment_deadline",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_deadline_v2"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "entity_project_a",
+      "abstained": true,
+      "context_tokens": 9358,
+      "latency_ms": 10841.608,
+      "claims": []
+    },
+    {
+      "case_id": "entity_project_b",
+      "abstained": true,
+      "context_tokens": 9362,
+      "latency_ms": 10693.746,
+      "claims": []
+    },
+    {
+      "case_id": "revocation_current_action",
+      "abstained": false,
+      "context_tokens": 9928,
+      "latency_ms": 11395.09,
+      "claims": [
+        {
+          "claim_id": "current_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_plan_v2"
+          ]
+        },
+        {
+          "claim_id": "revoked_plan_history",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_plan_v1"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "revocation_retrospective",
+      "abstained": false,
+      "context_tokens": 9938,
+      "latency_ms": 10241.204,
+      "claims": [
+        {
+          "claim_id": "revoked_plan_history",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_plan_v1",
+            "syn_revocation_audit"
+          ]
+        },
+        {
+          "claim_id": "current_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_plan_v2"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "provenance_inference_only",
+      "abstained": false,
+      "context_tokens": 9749,
+      "latency_ms": 11644.208,
+      "claims": [
+        {
+          "claim_id": "status_tentative_inference",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_agent_inference"
+          ]
+        },
+        {
+          "claim_id": "unmapped_factual_1",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_external_check"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "provenance_externally_verified",
+      "abstained": false,
+      "context_tokens": 9747,
+      "latency_ms": 10337.835,
+      "claims": [
+        {
+          "claim_id": "status_verified_fact",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_external_check"
+          ]
+        },
+        {
+          "claim_id": "prior_inference_history",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_agent_inference"
+          ]
+        }
+      ]
+    }
+  ]
+}

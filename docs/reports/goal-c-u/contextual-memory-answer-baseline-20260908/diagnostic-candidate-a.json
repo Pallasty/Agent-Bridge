@@ -1,0 +1,67 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_candidate.v0",
+  "candidate_id": "entity_query_review_a",
+  "condition": "synthetic_entity_query_diagnostic",
+  "cases": [
+    {
+      "case_id": "entity_project_a",
+      "abstained": false,
+      "context_tokens": 9533,
+      "latency_ms": 11544.735,
+      "claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_a_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "entity_project_b",
+      "abstained": false,
+      "context_tokens": 9529,
+      "latency_ms": 10843.003,
+      "claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_b_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "heldout_project_c",
+      "abstained": false,
+      "context_tokens": 9532,
+      "latency_ms": 12650.272,
+      "claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_c_commitment"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "heldout_project_d",
+      "abstained": false,
+      "context_tokens": 9530,
+      "latency_ms": 10843.418,
+      "claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "confidence": "supported",
+          "evidence_keys": [
+            "syn_project_d_commitment"
+          ]
+        }
+      ]
+    }
+  ]
+}

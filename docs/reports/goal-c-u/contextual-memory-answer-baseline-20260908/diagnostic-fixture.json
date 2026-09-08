@@ -1,0 +1,118 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_eval_fixture.v0",
+  "fixture_id": "synthetic_entity_query_diagnostic_20260908",
+  "description": "Synthetic redacted illustrative constraints only: six pairs share identical evidence catalogs while explicit request context or as_of changes the expected reviewed labels. Audience permissions are stipulated fixture inputs: owner may receive details; authorized collaborator may receive the shared summary only. No demographics, inferred permissions, learned policy, or product-quality result. The unrelated-task case requests supported project memory for an unrelated task and requires memory abstention, not silence in general conversation; the ordinary unrelated task can still be answered normally. An active revocation audit describes a historical event; it does not reactivate the superseded plan. History is optional for current action and required for retrospective. status_tentative_inference is a reviewed label for an explicitly attributed unverified inference; confidence=supported supports that attribution, not the underlying proposition. Only syn_external_check supports status_verified_fact after its validity begins; prior_inference_history may preserve the earlier attribution without restoring a tentative current status. The companion candidate is a hand-authored synthetic_reference scorer oracle only. All context_tokens and latency_ms values are unmeasured placeholders (0), not zero-cost execution or optimization or benchmark results. Existing scorer validates label/evidence obligations only; natural-language semantics, retrieval scope, actual access control, learning, and runtime behavior are not evaluated.",
+  "thresholds": {
+    "min_supported_claim_coverage": 1.0,
+    "min_evidence_precision": 1.0,
+    "max_stale_evidence_refs": 0,
+    "max_unknown_evidence_refs": 0,
+    "max_unsupported_claims": 0,
+    "max_forbidden_claims": 0,
+    "max_unsupported_evidence_claims": 0,
+    "require_all_cases_pass": true,
+    "require_all_abstention_cases_pass": true
+  },
+  "cases": [
+    {
+      "case_id": "entity_project_a",
+      "prompt_class": "project_a_commitment_request",
+      "as_of": 100,
+      "requires_abstention": false,
+      "evidence_catalog": [
+        {
+          "key": "syn_project_a_commitment",
+          "status": "active",
+          "valid_from": 0,
+          "valid_until": null
+        }
+      ],
+      "required_claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "weight": 1.0,
+          "accepted_evidence_keys": [
+            "syn_project_a_commitment"
+          ]
+        }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": []
+    },
+    {
+      "case_id": "entity_project_b",
+      "prompt_class": "project_a_commitment_request",
+      "as_of": 100,
+      "requires_abstention": false,
+      "evidence_catalog": [
+        {
+          "key": "syn_project_b_commitment",
+          "status": "active",
+          "valid_from": 0,
+          "valid_until": null
+        }
+      ],
+      "required_claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "weight": 1.0,
+          "accepted_evidence_keys": [
+            "syn_project_b_commitment"
+          ]
+        }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": []
+    },
+    {
+      "case_id": "heldout_project_c",
+      "prompt_class": "project_a_commitment_request",
+      "as_of": 100,
+      "requires_abstention": false,
+      "evidence_catalog": [
+        {
+          "key": "syn_project_c_commitment",
+          "status": "active",
+          "valid_from": 0,
+          "valid_until": null
+        }
+      ],
+      "required_claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "weight": 1.0,
+          "accepted_evidence_keys": [
+            "syn_project_c_commitment"
+          ]
+        }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": []
+    },
+    {
+      "case_id": "heldout_project_d",
+      "prompt_class": "project_a_commitment_request",
+      "as_of": 100,
+      "requires_abstention": false,
+      "evidence_catalog": [
+        {
+          "key": "syn_project_d_commitment",
+          "status": "active",
+          "valid_from": 0,
+          "valid_until": null
+        }
+      ],
+      "required_claims": [
+        {
+          "claim_id": "current_project_commitment",
+          "weight": 1.0,
+          "accepted_evidence_keys": [
+            "syn_project_d_commitment"
+          ]
+        }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": []
+    }
+  ]
+}

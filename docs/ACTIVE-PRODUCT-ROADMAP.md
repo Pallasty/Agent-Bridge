@@ -69,7 +69,7 @@ scope, depth of use, and expression should improve through experience under
 audience, task, scene, and time conditions. The admitted first increment reuses
 the existing continuity scorer and isolated bootstrap tests to validate paired
 contexts. It establishes measurement, not a learned policy or production benefit.
-See [the scoped plan](design/CONTEXTUAL-MEMORY-EVOLUTION.md). The historical
+See [the scoped plan](design/CONTEXTUAL-MEMORY-EVOLUTION.md). The subsequent owner-authorized actual-answer trial is complete: 10/12 semantic task completions, 7/12 under the unchanged strict scorer, and one bounded entity-query diagnostic; no production runtime promotion. See [the answer baseline](reports/goal-c-u/2026-09-08-contextual-memory-answer-baseline.md). The historical
 portfolio digest `NO_ADVANCE` remains in force; further behavior changes should
 address recurring natural failures with measured cost.
 

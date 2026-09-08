@@ -541,8 +541,11 @@ def validate_spec(value: dict[str, Any]) -> dict[str, Any]:
 
 
 class McpClient:
-    def __init__(self, binary: Path, cwd: Path, db_path: Path, stderr_path: Path, timeout: float):
-        env = os.environ.copy()
+    def __init__(
+        self, binary: Path, cwd: Path, db_path: Path, stderr_path: Path,
+        timeout: float, child_env: dict[str, str] | None = None,
+    ):
+        env = os.environ.copy() if child_env is None else child_env.copy()
         env.update(
             {
                 "AGENT_BRIDGE_DB": str(db_path),

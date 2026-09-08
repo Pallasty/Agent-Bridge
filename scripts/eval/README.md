@@ -502,7 +502,32 @@ database read-only, makes an online backup, and launches Agent-Bridge with
 stderr confirms that exact snapshot path. The source DB path is never passed
 to the child.
 
-The workflow has four explicit stages:
+`contextual_memory_answer_trial.py` adds a bounded synthetic answer trial. It
+seeds a fresh isolated store, retains actual `memory_search` results, and runs
+one fresh Codex invocation per request in a neutral empty directory. Generation
+does not receive the scoring rubric or reference labels. Independent review
+must map the retained answers to the existing scorer; the runner does not judge
+semantics. Capture uses the hash embedding backend; its fixed `hybrid` search
+path is FTS plus graph expansion, not vector fusion. This is not production
+semantic-quality or natural-task evidence. The generation phase calls the
+configured provider with the synthetic prompt and retrieved synthetic records.
+
+```bash
+python3 scripts/eval/contextual_memory_answer_trial.py capture \
+  --input scripts/eval/fixtures/contextual_memory_answer_stimuli.json \
+  --output /var/tmp/ab-contextual-capture
+python3 scripts/eval/contextual_memory_answer_trial.py generate \
+  --input scripts/eval/fixtures/contextual_memory_answer_stimuli.json \
+  --capture /var/tmp/ab-contextual-capture --output /var/tmp/ab-contextual-answers
+```
+
+Output directories must be new. Failed invocations are retained, without retry
+or answer selection. The requested model/effort are `gpt-6-astra`/`medium`;
+actual model identity remains unknown when the provider omits it. The report
+and retained semantic review explain distinctions that the strict label scorer
+cannot express: [2026-09-08 answer baseline](../../docs/reports/goal-c-u/2026-09-08-contextual-memory-answer-baseline.md).
+
+The portfolio adapter workflow has four explicit stages:
 
 ```bash
 python3 scripts/eval/portfolio_continuity_ab_trial.py capture ...
