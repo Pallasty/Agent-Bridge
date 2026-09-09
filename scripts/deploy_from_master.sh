@@ -3762,7 +3762,11 @@ new_size="$(file_size "$NEW_BIN")"
 cur_size="$( [ -f "$REAL_PATH" ] && file_size "$REAL_PATH" || echo 0 )"
 say
 say "=== deploy plan ==="
-say "  profile    : $DEPLOY_PROFILE (publication only; no R9 state migration)"
+if [ "$DEPLOY_PROFILE" = maintenance ]; then
+    say "  profile    : maintenance (publication only; no R9 state migration)"
+else
+    say "  profile    : r9 (existing platform service-refresh rules apply)"
+fi
 say "  source     : $PROVENANCE"
 say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"

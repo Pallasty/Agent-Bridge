@@ -27,6 +27,12 @@ under the provisioning mutex, using the pinned SSH authority. Verify provisionin
 custody again. The candidate must be merged and independently read back from
 master; commits include `[skip ci]`, and no CI is dispatched.
 
+Git may create freshly fetched, owned loose objects or pack/index/reverse-index files with mode
+`0400` even under `umask 077`. Before custody verification, normalize only these
+physical, singly linked Git object files to the required `0600` under
+the same mutex. Preserve their content and reject unexpected ownership, links,
+or paths; do not relax provisioning's exact private-mode checks.
+
 Invoke the publisher from a clean environment with:
 
 ```text
