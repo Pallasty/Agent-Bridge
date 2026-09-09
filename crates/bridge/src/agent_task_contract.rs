@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 pub const AGENT_TASK_CONTRACT_SCHEMA_V0: &str = "agent_bridge.agent_task_contract.v0";
 
+/// Optional advisory text, separate from the compiled contract and its authority.
+pub const AGENT_TASK_CONTRACT_NEXT_STEP_REVIEW: &str =
+    include_str!("agent_task_contract_next_step_review.md");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorityBoundary {

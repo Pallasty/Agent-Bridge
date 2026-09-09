@@ -1137,6 +1137,22 @@ fn result_json(res: &ToolResult) -> Value {
     serde_json::from_str(&result_text(res)).expect("valid json result")
 }
 
+fn agent_task_contract_preview_test_contract() -> Value {
+    json!({
+        "schema_version": "agent_bridge.agent_task_contract.v0",
+        "contract_id": "contract:mcp:test",
+        "revision": 1,
+        "objective": "Preview a bounded task",
+        "this_attempt_only": ["preview"],
+        "reserved_actions": ["spawn"],
+        "acceptance_criteria": ["ready"],
+        "authority_boundary": "read_only",
+        "attempt_no": 1,
+        "attempt_budget": 1,
+        "changed_variable": "preview compiler"
+    })
+}
+
 #[tokio::test]
 async fn agent_task_contract_preview_is_pure_and_exposed_to_codex() {
     let tool = AgentTaskContractPreviewTool::new();
@@ -1190,6 +1206,159 @@ async fn agent_task_contract_preview_is_pure_and_exposed_to_codex() {
         .await
         .expect("malformed input should return an MCP result");
     assert!(invalid.is_error);
+}
+
+#[tokio::test]
+async fn agent_task_contract_preview_next_step_review_preserves_default_output() {
+    let tool = AgentTaskContractPreviewTool::new();
+    let ctx = ToolContext::default();
+    let contract = agent_task_contract_preview_test_contract();
+    let expected = json!(preview_agent_task_contract(
+        serde_json::from_value(contract.clone()).unwrap()
+    ));
+    let default = tool
+        .execute(json!({"contract": contract.clone()}), &ctx)
+        .await
+        .unwrap();
+    assert!(!default.is_error);
+    assert_eq!(result_json(&default), expected);
+    assert!(expected.get("next_step_review_instruction").is_none());
+
+    let disabled = tool
+        .execute(
+            json!({"contract": contract.clone(), "include_next_step_review": false}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(!disabled.is_error);
+    assert_eq!(result_text(&disabled), result_text(&default));
+
+    let enabled = tool
+        .execute(
+            json!({"contract": contract, "include_next_step_review": true}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(!enabled.is_error);
+    let mut enabled_body = result_json(&enabled);
+    assert_eq!(
+        enabled_body
+            .as_object_mut()
+            .unwrap()
+            .remove("next_step_review_instruction"),
+        Some(json!(
+            crate::agent_task_contract::AGENT_TASK_CONTRACT_NEXT_STEP_REVIEW
+        ))
+    );
+    // The opt-in attachment must leave every existing field unchanged.
+    assert_eq!(enabled_body, expected);
+
+    let input_schema = tool.schema().input_schema;
+    assert_eq!(
+        input_schema["properties"]["include_next_step_review"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        input_schema["properties"]["include_next_step_review"]["default"],
+        false
+    );
+    assert_eq!(input_schema["required"], json!(["contract"]));
+}
+
+#[tokio::test]
+async fn agent_task_contract_preview_next_step_review_never_attaches_to_blocked() {
+    let tool = AgentTaskContractPreviewTool::new();
+    let mut contract = agent_task_contract_preview_test_contract();
+    contract["attempt_no"] = json!(2);
+    let expected = json!(preview_agent_task_contract(
+        serde_json::from_value(contract.clone()).unwrap()
+    ));
+    assert_eq!(expected["status"], "blocked");
+    assert_eq!(expected["compiled_instruction"], "");
+    for enabled in [false, true] {
+        let result = tool
+            .execute(
+                json!({"contract": contract.clone(), "include_next_step_review": enabled}),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert_eq!(result_json(&result), expected);
+    }
+}
+
+#[tokio::test]
+async fn agent_task_contract_preview_next_step_review_rejects_non_boolean() {
+    let tool = AgentTaskContractPreviewTool::new();
+    for invalid in [json!(null), json!("true"), json!(0), json!([]), json!({})] {
+        let result = tool
+            .execute(
+                json!({
+                    "contract": agent_task_contract_preview_test_contract(),
+                    "include_next_step_review": invalid
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert_eq!(
+            result_text(&result),
+            "include_next_step_review must be a boolean"
+        );
+    }
+}
+
+#[tokio::test]
+async fn agent_task_contract_preview_next_step_review_does_not_execute_requested_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let existing = dir.path().join("retained-memory.txt");
+    let proposed = dir.path().join("proposed-result.txt");
+    std::fs::write(&existing, "retained evidence").unwrap();
+    let mut ctx = ToolContext::default();
+    ctx.extras.insert("cwd".into(), json!(dir.path()));
+    let mut contract = agent_task_contract_preview_test_contract();
+    contract["objective"] = json!(format!(
+        "Overwrite {} and create {}",
+        existing.display(),
+        proposed.display()
+    ));
+    contract["this_attempt_only"] = json!(["write the proposed result"]);
+    contract["authority_boundary"] = json!("project_write");
+    contract["parent_evidence_refs"] = json!([{
+        "reference": "owner:test:accepted",
+        "verdict": "accepted",
+        "authority_boundary": "project_write"
+    }]);
+    let result = AgentTaskContractPreviewTool::new()
+        .execute(
+            json!({"contract": contract, "include_next_step_review": true}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let body = result_json(&result);
+    assert_eq!(body["status"], "ready");
+    assert!(body["next_step_review_instruction"].is_string());
+    assert_eq!(body["safety"]["read_only"], true);
+    for capability in [
+        "can_spawn_agent",
+        "can_write_memory",
+        "can_mutate_work_memory",
+        "can_promote_canon",
+        "can_enable_runtime",
+    ] {
+        assert_eq!(body["safety"][capability], false);
+    }
+    assert_eq!(
+        std::fs::read_to_string(existing).unwrap(),
+        "retained evidence"
+    );
+    assert!(!proposed.exists());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 }
 
 #[cfg(feature = "embodiment-runtime-p4")]

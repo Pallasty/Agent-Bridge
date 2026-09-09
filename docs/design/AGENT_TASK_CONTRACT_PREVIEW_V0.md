@@ -83,3 +83,31 @@ to execute the compiled instruction.
 ```
 
 Design discussion: Agent-Bridge forum thread `#142`.
+
+## Optional next-step review
+
+Set the top-level `include_next_step_review` boolean to `true` alongside the
+existing `contract` to request an advisory instruction. The default is `false`;
+omitting the field or sending `false` preserves the existing response. Non-boolean
+values, including `null`, return an input error.
+
+A `ready` response then adds `next_step_review_instruction`, asking the receiving
+assistant to connect its next action to existing acceptance criteria, explain
+why supporting work is necessary now, and honor the user's latest explicit
+changes and existing authorization. Missing facts stay unknown. The assistant
+should take an available useful action when the evidence supports it, and state
+a specific discrepancy when a material change is uncertain. This does not require
+another document or repeated approval.
+
+The [source instruction](../../crates/bridge/src/agent_task_contract_next_step_review.md)
+is separate from `compiled_instruction`. Contracts, validation, effective state,
+authority, completion rules, and safety fields keep their existing meanings.
+A `blocked` response never includes the advisory. The pure compiler and its
+other callers do not opt in implicitly.
+
+This is a caller-selected prompt, not a semantic drift detector. The preview
+does not retrieve the original request, verify acceptance criteria against user
+intent, or run the suggested action. Callers must supply that context and read
+the additional response field for the instruction to have any effect. It cannot
+establish that a task is complete or useful to the user. An updated MCP process
+and refreshed client tool schema are needed before using the new parameter.

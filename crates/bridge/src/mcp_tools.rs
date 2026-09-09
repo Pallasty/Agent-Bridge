@@ -23922,6 +23922,11 @@ impl McpTool for AgentTaskContractPreviewTool {
                 "type": "object",
                 "required": ["contract"],
                 "properties": {
+                    "include_next_step_review": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Attach a separate advisory next-step review instruction only when the preview is ready. Does not change the contract, compiled instruction, or authority."
+                    },
                     "contract": {
                         "type": "object",
                         "additionalProperties": false,
@@ -24014,6 +24019,15 @@ impl McpTool for AgentTaskContractPreviewTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let include_next_step_review = match args.get("include_next_step_review") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => {
+                return Ok(ToolResult::error(
+                    "include_next_step_review must be a boolean",
+                ))
+            }
+        };
         let Some(contract_value) = args.get("contract") else {
             return Ok(ToolResult::error("missing required object: contract"));
         };
@@ -24026,7 +24040,12 @@ impl McpTool for AgentTaskContractPreviewTool {
             }
         };
         let preview = preview_agent_task_contract(contract);
-        Ok(ToolResult::json_text(&json!(preview)))
+        let mut body = json!(preview);
+        if include_next_step_review && preview.status == "ready" {
+            body["next_step_review_instruction"] =
+                json!(crate::agent_task_contract::AGENT_TASK_CONTRACT_NEXT_STEP_REVIEW);
+        }
+        Ok(ToolResult::json_text(&body))
     }
 }
 
