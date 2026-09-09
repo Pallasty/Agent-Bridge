@@ -1,0 +1,10 @@
+[Unit]
+Description=Agent-Bridge LAN memory sync using the installed engine
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/agent-bridge/lan-sync/lan-memory-sync.py --config %h/.config/agent-bridge/lan-sync.json run
+SuccessExitStatus=3
+TimeoutStartSec=240
+StandardOutput=append:%h/.cache/agent-bridge/lan-sync/service.log
+StandardError=append:%h/.cache/agent-bridge/lan-sync/service.log

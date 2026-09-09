@@ -1,0 +1,12 @@
+[Unit]
+Description=Agent-Bridge low-frequency cloud sync independent of LAN cadence
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=1h
+AccuracySec=1min
+Unit=agent-bridge-sync-cloud.service
+Persistent=false
+
+[Install]
+WantedBy=timers.target

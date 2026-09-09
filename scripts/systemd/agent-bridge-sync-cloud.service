@@ -1,0 +1,10 @@
+[Unit]
+Description=Agent-Bridge hourly cloud compatibility and backup bridge
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/agent-bridge/lan-sync/lan-memory-sync.py --config %h/.config/agent-bridge/lan-sync.json run --channel cloud
+SuccessExitStatus=3
+TimeoutStartSec=240
+StandardOutput=append:%h/.cache/agent-bridge/lan-sync/cloud-service.log
+StandardError=append:%h/.cache/agent-bridge/lan-sync/cloud-service.log
