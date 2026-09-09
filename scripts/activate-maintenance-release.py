@@ -9,6 +9,8 @@ Caught failures restore completed moves in reverse.
 
 import argparse
 import contextlib
+import ctypes
+import errno
 import fcntl
 import hashlib
 import json
@@ -103,6 +105,31 @@ def publisher_assets():
     return arrays
 
 
+def parse_asset_inventory(root, records):
+    release = root / "maintenance"
+    require(isinstance(records, list) and 2 <= len(records) <= 256, "invalid frozen asset list")
+    result = []
+    seen = set()
+    ranks = []
+    for item in records:
+        require(isinstance(item, dict) and set(item) == {"label", "source", "mode"}, "invalid frozen asset entry")
+        label, source, mode = item["label"], absolute(item["source"]), item["mode"]
+        require(label in {"wrapper", "adapter", "companion", "policy", "runtime"}, "invalid frozen asset category")
+        prefixes = {"companion": release / "share/ab-tts", "policy": release / "share", "runtime": release / "lib/agent-bridge/scripts"}
+        if label == "wrapper":
+            require(source == root / "bin/agent-bridge", "invalid frozen wrapper path")
+        elif label == "adapter":
+            require(source == release / "share/ab-tts/audio_embody.py", "invalid frozen adapter path")
+        else:
+            require(prefixes[label] in source.parents and ".." not in source.parts, "frozen asset path escapes its category")
+        require(mode == (0o644 if label == "policy" else 0o755) and source not in seen, "invalid frozen asset mode or duplicate")
+        seen.add(source)
+        ranks.append(["wrapper", "adapter", "companion", "policy", "runtime"].index(label))
+        result.append((label, source, mode))
+    require(ranks == sorted(ranks) and ranks.count(0) == 1 and ranks.count(1) == 1, "invalid frozen asset order")
+    return result
+
+
 def assets(root, payload=None):
     release = root / "maintenance"
     if payload is not None:
@@ -110,27 +137,7 @@ def assets(root, payload=None):
         private(inventory, root, 0o600)
         require(inventory.stat().st_size <= 65536, "frozen asset list is too large")
         records = json.loads(inventory.read_text())
-        require(isinstance(records, list) and 2 <= len(records) <= 256, "invalid frozen asset list")
-        result = []
-        seen = set()
-        ranks = []
-        for item in records:
-            require(isinstance(item, dict) and set(item) == {"label", "source", "mode"}, "invalid frozen asset entry")
-            label, source, mode = item["label"], absolute(item["source"]), item["mode"]
-            require(label in {"wrapper", "adapter", "companion", "policy", "runtime"}, "invalid frozen asset category")
-            prefixes = {"companion": release / "share/ab-tts", "policy": release / "share", "runtime": release / "lib/agent-bridge/scripts"}
-            if label == "wrapper":
-                require(source == root / "bin/agent-bridge", "invalid frozen wrapper path")
-            elif label == "adapter":
-                require(source == release / "share/ab-tts/audio_embody.py", "invalid frozen adapter path")
-            else:
-                require(prefixes[label] in source.parents and ".." not in source.parts, "frozen asset path escapes its category")
-            require(mode == (0o644 if label == "policy" else 0o755) and source not in seen, "invalid frozen asset mode or duplicate")
-            seen.add(source)
-            ranks.append(["wrapper", "adapter", "companion", "policy", "runtime"].index(label))
-            result.append((label, source, mode))
-        require(ranks == sorted(ranks) and ranks.count(0) == 1 and ranks.count(1) == 1, "invalid frozen asset order")
-        return result
+        return parse_asset_inventory(root, records)
     listed = publisher_assets()
     return [
         ("wrapper", root / "bin/agent-bridge", 0o755),
@@ -245,20 +252,60 @@ def private_mkdir(path, root):
     private(path, root, 0o700, directory=True)
 
 
+def rename_without_replace(source, destination):
+    # This helper already requires Linux/ELF. renameat2 prevents replacing even
+    # an empty existing directory if another actor creates the final name.
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = libc.renameat2
+    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.restype = ctypes.c_int
+    if renameat2(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(destination))
+
+
+def clean_interrupted_staging(root, final, declared):
+    # Only this identity's reserved staging names, while holding the publisher
+    # mutex. Reject links, foreign ownership and unexpected content instead of
+    # traversing or deleting an unknown directory.
+    allowed = {Path("asset-list.json"), Path("fresh-mcp-admitted.meta"), Path("bin/agent-bridge.real")}
+    allowed.update(payload_path(root, final, source).relative_to(final) for _, source, _ in declared)
+    directories = {parent for path in allowed for parent in path.parents if str(parent) != "."}
+    pattern = re.compile(r"\.staging-" + re.escape(final.name) + r"-[0-9a-f]{32}")
+    for stage in final.parent.iterdir():
+        if not pattern.fullmatch(stage.name):
+            continue
+        private(stage, root, 0o700, directory=True)
+        for child in stage.rglob("*"):
+            relative = child.relative_to(stage)
+            require(not child.is_symlink(), "interrupted staging contains a symlink")
+            if child.is_dir():
+                require(relative in directories, "interrupted staging contains an unexpected directory")
+                private(child, root, 0o700, directory=True)
+            else:
+                manifest_temp = len(relative.parts) == 1 and re.fullmatch(r"asset-list\.json\.tmp-[0-9a-f]{32}", relative.name)
+                require((relative in allowed or manifest_temp) and child.is_file(), "interrupted staging contains an unexpected file")
+                require(child.stat().st_uid == os.getuid() and not stat.S_IMODE(child.stat().st_mode) & 0o022, "interrupted staging file is not private publisher content")
+        shutil.rmtree(stage)
+    sync_directory(final.parent)
+
+
 def freeze_release(root, receipt, admitted):
-    payload = release_path(root, admitted)
-    if os.path.lexists(payload):
-        validate_frozen(root, payload)
-        return payload
-    private_mkdir(payload.parent, root)
-    payload.mkdir(mode=0o700)  # Exclusive creation: never overwrite a prior release.
-    sync_directory(payload.parent)
+    final = release_path(root, admitted)
+    if os.path.lexists(final):
+        validate_frozen(root, final)
+        return final
+    private_mkdir(final.parent, root)
+    declared = assets(root)
+    clean_interrupted_staging(root, final, declared)
+    stage = final.with_name(".staging-" + final.name + "-" + uuid.uuid4().hex)
+    stage.mkdir(mode=0o700)
+    sync_directory(stage.parent)
     try:
-        declared = assets(root)
-        save_manifest(payload / "asset-list.json", [{"label": label, "source": str(source), "mode": mode} for label, source, mode in declared])
-        copies = [(root / "maintenance/bin/agent-bridge.real", payload / "bin/agent-bridge.real", 0o755)]
-        copies += [(source, payload_path(root, payload, source), mode) for _, source, mode in declared]
-        copies.append((receipt, payload / "fresh-mcp-admitted.meta", 0o600))
+        save_manifest(stage / "asset-list.json", [{"label": label, "source": str(source), "mode": mode} for label, source, mode in declared])
+        copies = [(root / "maintenance/bin/agent-bridge.real", stage / "bin/agent-bridge.real", 0o755)]
+        copies += [(source, payload_path(root, stage, source), mode) for _, source, mode in declared]
+        copies.append((receipt, stage / "fresh-mcp-admitted.meta", 0o600))
         for source, destination, mode in copies:
             private_mkdir(destination.parent, root)
             source_hash = digest(source)
@@ -270,13 +317,22 @@ def freeze_release(root, receipt, admitted):
                 os.fsync(dst.fileno())
             require(digest(destination) == source_hash, "frozen payload copy differs from admitted source")
             sync_directory(destination.parent)
-        validate_frozen(root, payload)
-        sync_directory(payload)
-        sync_directory(payload.parent)
+        staged_admission = validate_release(root, stage / "fresh-mcp-admitted.meta", stage)
+        require(release_path(root, staged_admission) == final, "staged payload does not match final identity")
+        sync_directory(stage)
+        try:
+            rename_without_replace(stage, final)
+        except OSError as error:
+            if error.errno != errno.EEXIST:
+                raise
+            validate_frozen(root, final)
+            shutil.rmtree(stage)
+        sync_directory(final.parent)
     except BaseException:
-        shutil.rmtree(payload)
+        if stage.exists():
+            shutil.rmtree(stage)
         raise
-    return payload
+    return final
 
 
 def fixed_aliases(root, wrapper, payload=None, declared=None):
@@ -393,8 +449,11 @@ def run(args):
             require(data["status"] in {"prepared", "activated", "rollback_started", "recovery_required"} and data["deploy_root"] == str(root) and data["legacy_wrapper"] == str(wrapper), "manifest does not describe an active matching adoption")
             require(data["expected_binary_sha256"] == args.expected_binary_sha256 and data["expected_wrapper_sha256"] == args.expected_wrapper_sha256, "manifest baseline mismatch")
             payload = absolute(data["release_root"])
-            validate_frozen(root, payload)
-            frozen_assets = assets(root, payload)
+            require(payload.parent == root / "maintenance/releases" and re.fullmatch(r"[0-9a-f]{64}-[0-9a-f]{64}", payload.name), "invalid rollback release path")
+            # The outgoing payload may be damaged or absent. Its protected
+            # activation manifest supplies the exact adopted paths; only the
+            # backups and previous frozen recovery target must still be healthy.
+            frozen_assets = parse_asset_inventory(root, data["asset_list"])
             aliases = fixed_aliases(root, wrapper, payload, frozen_assets)
             require([(entry["alias"], entry["target"]) for entry in data["entries"]] == [(str(a), str(t)) for a, t in aliases], "manifest alias set changed")
             # A synced prepared manifest precedes every rename. Process
@@ -443,7 +502,7 @@ def run(args):
             alias = Path(entry["alias"])
             entry["backup"] = str(alias.with_name(alias.name + ".bak-maintenance-" + identity))
             require(not os.path.lexists(entry["backup"]), "backup path already exists")
-        data = {"id": identity, "status": "prepared", "deploy_root": str(root), "legacy_wrapper": str(wrapper), "expected_binary_sha256": args.expected_binary_sha256, "expected_wrapper_sha256": args.expected_wrapper_sha256, "admission_receipt": str(receipt), "release_root": str(payload), "entries": entries}
+        data = {"id": identity, "status": "prepared", "deploy_root": str(root), "legacy_wrapper": str(wrapper), "expected_binary_sha256": args.expected_binary_sha256, "expected_wrapper_sha256": args.expected_wrapper_sha256, "admission_receipt": str(receipt), "release_root": str(payload), "asset_list": [{"label": label, "source": str(source), "mode": mode} for label, source, mode in assets(root)], "entries": entries}
         save_manifest(manifest, data)
         moved = []
         try:

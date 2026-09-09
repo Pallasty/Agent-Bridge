@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -137,6 +139,7 @@ class MaintenanceActivationTests(unittest.TestCase):
         # frozen receipts and never revalidates the obsolete staging inode.
         self.binary.write_bytes(b"unrelated third publication")
         next_asset.write_bytes(b"third staging content")
+        (Path(new_manifest["release_root"]) / "bin/agent-bridge.real").write_bytes(b"damaged outgoing second version")
         self.args.action = "rollback"
         self.args.manifest = second["manifest"]
         activation.run(self.args)
@@ -208,6 +211,50 @@ class MaintenanceActivationTests(unittest.TestCase):
                 activation.run(self.args)
         self.assert_original()
         self.assertEqual(list(self.receipts.glob("*.maintenance-activation.json")), [])
+
+    def test_damaged_outgoing_payload_does_not_block_restore_of_healthy_backups(self):
+        self.args.action = "activate"
+        result = activation.run(self.args)
+        data = json.loads(Path(result["manifest"]).read_text())
+        payload = Path(data["release_root"])
+        (payload / "bin/agent-bridge.real").write_bytes(b"damaged new binary")
+        (payload / "lib/agent-bridge/scripts/app_control.py").write_bytes(b"damaged new script")
+        (payload / "asset-list.json").unlink()
+        self.args.action = "rollback"
+        self.args.manifest = result["manifest"]
+        self.assertEqual(activation.run(self.args)["status"], "rolled_back")
+        self.assert_original()
+
+    def test_hard_interruption_leaves_only_staging_and_same_admission_can_retry(self):
+        self.args.action = "activate"
+        code = r"""
+import argparse, importlib.util, json, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("activation", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+Path.home = classmethod(lambda cls: Path(sys.argv[2]))
+os.umask(0o077)
+def interrupt_copy(src, dst, length):
+    dst.write(src.read(8))
+    dst.flush()
+    os._exit(73)
+m.shutil.copyfileobj = interrupt_copy
+m.run(argparse.Namespace(**json.loads(sys.argv[3])))
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code, str(Path(activation.__file__).resolve()), str(self.home), json.dumps(vars(self.args))], timeout=10, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 73, result.stderr)
+        releases = self.root / "maintenance/releases"
+        self.assertEqual(len(list(releases.glob(".staging-*"))), 1)
+        self.assertEqual([path for path in releases.iterdir() if not path.name.startswith(".")], [])
+        self.assertEqual(list(self.receipts.glob("*.maintenance-activation.json")), [])
+        self.assert_original()
+        adopted = activation.run(self.args)
+        self.assertEqual(adopted["status"], "activated")
+        self.assertEqual(list(releases.glob(".staging-*")), [])
+        self.args.action = "rollback"
+        self.args.manifest = adopted["manifest"]
+        activation.run(self.args)
+        self.assert_original()
 
     def test_changed_baseline_or_wrapper_is_rejected_before_moving_files(self):
         for field in ["expected_binary_sha256", "expected_wrapper_sha256"]:
