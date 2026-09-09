@@ -1,10 +1,31 @@
 # Plan Completion Evidence Gate
 
-Status: implemented v1 source contract; runtime admission HOLD (2026-08-30)
+Status: strict producer integration HOLD; ordinary-plan compatibility authorized
+2026-09-09.
+
+## Ordinary maintenance compatibility (2026-09-09)
+
+Plans persist a `completion_mode`: `agent_reported` or `evidence_gated`.
+New plans default to `agent_reported`; omitted mode on an existing plan preserves
+its mode. An explicit conflicting mode change is rejected. Ordinary completion
+retains the existing nonempty status-label workflow and needs no outcome record.
+It is reported completion, never independent verification.
+
+For pre-mode rows, inference uses raw persisted anchors/evidence, not hydrated
+contracts. Any persistent strict binding forces `evidence_gated`, even if the
+mode field says otherwise; malformed strict evidence cannot fall back to reported
+completion. Both write paths, load projections, progress, and next-step selection
+use the effective mode. Ordinary `done` contributes to reported progress but
+not `verified_done_count`.
+
+The owner authorized this compatibility repair so ordinary maintenance releases
+can proceed without a trusted completion producer. The strict rules below remain
+unchanged for `evidence_gated` plans. The producer NO-GO and natural-task reopen
+gate remain in force.
 
 ## Decision
 
-`PlanStep.status = "done"` is a verified state transition, not an agent-authored
+In an `evidence_gated` plan, `PlanStep.status = "done"` is a verified state transition, not an agent-authored
 label. Both plan write paths (`plan_save` and `plan_update`) use the same
 fail-closed Store gate. A transition is admitted only when:
 
@@ -92,9 +113,9 @@ The production writer inventory is closed:
 | durable `app_control(action="next")` | allowlisted dispatch plus a stable changed track ID | closest candidate, but not contract-bound and not backed by a natural plan-completion need |
 | test fixtures/direct Store calls | gate mechanics | synthetic and unauthenticated outside the test process |
 
-The decision is therefore **NO-GO for a producer and HOLD for runtime rollout**.
+The 2026-08-30 decision was **NO-GO for a producer and HOLD for runtime rollout**.
 The source contract and regression tests remain useful as a fail-closed
-boundary, but this build must not replace the ordinary deployed plan workflow:
+boundary, but that unconditional-gate build must not replace the ordinary deployed plan workflow:
 without a producer, every new `done` transition is intentionally unavailable.
 No service, scheduler, verifier command runner, second ledger, public
 provenance field, or generic Recuris runtime is admitted by this result.

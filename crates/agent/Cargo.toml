@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+r9-workload-receipts = []
+
 [dependencies]
 ab-core.workspace = true
 ab-store.workspace = true

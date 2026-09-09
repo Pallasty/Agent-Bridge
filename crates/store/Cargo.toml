@@ -7,6 +7,8 @@ license.workspace = true
 [features]
 default = ["onnx-embed"]
 onnx-embed = ["dep:fastembed"]
+# Explicit R9 ledger admission; off leaves historical workload rows untouched.
+r9-workload-receipts = []
 codebase-index-bounded-native-a1 = ["dep:tempfile"]
 temporal-evidence-s4-synthetic = []
 temporal-evidence-s5-candidate-synthetic = ["temporal-evidence-s4-synthetic", "dep:ring"]

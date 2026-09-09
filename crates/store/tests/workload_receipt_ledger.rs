@@ -1,3 +1,5 @@
+#![cfg(feature = "r9-workload-receipts")]
+
 use ab_store::{
     workload_receipt_commit_record_sha256, SemanticEventRecord, SqliteStore, StateStore,
     WorkloadReceiptCommitKind, WorkloadReceiptCommitRecord, WorkloadReceiptCommitStatus,

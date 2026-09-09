@@ -40,18 +40,28 @@
 #                                                     # production never admits caller binaries
 #
 # Env:
+#   AGENT_BRIDGE_DEPLOY_PROFILE maintenance (default) or r9. Maintenance builds
+#                              omit R9 and publish to $DEPLOY_ROOT/maintenance;
+#                              they do not adopt services or migrate state.
+#   AGENT_BRIDGE_MAINTENANCE_BASELINE /absolute/path/to/currently-used .real
+#   AGENT_BRIDGE_MAINTENANCE_BASELINE_SHA256 exact previously observed SHA-256.
+#                              Required for production maintenance publishing;
+#                              protects the active installation even when the
+#                              private maintenance slot does not yet exist.
 #   AGENT_BRIDGE_DEPLOY_ROOT   required pre-existing trusted deployment root.
 #                              Production paths are derived only from this root;
 #                              there is no implicit HOME fallback.
 #   AGENT_BRIDGE_INSTALL_DIR   legacy compatibility assertion; when set in
-#                              production it must equal $DEPLOY_ROOT/bin
+#                              production it must equal $RELEASE_ROOT/bin
 #   AGENT_BRIDGE_REAL_BIN      legacy compatibility assertion; when set in
 #                              production it must equal
-#                              $DEPLOY_ROOT/bin/agent-bridge.real
+#                              $RELEASE_ROOT/bin/agent-bridge.real
 #   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
-#                              (production: $DEPLOY_ROOT/share/ab-tts/audio_embody.py)
+#                              (production: $RELEASE_ROOT/share/ab-tts/audio_embody.py)
 #   AGENT_BRIDGE_RUNTIME_ASSET_DIR stable script directory
-#                              (production: $DEPLOY_ROOT/lib/agent-bridge/scripts)
+#                              (production: $RELEASE_ROOT/lib/agent-bridge/scripts)
+#                              RELEASE_ROOT is ROOT/maintenance for maintenance,
+#                              ROOT for explicit r9; wrapper stays ROOT/bin.
 #   CARGO_TARGET_DIR           optional pre-existing private build-cache base
 #                              (exact 0700). The publisher appends a deployment-
 #                              root fingerprint and master SHA so distinct trust
@@ -81,6 +91,10 @@ umask 077
 
 LEASE_TEST_MODE="${AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE:-0}"
 case "$LEASE_TEST_MODE" in 0|1) ;; *) printf 'ERROR: AGENT_BRIDGE_DEPLOY_LEASE_TEST_MODE must be 0 or 1\n' >&2; exit 1 ;; esac
+DEPLOY_PROFILE="${AGENT_BRIDGE_DEPLOY_PROFILE:-maintenance}"
+case "$DEPLOY_PROFILE" in maintenance|r9) ;; *) printf 'ERROR: AGENT_BRIDGE_DEPLOY_PROFILE must be maintenance or r9\n' >&2; exit 1 ;; esac
+MAINTENANCE_BASELINE="${AGENT_BRIDGE_MAINTENANCE_BASELINE:-}"
+MAINTENANCE_BASELINE_SHA="${AGENT_BRIDGE_MAINTENANCE_BASELINE_SHA256:-}"
 
 # Production orchestration never resolves git, lock, compiler helpers, or
 # parsing tools from caller/HOME PATH. Contained tests retain their synthetic
@@ -106,12 +120,20 @@ if [ "$LEASE_TEST_MODE" = 1 ]; then
     RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 else
     DEPLOY_ROOT_RAW="${AGENT_BRIDGE_DEPLOY_ROOT:-}"
-    INSTALL_DIR="$DEPLOY_ROOT_RAW/bin"
+    RELEASE_ROOT_RAW="$DEPLOY_ROOT_RAW"
+    [ "$DEPLOY_PROFILE" != maintenance ] || RELEASE_ROOT_RAW="$DEPLOY_ROOT_RAW/maintenance"
+    INSTALL_DIR="$RELEASE_ROOT_RAW/bin"
     REAL_PATH="$INSTALL_DIR/agent-bridge.real"
-    ADAPTER_PATH="$DEPLOY_ROOT_RAW/share/ab-tts/audio_embody.py"
-    RUNTIME_ASSET_DIR="$DEPLOY_ROOT_RAW/lib/agent-bridge/scripts"
+    ADAPTER_PATH="$RELEASE_ROOT_RAW/share/ab-tts/audio_embody.py"
+    RUNTIME_ASSET_DIR="$RELEASE_ROOT_RAW/lib/agent-bridge/scripts"
 fi
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
+# The common trusted bootstrap wrapper remains a provisioning input. A
+# maintenance publication does not install a wrapper or claim that the legacy
+# entry point adopted the new binary; that is a separate activation check.
+if [ "$LEASE_TEST_MODE" = 0 ] && [ "$DEPLOY_PROFILE" = maintenance ]; then
+    WRAPPER_PATH="$DEPLOY_ROOT_RAW/bin/agent-bridge"
+fi
 ASSET_SOURCE_ROOT="$REPO"
 ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
 AUDIO_ADAPTER_COMPANIONS=(
@@ -184,8 +206,13 @@ REQUIRED_NEW_BINARY_MARKERS=(
     "agent_bridge.app_control.operation_preflight.v0"
     "agent_bridge.app_control.track_settlement.v0"
     "agent_bridge.app_control.wrapper_contract.v1"
-    "agent_bridge.workload_receipt_commit.v1"
 )
+if [ "$DEPLOY_PROFILE" = r9 ]; then
+    REQUIRED_NEW_BINARY_MARKERS+=("agent_bridge.workload_receipt_commit.v1")
+fi
+if [ "$LEASE_TEST_MODE" = 0 ]; then
+    REQUIRED_NEW_BINARY_MARKERS+=("agent_bridge.runtime_profile.$DEPLOY_PROFILE.v1")
+fi
 
 # Linux production builds must contain the transparent native avatar backend.
 # Keep the feature explicit here: Cargo's default feature set intentionally
@@ -355,6 +382,25 @@ clean_field() { printf '%s' "$1" | tr '\r\n' '  '; }
 
 meta_keys() { cut -d= -f1 "$1" 2>/dev/null | paste -sd, -; }
 is_sha256_value() { printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{64}$'; }
+
+verify_maintenance_baseline() {
+    [ "$DEPLOY_PROFILE" = maintenance ] || return 0
+    if [ "$LEASE_TEST_MODE" = 1 ] && [ -z "$MAINTENANCE_BASELINE" ]; then
+        return 0
+    fi
+    case "$MAINTENANCE_BASELINE" in
+        /*) ;;
+        *) die "maintenance publication requires an absolute active binary baseline" ;;
+    esac
+    [ "$(clean_field "$MAINTENANCE_BASELINE")" = "$MAINTENANCE_BASELINE" ] ||
+        die "maintenance baseline path contains control characters"
+    is_sha256_value "$MAINTENANCE_BASELINE_SHA" ||
+        die "maintenance publication requires the exact active binary baseline SHA-256"
+    [ -f "$MAINTENANCE_BASELINE" ] && is_native_exe "$MAINTENANCE_BASELINE" ||
+        die "maintenance baseline is not an existing native binary"
+    [ "$(sha256_file "$MAINTENANCE_BASELINE")" = "$MAINTENANCE_BASELINE_SHA" ] ||
+        die "active maintenance baseline changed; re-evaluate the release before publishing"
+}
 is_safe_id() {
     [ "${#1}" -ge 1 ] && [ "${#1}" -le 128 ] &&
         printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9._-]+$'
@@ -1061,7 +1107,7 @@ validate_lease_test_environment() {
     root="$(realpath "$raw_root")" || die "cannot canonicalize publisher lease test root"
     [ "$(dirname "$root")" = "$temp_base" ] || die "publisher lease test root must be a direct child of the physical OS temp directory"
     case "$(basename "$root")" in
-        ab-publisher-lease-v0.*|ab-deploy-pinned-assets.*|ab-deploy-postbuild-race.*|ab-deploy-audio-parity.*) ;;
+        ab-publisher-lease-v0.*|ab-deploy-pinned-assets.*|ab-deploy-postbuild-race.*|ab-deploy-audio-parity.*|ab-maintenance-profile.*) ;;
         *) die "publisher lease test root has an invalid name" ;;
     esac
     mode="$(file_mode "$root")"
@@ -1072,6 +1118,9 @@ validate_lease_test_environment() {
     canonical_contained_test_path "$REAL_PATH" "$root" real_path >/dev/null
     canonical_contained_test_path "$ADAPTER_PATH" "$root" adapter >/dev/null
     canonical_contained_test_path "$RUNTIME_ASSET_DIR" "$root" runtime_assets >/dev/null
+    if [ -n "$MAINTENANCE_BASELINE" ]; then
+        MAINTENANCE_BASELINE="$(canonical_contained_test_path "$MAINTENANCE_BASELINE" "$root" maintenance_baseline)"
+    fi
     canonical_contained_test_path "${AGENT_BRIDGE_DEPLOY_STATE_DIR:-}" "$root" state >/dev/null
     if [ -n "$USE_BINARY" ]; then
         # Store the canonical absolute result, not merely a successful check:
@@ -1232,10 +1281,11 @@ is_native_exe() {
 # closes the pipe early and strings dies of SIGPIPE (the original gate's bug:
 # every marker read as "absent", so a stale-build regression sailed through).
 markers_in() {
-    local bin="$1" m tmp
+    local bin="$1" m tmp extra_marker="${2:-}"
     tmp="$(mktemp "$DEPLOY_TMPDIR/agent-bridge-markers.XXXXXX")"
     strings -a "$bin" 2>/dev/null > "$tmp" || true
-    for m in "${SENTINELS[@]}"; do
+    for m in "${SENTINELS[@]}" "$extra_marker"; do
+        [ -n "$m" ] || continue
         grep -qF -- "$m" "$tmp" && printf '%s\n' "$m"
     done
     rm -f "$tmp"
@@ -1308,11 +1358,14 @@ fi
 
 if [ "$LEASE_TEST_MODE" = 0 ]; then
     validate_trusted_deploy_root "$DEPLOY_ROOT_RAW"
-    derived_install="$DEPLOY_ROOT/bin"
+    RELEASE_ROOT="$DEPLOY_ROOT"
+    [ "$DEPLOY_PROFILE" != maintenance ] || RELEASE_ROOT="$DEPLOY_ROOT/maintenance"
+    derived_install="$RELEASE_ROOT/bin"
     derived_real="$derived_install/agent-bridge.real"
-    derived_adapter="$DEPLOY_ROOT/share/ab-tts/audio_embody.py"
-    derived_runtime="$DEPLOY_ROOT/lib/agent-bridge/scripts"
+    derived_adapter="$RELEASE_ROOT/share/ab-tts/audio_embody.py"
+    derived_runtime="$RELEASE_ROOT/lib/agent-bridge/scripts"
     derived_state="$DEPLOY_ROOT/publisher-state/deploy"
+    [ "$DEPLOY_PROFILE" != maintenance ] || derived_state="$DEPLOY_ROOT/publisher-state/maintenance"
     validate_legacy_leaf_override AGENT_BRIDGE_INSTALL_DIR \
         "${AGENT_BRIDGE_INSTALL_DIR+x}" "${AGENT_BRIDGE_INSTALL_DIR-}" "$derived_install"
     validate_legacy_leaf_override AGENT_BRIDGE_REAL_BIN \
@@ -1325,14 +1378,14 @@ if [ "$LEASE_TEST_MODE" = 0 ]; then
         "${AGENT_BRIDGE_DEPLOY_STATE_DIR+x}" "${AGENT_BRIDGE_DEPLOY_STATE_DIR-}" "$derived_state"
     INSTALL_DIR="$derived_install"
     REAL_PATH="$derived_real"
-    WRAPPER_PATH="$derived_install/agent-bridge"
+    WRAPPER_PATH="$DEPLOY_ROOT/bin/agent-bridge"
     ADAPTER_PATH="$derived_adapter"
     RUNTIME_ASSET_DIR="$derived_runtime"
     LEASE_STATE_RAW="$derived_state"
     for trusted_directory in \
         "$derived_install" \
         "$derived_state" \
-        "$DEPLOY_ROOT/share/ab-tts" \
+        "$RELEASE_ROOT/share/ab-tts" \
         "$derived_runtime"
     do
         validate_existing_trusted_subdirectory_components \
@@ -1356,6 +1409,7 @@ if [ "$LEASE_TEST_MODE" = 0 ]; then
     # private clone provisioned beneath the deployment root.
     validate_private_source_checkout
     verify_trusted_root_provisioning
+    verify_maintenance_baseline
     [ -z "$USE_BINARY" ] ||
         die "--use-binary is disabled for production trusted-root deployment"
     DEPLOY_TARGET_ROOT=""
@@ -1386,7 +1440,7 @@ if [ "$LEASE_TEST_MODE" = 0 ]; then
             die "cannot inspect deployment-root inode identity"
         deploy_root_fingerprint="$(printf '%s\t%s\t%s\n' \
             "$DEPLOY_ROOT" "$deploy_root_device" "$deploy_root_inode" | sha256_text)"
-        DEPLOY_TARGET_ROOT="$DEPLOY_TARGET_BASE/root-$deploy_root_fingerprint"
+        DEPLOY_TARGET_ROOT="$DEPLOY_TARGET_BASE/root-$deploy_root_fingerprint-$DEPLOY_PROFILE"
         ensure_trusted_subdirectory_path \
             "$DEPLOY_TARGET_BASE" "$DEPLOY_TARGET_ROOT" "deployment-scoped Cargo build target"
         TRUSTED_CARGO_HOME="$DEPLOY_TARGET_ROOT/cargo-home"
@@ -1436,14 +1490,16 @@ else
     # The service installer intentionally remains zero-write until its own
     # UnitPath/runtime-bus preflight succeeds, so it must never bootstrap these
     # trust roots itself.
-    RUNTIME_STATE_ROOT="$DEPLOY_ROOT/runtime-state"
-    ensure_trusted_subdirectory_path \
-        "$DEPLOY_ROOT" "$RUNTIME_STATE_ROOT" "workload runtime-state root"
-    for runtime_state_leaf in home data cache xdg-state tmp workload-tmp workload-receipts; do
+    if [ "$DEPLOY_PROFILE" = r9 ]; then
+        RUNTIME_STATE_ROOT="$DEPLOY_ROOT/runtime-state"
         ensure_trusted_subdirectory_path \
-            "$DEPLOY_ROOT" "$RUNTIME_STATE_ROOT/$runtime_state_leaf" \
-            "workload runtime-state directory"
-    done
+            "$DEPLOY_ROOT" "$RUNTIME_STATE_ROOT" "workload runtime-state root"
+        for runtime_state_leaf in home data cache xdg-state tmp workload-tmp workload-receipts; do
+            ensure_trusted_subdirectory_path \
+                "$DEPLOY_ROOT" "$RUNTIME_STATE_ROOT/$runtime_state_leaf" \
+                "workload runtime-state directory"
+        done
+    fi
 fi
 REAL_PATH="$(canonical_target_path "$REAL_PATH")" || die "cannot canonicalize deployment target: $REAL_PATH"
 [ ! -L "$LEASE_STATE_RAW" ] || die "publisher lease state root must not be a symlink: $LEASE_STATE_RAW"
@@ -1478,6 +1534,11 @@ protect_owned_directory "$LEASE_RECEIPT_DIR" "publisher receipt directory"
 protect_owned_directory "$LEASE_QUARANTINE_DIR" "publisher quarantine directory"
 protect_owned_directory "$LEASE_INTENT_DIR" "publisher intent directory"
 KERNEL_LOCK_FILE="$LEASE_STATE_ROOT/publisher.kernel.lock"
+if [ "$LEASE_TEST_MODE" = 0 ]; then
+    # Both profiles share the exact mutex inode bound by provisioning. Only
+    # their publication/admission records are separated.
+    KERNEL_LOCK_FILE="$DEPLOY_ROOT/publisher-state/deploy/publisher.kernel.lock"
+fi
 PUBLISHER_PREVIOUS_UMASK="$(umask)"
 umask 077
 if [ -e "$KERNEL_LOCK_FILE" ] || [ -L "$KERNEL_LOCK_FILE" ]; then
@@ -1543,6 +1604,7 @@ if [ "$LEASE_TEST_MODE" = 0 ]; then
 fi
 CURRENT_BOOT_IDENTITY="$(boot_identity)" || die "cannot establish host boot identity for publisher lease"
 SHARED_TARGETS="$(clean_field "$REAL_PATH|$ADAPTER_PATH|$RUNTIME_ASSET_DIR|$WRAPPER_PATH")"
+verify_maintenance_baseline
 
 installed_assets_sha256() {
     local adapter_dir adapter_root asset path
@@ -3470,6 +3532,9 @@ else
             "$DEPLOY_TARGET_BASE" "$DEPLOY_TARGET_DIR" "authoritative SHA Cargo target"
     fi
     CARGO_FEATURE_ARGS=()
+    if [ "$DEPLOY_PROFILE" = r9 ]; then
+        CARGO_FEATURE_ARGS+=(--features r9-workload-receipts)
+    fi
     if [ "$(uname -s)" = "Linux" ]; then
         CARGO_FEATURE_ARGS+=(--features linux-native-avatar)
         say ">> enabling linux-native-avatar for the production Linux binary"
@@ -3517,7 +3582,7 @@ EOF
                 TMPDIR="$TRUSTED_BUILD_TMP" \
                 AGENT_BRIDGE_BUILD_SHA="${MASTER_SHA:0:12}" \
                 AGENT_BRIDGE_BUILD_DESCRIBE="${MASTER_SHA:0:12}" \
-                "$TRUSTED_CARGO" build --locked --release --bin agent-bridge \
+                "$TRUSTED_CARGO" build --locked --jobs 2 --release --bin agent-bridge \
                 "${CARGO_FEATURE_ARGS[@]}" )
         else
             ( cd "$BUILD_DIR" && /usr/bin/env -i \
@@ -3531,7 +3596,7 @@ EOF
                 TMPDIR="$TRUSTED_BUILD_TMP" \
                 AGENT_BRIDGE_BUILD_SHA="${MASTER_SHA:0:12}" \
                 AGENT_BRIDGE_BUILD_DESCRIBE="${MASTER_SHA:0:12}" \
-                "$TRUSTED_CARGO" build --locked --release --bin agent-bridge )
+                "$TRUSTED_CARGO" build --locked --jobs 2 --release --bin agent-bridge )
         fi
     elif [ "${#CARGO_FEATURE_ARGS[@]}" -gt 0 ]; then
         ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" PKG_CONFIG_PATH="$BUILD_PKG_CONFIG_PATH" CARGO_TERM_COLOR=never cargo build --locked --release --bin agent-bridge "${CARGO_FEATURE_ARGS[@]}" )
@@ -3654,11 +3719,26 @@ fi
 # ---- 3. anti-regression gate vs the currently-deployed binary ----
 say
 say "=== feature gate (new binary must not drop any current capability) ==="
-new_markers="$(markers_in "$NEW_BIN")"
+verify_maintenance_baseline
+new_markers="$(markers_in "$NEW_BIN" "agent_bridge.runtime_profile.$DEPLOY_PROFILE.v1")"
 for required_marker in "${REQUIRED_NEW_BINARY_MARKERS[@]}"; do
     grep -qxF -- "$required_marker" <<< "$new_markers" ||
         die "new binary missing required runtime-contract marker: $required_marker"
 done
+if [ "$DEPLOY_PROFILE" = maintenance ] && [ -n "$MAINTENANCE_BASELINE" ]; then
+    baseline_snapshot="$(mktemp "$DEPLOY_TMPDIR/maintenance-baseline.XXXXXX")"
+    if ! cp "$MAINTENANCE_BASELINE" "$baseline_snapshot" ||
+            [ "$(sha256_file "$baseline_snapshot")" != "$MAINTENANCE_BASELINE_SHA" ]; then
+        rm -f "$baseline_snapshot"
+        die "active maintenance baseline changed while capturing its capability markers"
+    fi
+    active_markers="$(markers_in "$baseline_snapshot")"
+    rm -f "$baseline_snapshot"
+    missing_active="$(comm -23 <(printf '%s\n' "$active_markers" | sort -u) <(printf '%s\n' "$new_markers" | sort -u))"
+    [ -z "$missing_active" ] ||
+        die "maintenance binary drops a capability from the active baseline: $missing_active"
+    say "active maintenance baseline preserved: $MAINTENANCE_BASELINE_SHA"
+fi
 if [ -f "$REAL_PATH" ]; then
     cur_markers="$(markers_in "$REAL_PATH")"
     # markers present in current but missing in new = regression
@@ -3682,6 +3762,7 @@ new_size="$(file_size "$NEW_BIN")"
 cur_size="$( [ -f "$REAL_PATH" ] && file_size "$REAL_PATH" || echo 0 )"
 say
 say "=== deploy plan ==="
+say "  profile    : $DEPLOY_PROFILE (publication only; no R9 state migration)"
 say "  source     : $PROVENANCE"
 say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"
@@ -3712,6 +3793,7 @@ if [ "$ASSUME_YES" -ne 1 ]; then
 fi
 
 # ---- 6. backup current, then deploy ----
+verify_maintenance_baseline
 lease_phase_update committing
 consume_pending_before_mutation "$LEASE_CANDIDATE"
 if [ -f "$REAL_PATH" ]; then
@@ -3874,7 +3956,8 @@ copied_size="$(file_size "$REAL_PATH")"
 # under their owning clients and remain covered by the reconnect report below.
 SERVICE_REFRESHED=0
 lease_phase_update services_verifying
-if [ "$(uname -s)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
+if [ "$DEPLOY_PROFILE" = r9 ] && [ "$(uname -s)" = "Darwin" ] &&
+        command -v launchctl >/dev/null 2>&1; then
     refresh_daemon=0
     refresh_daemon_http=0
     refresh_palace=0

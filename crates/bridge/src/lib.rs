@@ -225,6 +225,7 @@ pub mod trigger_recall_opt_in;
 pub mod warp_actions;
 pub mod warp_scheme;
 pub mod workflow_feedback;
+#[cfg(feature = "r9-workload-receipts")]
 pub mod workload_receipt_reconciliation;
 pub mod world_tools;
 

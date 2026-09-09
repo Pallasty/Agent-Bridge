@@ -1,5 +1,5 @@
 use ab_store::{
-    plan_step_contract_id, AgentTaskOutcomeRecord, AgentTaskOutcomeWriteStatus,
+    plan_step_contract_id, AgentTaskOutcomeRecord, AgentTaskOutcomeWriteStatus, PlanCompletionMode,
     PlanMutationRejectionCode, PlanSaveOutcome, PlanStep, PlanStepCompletionEvidenceRef,
     PlanUpdateOutcome, SqliteStore, StateStore, PLAN_STEP_COMPLETION_CONTRACT_REVISION,
 };
@@ -166,7 +166,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
 
     assert_save_rejected(
         store
-            .plan_save("empty", "empty", &[])
+            .plan_save_with_mode(
+                "empty",
+                "empty",
+                &[],
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("empty plan rejection"),
         PlanMutationRejectionCode::EmptySteps,
@@ -174,7 +179,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     let duplicate = vec![step("same", "first", &[]), step("same", "second", &[])];
     assert_save_rejected(
         store
-            .plan_save("duplicate", "duplicate", &duplicate)
+            .plan_save_with_mode(
+                "duplicate",
+                "duplicate",
+                &duplicate,
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("duplicate rejection"),
         PlanMutationRejectionCode::DuplicateStepId,
@@ -182,7 +192,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     let cycle = vec![step("a", "a", &["b"]), step("b", "b", &["a"])];
     assert_save_rejected(
         store
-            .plan_save("cycle", "cycle", &cycle)
+            .plan_save_with_mode(
+                "cycle",
+                "cycle",
+                &cycle,
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("cycle rejection"),
         PlanMutationRejectionCode::DependencyCycle,
@@ -193,7 +208,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     done_without_evidence.completion_anchor = true;
     assert_save_rejected(
         store
-            .plan_save("done-bypass", "done bypass", &[done_without_evidence])
+            .plan_save_with_mode(
+                "done-bypass",
+                "done bypass",
+                &[done_without_evidence],
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("DONE without evidence rejection"),
         PlanMutationRejectionCode::CompletionEvidenceRequired,
@@ -205,10 +225,11 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     });
     assert_save_rejected(
         store
-            .plan_save(
+            .plan_save_with_mode(
                 "evidence-bypass",
                 "evidence bypass",
                 &[pending_with_evidence],
+                Some(PlanCompletionMode::EvidenceGated),
             )
             .await
             .expect("non-DONE evidence rejection"),
@@ -218,7 +239,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     let mut caller_anchored_pending = step("one", "one", &[]);
     caller_anchored_pending.completion_anchor = true;
     let caller_anchor_save = store
-        .plan_save("caller-anchor", "caller anchor", &[caller_anchored_pending])
+        .plan_save_with_mode(
+            "caller-anchor",
+            "caller anchor",
+            &[caller_anchored_pending],
+            Some(PlanCompletionMode::EvidenceGated),
+        )
         .await
         .expect("save caller-supplied marker");
     let caller_anchor_plan = match caller_anchor_save {
@@ -228,7 +254,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     assert!(!caller_anchor_plan.steps[0].completion_anchor);
 
     let saved = store
-        .plan_save("editable", "editable", &[step("one", "before", &[])])
+        .plan_save_with_mode(
+            "editable",
+            "editable",
+            &[step("one", "before", &[])],
+            Some(PlanCompletionMode::EvidenceGated),
+        )
         .await
         .expect("save editable plan");
     let mut roundtrip = match saved {
@@ -243,7 +274,12 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
         .clone();
     roundtrip[0].desc = "after".to_string();
     let edited = store
-        .plan_save("editable", "editable", &roundtrip)
+        .plan_save_with_mode(
+            "editable",
+            "editable",
+            &roundtrip,
+            Some(PlanCompletionMode::EvidenceGated),
+        )
         .await
         .expect("save edited non-DONE plan");
     let new_contract = match edited {
@@ -258,13 +294,14 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     assert_ne!(old_contract, new_contract);
 
     let canonicalized = store
-        .plan_save(
+        .plan_save_with_mode(
             "trim-roundtrip",
             "trim roundtrip",
             &[
                 step(" s1 ", "first trimmed step", &[]),
                 step(" s2 ", "second trimmed step", &[" s1 "]),
             ],
+            Some(PlanCompletionMode::EvidenceGated),
         )
         .await
         .expect("save whitespace-padded step ids");
@@ -341,10 +378,11 @@ async fn save_cannot_bypass_structure_or_completion_evidence_validation() {
     )
     .await;
     let completed_save = store
-        .plan_save(
+        .plan_save_with_mode(
             completed_plan_id,
             "completed save",
             &[completed_first, completed_second],
+            Some(PlanCompletionMode::EvidenceGated),
         )
         .await
         .expect("save fully evidenced completed plan");
@@ -371,7 +409,12 @@ async fn done_requires_exact_trusted_harness_outcome_and_is_atomic_on_rejection(
     let task = step("task", "verify task", &[]);
     assert!(matches!(
         store
-            .plan_save(plan_id, "trust gate", &[task.clone()])
+            .plan_save_with_mode(
+                plan_id,
+                "trust gate",
+                &[task.clone()],
+                Some(PlanCompletionMode::EvidenceGated)
+            )
             .await
             .expect("save plan"),
         PlanSaveOutcome::Saved { .. }
@@ -486,7 +529,12 @@ async fn dependencies_success_durability_irreversibility_and_anchor_rules_are_en
     let second = step("second", "second task", &["first"]);
     assert!(matches!(
         store
-            .plan_save(plan_id, "dependency gate", &[first.clone(), second.clone()])
+            .plan_save_with_mode(
+                plan_id,
+                "dependency gate",
+                &[first.clone(), second.clone()],
+                Some(PlanCompletionMode::EvidenceGated)
+            )
             .await
             .expect("save plan"),
         PlanSaveOutcome::Saved { .. }
@@ -632,10 +680,11 @@ async fn dependencies_success_durability_irreversibility_and_anchor_rules_are_en
 
     assert_save_rejected(
         reopened
-            .plan_save(
+            .plan_save_with_mode(
                 plan_id,
                 "attempt delete verified done",
                 &[durable.steps[0].clone()],
+                Some(PlanCompletionMode::EvidenceGated),
             )
             .await
             .expect("reject deleting verified DONE step through plan_save"),
@@ -646,7 +695,12 @@ async fn dependencies_success_durability_irreversibility_and_anchor_rules_are_en
     reopen_by_save[1].completion_evidence = None;
     assert_save_rejected(
         reopened
-            .plan_save(plan_id, "attempt reopen by save", &reopen_by_save)
+            .plan_save_with_mode(
+                plan_id,
+                "attempt reopen by save",
+                &reopen_by_save,
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("reject reopening verified DONE step through plan_save"),
         PlanMutationRejectionCode::CompletionReopenForbidden,
@@ -676,7 +730,12 @@ async fn update_cannot_wash_a_tampered_same_id_completion_digest() {
     let plan_id = "update-anchor-digest";
     assert!(matches!(
         store
-            .plan_save(plan_id, "update digest", &[step("closed", "task", &[])])
+            .plan_save_with_mode(
+                plan_id,
+                "update digest",
+                &[step("closed", "task", &[])],
+                Some(PlanCompletionMode::EvidenceGated)
+            )
             .await
             .expect("save plan"),
         PlanSaveOutcome::Saved { .. }
@@ -748,7 +807,12 @@ async fn save_cannot_wash_a_tampered_same_id_completion_digest() {
     let plan_id = "save-anchor-digest";
     assert!(matches!(
         store
-            .plan_save(plan_id, "save digest", &[step("closed", "task", &[])])
+            .plan_save_with_mode(
+                plan_id,
+                "save digest",
+                &[step("closed", "task", &[])],
+                Some(PlanCompletionMode::EvidenceGated)
+            )
             .await
             .expect("save plan"),
         PlanSaveOutcome::Saved { .. }
@@ -795,7 +859,12 @@ async fn save_cannot_wash_a_tampered_same_id_completion_digest() {
     });
     assert_save_rejected(
         store
-            .plan_save(plan_id, "attempt digest wash", &submitted)
+            .plan_save_with_mode(
+                plan_id,
+                "attempt digest wash",
+                &submitted,
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("reject full-save digest wash"),
         PlanMutationRejectionCode::CompletionEvidenceDigestMismatch,
@@ -819,13 +888,14 @@ async fn completion_marker_survives_legacy_ref_and_integrity_corruption() {
     let plan_id = "anchor-integrity";
     assert!(matches!(
         store
-            .plan_save(
+            .plan_save_with_mode(
                 plan_id,
                 "anchor integrity",
                 &[
                     step("closed", "closed task", &[]),
                     step("probe", "probe task", &[]),
                 ],
+                Some(PlanCompletionMode::EvidenceGated)
             )
             .await
             .expect("save anchor fixture"),
@@ -913,10 +983,11 @@ async fn completion_marker_survives_legacy_ref_and_integrity_corruption() {
     );
     assert_save_rejected(
         store
-            .plan_save(
+            .plan_save_with_mode(
                 plan_id,
                 "reject anchored removal",
                 &[status_projection.steps[1].clone()],
+                Some(PlanCompletionMode::EvidenceGated),
             )
             .await
             .expect("reject status-corrupted anchor removal"),
@@ -965,10 +1036,11 @@ async fn completion_marker_survives_legacy_ref_and_integrity_corruption() {
     );
     assert_save_rejected(
         store
-            .plan_save(
+            .plan_save_with_mode(
                 plan_id,
                 "reject missing-reference removal",
                 &[reference_projection.steps[1].clone()],
+                Some(PlanCompletionMode::EvidenceGated),
             )
             .await
             .expect("reject missing-reference anchor removal"),
@@ -978,7 +1050,12 @@ async fn completion_marker_survives_legacy_ref_and_integrity_corruption() {
     replay[0].completion_evidence = Some(trusted_evidence);
     assert_save_rejected(
         store
-            .plan_save(plan_id, "reject missing-reference replay", &replay)
+            .plan_save_with_mode(
+                plan_id,
+                "reject missing-reference replay",
+                &replay,
+                Some(PlanCompletionMode::EvidenceGated),
+            )
             .await
             .expect("reject replay against marker-only anchor"),
         PlanMutationRejectionCode::CompletionAnchorInvalid,
@@ -1044,6 +1121,20 @@ async fn legacy_done_is_not_evidence_and_can_be_backfilled_without_silent_upgrad
     assert_eq!(legacy_downgrade.steps[0].status, "blocked");
     assert!(!legacy_downgrade.steps[0].completion_anchor);
     assert!(legacy_downgrade.steps[0].completion_evidence.is_none());
+
+    assert_eq!(legacy.completion_mode, PlanCompletionMode::AgentReported);
+    assert!(matches!(
+        store
+            .plan_save_with_mode(
+                "legacy-plan",
+                "Explicitly adopt evidence gating",
+                &legacy_downgrade.steps,
+                Some(PlanCompletionMode::EvidenceGated),
+            )
+            .await
+            .expect("explicit strict upgrade"),
+        PlanSaveOutcome::Saved { .. }
+    ));
 
     let contract = plan_step_contract_id("legacy-plan", "legacy", "legacy task", &[]);
     let record = completion_outcome("legacy-backfill", contract.clone(), "harness_verified");
@@ -1122,10 +1213,11 @@ async fn legacy_done_is_not_evidence_and_can_be_backfilled_without_silent_upgrad
     );
     assert_save_rejected(
         store
-            .plan_save(
+            .plan_save_with_mode(
                 "legacy-plan",
                 "attempt removal after contract corruption",
                 &[projected.steps[1].clone()],
+                Some(PlanCompletionMode::EvidenceGated),
             )
             .await
             .expect("stale-contract anchor removal rejection"),
@@ -1174,7 +1266,12 @@ async fn immediate_updates_do_not_lose_concurrent_step_completions() {
     let second = step("second", "second concurrent task", &[]);
     assert!(matches!(
         first_store
-            .plan_save(plan_id, "concurrent", &[first, second])
+            .plan_save_with_mode(
+                plan_id,
+                "concurrent",
+                &[first, second],
+                Some(PlanCompletionMode::EvidenceGated)
+            )
             .await
             .expect("save concurrent plan"),
         PlanSaveOutcome::Saved { .. }
@@ -1219,4 +1316,395 @@ async fn immediate_updates_do_not_lose_concurrent_step_completions() {
         .steps
         .iter()
         .all(|step| step.status == "done" && step.completion_evidence.is_some()));
+}
+
+#[tokio::test]
+async fn ordinary_plan_roundtrips_reported_done_without_evidence_or_outcomes() {
+    let fixture = tempfile::tempdir().unwrap();
+    let db_path = fixture.path().join("state.db");
+    let store = SqliteStore::open(&db_path).await.unwrap();
+    let saved = store
+        .plan_save(
+            "ordinary",
+            "Ordinary",
+            &[
+                step("first", "First", &[]),
+                step("second", "Second", &["first"]),
+            ],
+        )
+        .await
+        .unwrap();
+    let PlanSaveOutcome::Saved { plan } = saved else {
+        panic!("ordinary save rejected")
+    };
+    assert_eq!(plan.completion_mode, PlanCompletionMode::AgentReported);
+    assert!(matches!(
+        store
+            .plan_update_step("ordinary", "first", "waiting_external", None)
+            .await
+            .unwrap(),
+        PlanUpdateOutcome::Updated { .. }
+    ));
+    let PlanUpdateOutcome::Updated { plan } = store
+        .plan_update_step("ordinary", "first", "DONE", None)
+        .await
+        .unwrap()
+    else {
+        panic!("ordinary done rejected")
+    };
+    assert_eq!(plan.steps[0].status, "done");
+    assert!(!plan.steps[0].completion_anchor);
+    assert!(plan.steps[0].completion_evidence.is_none());
+    let mut roundtrip = plan.steps;
+    roundtrip[0].desc = "Updated description of reported work".into();
+    assert!(matches!(
+        store
+            .plan_save("ordinary", "Roundtrip", &roundtrip)
+            .await
+            .unwrap(),
+        PlanSaveOutcome::Saved { .. }
+    ));
+    assert_update_rejected(
+        store
+            .plan_update_step("ordinary", "first", "done", Some("forged"))
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionEvidenceForbidden,
+    );
+    roundtrip[0].completion_evidence = Some(PlanStepCompletionEvidenceRef {
+        outcome_id: "forged".into(),
+        record_sha256: String::new(),
+    });
+    assert_save_rejected(
+        store
+            .plan_save("ordinary", "No evidence mint", &roundtrip)
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionEvidenceForbidden,
+    );
+    drop(store);
+    let store = SqliteStore::open(&db_path).await.unwrap();
+    let loaded = store.plan_load("ordinary").await.unwrap().unwrap();
+    assert_eq!(loaded.completion_mode, PlanCompletionMode::AgentReported);
+    assert_eq!(loaded.steps[0].status, "done");
+    assert!(loaded
+        .steps
+        .iter()
+        .all(|s| !s.completion_anchor && s.completion_evidence.is_none()));
+    assert!(
+        matches!(
+            store
+                .plan_update_step("ordinary", "first", "pending", None)
+                .await
+                .unwrap(),
+            PlanUpdateOutcome::Updated { .. }
+        ),
+        "agent reports remain editable"
+    );
+    let direct = tokio_rusqlite::Connection::open(&db_path).await.unwrap();
+    let count = direct
+        .call(|c| {
+            c.query_row("SELECT COUNT(*) FROM agent_task_outcomes", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 0,
+        "ordinary saves and updates never mint verified outcomes"
+    );
+}
+
+#[tokio::test]
+async fn strict_mode_is_retained_even_before_the_first_evidence_anchor() {
+    let fixture = tempfile::tempdir().unwrap();
+    let db_path = fixture.path().join("state.db");
+    let store = SqliteStore::open(&db_path).await.unwrap();
+    let steps = vec![step("first", "First", &[])];
+    assert!(matches!(
+        store
+            .plan_save_with_mode(
+                "strict",
+                "Strict",
+                &steps,
+                Some(PlanCompletionMode::EvidenceGated)
+            )
+            .await
+            .unwrap(),
+        PlanSaveOutcome::Saved { .. }
+    ));
+    assert_save_rejected(
+        store
+            .plan_save_with_mode(
+                "strict",
+                "Downgrade",
+                &steps,
+                Some(PlanCompletionMode::AgentReported),
+            )
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionModeDowngradeForbidden,
+    );
+    let PlanSaveOutcome::Saved { plan } = store
+        .plan_save("strict", "Omitted retains", &steps)
+        .await
+        .unwrap()
+    else {
+        panic!("strict roundtrip rejected")
+    };
+    assert_eq!(plan.completion_mode, PlanCompletionMode::EvidenceGated);
+    assert_update_rejected(
+        store
+            .plan_update_step("strict", "first", "waiting_external", None)
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::UnsupportedStatus,
+    );
+    drop(store);
+    let store = SqliteStore::open(&db_path).await.unwrap();
+    assert_update_rejected(
+        store
+            .plan_update_step("strict", "first", "done", None)
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionEvidenceRequired,
+    );
+    assert_eq!(
+        store
+            .plan_load("strict")
+            .await
+            .unwrap()
+            .unwrap()
+            .completion_mode,
+        PlanCompletionMode::EvidenceGated
+    );
+}
+
+#[tokio::test]
+async fn legacy_mode_uses_raw_bindings_and_never_hydrated_contracts() {
+    let fixture = tempfile::tempdir().unwrap();
+    let db_path = fixture.path().join("state.db");
+    let store = SqliteStore::open(&db_path).await.unwrap();
+    let direct = tokio_rusqlite::Connection::open(&db_path).await.unwrap();
+    direct.call(|c| {
+        c.execute("INSERT INTO plans (plan_id, title, steps_json, created_at, updated_at) VALUES ('old', 'Old', ?1, 1, 1)", [r#"[{"id":"one","desc":"One","status":"done","deps":[]}]"#])?;
+        Ok::<_, tokio_rusqlite::rusqlite::Error>(())
+    }).await.unwrap();
+    let plan = store.plan_load("old").await.unwrap().unwrap();
+    assert_eq!(plan.completion_mode, PlanCompletionMode::AgentReported);
+    assert!(plan.steps[0].completion_contract.is_some());
+    let PlanSaveOutcome::Saved { plan } = store
+        .plan_save("old", "Hydrated roundtrip", &plan.steps)
+        .await
+        .unwrap()
+    else {
+        panic!("hydrated ordinary roundtrip rejected")
+    };
+    assert_eq!(plan.completion_mode, PlanCompletionMode::AgentReported);
+    assert!(!plan.steps[0].completion_anchor);
+    let mut broken = plan.steps;
+    broken[0].completion_anchor = true;
+    overwrite_plan_steps(&direct, "old", &broken).await;
+    direct
+        .call(|c| {
+            c.execute(
+                "UPDATE plans SET completion_mode=NULL WHERE plan_id='old'",
+                [],
+            )?;
+            Ok::<_, tokio_rusqlite::rusqlite::Error>(())
+        })
+        .await
+        .unwrap();
+    let projected = store.plan_load("old").await.unwrap().unwrap();
+    assert_eq!(projected.completion_mode, PlanCompletionMode::EvidenceGated);
+    assert_eq!(
+        projected.completion_diagnostics[0].code,
+        PlanMutationRejectionCode::CompletionAnchorInvalid
+    );
+    assert_save_rejected(
+        store
+            .plan_save_with_mode(
+                "old",
+                "Cannot downgrade corrupt",
+                &projected.steps,
+                Some(PlanCompletionMode::AgentReported),
+            )
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionModeDowngradeForbidden,
+    );
+    assert_save_rejected(
+        store
+            .plan_save("old", "Cannot wash missing ref", &projected.steps)
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionEvidenceRequired,
+    );
+    assert_save_rejected(
+        store
+            .plan_save(
+                "old",
+                "Cannot delete anchor",
+                &[step("other", "Other", &[])],
+            )
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionReopenForbidden,
+    );
+    assert_update_rejected(
+        store
+            .plan_update_step("old", "one", "pending", None)
+            .await
+            .unwrap(),
+        PlanMutationRejectionCode::CompletionReopenForbidden,
+    );
+}
+
+#[tokio::test]
+async fn ordinary_concurrent_updates_survive_restart_and_strict_adoption_is_atomic() {
+    let fixture = tempfile::tempdir().unwrap();
+    let db_path = fixture.path().join("state.db");
+    let first = SqliteStore::open(&db_path).await.unwrap();
+    let second = SqliteStore::open(&db_path).await.unwrap();
+    let steps = vec![step("a", "A", &[]), step("b", "B", &[])];
+    assert!(matches!(
+        first
+            .plan_save("concurrent-ordinary", "Ordinary", &steps)
+            .await
+            .unwrap(),
+        PlanSaveOutcome::Saved { .. }
+    ));
+    let (a, b) = tokio::join!(
+        first.plan_update_step("concurrent-ordinary", "a", "done", None),
+        second.plan_update_step("concurrent-ordinary", "b", "done", None)
+    );
+    assert!(matches!(a.unwrap(), PlanUpdateOutcome::Updated { .. }));
+    assert!(matches!(b.unwrap(), PlanUpdateOutcome::Updated { .. }));
+    let loaded = first
+        .plan_load("concurrent-ordinary")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(loaded
+        .steps
+        .iter()
+        .all(|s| s.status == "done" && !s.completion_anchor && s.completion_evidence.is_none()));
+    let (adopt, report) = tokio::join!(
+        first.plan_save_with_mode(
+            "concurrent-ordinary",
+            "Adopt strict",
+            &steps,
+            Some(PlanCompletionMode::EvidenceGated)
+        ),
+        second.plan_update_step("concurrent-ordinary", "a", "done", None)
+    );
+    assert!(matches!(adopt.unwrap(), PlanSaveOutcome::Saved { .. }));
+    match report.unwrap() {
+        PlanUpdateOutcome::Updated { plan } => {
+            assert_eq!(plan.completion_mode, PlanCompletionMode::AgentReported)
+        }
+        PlanUpdateOutcome::Rejected { reason } => assert_eq!(
+            reason.code,
+            PlanMutationRejectionCode::CompletionEvidenceRequired
+        ),
+    }
+    drop(first);
+    drop(second);
+    let reopened = SqliteStore::open(&db_path).await.unwrap();
+    let loaded = reopened
+        .plan_load("concurrent-ordinary")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.completion_mode, PlanCompletionMode::EvidenceGated);
+    assert!(loaded
+        .steps
+        .iter()
+        .all(|s| s.status == "pending" && !s.completion_anchor));
+}
+
+
+#[tokio::test]
+async fn raw_legacy_evidence_retains_strict_mode_when_mode_is_missing_or_inconsistent() {
+    let fixture = tempfile::tempdir().unwrap();
+    let db_path = fixture.path().join("state.db");
+    let store = SqliteStore::open(&db_path).await.unwrap();
+    let steps = vec![step("one", "One", &[])];
+    assert!(matches!(
+        store
+            .plan_save_with_mode(
+                "bound-old",
+                "Bound",
+                &steps,
+                Some(PlanCompletionMode::EvidenceGated)
+            )
+            .await
+            .unwrap(),
+        PlanSaveOutcome::Saved { .. }
+    ));
+    seed_outcome(
+        &store,
+        completion_outcome(
+            "old-outcome",
+            plan_step_contract_id("bound-old", "one", "One", &[]),
+            "harness_verified",
+        ),
+    )
+    .await;
+    assert!(matches!(
+        store
+            .plan_update_step("bound-old", "one", "done", Some("old-outcome"))
+            .await
+            .unwrap(),
+        PlanUpdateOutcome::Updated { .. }
+    ));
+    let direct = tokio_rusqlite::Connection::open(&db_path).await.unwrap();
+    let mut raw = load_raw_plan_steps(&direct, "bound-old").await;
+    raw[0].completion_anchor = false;
+    overwrite_plan_steps(&direct, "bound-old", &raw).await;
+    for mode in [None, Some("agent_reported")] {
+        direct
+            .call(move |c| {
+                c.execute(
+                    "UPDATE plans SET completion_mode=?1 WHERE plan_id='bound-old'",
+                    [mode],
+                )?;
+                Ok::<_, tokio_rusqlite::rusqlite::Error>(())
+            })
+            .await
+            .unwrap();
+        let loaded = store.plan_load("bound-old").await.unwrap().unwrap();
+        assert_eq!(loaded.completion_mode, PlanCompletionMode::EvidenceGated);
+        assert!(loaded.steps[0].completion_evidence.is_some());
+        assert_save_rejected(
+            store
+                .plan_save_with_mode(
+                    "bound-old",
+                    "Cannot downgrade",
+                    &loaded.steps,
+                    Some(PlanCompletionMode::AgentReported),
+                )
+                .await
+                .unwrap(),
+            PlanMutationRejectionCode::CompletionModeDowngradeForbidden,
+        );
+        let mut wash = loaded.steps;
+        wash[0].completion_anchor = false;
+        wash[0].completion_evidence = None;
+        assert_save_rejected(
+            store
+                .plan_save("bound-old", "Cannot strip binding", &wash)
+                .await
+                .unwrap(),
+            PlanMutationRejectionCode::CompletionEvidenceRequired,
+        );
+        assert_update_rejected(
+            store
+                .plan_update_step("bound-old", "one", "pending", None)
+                .await
+                .unwrap(),
+            PlanMutationRejectionCode::CompletionReopenForbidden,
+        );
+    }
 }

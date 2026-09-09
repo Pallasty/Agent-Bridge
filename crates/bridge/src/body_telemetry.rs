@@ -9,7 +9,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
+#[cfg(feature = "r9-workload-receipts")]
+use std::collections::HashSet;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1085,24 +1087,15 @@ impl TaskWorkloadResourceUsage {
     /// Redundant durable gate: no single deserialized boolean is sufficient to
     /// turn a task event into Verified whole-tree CPU/memory evidence.
     pub fn proves_complete_cpu_memory_workload_tree(&self) -> bool {
-        let mut seen_receipt_ids = HashSet::with_capacity(self.durable_receipts.len());
-        let durable_receipts_complete = self.durable_receipts.len()
-            == self.captured_generation_count as usize
-            && !self.durable_receipts.is_empty()
-            && self.durable_receipts.iter().all(|reference| {
-                reference.receipt_id.len() == 32
-                    && reference
-                        .receipt_id
-                        .bytes()
-                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-                    && reference.sha256.len() == 71
-                    && reference.sha256.starts_with("sha256:")
-                    && reference.sha256.as_bytes()[7..]
-                        .iter()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
-                    && seen_receipt_ids.insert(reference.receipt_id.as_str())
-            });
-        self.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+        #[cfg(feature = "r9-workload-receipts")]
+        let receipt_contract_complete = self.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+            && self.has_complete_durable_receipt_bindings();
+        // Ordinary transient accounting retains the R8 v0 contract. Existing
+        // v1 evidence is never reinterpreted as v0 merely because R9 is off.
+        #[cfg(not(feature = "r9-workload-receipts"))]
+        let receipt_contract_complete = self.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V0
+            && self.durable_receipts.is_empty();
+        receipt_contract_complete
             && self.accounting_status == "complete"
             && self.source == "linux_cgroup_v2_systemd_delegated_scope"
             && self.scope == "delegated_session_workload_tree"
@@ -1116,11 +1109,30 @@ impl TaskWorkloadResourceUsage {
             && self.start_before_exec
             && self.final_populated_zero
             && self.complete_for_cpu_memory_workload_tree
-            && durable_receipts_complete
             && self.controllers.iter().any(|value| value == "cpu")
             && self.controllers.iter().any(|value| value == "memory")
             && self.io_accounting_status == "unknown_not_delegated"
             && self.trust_boundary == "same_uid_non_adversarial_cgroup_membership"
+    }
+
+    #[cfg(feature = "r9-workload-receipts")]
+    fn has_complete_durable_receipt_bindings(&self) -> bool {
+        let mut seen_receipt_ids = HashSet::with_capacity(self.durable_receipts.len());
+        self.durable_receipts.len() == self.captured_generation_count as usize
+            && !self.durable_receipts.is_empty()
+            && self.durable_receipts.iter().all(|reference| {
+                reference.receipt_id.len() == 32
+                    && reference
+                        .receipt_id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                    && reference.sha256.len() == 71
+                    && reference.sha256.starts_with("sha256:")
+                    && reference.sha256.as_bytes()[7..]
+                        .iter()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+                    && seen_receipt_ids.insert(reference.receipt_id.as_str())
+            })
     }
 }
 
@@ -1384,6 +1396,7 @@ fn terminal_resource_usage(
 
 fn workload_resource_usage(
     snapshot: ab_agent::WorkloadResourceSnapshot,
+    durable_binding_present: bool,
 ) -> TaskWorkloadResourceUsage {
     let accounting_status = match snapshot.status {
         ab_agent::WorkloadResourceStatus::Pending => "pending",
@@ -1402,7 +1415,15 @@ fn workload_resource_usage(
     let failure_reason = (!snapshot.incomplete_reasons.is_empty())
         .then(|| snapshot.incomplete_reasons.join("; "));
     TaskWorkloadResourceUsage {
-        schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V1.to_string(),
+        schema_version: if cfg!(feature = "r9-workload-receipts")
+            || !snapshot.durable_receipts.is_empty()
+            || durable_binding_present
+        {
+            TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+        } else {
+            TASK_WORKLOAD_RESOURCES_SCHEMA_V0
+        }
+        .to_string(),
         accounting_status: accounting_status.to_string(),
         source: snapshot
             .source
@@ -1440,7 +1461,18 @@ fn refresh_task_custody_resources(
 ) {
     span.task_terminal_resources = Some(terminal_resource_usage(custody.terminal_resources()));
     let (workload_resources, lease_guard) = custody.workload_resources_with_lease();
-    span.task_workload_resources = Some(workload_resource_usage(workload_resources));
+    // A pending producer can hold a durable binding before sealing any receipt.
+    // Also preserve a previous v1 projection if a later snapshot is empty.
+    let durable_binding_present = !lease_guard.is_empty()
+        || !span.durable_workload_receipt_lease.guard.is_empty()
+        || span.task_workload_resources.as_ref().is_some_and(|usage| {
+            usage.schema_version == TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+                || !usage.durable_receipts.is_empty()
+        });
+    span.task_workload_resources = Some(workload_resource_usage(
+        workload_resources,
+        durable_binding_present,
+    ));
     span.durable_workload_receipt_lease = OpaqueDurableWorkloadReceiptLease { guard: lease_guard };
 }
 
@@ -2536,11 +2568,16 @@ mod tests {
             complete_for_spawned_attempts: true,
             complete_for_workload_tree: false,
             terminal_condition: "all_spawned_children_observed_before_reap".into(),
-            peak_resident_semantics:
-                "max_ru_maxrss_across_attempts_not_concurrent_tree_peak".into(),
+            peak_resident_semantics: "max_ru_maxrss_across_attempts_not_concurrent_tree_peak"
+                .into(),
         });
         span.task_workload_resources = Some(TaskWorkloadResourceUsage {
-            schema_version: TASK_WORKLOAD_RESOURCES_SCHEMA_V1.into(),
+            schema_version: if cfg!(feature = "r9-workload-receipts") {
+                TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+            } else {
+                TASK_WORKLOAD_RESOURCES_SCHEMA_V0
+            }
+            .into(),
             accounting_status: "complete".into(),
             source: "linux_cgroup_v2_systemd_delegated_scope".into(),
             scope: "delegated_session_workload_tree".into(),
@@ -2559,10 +2596,14 @@ mod tests {
             final_populated_zero: true,
             complete_for_cpu_memory_workload_tree: true,
             complete_for_pids_workload_tree: true,
-            durable_receipts: vec![ab_agent::DurableWorkloadReceiptRef {
-                receipt_id: "a".repeat(32),
-                sha256: format!("sha256:{}", "b".repeat(64)),
-            }],
+            durable_receipts: if cfg!(feature = "r9-workload-receipts") {
+                vec![ab_agent::DurableWorkloadReceiptRef {
+                    receipt_id: "a".repeat(32),
+                    sha256: format!("sha256:{}", "b".repeat(64)),
+                }]
+            } else {
+                Vec::new()
+            },
             io_accounting_status: "unknown_not_delegated".into(),
             terminal_condition: "all_generations_populated_zero".into(),
             failure_reason: None,
@@ -2576,8 +2617,7 @@ mod tests {
         let receipt = serde_json::to_value(span.receipt()).expect("receipt serializes");
         assert_eq!(receipt["schema_version"], TASK_RESOURCE_SPAN_SCHEMA_V4);
         assert_eq!(
-            receipt["task_workload_resources"]
-                ["complete_for_cpu_memory_workload_tree"],
+            receipt["task_workload_resources"]["complete_for_cpu_memory_workload_tree"],
             true
         );
         assert_eq!(
@@ -2586,7 +2626,9 @@ mod tests {
         );
         for private_key in ["pid", "pidfd", "cgroup_path", "unit", "nonce"] {
             assert!(receipt.get(private_key).is_none());
-            assert!(receipt["task_workload_resources"].get(private_key).is_none());
+            assert!(receipt["task_workload_resources"]
+                .get(private_key)
+                .is_none());
         }
 
         let baseline = span
@@ -2600,11 +2642,29 @@ mod tests {
         tampered.trust_boundary = "hostile_same_uid_containment".into();
         assert!(!tampered.proves_complete_cpu_memory_workload_tree());
         tampered = baseline.clone();
-        tampered.controllers.retain(|controller| controller != "memory");
+        tampered
+            .controllers
+            .retain(|controller| controller != "memory");
         assert!(!tampered.proves_complete_cpu_memory_workload_tree());
         tampered = baseline.clone();
-        tampered.durable_receipts.clear();
+        if cfg!(feature = "r9-workload-receipts") {
+            tampered.durable_receipts.clear();
+        } else {
+            tampered.schema_version = TASK_WORKLOAD_RESOURCES_SCHEMA_V1.into();
+        }
         assert!(!tampered.proves_complete_cpu_memory_workload_tree());
+        tampered = baseline.clone();
+        tampered.schema_version = TASK_WORKLOAD_RESOURCES_SCHEMA_V0.into();
+        tampered.durable_receipts = vec![ab_agent::DurableWorkloadReceiptRef {
+            receipt_id: "a".repeat(32),
+            sha256: format!("sha256:{}", "b".repeat(64)),
+        }];
+        assert!(!tampered.proves_complete_cpu_memory_workload_tree());
+        tampered.schema_version = TASK_WORKLOAD_RESOURCES_SCHEMA_V1.into();
+        assert_eq!(
+            tampered.proves_complete_cpu_memory_workload_tree(),
+            cfg!(feature = "r9-workload-receipts"),
+        );
 
         span.task_terminal_resources
             .as_mut()
@@ -2620,6 +2680,36 @@ mod tests {
             .expect("workload receipt")
             .complete_for_cpu_memory_workload_tree = false;
         assert!(!span.has_complete_capture());
+    }
+
+    #[test]
+    fn workload_projection_preserves_pending_and_existing_durable_bindings() {
+        let ordinary = workload_resource_usage(Default::default(), false);
+        assert_eq!(
+            ordinary.schema_version,
+            if cfg!(feature = "r9-workload-receipts") {
+                TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+            } else {
+                TASK_WORKLOAD_RESOURCES_SCHEMA_V0
+            }
+        );
+        let pending = workload_resource_usage(Default::default(), true);
+        assert_eq!(pending.schema_version, TASK_WORKLOAD_RESOURCES_SCHEMA_V1);
+        assert!(!pending.proves_complete_cpu_memory_workload_tree());
+        let with_receipt = workload_resource_usage(
+            ab_agent::WorkloadResourceSnapshot {
+                durable_receipts: vec![ab_agent::DurableWorkloadReceiptRef {
+                    receipt_id: "a".repeat(32),
+                    sha256: format!("sha256:{}", "b".repeat(64)),
+                }],
+                ..Default::default()
+            },
+            false,
+        );
+        assert_eq!(
+            with_receipt.schema_version,
+            TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+        );
     }
 
     #[test]

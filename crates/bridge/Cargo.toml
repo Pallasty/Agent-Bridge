@@ -11,6 +11,9 @@ license.workspace = true
 # hash-only fallback in ab-store keeps memory/embedding APIs functional.
 default = ["onnx-embed"]
 onnx-embed = ["ab-store/onnx-embed"]
+# R9 adoption is a separate build; ordinary maintenance does not produce,
+# reconcile, or acknowledge durable workload receipts.
+r9-workload-receipts = ["ab-store/r9-workload-receipts", "ab-agent/r9-workload-receipts"]
 linux-native-avatar = ["dep:smithay-client-toolkit", "dep:wayland-client"]
 biocortex-retrieval-shadow = []
 biocortex-retrieval-opt-in = ["biocortex-retrieval-shadow"]

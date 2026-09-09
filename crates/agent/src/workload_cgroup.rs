@@ -187,6 +187,7 @@ impl DurableWorkloadReceiptLeaseGuard {
     /// guard. This is the live-path counterpart of the restart scanner's
     /// public ACK, which intentionally refuses entries with active owners.
     pub fn acknowledge(&self, receipt_ref: &DurableWorkloadReceiptRef) -> Result<bool> {
+        require_r9_workload_receipts()?;
         let held = self
             ._entries
             .iter()
@@ -1197,6 +1198,9 @@ pub(crate) fn wrap_launch_spec(
     env: &std::collections::HashMap<String, String>,
     receipt_binding: Option<&str>,
 ) -> Result<crate::sandbox::LaunchSpec> {
+    if receipt_binding.is_some() {
+        require_r9_workload_receipts()?;
+    }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (runtime, env, receipt_binding);
@@ -1566,9 +1570,20 @@ fn validate_manifest(manifest: &DurableReceiptManifest) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn durable_receipt_root() -> Result<PathBuf> {
+    require_r9_workload_receipts()?;
     let root = durable_workload_receipt_root_path()?;
     ensure_private_directory(&root, true)?;
     Ok(root)
+}
+
+fn require_r9_workload_receipts() -> Result<()> {
+    if cfg!(feature = "r9-workload-receipts") {
+        Ok(())
+    } else {
+        Err(Error::Backend(
+            "R9 workload receipts are disabled in this build".into(),
+        ))
+    }
 }
 
 /// Resolve the configured durable workload receipt root without inspecting or
@@ -2452,6 +2467,7 @@ fn parse_supervisor_request(args: &[std::ffi::OsString]) -> Result<Option<Superv
     match (&receipt_id, &span_id) {
         (None, None) => {}
         (Some(receipt_id), Some(span_id)) => {
+            require_r9_workload_receipts()?;
             validate_receipt_id(receipt_id)?;
             validate_receipt_binding(span_id)?;
         }
@@ -3771,6 +3787,116 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
+    #[cfg(not(feature = "r9-workload-receipts"))]
+    #[test]
+    fn maintenance_rejects_bound_launch_before_outbox_or_supervisor_preparation() {
+        let launch = crate::sandbox::LaunchSpec {
+            program: "/bin/true".into(),
+            args: vec![],
+            sandboxed: false,
+            workload: None,
+        };
+        // Rejection precedes ambient custody policy and filesystem resolution.
+        let error = wrap_launch_spec(launch, "test", &Default::default(), Some("existing-span"))
+            .unwrap_err();
+        assert!(error.to_string().contains("disabled in this build"));
+        let args: Vec<std::ffi::OsString> = [
+            INTERNAL_MARKER,
+            "--runtime",
+            "test",
+            "--unit",
+            "agent-bridge-agent-test.scope",
+            "--nonce",
+            &"a".repeat(32),
+            "--receipt-id",
+            &"b".repeat(32),
+            "--span-id",
+            "existing-span",
+            "--socket",
+            "/must-not-be-used/socket",
+            "--receipt",
+            "/must-not-be-used/receipt",
+            "--",
+            "/bin/true",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+        let error = match parse_supervisor_request(&args) {
+            Err(error) => error,
+            Ok(_) => panic!("durable supervisor request must be rejected"),
+        };
+        assert!(error.to_string().contains("disabled in this build"));
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "r9-workload-receipts")))]
+    #[test]
+    fn maintenance_scan_and_ack_preserve_existing_receipt() {
+        const PROBE: &str = "AB_TEST_R9_DISABLED_PUBLIC_API_PROBE";
+        if std::env::var_os(PROBE).is_some() {
+            let receipt_ref = DurableWorkloadReceiptRef {
+                receipt_id: "a".repeat(32),
+                sha256: format!("sha256:{}", "b".repeat(64)),
+            };
+            assert!(scan_durable_workload_receipts()
+                .unwrap_err()
+                .to_string()
+                .contains("disabled in this build"));
+            assert!(acknowledge_durable_workload_receipt(&receipt_ref)
+                .unwrap_err()
+                .to_string()
+                .contains("disabled in this build"));
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        set_mode(root.path(), 0o700).unwrap();
+        let (entry, producer, manifest) = prepare_durable_receipt_entry_at(
+            root.path(),
+            "test",
+            "historical-span",
+            "agent-bridge-agent-test.scope",
+            &"a".repeat(32),
+        )
+        .unwrap();
+        let receipt_ref =
+            write_durable_fixture_receipt(&entry, &manifest, complete_snapshot(1, 1, 1));
+        let before = std::fs::read(entry.join(RECEIPT_FILE)).unwrap();
+        let guard = DurableWorkloadReceiptLeaseGuard {
+            _entries: vec![HeldDurableReceiptLease {
+                entry: Arc::new(producer),
+                receipt_ref: Some(receipt_ref.clone()),
+            }],
+        };
+        // Keep ambient API probes in a child with a fixture-only receipt root,
+        // so a regression cannot make the test touch installed runtime state.
+        let probe = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "workload_cgroup::tests::maintenance_scan_and_ack_preserve_existing_receipt",
+            ])
+            .env(PROBE, "1")
+            .env(RECEIPT_DIR_ENV, root.path())
+            .output()
+            .unwrap();
+        assert!(
+            probe.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&probe.stdout),
+            String::from_utf8_lossy(&probe.stderr),
+        );
+        assert!(guard
+            .acknowledge(&receipt_ref)
+            .unwrap_err()
+            .to_string()
+            .contains("disabled in this build"));
+        assert_eq!(std::fs::read(entry.join(RECEIPT_FILE)).unwrap(), before);
+        assert!(entry.join(MANIFEST_FILE).exists());
+        assert!(!root
+            .path()
+            .join(format!(".acked-{}", receipt_ref.receipt_id))
+            .exists());
+    }
+
     #[cfg(not(target_os = "linux"))]
     #[test]
     fn proc_identity_is_unavailable_without_linux_procfs() {
@@ -4227,6 +4353,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(feature = "r9-workload-receipts")]
     fn durable_snapshot_guard_holds_and_owner_acknowledges_exact_digest() {
         let root = tempfile::tempdir().expect("durable root");
         set_mode(root.path(), 0o700).unwrap();

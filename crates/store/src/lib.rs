@@ -1943,9 +1943,9 @@ pub fn plan_step_contract_id(plan_id: &str, step_id: &str, desc: &str, deps: &[S
 
 /// Canonicalize a status accepted by the plan write surfaces.
 ///
-/// Existing rows are decoded without rewriting their status. Every save or
-/// update, however, uses this closed set and persists the canonical lowercase
-/// form.
+/// Existing rows are decoded without rewriting their status. Known states are
+/// normalized on writes; strict plans use this closed set, while ordinary plans
+/// also preserve nonempty custom status labels for compatibility.
 pub fn canonical_plan_status(status: &str) -> Option<&'static str> {
     match status.trim().to_ascii_lowercase().as_str() {
         "not_yet" | "pending" => Some("pending"),
@@ -1984,7 +1984,8 @@ pub struct PlanStep {
     pub desc: String,
     /// Canonical values: `pending` | `in_progress` | `done` | `blocked` |
     /// `obsolete`. Uppercase Recuris spellings and the documented aliases are
-    /// accepted on new writes and normalized before persistence.
+    /// accepted on new writes and normalized before persistence. Ordinary plans
+    /// additionally accept custom nonempty labels without claiming completion.
     #[serde(default = "default_plan_status")]
     pub status: String,
     #[serde(default)]
@@ -2006,11 +2007,32 @@ fn default_plan_status() -> String {
     "pending".to_string()
 }
 
+/// Completion policy is explicit for new plans and retained across saves.
+/// Agent reports advance ordinary work without becoming verified outcomes.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanCompletionMode {
+    #[default]
+    AgentReported,
+    EvidenceGated,
+}
+
+impl PlanCompletionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentReported => "agent_reported",
+            Self::EvidenceGated => "evidence_gated",
+        }
+    }
+}
+
 /// Full plan row loaded from SQLite.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanRecord {
     pub plan_id: String,
     pub title: String,
+    #[serde(default)]
+    pub completion_mode: PlanCompletionMode,
     pub steps: Vec<PlanStep>,
     /// Read-projection diagnostics for completion anchors that failed exact
     /// validation. This is never persisted inside `steps_json`.
@@ -2035,6 +2057,7 @@ pub enum PlanMutationRejectionCode {
     SelfDependency,
     DependencyCycle,
     UnsupportedStatus,
+    CompletionModeDowngradeForbidden,
     CompletionContractMismatch,
     CompletionEvidenceForbidden,
     CompletionEvidenceRequired,
@@ -4964,12 +4987,26 @@ pub trait StateStore: Send + Sync {
         plan_id: &str,
         title: &str,
         steps: &[PlanStep],
+    ) -> Result<PlanSaveOutcome> {
+        self.plan_save_with_mode(plan_id, title, steps, None).await
+    }
+
+    /// Omitted mode preserves an existing plan's policy and creates an ordinary
+    /// agent-reported plan otherwise. Strict plans and persisted evidence anchors
+    /// cannot be downgraded, including when their evidence has become invalid.
+    async fn plan_save_with_mode(
+        &self,
+        plan_id: &str,
+        title: &str,
+        steps: &[PlanStep],
+        completion_mode: Option<PlanCompletionMode>,
     ) -> Result<PlanSaveOutcome>;
 
     /// Load a plan by id.
     async fn plan_load(&self, plan_id: &str) -> Result<Option<PlanRecord>>;
 
-    /// Atomically set `steps[id].status`. A DONE transition accepts only an
+    /// Atomically set `steps[id].status`. Ordinary plans accept agent-reported
+    /// completion without evidence. In strict plans a DONE transition accepts an
     /// immutable outcome id; the Store resolves and persists its canonical
     /// digest. An evidence-anchored DONE is terminal in v1. Other non-DONE
     /// transitions must pass `None`, and legacy evidence-free DONE may be

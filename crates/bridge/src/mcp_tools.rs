@@ -17591,8 +17591,10 @@ async fn record_body_scheduling_advice_event(
 async fn spawn_agent_with_body_span(
     hub: &Hub,
     agent: Arc<dyn AgentRuntime>,
-    mut cfg: SpawnConfig,
+    cfg: SpawnConfig,
 ) -> std::result::Result<(ab_agent::AgentSession, Option<Value>), String> {
+    #[cfg(feature = "r9-workload-receipts")]
+    let mut cfg = cfg;
     validate_workspace_runtime_request(agent.as_ref(), &cfg)?;
     let runtime_id = agent.id().to_string();
     let span_id = if crate::body_telemetry::body_telemetry_enabled() {
@@ -17612,18 +17614,21 @@ async fn spawn_agent_with_body_span(
         None
     };
 
-    let contract = agent.workspace_contract();
-    let local_workload = match contract.locality {
-        ab_agent::RuntimeLocality::Local => true,
-        ab_agent::RuntimeLocality::LocalOrRemote => !agent_node_is_remote(cfg.node.as_deref()),
-        ab_agent::RuntimeLocality::Cloud | ab_agent::RuntimeLocality::Unknown => false,
-    };
-    if local_workload {
-        if let Some(span_id) = span_id.as_ref() {
-            cfg.env.insert(
-                ab_agent::workload_cgroup::RECEIPT_BINDING_ENV.to_string(),
-                span_id.clone(),
-            );
+    #[cfg(feature = "r9-workload-receipts")]
+    {
+        let contract = agent.workspace_contract();
+        let local_workload = match contract.locality {
+            ab_agent::RuntimeLocality::Local => true,
+            ab_agent::RuntimeLocality::LocalOrRemote => !agent_node_is_remote(cfg.node.as_deref()),
+            ab_agent::RuntimeLocality::Cloud | ab_agent::RuntimeLocality::Unknown => false,
+        };
+        if local_workload {
+            if let Some(span_id) = span_id.as_ref() {
+                cfg.env.insert(
+                    ab_agent::workload_cgroup::RECEIPT_BINDING_ENV.to_string(),
+                    span_id.clone(),
+                );
+            }
         }
     }
 
@@ -32942,7 +32947,9 @@ impl McpTool for CapabilitiesTool {
             "build": {
                 "package_version": version,
                 "git_sha": crate::build_identity::GIT_SHA,
-                "git_describe": crate::build_identity::GIT_DESCRIBE
+                "git_describe": crate::build_identity::GIT_DESCRIBE,
+                "runtime_profile_marker": crate::build_identity::RUNTIME_PROFILE_MARKER,
+                "r9_workload_receipts_enabled": crate::build_identity::R9_WORKLOAD_RECEIPTS_ENABLED
             }
         })))
     }
@@ -33726,6 +33733,15 @@ async fn record_body_task_span_event(
         .as_ref()
         .map(|usage| usage.durable_receipts.clone())
         .unwrap_or_default();
+    #[cfg(not(feature = "r9-workload-receipts"))]
+    if !durable_receipt_lease.is_empty()
+        || receipt.task_workload_resources.as_ref().is_some_and(|usage| {
+            usage.schema_version == crate::body_telemetry::TASK_WORKLOAD_RESOURCES_SCHEMA_V1
+        })
+    {
+        tracing::warn!(span_id = %span.span_id, "durable workload receipt binding disabled in this build; existing evidence preserved");
+        return false;
+    }
     let verdict = if complete {
         crate::semantic_event::Verdict {
             status: crate::semantic_event::VerdictStatus::Verified,
@@ -33840,6 +33856,14 @@ async fn record_body_task_span_event(
             }
         }
     } else {
+        // A maintenance build must not turn a receipt-bound event into an
+        // uncommitted semantic success or acknowledge an existing outbox.
+        #[cfg(not(feature = "r9-workload-receipts"))]
+        {
+            tracing::warn!(span_id = %span.span_id, "durable workload receipt commit disabled in this build; outbox preserved");
+            false
+        }
+        #[cfg(feature = "r9-workload-receipts")]
         match crate::workload_receipt_reconciliation::commit_live_workload_receipt_event_and_ack(
             store,
             &durable_receipts,
@@ -47480,6 +47504,7 @@ impl McpTool for MemoryAutoCurateTool {
 
 fn enrich_plan_json(rec: &PlanRecord) -> Value {
     let total = rec.steps.len();
+    let agent_reported = rec.completion_mode == ab_store::PlanCompletionMode::AgentReported;
     let completion_integrity_failure_step_ids = rec
         .completion_diagnostics
         .iter()
@@ -47498,11 +47523,16 @@ fn enrich_plan_json(rec: &PlanRecord) -> Value {
         .map(|step| step.id.as_str())
         .collect::<HashSet<_>>();
     let verified_done = verified_done_ids.len();
+    let reported_done_ids = rec.steps.iter()
+        .filter(|step| step.status == "done" && !completion_integrity_failure_step_ids.contains(&step.id))
+        .map(|step| step.id.as_str())
+        .collect::<HashSet<_>>();
+    let completed_ids = if agent_reported { &reported_done_ids } else { &verified_done_ids };
     let legacy_unverified_done_step_ids = rec
         .steps
         .iter()
         .filter(|step| {
-            step.status == "done"
+            !agent_reported && step.status == "done"
                 && step.completion_evidence.is_none()
                 && !completion_integrity_failure_step_ids.contains(&step.id)
         })
@@ -47511,17 +47541,23 @@ fn enrich_plan_json(rec: &PlanRecord) -> Value {
     let legacy_unverified_done_count = legacy_unverified_done_step_ids.len();
     let completion_gate = if completion_integrity_failure_count > 0 {
         "integrity_failure"
+    } else if agent_reported {
+        "agent_reported"
     } else if !legacy_unverified_done_step_ids.is_empty() {
         "legacy_unverified"
     } else {
         "evidence_gated"
     };
-    let progress = format!("{verified_done}/{total} evidence-gated done");
+    let progress = if agent_reported {
+        format!("{}/{total} done", completed_ids.len())
+    } else {
+        format!("{verified_done}/{total} evidence-gated done")
+    };
     let next = rec
         .steps
         .iter()
         .find(|step| {
-            !verified_done_ids.contains(step.id.as_str())
+            !completed_ids.contains(step.id.as_str())
                 && !matches!(
                     step.status.as_str(),
                     "blocked" | "obsolete" | "cancelled" | "canceled"
@@ -47529,18 +47565,19 @@ fn enrich_plan_json(rec: &PlanRecord) -> Value {
                 && step
                     .deps
                     .iter()
-                    .all(|dependency| verified_done_ids.contains(dependency.as_str()))
+                    .all(|dependency| completed_ids.contains(dependency.as_str()))
         })
         .map(|step| step.id.clone());
     json!({
         "plan_id": rec.plan_id,
         "title": rec.title,
+        "completion_mode": rec.completion_mode,
         "steps": rec.steps,
         "created_at": rec.created_at,
         "updated_at": rec.updated_at,
         "progress": progress,
-        // Keep the original key while making its meaning evidence-gated.
-        "done_count": verified_done,
+        "done_count": completed_ids.len(),
+        "agent_reported_done_count": if agent_reported { reported_done_ids.len() } else { 0 },
         "verified_done_count": verified_done,
         "legacy_unverified_done_count": legacy_unverified_done_count,
         "legacy_unverified_done_step_ids": legacy_unverified_done_step_ids,
@@ -47672,7 +47709,7 @@ impl McpTool for PlanSaveTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Persist a structured task plan to SQLite (survives sessions). Each step has id, desc, optional status (default pending), and optional deps. A done step is admitted only when its completion_evidence outcome_id resolves to an immutable, content-bound, harness-verified outcome after every dependency is evidence-gated done. This public route cannot mint trusted outcomes or supply provenance/verdict claims."
+            description: "Persist a structured task plan to SQLite (survives sessions). Each step has id, desc, optional status (default pending), and optional deps. New plans default to agent_reported: done advances work without independent verification. Set completion_mode=evidence_gated for immutable, content-bound, harness-verified completion after dependencies pass. Omitted mode preserves existing policy; strict plans cannot be downgraded. This public route cannot mint trusted outcomes or supply provenance/verdict claims."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -47680,6 +47717,11 @@ impl McpTool for PlanSaveTool {
                 "properties": {
                     "plan_id": { "type": "string", "minLength": 1, "description": "Stable plan identifier." },
                     "title": { "type": "string", "minLength": 1, "description": "Human-readable plan title." },
+                    "completion_mode": {
+                        "type": "string",
+                        "enum": ["agent_reported", "evidence_gated"],
+                        "description": "Omit to retain an existing policy or create an ordinary agent_reported plan. Evidence-gated plans and persisted completion anchors cannot be downgraded."
+                    },
                     "steps": {
                         "type": "array",
                         "items": {
@@ -47690,8 +47732,9 @@ impl McpTool for PlanSaveTool {
                                 "desc": { "type": "string", "minLength": 1, "description": "Required human-readable step description. The field name is desc, not description or step." },
                                 "status": {
                                     "type": "string",
-                                    "enum": ["pending", "not_yet", "in_progress", "done", "blocked", "obsolete", "cancelled", "canceled", "NOT_YET", "IN_PROGRESS", "DONE", "BLOCKED", "OBSOLETE"],
-                                    "description": "Closed plan state. Aliases are normalized by the Store; done requires trusted completion evidence."
+                                    "minLength": 1,
+                                    "examples": ["pending", "not_yet", "in_progress", "done", "blocked", "obsolete"],
+                                    "description": "Known states and aliases are normalized. Ordinary plans also retain custom nonempty labels; evidence_gated plans accept only the documented states and require trusted evidence for done."
                                 },
                                 "deps": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
                                 "completion_contract": {
@@ -47737,7 +47780,7 @@ impl McpTool for PlanSaveTool {
         if let Some(field) = args.as_object().and_then(|object| {
             object
                 .keys()
-                .find(|field| !matches!(field.as_str(), "plan_id" | "title" | "steps"))
+                .find(|field| !matches!(field.as_str(), "plan_id" | "title" | "steps" | "completion_mode"))
         }) {
             return Ok(ToolResult::error(format!(
                 "plan_save contains unsupported field '{field}'"
@@ -47761,6 +47804,13 @@ impl McpTool for PlanSaveTool {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing or empty 'title'")),
         };
+        let completion_mode = match args.get("completion_mode") {
+            None => None,
+            Some(value) => match serde_json::from_value::<ab_store::PlanCompletionMode>(value.clone()) {
+                Ok(mode) => Some(mode),
+                Err(_) => return Ok(ToolResult::error("'completion_mode' must be agent_reported or evidence_gated")),
+            },
+        };
         let steps_val = match args.get("steps") {
             Some(v) if v.is_array() => v.clone(),
             _ => return Ok(ToolResult::error("missing 'steps' array")),
@@ -47780,7 +47830,7 @@ impl McpTool for PlanSaveTool {
             return Ok(ToolResult::error("'steps' must be non-empty"));
         }
         let outcome = store
-            .plan_save(&plan_id, &title, &steps)
+            .plan_save_with_mode(&plan_id, &title, &steps, completion_mode)
             .await
             .map_err(|e| ab_core::Error::Backend(format!("plan_save: {e}")))?;
         match outcome {
@@ -47813,7 +47863,7 @@ impl McpTool for PlanLoadTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Load a persisted plan by plan_id. Includes evidence-gated progress, explicit legacy-unverified done diagnostics, and the first dependency-ready next_step_id."
+            description: "Load a persisted plan by plan_id. Includes progress under the persisted completion mode, a separate independently verified count, integrity diagnostics, and the first dependency-ready next_step_id."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -47867,7 +47917,7 @@ impl McpTool for PlanUpdateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Update one plan step's status by step id. Nonterminal updates remain lightweight. A done transition requires completion_evidence.outcome_id for an already-admitted, content-bound, harness-verified outcome and completed dependencies; once evidence-anchored, done is terminal in v1 and cannot be reopened or rebound. The public MCP route cannot mint that trusted outcome and cannot supply provenance, kind, method, or verdict fields."
+            description: "Update one plan step's status by step id. Ordinary agent_reported plans advance on done without evidence and accept custom nonempty status labels. In evidence_gated plans, a done transition requires completion_evidence.outcome_id for an already-admitted, content-bound, harness-verified outcome and completed dependencies; once evidence-anchored, done is terminal in v1 and cannot be reopened or rebound. The public MCP route cannot mint that trusted outcome and cannot supply provenance, kind, method, or verdict fields."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -47877,12 +47927,14 @@ impl McpTool for PlanUpdateTool {
                     "step_id": { "type": "string", "minLength": 1 },
                     "status": {
                         "type": "string",
-                        "enum": ["pending", "not_yet", "in_progress", "done", "blocked", "obsolete", "cancelled", "canceled", "NOT_YET", "IN_PROGRESS", "DONE", "BLOCKED", "OBSOLETE"]
+                        "minLength": 1,
+                        "examples": ["pending", "not_yet", "in_progress", "done", "blocked", "obsolete"],
+                        "description": "Known states and aliases are normalized; custom nonempty labels are accepted only for ordinary agent_reported plans."
                     },
                     "completion_evidence": {
                         "type": "object",
                         "additionalProperties": false,
-                        "description": "For done only: a reference to a trusted outcome already present in the immutable outcome ledger. No caller-supplied provenance or verdict fields are accepted.",
+                        "description": "For evidence_gated done only (forbidden in ordinary plans): a reference to a trusted outcome already present in the immutable outcome ledger. No caller-supplied provenance or verdict fields are accepted.",
                         "properties": {
                             "outcome_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" }
                         },

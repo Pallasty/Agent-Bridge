@@ -172,12 +172,12 @@ fn read_head(path: &Path, n: usize) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", any(feature = "r9-workload-receipts", test)))]
 const WORKLOAD_RECEIPT_ROOT_FIX: &str =
     "configure AGENT_BRIDGE_CGROUP_RECEIPT_DIR or AGENT_BRIDGE_STATE_DIR on a permission-capable private filesystem, then start or restart the R9 binary once; do not blindly chmod a FUSE-backed path";
 
 /// Verify the R9 receipt root without creating it or changing any permissions.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "r9-workload-receipts"))]
 fn check_workload_receipt_root() -> Check {
     match ab_agent::durable_workload_receipt_root_path() {
         Ok(path) => check_workload_receipt_root_path(&path),
@@ -189,7 +189,7 @@ fn check_workload_receipt_root() -> Check {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(not(target_os = "linux"), feature = "r9-workload-receipts"))]
 fn check_workload_receipt_root() -> Check {
     Check::ok(
         "workload_receipt_root",
@@ -197,7 +197,15 @@ fn check_workload_receipt_root() -> Check {
     )
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(feature = "r9-workload-receipts"))]
+fn check_workload_receipt_root() -> Check {
+    Check::ok(
+        "workload_receipt_root",
+        "not applicable: R9 workload receipts are disabled in this build; existing state is untouched",
+    )
+}
+
+#[cfg(all(target_os = "linux", any(feature = "r9-workload-receipts", test)))]
 fn check_workload_receipt_root_path(path: &Path) -> Check {
     use std::io::ErrorKind;
 
@@ -1566,6 +1574,15 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "r9-workload-receipts"))]
+    #[test]
+    fn maintenance_doctor_does_not_require_a_workload_receipt_root() {
+        let check = check_workload_receipt_root();
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("disabled in this build"));
+        assert!(check.fix.is_none());
+    }
 
     #[cfg(target_os = "linux")]
     fn set_test_mode(path: &Path, mode: u32) {

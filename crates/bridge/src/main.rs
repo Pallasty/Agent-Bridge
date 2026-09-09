@@ -21551,6 +21551,7 @@ async fn run_rescue_snapshot(
     }
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn log_workload_receipt_reconciliation_report(
     report: &ab_bridge::workload_receipt_reconciliation::WorkloadReceiptReconciliationReport,
 ) {
@@ -21617,6 +21618,7 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
     tracing::info!(path = %db_path.display(), "SQLite store");
     let store_impl = Arc::new(SqliteStore::open(&db_path).await?);
     let store: Arc<dyn StateStore> = store_impl.clone();
+    #[cfg(feature = "r9-workload-receipts")]
     match ab_bridge::workload_receipt_reconciliation::reconcile_workload_receipt_spool(&store)
         .await
     {
@@ -21750,6 +21752,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "r9-workload-receipts")]
     fn startup_workload_receipt_log_exposes_complete_duplicate_evidence() {
         let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let writer_output = output.clone();

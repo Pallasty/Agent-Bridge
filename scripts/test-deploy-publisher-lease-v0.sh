@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Isolated contract tests for deploy_from_master.sh publisher lease v0.
 set -euo pipefail
+# These existing root/binder fixtures exercise the explicit R9 profile.
+# Ordinary publication is covered by test-deploy-maintenance-profile.sh.
+export AGENT_BRIDGE_DEPLOY_PROFILE=r9
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY="$SCRIPT_DIR/deploy_from_master.sh"
@@ -683,13 +686,13 @@ write_production_toolchain_fixture() {
 run_production_checkout_fixture() {
     local root="$1" deploy="$2" lane="${3:-build}" deploy_remote="${4:-gitlab}"
     if [ "$lane" = use-binary ]; then
-        env -i HOME="$production_home" PATH=/usr/bin:/bin \
+        env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
             AGENT_BRIDGE_DEPLOY_ROOT="$root" \
             AGENT_BRIDGE_DEPLOY_REMOTE="$deploy_remote" \
             CARGO_TARGET_DIR="$root/build-cache" \
             "$deploy" --use-binary "$root/missing-binary" --yes
     else
-        env -i HOME="$production_home" PATH=/usr/bin:/bin \
+        env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
             AGENT_BRIDGE_DEPLOY_ROOT="$root" \
             AGENT_BRIDGE_DEPLOY_REMOTE="$deploy_remote" \
             CARGO_TARGET_DIR="$root/build-cache" \
@@ -728,7 +731,7 @@ unsafe_root="$TEST_ROOT/production-unsafe-root"
 mkdir -p "$unsafe_root"
 chmod 777 "$unsafe_root"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$unsafe_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -748,7 +751,7 @@ for root_mode in 755 750; do
     mkdir -p "$broad_root"
     chmod "$root_mode" "$broad_root"
     set +e
-    output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+    output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
         AGENT_BRIDGE_DEPLOY_ROOT="$broad_root" \
         "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
     status=$?
@@ -769,7 +772,7 @@ mkdir -p "$wide_bin_root/bin"
 chmod 700 "$wide_bin_root"
 chmod 777 "$wide_bin_root/bin"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$wide_bin_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -787,7 +790,7 @@ mkdir -p "$wide_state_root/publisher-state"
 chmod 700 "$wide_state_root"
 chmod 777 "$wide_state_root/publisher-state"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$wide_state_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -807,7 +810,7 @@ mkdir -p "$symlink_intermediate_root" "$symlink_intermediate_target"
 chmod 700 "$symlink_intermediate_root" "$symlink_intermediate_target"
 ln -s "$symlink_intermediate_target" "$symlink_intermediate_root/publisher-state"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$symlink_intermediate_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -826,7 +829,7 @@ mkdir -p "$physical_root"
 chmod 700 "$physical_root"
 ln -s "$physical_root" "$symlink_root"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$symlink_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -842,7 +845,7 @@ mkdir -p "$canonical_root"
 chmod 700 "$canonical_root"
 noncanonical_root="$canonical_root/../$(basename "$canonical_root")"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$noncanonical_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -855,7 +858,7 @@ leaf_root="$TEST_ROOT/production-divergent-leaf-root"
 mkdir -p "$leaf_root"
 chmod 700 "$leaf_root"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$leaf_root" \
     AGENT_BRIDGE_INSTALL_DIR="$leaf_root/not-the-canonical-bin" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
@@ -871,7 +874,7 @@ injected_root="$TEST_ROOT/production-bad:root"
 mkdir -p "$injected_root"
 chmod 700 "$injected_root"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$injected_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?
@@ -881,9 +884,8 @@ case "$output" in *"contains an unsupported character"*) ;; *) fail "unsafe-char
 [ ! -e "$injected_root/publisher-state" ] || fail "unsafe-character root formed publisher state before rejection"
 
 # Literal spaces are required by the standard macOS Application Support path.
-# They must pass the same physical-root and fixed-checkout gates; the missing
-# candidate proves this reaches candidate validation rather than character
-# rejection, without allowing a deployment.
+# They must pass the same physical-root and fixed-checkout gates; the production
+# caller-binary rejection proves those gates passed without allowing deployment.
 space_root="$TEST_ROOT/production accepted root"
 write_production_checkout_fixture \
     "$space_root" git@gitlab.com:pallasting/agent-bridge.git
@@ -893,8 +895,8 @@ output="$(run_production_checkout_fixture \
 status=$?
 set -e
 [ "$status" -ne 0 ] || fail "space-root fixture unexpectedly deployed a missing binary"
-case "$output" in *"--use-binary path not found"*) ;; *)
-    fail "space-root fixture did not reach candidate validation" ;;
+case "$output" in *"--use-binary is disabled for production"*) ;; *)
+    fail "space-root fixture did not reach the production caller-binary gate" ;;
 esac
 [ ! -e "$space_root/bin" ] || fail "space-root missing candidate formed bin custody"
 
@@ -905,7 +907,7 @@ wrong_checkout_root="$TEST_ROOT/production-wrong-checkout-root"
 mkdir -p "$wrong_checkout_root"
 chmod 700 "$wrong_checkout_root"
 set +e
-output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin \
+output="$(env -i HOME="$production_home" PATH=/usr/bin:/bin AGENT_BRIDGE_DEPLOY_PROFILE=r9 \
     AGENT_BRIDGE_DEPLOY_ROOT="$wrong_checkout_root" \
     "$DEPLOY" --use-binary "$TEST_ROOT/missing-binary" --yes 2>&1)"
 status=$?

@@ -10640,7 +10640,7 @@ fn collaboration_write_schemas_expose_observed_argument_contracts() {
             .is_some_and(|description| description.contains("grants no authority"))
     );
     assert!(
-        plan["properties"]["steps"]["items"]["properties"]["status"]["enum"]
+        plan["properties"]["steps"]["items"]["properties"]["status"]["examples"]
             .as_array()
             .is_some_and(|values| values.contains(&json!("not_yet")))
     );
@@ -10664,7 +10664,7 @@ fn collaboration_write_schemas_expose_observed_argument_contracts() {
             .collect::<Vec<_>>(),
         vec!["outcome_id"]
     );
-    assert!(update.input_schema["properties"]["status"]["enum"]
+    assert!(update.input_schema["properties"]["status"]["examples"]
         .as_array()
         .is_some_and(|values| values.contains(&json!("not_yet"))));
     assert!(update
@@ -10681,6 +10681,7 @@ fn plan_enrichment_never_promotes_legacy_done_or_skips_dependencies() {
     let rec = PlanRecord {
         plan_id: "legacy-plan".into(),
         title: "Legacy plan".into(),
+        completion_mode: ab_store::PlanCompletionMode::EvidenceGated,
         steps: vec![
             PlanStep {
                 id: "legacy-done".into(),
@@ -10865,6 +10866,7 @@ async fn plan_mcp_completion_is_store_gated_and_roundtrips_trusted_evidence() {
             json!({
                 "plan_id": "direct-done",
                 "title": "Must reject direct done",
+                "completion_mode": "evidence_gated",
                 "steps": [{
                     "id": "s1",
                     "desc": "Unproved",
@@ -10892,6 +10894,7 @@ async fn plan_mcp_completion_is_store_gated_and_roundtrips_trusted_evidence() {
             json!({
                 "plan_id": "evidence-plan",
                 "title": "Evidence plan",
+                "completion_mode": "evidence_gated",
                 "steps": [
                     {
                         "id": "s1",
@@ -11151,6 +11154,117 @@ async fn plan_mcp_completion_is_store_gated_and_roundtrips_trusted_evidence() {
     assert_eq!(roundtrip["plan"]["steps"][0]["completion_anchor"], true);
     assert_eq!(roundtrip["plan"]["steps"][1]["completion_anchor"], true);
 
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn plan_mcp_ordinary_completion_advances_without_claiming_verification() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let ctx = ToolContext::default();
+    let saved = PlanSaveTool::new(hub.clone()).execute(json!({
+        "plan_id": "ordinary-mcp", "title": "Ordinary",
+        "steps": [{"id": "a", "desc": "First"}, {"id": "b", "desc": "Second", "deps": ["a"]}]
+    }), &ctx).await.unwrap();
+    assert!(!saved.is_error, "{}", result_text(&saved));
+    assert_eq!(
+        result_text_as_json(&saved)["plan"]["completion_mode"],
+        "agent_reported"
+    );
+    let custom = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "ordinary-mcp", "step_id": "a", "status": "waiting_external"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(!custom.is_error);
+    assert_eq!(
+        result_text_as_json(&custom)["plan"]["steps"][0]["status"],
+        "waiting_external"
+    );
+    let updated = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "ordinary-mcp", "step_id": "a", "status": "done"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(!updated.is_error, "{}", result_text(&updated));
+    for payload in [
+        result_text_as_json(&updated)["plan"].clone(),
+        result_text_as_json(
+            &PlanLoadTool::new(hub.clone())
+                .execute(json!({"plan_id": "ordinary-mcp"}), &ctx)
+                .await
+                .unwrap(),
+        ),
+    ] {
+        assert_eq!(payload["done_count"], 1);
+        assert_eq!(payload["agent_reported_done_count"], 1);
+        assert_eq!(payload["verified_done_count"], 0);
+        assert_eq!(payload["legacy_unverified_done_count"], 0);
+        assert_eq!(payload["completion_gate"], "agent_reported");
+        assert_eq!(payload["progress"], "1/2 done");
+        assert_eq!(payload["next_step_id"], "b");
+        assert_eq!(payload["steps"][0]["completion_anchor"], false);
+        assert!(payload["steps"][0].get("completion_evidence").is_none());
+        let saved = PlanSaveTool::new(hub.clone())
+            .execute(
+                json!({
+                    "plan_id": "ordinary-mcp", "title": "Roundtrip", "steps": payload["steps"]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!saved.is_error);
+        assert_eq!(result_text_as_json(&saved)["plan"]["next_step_id"], "b");
+        assert_eq!(
+            result_text_as_json(&saved)["plan"]["verified_done_count"],
+            0
+        );
+    }
+    let forged = PlanUpdateTool::new(hub.clone())
+        .execute(
+            json!({
+                "plan_id": "ordinary-mcp", "step_id": "a", "status": "done",
+                "completion_evidence": {"outcome_id": "forged"}
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(forged.is_error);
+    assert_eq!(
+        result_text_as_json(&forged)["reason"]["code"],
+        "completion_evidence_forbidden"
+    );
+    for mode in [json!(true), json!(null), json!("unknown")] {
+        let rejected = PlanSaveTool::new(hub.clone())
+            .execute(
+                json!({
+                    "plan_id": "invalid-mode", "title": "Invalid", "completion_mode": mode,
+                    "steps": [{"id": "a", "desc": "A"}]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(rejected.is_error);
+        assert!(result_text(&rejected).contains("'completion_mode' must be"));
+    }
+    assert!(hub
+        .store
+        .as_ref()
+        .unwrap()
+        .plan_load("invalid-mode")
+        .await
+        .unwrap()
+        .is_none());
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
@@ -23815,6 +23929,127 @@ fn mock(id: &str, fail: bool) -> Arc<dyn ab_agent::AgentRuntime> {
 
 static AGENT_SPAWN_FALLBACK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static BODY_CUSTODY_DOGFOOD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "mutates the process-wide body telemetry feature flag; run alone"]
+async fn r9_build_profile_controls_spawn_binding_and_preserves_bound_events() {
+    struct CapturingRuntime(std::sync::Mutex<Option<SpawnConfig>>);
+    #[async_trait]
+    impl ab_agent::AgentRuntime for CapturingRuntime {
+        fn id(&self) -> &str {
+            "receipt-binding-test"
+        }
+        fn workspace_contract(&self) -> ab_agent::WorkspaceRuntimeContract {
+            ab_agent::WorkspaceRuntimeContract::local_agent(false)
+        }
+        async fn spawn(&self, cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+            *self.0.lock().unwrap() = Some(cfg);
+            Err(ab_core::Error::Backend(
+                "test stopped before process launch".into(),
+            ))
+        }
+        async fn send_input(&self, _: &ab_core::SessionId, _: &str) -> ab_core::Result<()> {
+            unreachable!()
+        }
+        async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+            Default::default()
+        }
+    }
+    let _lock = BODY_CUSTODY_DOGFOOD_ENV_LOCK.lock().unwrap();
+    let _env = AgentSpawnFallbackEnvGuard::set("AGENT_BRIDGE_BODY_TELEMETRY", "1");
+    let dir = tempfile::tempdir().unwrap();
+    let store: Arc<dyn StateStore> = Arc::new(
+        ab_store::SqliteStore::open(&dir.path().join("state.db"))
+            .await
+            .unwrap(),
+    );
+    let runtime = Arc::new(CapturingRuntime(Default::default()));
+    let hub = Hub::builder().store(store.clone()).build();
+    assert!(spawn_agent_with_body_span(
+        &hub,
+        runtime.clone(),
+        SpawnConfig {
+            cwd: dir.path().display().to_string(),
+            ..Default::default()
+        }
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        runtime
+            .0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .env
+            .contains_key(ab_agent::workload_cgroup::RECEIPT_BINDING_ENV),
+        cfg!(feature = "r9-workload-receipts"),
+    );
+
+    let span_id = format!("r9-existing-{}", uuid::Uuid::new_v4());
+    crate::body_telemetry::start_task_resource_span(span_id.clone(), "test".into(), None).unwrap();
+    let mut span = crate::body_telemetry::finish_task_resource_span(&span_id).unwrap();
+    span.task_workload_resources = Some(crate::body_telemetry::TaskWorkloadResourceUsage {
+        schema_version: crate::body_telemetry::TASK_WORKLOAD_RESOURCES_SCHEMA_V1.into(),
+        accounting_status: "complete".into(),
+        source: "linux_cgroup_v2_systemd_delegated_scope".into(),
+        scope: "delegated_session_workload_tree".into(),
+        controllers: vec!["cpu".into(), "memory".into()],
+        workload_lifetime_covered: true,
+        generation_count: 1,
+        captured_generation_count: 1,
+        known_total_cpu_us: Some(2),
+        known_user_cpu_us: Some(1),
+        known_system_cpu_us: Some(1),
+        known_peak_memory_bytes: Some(1),
+        known_peak_pids: Some(1),
+        known_oom_event_count: Some(0),
+        known_oom_kill_count: Some(0),
+        start_before_exec: true,
+        final_populated_zero: true,
+        complete_for_cpu_memory_workload_tree: true,
+        complete_for_pids_workload_tree: false,
+        durable_receipts: vec![ab_agent::DurableWorkloadReceiptRef {
+            receipt_id: "a".repeat(32),
+            sha256: format!("sha256:{}", "b".repeat(64)),
+        }],
+        io_accounting_status: "unknown_not_delegated".into(),
+        terminal_condition: "all_generations_populated_zero".into(),
+        failure_reason: None,
+        trust_boundary: "same_uid_non_adversarial_cgroup_membership".into(),
+    });
+    let before = store.recent_semantic_events(60, 100).await.unwrap().len();
+    // Off cannot consume bound receipts; on still requires the original live
+    // producer lease. Neither profile may downgrade this to semantic success.
+    assert!(!record_body_task_span_event(&store, &span).await);
+    assert_eq!(
+        store.recent_semantic_events(60, 100).await.unwrap().len(),
+        before
+    );
+    #[cfg(not(feature = "r9-workload-receipts"))]
+    {
+        span.task_workload_resources
+            .as_mut()
+            .unwrap()
+            .schema_version = crate::body_telemetry::TASK_WORKLOAD_RESOURCES_SCHEMA_V0.into();
+        assert!(!record_body_task_span_event(&store, &span).await);
+        let usage = span.task_workload_resources.as_mut().unwrap();
+        usage.schema_version = crate::body_telemetry::TASK_WORKLOAD_RESOURCES_SCHEMA_V1.into();
+        usage.durable_receipts.clear();
+        assert!(!record_body_task_span_event(&store, &span).await);
+        assert_eq!(
+            store.recent_semantic_events(60, 100).await.unwrap().len(),
+            before
+        );
+    }
+    span.task_workload_resources = None;
+    assert!(record_body_task_span_event(&store, &span).await);
+    assert_eq!(
+        store.recent_semantic_events(60, 100).await.unwrap().len(),
+        before + 1
+    );
+}
 
 struct AgentSpawnFallbackEnvGuard {
     key: &'static str,
@@ -44269,6 +44504,17 @@ async fn direct_capabilities_call_does_not_claim_a_live_registry_binding() {
         .await
         .expect("capabilities executes directly");
     let payload: Value = serde_json::from_str(&result_text(&result)).expect("capabilities JSON");
+
+    assert_eq!(
+        payload["build"]["r9_workload_receipts_enabled"],
+        cfg!(feature = "r9-workload-receipts")
+    );
+    let expected_profile = if cfg!(feature = "r9-workload-receipts") {
+        "agent_bridge.runtime_profile.r9.v1"
+    } else {
+        "agent_bridge.runtime_profile.maintenance.v1"
+    };
+    assert_eq!(payload["build"]["runtime_profile_marker"], expected_profile);
 
     assert!(payload["mcp"]["exposed_tool_count"].is_null());
     assert_eq!(

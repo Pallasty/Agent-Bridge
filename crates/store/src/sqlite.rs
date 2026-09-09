@@ -855,7 +855,8 @@ use crate::{
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta, MemoryPeekResult,
     MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
     MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord, OverlapPair,
-    PlanMutationRejection, PlanMutationRejectionCode, PlanRecord, PlanSaveOutcome, PlanStep,
+    PlanCompletionMode, PlanMutationRejection, PlanMutationRejectionCode, PlanRecord, PlanSaveOutcome,
+    PlanStep,
     PlanStepCompletionContract, PlanStepCompletionEvidenceRef, PlanUpdateOutcome,
     ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory,
     RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts, SessionFilter,
@@ -1643,6 +1644,7 @@ CREATE INDEX IF NOT EXISTS idx_body_operation_receipts_body
 // remain a bounded projection; these rows are never removed by Event Spine's
 // FIFO pruning. Version-less additive DDL is required because schema_meta v43
 // is owned by the temporal-evidence migration family.
+#[cfg(feature = "r9-workload-receipts")]
 const SCHEMA_WORKLOAD_RECEIPT_COMMITS: &str = r#"
 CREATE TABLE IF NOT EXISTS workload_receipt_commits (
     schema_version      TEXT NOT NULL CHECK (schema_version = 'agent_bridge.workload_receipt_commit.v1'),
@@ -1721,6 +1723,7 @@ const BODY_OPERATION_RECEIPT_INDEX_SHAPE: &[LedgerIndexShape] = &[
     ),
 ];
 
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_COMMIT_COLUMN_SHAPE: &[LedgerColumnShape] = &[
     ("schema_version", "TEXT", true, 0),
     ("receipt_id", "TEXT", false, 1),
@@ -1732,6 +1735,7 @@ const WORKLOAD_RECEIPT_COMMIT_COLUMN_SHAPE: &[LedgerColumnShape] = &[
     ("record_sha256", "TEXT", true, 0),
 ];
 
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_COMMIT_INDEX_SHAPE: &[LedgerIndexShape] = &[
     (
         "idx_workload_receipt_commits_recorded_at",
@@ -1743,6 +1747,7 @@ const WORKLOAD_RECEIPT_COMMIT_INDEX_SHAPE: &[LedgerIndexShape] = &[
     ),
 ];
 
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_COMMIT_INDEX_ORDER: &[(&str, &[(&str, bool)])] = &[
     (
         "idx_workload_receipt_commits_recorded_at",
@@ -1825,6 +1830,7 @@ fn verify_ledger_table_shape(
     Ok(())
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn verify_workload_receipt_commit_shape(
     connection: &rusqlite::Connection,
 ) -> RusqliteResult<()> {
@@ -2986,6 +2992,7 @@ impl SqliteStore {
             c.execute_batch(SCHEMA_AGENT_WORLD_CAPTURE)?;
             c.execute_batch(SCHEMA_AGENT_TASK_OUTCOMES)?;
             c.execute_batch(SCHEMA_BODY_OPERATION_RECEIPTS)?;
+            #[cfg(feature = "r9-workload-receipts")]
             c.execute_batch(SCHEMA_WORKLOAD_RECEIPT_COMMITS)?;
             verify_ledger_table_shape(
                 c,
@@ -2999,6 +3006,7 @@ impl SqliteStore {
                 BODY_OPERATION_RECEIPT_COLUMN_SHAPE,
                 BODY_OPERATION_RECEIPT_INDEX_SHAPE,
             )?;
+            #[cfg(feature = "r9-workload-receipts")]
             verify_workload_receipt_commit_shape(c)?;
             // SEPL P0/P1A0: additive lineage plus AGENT.md path binding.
             // StateStore remains read-only; baseline admission is an explicit
@@ -3032,6 +3040,16 @@ impl SqliteStore {
                 }
             }
             c.execute_batch(SCHEMA_MCP_SESSION_ATTRIBUTION_INDEX)?;
+            // Additive and nullable so older binaries can still write ordinary
+            // plans. Resolve NULL using raw anchors, never hydrated contracts.
+            let plan_mode_exists: i64 = c.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('plans') WHERE name='completion_mode'",
+                [],
+                |row| row.get(0),
+            )?;
+            if plan_mode_exists == 0 {
+                c.execute("ALTER TABLE plans ADD COLUMN completion_mode TEXT", [])?;
+            }
             Ok(())
         })
         .await
@@ -7547,14 +7565,22 @@ fn ledger_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_COMMIT_BATCH_MAX: usize = 64;
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_REDACTED_FACTS_MAX_BYTES: usize = 65_536;
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_REDACTED_MAX_DEPTH: usize = 16;
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_REDACTED_MAX_NODES: usize = 4_096;
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_REDACTED_MAX_CONTAINER_LEN: usize = 256;
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_REDACTED_MAX_KEY_BYTES: usize = 128;
+#[cfg(feature = "r9-workload-receipts")]
 const WORKLOAD_RECEIPT_REDACTED_MAX_STRING_BYTES: usize = 4_096;
 
+#[cfg(feature = "r9-workload-receipts")]
 fn workload_receipt_sensitive_key(key: &str) -> bool {
     let normalized = key
         .chars()
@@ -7590,6 +7616,7 @@ fn workload_receipt_sensitive_key(key: &str) -> bool {
         )
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn validate_workload_receipt_redacted_value(
     value: &serde_json::Value,
     depth: usize,
@@ -7640,6 +7667,7 @@ fn validate_workload_receipt_redacted_value(
     Ok(())
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn validate_workload_receipt_commit_record(
     record: &crate::WorkloadReceiptCommitRecord,
 ) -> std::result::Result<(), String> {
@@ -7680,6 +7708,7 @@ fn validate_workload_receipt_commit_record(
     Ok(())
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn workload_receipt_projection_error(message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
         std::io::ErrorKind::InvalidData,
@@ -7687,6 +7716,7 @@ fn workload_receipt_projection_error(message: impl Into<String>) -> rusqlite::Er
     )))
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn validate_workload_receipt_event_json(
     raw: &str,
     label: &str,
@@ -7713,6 +7743,7 @@ fn validate_workload_receipt_event_json(
 /// conflict/duplicate classification: an all-duplicate replay performs no new
 /// write and therefore does not let a later, different projection invalidate
 /// the already durable commit.
+#[cfg(feature = "r9-workload-receipts")]
 fn validate_workload_receipt_event_projection(
     records: &[crate::WorkloadReceiptCommitRecord],
     event: &mut crate::SemanticEventRecord,
@@ -7810,6 +7841,7 @@ fn validate_workload_receipt_event_projection(
     Ok(())
 }
 
+#[cfg(feature = "r9-workload-receipts")]
 fn workload_receipt_commit_kind_from_str(
     value: &str,
     column: usize,
@@ -8169,6 +8201,42 @@ fn has_persisted_completion_anchor(step: &PlanStep) -> bool {
     step.completion_anchor || step.completion_evidence.is_some()
 }
 
+fn persisted_plan_completion_mode(
+    stored: Option<&str>,
+    raw_steps: &[PlanStep],
+) -> RusqliteResult<PlanCompletionMode> {
+    let mode = match stored {
+        None | Some("agent_reported") => PlanCompletionMode::AgentReported,
+        Some("evidence_gated") => PlanCompletionMode::EvidenceGated,
+        Some(_) => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid plan completion_mode",
+                )),
+            ))
+        }
+    };
+    Ok(if raw_steps.iter().any(has_persisted_completion_anchor) {
+        PlanCompletionMode::EvidenceGated
+    } else {
+        mode
+    })
+}
+
+fn plan_status_for_mode(status: &str, mode: PlanCompletionMode) -> Option<String> {
+    canonical_plan_status(status)
+        .map(str::to_string)
+        .or_else(|| {
+            // Ordinary callers historically persisted their own nonempty status
+            // labels. They still do; only known aliases participate in progress.
+            (mode == PlanCompletionMode::AgentReported && !status.trim().is_empty())
+                .then(|| status.trim().to_string())
+        })
+}
+
 fn completion_outcome_trust_rejection(
     record: &crate::AgentTaskOutcomeRecord,
     expected_contract: &PlanStepCompletionContract,
@@ -8312,6 +8380,7 @@ fn persisted_completion_anchor_integrity_rejection(
 fn validate_plan_structure(
     plan_id: &str,
     steps: &[PlanStep],
+    mode: PlanCompletionMode,
 ) -> std::result::Result<Vec<PlanStep>, PlanMutationRejection> {
     if plan_id.trim().is_empty() {
         return Err(plan_rejection(
@@ -8430,15 +8499,22 @@ fn validate_plan_structure(
     }
 
     for step in &mut prepared {
-        let Some(status) = canonical_plan_status(&step.status) else {
+        let Some(status) = plan_status_for_mode(&step.status, mode) else {
             return Err(plan_rejection(
                 PlanMutationRejectionCode::UnsupportedStatus,
                 Some(&step.id),
             ));
         };
-        step.status = status.to_string();
+        step.status = status;
+        if mode == PlanCompletionMode::AgentReported && step.completion_evidence.is_some() {
+            return Err(plan_rejection(
+                PlanMutationRejectionCode::CompletionEvidenceForbidden,
+                Some(&step.id),
+            ));
+        }
         let expected_contract = expected_plan_step_contract(plan_id, step);
-        if (step.status == "done" || step.completion_evidence.is_some())
+        if mode == PlanCompletionMode::EvidenceGated
+            && (step.status == "done" || step.completion_evidence.is_some())
             && step
                 .completion_contract
                 .as_ref()
@@ -8458,7 +8534,10 @@ fn validate_plan_structure(
                 Some(&step.id),
             ));
         }
-        if step.status == "done" && step.completion_evidence.is_none() {
+        if mode == PlanCompletionMode::EvidenceGated
+            && step.status == "done"
+            && step.completion_evidence.is_none()
+        {
             let mut rejection = plan_rejection(
                 PlanMutationRejectionCode::CompletionEvidenceRequired,
                 Some(&step.id),
@@ -8477,11 +8556,16 @@ fn prepare_plan_steps(
     connection: &rusqlite::Connection,
     plan_id: &str,
     steps: &[PlanStep],
+    mode: PlanCompletionMode,
 ) -> RusqliteResult<std::result::Result<Vec<PlanStep>, PlanMutationRejection>> {
-    let mut prepared = match validate_plan_structure(plan_id, steps) {
+    let mut prepared = match validate_plan_structure(plan_id, steps, mode) {
         Ok(prepared) => prepared,
         Err(rejection) => return Ok(Err(rejection)),
     };
+
+    if mode == PlanCompletionMode::AgentReported {
+        return Ok(Ok(prepared));
+    }
 
     for step in &mut prepared {
         if step.status != "done" {
@@ -9287,6 +9371,7 @@ impl StateStore for SqliteStore {
         Ok(rows)
     }
 
+    #[cfg(feature = "r9-workload-receipts")]
     async fn commit_workload_receipt_event(
         &self,
         records: Vec<crate::WorkloadReceiptCommitRecord>,
@@ -9415,6 +9500,7 @@ impl StateStore for SqliteStore {
             .map_err(|error| Error::Backend(format!("commit_workload_receipt_event: {error}")))
     }
 
+    #[cfg(feature = "r9-workload-receipts")]
     async fn load_workload_receipt_commit(
         &self,
         receipt_id: &str,
@@ -9458,6 +9544,7 @@ impl StateStore for SqliteStore {
             .map_err(|error| Error::Backend(format!("load_workload_receipt_commit: {error}")))
     }
 
+    #[cfg(feature = "r9-workload-receipts")]
     async fn recent_workload_receipt_commits(
         &self,
         window_secs: i64,
@@ -16694,11 +16781,12 @@ impl StateStore for SqliteStore {
 
     // ─── W5: plans ───────────────────────────────────────────────────────
 
-    async fn plan_save(
+    async fn plan_save_with_mode(
         &self,
         plan_id: &str,
         title: &str,
         steps: &[PlanStep],
+        requested_mode: Option<PlanCompletionMode>,
     ) -> Result<PlanSaveOutcome> {
         if plan_id.trim().is_empty() {
             return Ok(PlanSaveOutcome::Rejected {
@@ -16715,14 +16803,14 @@ impl StateStore for SqliteStore {
                 )?;
                 let existing = transaction
                     .query_row(
-                        "SELECT steps_json, created_at FROM plans WHERE plan_id = ?1",
+                        "SELECT steps_json, created_at, completion_mode FROM plans WHERE plan_id = ?1",
                         params![&pid],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?)),
                     )
                     .optional()?;
                 let old_steps = existing
                     .as_ref()
-                    .map(|(steps_json, _)| {
+                    .map(|(steps_json, _, _)| {
                         serde_json::from_str::<Vec<PlanStep>>(steps_json).map_err(|error| {
                             rusqlite::Error::FromSqlConversionFailure(
                                 0,
@@ -16732,6 +16820,18 @@ impl StateStore for SqliteStore {
                         })
                     })
                     .transpose()?;
+                let retained_mode = persisted_plan_completion_mode(
+                    existing.as_ref().and_then(|(_, _, mode)| mode.as_deref()),
+                    old_steps.as_deref().unwrap_or(&[]),
+                )?;
+                if retained_mode == PlanCompletionMode::EvidenceGated
+                    && requested_mode == Some(PlanCompletionMode::AgentReported)
+                {
+                    return Ok(PlanSaveOutcome::Rejected {
+                        reason: plan_rejection(PlanMutationRejectionCode::CompletionModeDowngradeForbidden, None),
+                    });
+                }
+                let completion_mode = requested_mode.unwrap_or(retained_mode);
                 if let Some(old_steps) = old_steps.as_ref() {
                     if let Some(reason) =
                         completion_reopen_rejection(&pid, old_steps, &submitted_steps)
@@ -16739,7 +16839,7 @@ impl StateStore for SqliteStore {
                         return Ok(PlanSaveOutcome::Rejected { reason });
                     }
                 }
-                let prepared = match prepare_plan_steps(&transaction, &pid, &submitted_steps)? {
+                let prepared = match prepare_plan_steps(&transaction, &pid, &submitted_steps, completion_mode)? {
                     Ok(prepared) => prepared,
                     Err(reason) => return Ok(PlanSaveOutcome::Rejected { reason }),
                 };
@@ -16759,22 +16859,23 @@ impl StateStore for SqliteStore {
                 let now = now_secs();
                 let created_at = existing
                     .as_ref()
-                    .map(|(_, created_at)| *created_at)
+                    .map(|(_, created_at, _)| *created_at)
                     .unwrap_or(now);
                 if existing.is_some() {
                     transaction.execute(
-                        "UPDATE plans SET title = ?2, steps_json = ?3, updated_at = ?4 WHERE plan_id = ?1",
-                        params![&pid, &ttl, &steps_json, now],
+                        "UPDATE plans SET title = ?2, steps_json = ?3, updated_at = ?4, completion_mode = ?5 WHERE plan_id = ?1",
+                        params![&pid, &ttl, &steps_json, now, completion_mode.as_str()],
                     )?;
                 } else {
                     transaction.execute(
-                        "INSERT INTO plans (plan_id, title, steps_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![&pid, &ttl, &steps_json, created_at, now],
+                        "INSERT INTO plans (plan_id, title, steps_json, created_at, updated_at, completion_mode) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![&pid, &ttl, &steps_json, created_at, now, completion_mode.as_str()],
                     )?;
                 }
                 let plan = PlanRecord {
                     plan_id: pid,
                     title: ttl,
+                    completion_mode,
                     steps: prepared,
                     completion_diagnostics: Vec::new(),
                     created_at,
@@ -16793,7 +16894,7 @@ impl StateStore for SqliteStore {
             .call(move |connection| -> RusqliteResult<Option<PlanRecord>> {
                 let row = connection
                     .query_row(
-                        "SELECT plan_id, title, steps_json, created_at, updated_at FROM plans WHERE plan_id = ?1",
+                        "SELECT plan_id, title, steps_json, created_at, updated_at, completion_mode FROM plans WHERE plan_id = ?1",
                         params![pid],
                         |row| {
                             Ok((
@@ -16802,11 +16903,12 @@ impl StateStore for SqliteStore {
                                 row.get::<_, String>(2)?,
                                 row.get::<_, i64>(3)?,
                                 row.get::<_, i64>(4)?,
+                                row.get::<_, Option<String>>(5)?,
                             ))
                         },
                     )
                     .optional()?;
-                let Some((plan_id, title, steps_json, created_at, updated_at)) = row else {
+                let Some((plan_id, title, steps_json, created_at, updated_at, stored_mode)) = row else {
                     return Ok(None);
                 };
                 let steps: Vec<PlanStep> =
@@ -16817,11 +16919,13 @@ impl StateStore for SqliteStore {
                             Box::new(error),
                         )
                     })?;
+                let completion_mode = persisted_plan_completion_mode(stored_mode.as_deref(), &steps)?;
                 let (steps, completion_diagnostics) =
                     project_plan_steps(connection, &plan_id, &steps)?;
                 Ok(Some(PlanRecord {
                     plan_id,
                     title,
+                    completion_mode,
                     steps,
                     completion_diagnostics,
                     created_at,
@@ -16850,23 +16954,9 @@ impl StateStore for SqliteStore {
                 reason: plan_rejection(PlanMutationRejectionCode::EmptyStepId, None),
             });
         }
-        let Some(canonical_status) = canonical_plan_status(status) else {
-            return Ok(PlanUpdateOutcome::Rejected {
-                reason: plan_rejection(PlanMutationRejectionCode::UnsupportedStatus, Some(step_id)),
-            });
-        };
-        if canonical_status == "done" && outcome_id.is_none() {
-            return Ok(PlanUpdateOutcome::Rejected {
-                reason: plan_rejection(
-                    PlanMutationRejectionCode::CompletionEvidenceRequired,
-                    Some(step_id),
-                ),
-            });
-        }
-
         let pid = plan_id.to_string();
         let sid = step_id.to_string();
-        let canonical_status = canonical_status.to_string();
+        let submitted_status = status.to_string();
         let outcome_id = outcome_id.map(str::to_string);
         self.conn
             .call(move |connection| -> RusqliteResult<PlanUpdateOutcome> {
@@ -16874,18 +16964,19 @@ impl StateStore for SqliteStore {
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 let row = transaction
                     .query_row(
-                        "SELECT title, steps_json, created_at FROM plans WHERE plan_id = ?1",
+                        "SELECT title, steps_json, created_at, completion_mode FROM plans WHERE plan_id = ?1",
                         params![&pid],
                         |row| {
                             Ok((
                                 row.get::<_, String>(0)?,
                                 row.get::<_, String>(1)?,
                                 row.get::<_, i64>(2)?,
+                                row.get::<_, Option<String>>(3)?,
                             ))
                         },
                     )
                     .optional()?;
-                let Some((title, steps_json, created_at)) = row else {
+                let Some((title, steps_json, created_at, stored_mode)) = row else {
                     return Ok(PlanUpdateOutcome::Rejected {
                         reason: plan_rejection(PlanMutationRejectionCode::PlanNotFound, None),
                     });
@@ -16898,6 +16989,24 @@ impl StateStore for SqliteStore {
                             Box::new(error),
                         )
                     })?;
+                let completion_mode = persisted_plan_completion_mode(stored_mode.as_deref(), &steps)?;
+                let Some(canonical_status) = plan_status_for_mode(&submitted_status, completion_mode) else {
+                    return Ok(PlanUpdateOutcome::Rejected {
+                        reason: plan_rejection(PlanMutationRejectionCode::UnsupportedStatus, Some(&sid)),
+                    });
+                };
+                if completion_mode == PlanCompletionMode::AgentReported && outcome_id.is_some() {
+                    return Ok(PlanUpdateOutcome::Rejected {
+                        reason: plan_rejection(PlanMutationRejectionCode::CompletionEvidenceForbidden, Some(&sid)),
+                    });
+                }
+                if completion_mode == PlanCompletionMode::EvidenceGated
+                    && canonical_status == "done" && outcome_id.is_none()
+                {
+                    return Ok(PlanUpdateOutcome::Rejected {
+                        reason: plan_rejection(PlanMutationRejectionCode::CompletionEvidenceRequired, Some(&sid)),
+                    });
+                }
                 let matching_indices: Vec<usize> = steps
                     .iter()
                     .enumerate()
@@ -16978,7 +17087,8 @@ impl StateStore for SqliteStore {
                 }
 
                 let expected_contract = expected_plan_step_contract(&pid, &steps[target_index]);
-                let completion_evidence = if canonical_status == "done" {
+                let completion_evidence = if completion_mode == PlanCompletionMode::EvidenceGated
+                    && canonical_status == "done" {
                     for dependency_id in &steps[target_index].deps {
                         let dependency = steps.iter().find(|step| step.id == *dependency_id);
                         if dependency.is_none_or(|dependency| {
@@ -17021,7 +17131,7 @@ impl StateStore for SqliteStore {
                 };
 
                 steps[target_index].status = canonical_status;
-                steps[target_index].completion_anchor = steps[target_index].status == "done";
+                steps[target_index].completion_anchor = completion_evidence.is_some();
                 steps[target_index].completion_contract = Some(expected_contract);
                 steps[target_index].completion_evidence = completion_evidence;
                 backfill_valid_completion_anchor_markers(&transaction, &pid, &mut steps)?;
@@ -17030,8 +17140,8 @@ impl StateStore for SqliteStore {
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 let now = now_secs();
                 transaction.execute(
-                    "UPDATE plans SET steps_json = ?2, updated_at = ?3 WHERE plan_id = ?1",
-                    params![&pid, &new_json, now],
+                    "UPDATE plans SET steps_json = ?2, updated_at = ?3, completion_mode = ?4 WHERE plan_id = ?1",
+                    params![&pid, &new_json, now, completion_mode.as_str()],
                 )?;
                 let (projected_steps, completion_diagnostics) =
                     project_plan_steps(&transaction, &pid, &steps)?;
@@ -17039,6 +17149,7 @@ impl StateStore for SqliteStore {
                     plan_id: pid,
                     title,
                     steps: projected_steps,
+                    completion_mode,
                     completion_diagnostics,
                     created_at,
                     updated_at: now,

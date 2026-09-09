@@ -95,6 +95,17 @@ column.
 
 ## Stop-drift operating rule
 
+On 2026-09-09 the owner explicitly authorized a bounded ordinary-maintenance
+release compatibility repair: R10 becomes per-plan `agent_reported` versus
+`evidence_gated` without downgrading existing strict bindings; R9 durable
+workload receipts become an explicit default-off build feature. Maintenance
+publication retains source, private custody, asset parity, mutex, baseline,
+fresh-MCP, and recovery checks, using a separate publication slot and explicit
+legacy-entry activation. This authorization permits the repaired ordinary
+release and its deployment; it does not reopen R9 migration/service adoption,
+the R10 producer, or any frozen value-collection lane. See the
+[maintenance release procedure](operations/MAINTENANCE_RELEASE.md).
+
 The owner authorized the 2026-09-08 collection closeout after the waiting-time
 audit. R4-A expansion is refrozen, active R7 M2 sample pursuit is on hold, and
 R4's already-authorized trial is on hold because its complete receipt-source
