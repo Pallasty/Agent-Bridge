@@ -219,7 +219,7 @@ def memory_proof(config, key, expected=None):
              "db_path_sha256": hashlib.sha256(str(db).encode()).hexdigest(), "exists": row is not None}
     if row:
         proof.update(content_sha256=hashlib.sha256(row[0].encode()).hexdigest(),
-                     updated_at=row[1], status=row[2], version_vector=json.loads(row[3] or "{}"))
+                     updated_at=row[1], status=row[2], version_vector=row[3] or "")
     if expected is not None:
         fields = ["key", "content_sha256", "updated_at", "status", "version_vector"]
         proof["matches_expected"] = row is not None and all(proof.get(k) == expected.get(k) for k in fields)

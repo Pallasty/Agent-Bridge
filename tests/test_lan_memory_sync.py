@@ -23,6 +23,10 @@ SPEC = importlib.util.spec_from_file_location("lan_memory_sync_under_test", SCRI
 LAN = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(LAN)
 
+# The SQLite column uses VersionVector Display/FromStr's compact text, not
+# serde JSON (crates/store/src/version_vector.rs). Keep it opaque in proofs.
+PRODUCTION_VECTOR = "cf70d7ef01acb816:1788934278"
+
 
 class LanMemorySyncTest(unittest.TestCase):
     def setUp(self):
@@ -54,7 +58,7 @@ class LanMemorySyncTest(unittest.TestCase):
                         "updated_at INTEGER, status TEXT, version_vector TEXT)")
             con.execute("INSERT INTO memories VALUES (?, ?, ?, ?, ?)", (
                 "handoff", "Mac 的真实交接测试内容", 1788920000, "active",
-                json.dumps({"counters": [{"id": 42, "value": 7}]}),
+                PRODUCTION_VECTOR,
             ))
             con.commit()
         self.wrapper = self.root / "fake-sync"
@@ -234,11 +238,12 @@ class LanMemorySyncTest(unittest.TestCase):
     def test_verify_requires_all_identity_and_revision_fields(self):
         expected = LAN.memory_proof(self.config, "handoff")
         self.assertEqual(expected["content_sha256"], hashlib.sha256("Mac 的真实交接测试内容".encode()).hexdigest())
+        self.assertEqual(expected["version_vector"], PRODUCTION_VECTOR)
         self.assertTrue(LAN.memory_proof(self.config, "handoff", expected)["matches_expected"])
         changed = {
             "key": "different-key", "content_sha256": "0" * 64,
             "updated_at": expected["updated_at"] + 1, "status": "tombstoned",
-            "version_vector": {"counters": [{"id": 42, "value": 8}]},
+            "version_vector": "cf70d7ef01acb816:1788934279",
         }
         for field, value in changed.items():
             with self.subTest(field=field):
@@ -247,6 +252,51 @@ class LanMemorySyncTest(unittest.TestCase):
                 self.assertFalse(LAN.memory_proof(self.config, "handoff", wrong)["matches_expected"])
                 del wrong[field]
                 self.assertFalse(LAN.memory_proof(self.config, "handoff", wrong)["matches_expected"])
+
+    def test_empty_legacy_vector_is_retained_and_compared_exactly(self):
+        with contextlib.closing(sqlite3.connect(self.db)) as con:
+            con.execute("UPDATE memories SET version_vector='' WHERE key='handoff'")
+            con.commit()
+        expected = LAN.memory_proof(self.config, "handoff")
+        self.assertEqual(expected["version_vector"], "")
+        self.assertTrue(LAN.memory_proof(self.config, "handoff", expected)["matches_expected"])
+        for wrong in (None, {}, PRODUCTION_VECTOR):
+            with self.subTest(wrong=wrong):
+                changed = {**expected, "version_vector": wrong}
+                self.assertFalse(LAN.memory_proof(self.config, "handoff", changed)["matches_expected"])
+        del expected["version_vector"]
+        self.assertFalse(LAN.memory_proof(self.config, "handoff", expected)["matches_expected"])
+
+    def test_multiple_node_vector_is_retained_without_reinterpretation(self):
+        vector = "2a:7,cf70d7ef01acb816:1788934278"
+        with contextlib.closing(sqlite3.connect(self.db)) as con:
+            con.execute("UPDATE memories SET version_vector=? WHERE key='handoff'", (vector,))
+            con.commit()
+        expected = LAN.memory_proof(self.config, "handoff")
+        self.assertEqual(expected["version_vector"], vector)
+        self.assertTrue(LAN.memory_proof(self.config, "handoff", expected)["matches_expected"])
+        for wrong in ("2a:8,cf70d7ef01acb816:1788934278",
+                      "2a:7,cf70d7ef01acb816:1788934279", PRODUCTION_VECTOR):
+            with self.subTest(wrong=wrong):
+                changed = {**expected, "version_vector": wrong}
+                self.assertFalse(LAN.memory_proof(self.config, "handoff", changed)["matches_expected"])
+
+    def test_verify_cli_accepts_compact_vector_proof_and_rejects_changed_version(self):
+        config_path = self.root / "config.json"
+        expected_path = self.root / "expected.json"
+        config_path.write_text(json.dumps(self.config))
+        expected = LAN.memory_proof(self.config, "handoff")
+        expected_path.write_text(json.dumps(expected))
+        argv = [sys.executable, str(SCRIPT), "--config", str(config_path),
+                "verify", "--key", "handoff", "--expected", str(expected_path)]
+        good = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        self.assertTrue(json.loads(good.stdout)["matches_expected"])
+        expected["version_vector"] = "cf70d7ef01acb816:1788934279"
+        expected_path.write_text(json.dumps(expected))
+        bad = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(bad.returncode, 1, bad.stderr)
+        self.assertFalse(json.loads(bad.stdout)["matches_expected"])
 
     def test_missing_memory_cannot_satisfy_verify(self):
         expected = LAN.memory_proof(self.config, "handoff")
