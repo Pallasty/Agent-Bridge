@@ -21,7 +21,7 @@ class MaintenanceActivationTests(unittest.TestCase):
     def setUp(self):
         self.fixture = tempfile.TemporaryDirectory(prefix="ab-maintenance-adoption-")
         self.addCleanup(self.fixture.cleanup)
-        self.base = Path(self.fixture.name)
+        self.base = Path(self.fixture.name).resolve()
         self.home = self.base / "home"
         self.root = self.base / "private"
         self.mkdir(self.root)
@@ -32,7 +32,7 @@ class MaintenanceActivationTests(unittest.TestCase):
         self.wrapper = self.home / ".local/bin/agent-bridge"
         self.write(self.wrapper, b"#!/bin/sh\nexec original-wrapper\n", 0o755)
         self.binary = self.root / "maintenance/bin/agent-bridge.real"
-        self.write(self.binary, b"\x7fELF fixture agent_bridge.runtime_profile.maintenance.v1", 0o755)
+        self.write_binary("fixture")
         for label, path, mode in activation.assets(self.root):
             self.write(path, (label + ":" + path.name).encode(), mode)
         self.receipts = self.root / "publisher-state/maintenance/receipts"
@@ -58,6 +58,16 @@ class MaintenanceActivationTests(unittest.TestCase):
             if path == self.base:
                 break
             path = path.parent
+
+    def write_binary(self, identity):
+        if sys.platform != "darwin":
+            self.write(self.binary, b"\x7fELF " + identity.encode() + b" agent_bridge.runtime_profile.maintenance.v1", 0o755)
+            return
+        self.mkdir(self.binary.parent)
+        source = '#include <stdio.h>\nint main(void) { puts("agent_bridge.runtime_profile.maintenance.v1 ' + identity + '"); return 0; }\n'
+        subprocess.run(["/usr/bin/cc", "-x", "c", "-", "-o", str(self.binary)], input=source, text=True, check=True, capture_output=True)
+        self.binary.chmod(0o755)
+        subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(self.binary)], check=True, capture_output=True)
 
     def write(self, path, content, mode):
         self.mkdir(path.parent)
@@ -101,6 +111,32 @@ class MaintenanceActivationTests(unittest.TestCase):
         self.assertEqual(activation.run(self.args)["status"], "rolled_back")
         self.assert_original()
 
+    def test_native_exclusive_rename_refuses_existing_empty_directory(self):
+        source, destination = self.base / "source", self.base / "destination"
+        source.mkdir()
+        destination.mkdir()
+        (source / "keep").write_text("source retained")
+        with self.assertRaises(FileExistsError):
+            activation.rename_without_replace(source, destination)
+        self.assertEqual((source / "keep").read_text(), "source retained")
+        self.assertEqual(list(destination.iterdir()), [])
+        destination.rmdir()
+        activation.rename_without_replace(source, destination)
+        self.assertEqual((destination / "keep").read_text(), "source retained")
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS signing boundary")
+    def test_darwin_refuses_foreign_and_unsigned_binaries_before_activation(self):
+        self.binary.write_bytes(b"\x7fELF agent_bridge.runtime_profile.maintenance.v1")
+        self.make_receipt()
+        with self.assertRaisesRegex(activation.ActivationError, "Mach-O"):
+            activation.run(self.args)
+        self.write_binary("unsigned")
+        subprocess.run(["/usr/bin/codesign", "--remove-signature", str(self.binary)], check=True, capture_output=True)
+        self.make_receipt()
+        with self.assertRaisesRegex(activation.ActivationError, "signature"):
+            activation.run(self.args)
+        self.assert_original()
+
     def test_later_publication_does_not_change_active_inputs_or_prevent_rollback(self):
         self.args.action = "activate"
         result = activation.run(self.args)
@@ -125,7 +161,7 @@ class MaintenanceActivationTests(unittest.TestCase):
         old_manifest = json.loads(Path(first["manifest"]).read_text())
         old_payload = Path(old_manifest["release_root"])
         previous_hash = activation.digest(self.wrapper.with_name("agent-bridge.real"))
-        self.binary.write_bytes(b"\x7fELF second build agent_bridge.runtime_profile.maintenance.v1")
+        self.write_binary("second-build")
         next_asset = self.root / "maintenance/lib/agent-bridge/scripts/app_control.py"
         next_asset.write_bytes(b"second runtime asset")
         self.make_receipt()

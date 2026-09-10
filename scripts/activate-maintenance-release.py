@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import uuid
 
@@ -203,7 +204,13 @@ def validate_release(root, receipt, payload=None):
     require(re.fullmatch(r"[0-9a-f]{40}", record["candidate_commit"]) and record["probe_build_git_sha"] == record["candidate_commit"][:12], "admission commit mismatch")
     require(record["probe_tool_count"].isdigit() and int(record["probe_tool_count"]) > 0, "fresh MCP returned no tools")
     with binary.open("rb") as stream:
-        require(stream.read(4) == b"\x7fELF", "maintenance adoption requires a native Linux ELF binary")
+        magic = stream.read(4)
+        if sys.platform == "darwin":
+            require(magic in {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"}, "maintenance adoption requires a native macOS Mach-O binary")
+            signed = subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(binary)], capture_output=True, timeout=30)
+            require(signed.returncode == 0, "maintenance Mach-O signature verification failed")
+        else:
+            require(sys.platform.startswith("linux") and magic == b"\x7fELF", "maintenance adoption requires a native Linux ELF binary")
         stream.seek(0)
         marker = b"agent_bridge.runtime_profile.maintenance.v1"
         overlap = b""
@@ -253,13 +260,18 @@ def private_mkdir(path, root):
 
 
 def rename_without_replace(source, destination):
-    # This helper already requires Linux/ELF. renameat2 prevents replacing even
-    # an empty existing directory if another actor creates the final name.
+    # Both native calls refuse an existing destination, including an empty dir.
     libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = libc.renameat2
-    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-    renameat2.restype = ctypes.c_int
-    if renameat2(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
+    if sys.platform == "darwin":
+        rename = libc.renameatx_np
+        at_fdcwd, exclusive = -2, 0x00000004  # RENAME_EXCL
+    else:
+        require(sys.platform.startswith("linux"), "unsupported activation platform")
+        rename = libc.renameat2
+        at_fdcwd, exclusive = -100, 1  # RENAME_NOREPLACE
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(at_fdcwd, os.fsencode(source), at_fdcwd, os.fsencode(destination), exclusive) != 0:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(destination))
 

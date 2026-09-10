@@ -60,7 +60,7 @@ explicit binary/asset overrides, retaining the real configuration and state
 selection. Confirm an online SQLite backup made with SQLite's backup API and
 the compatibility of any rollback binary. Do not raw-copy an active WAL family.
 
-On the existing Linux legacy entry, run
+On the existing Linux or macOS legacy entry, run
 `scripts/activate-maintenance-release.py plan` with `--deploy-root`,
 `--legacy-wrapper`, `--expected-binary-sha256`, `--expected-wrapper-sha256`, and
 the exact `--admission-receipt`. The helper verifies private payload custody and
@@ -85,6 +85,19 @@ backups and the private activation manifest. `rollback --manifest <path>` uses
 the original bound arguments and refuses changed aliases/backups. It restores
 files, not SQLite: do not erase concurrent production writes to undo a binary
 deployment. Existing MCP clients retain the old executable until they reconnect.
+
+On macOS the helper requires a signed Mach-O, verifies its signature, and
+freezes releases using native `renameatx_np(RENAME_EXCL)`. Linux retains ELF
+validation and `renameat2(RENAME_NOREPLACE)`. Both refuse an existing target.
+The same backup/manifest recovery rules apply on both platforms. The Mac
+fixture suite compiles and signs disposable native binaries, exercises actual
+activation and rollback, and rejects unsigned or foreign-format candidates.
+
+This helper adaptation does not provision a production Mac root or qualify the
+entire publisher/launchd sequence. A valid private publisher root and independent
+fresh-MCP receipt remain required; never synthesize these from fixture receipts.
+Production launchd quiescence, SQLite backup, and actual service identity/health
+checks remain the caller's responsibility as described above.
 
 The legacy HOME entry may live on a filesystem with permissive synthetic modes.
 It remains an owner-local compatibility entry; this procedure does not describe

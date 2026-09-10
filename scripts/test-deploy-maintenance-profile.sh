@@ -60,5 +60,16 @@ reject 'must be maintenance or r9' env AGENT_BRIDGE_DEPLOY_PROFILE=typo \
 "$publisher" --use-binary "$TEST_ROOT/active.real" --yes > "$TEST_ROOT/accepted.log" 2>&1 || {
     cat "$TEST_ROOT/accepted.log" >&2; exit 1;
 }
-cmp -s "$TEST_ROOT/active.real" "$TEST_ROOT/bin/agent-bridge.real"
+if [ "$(uname -s)" = Darwin ]; then
+    # The publisher signs under a unique staging name. Reproduce that exact
+    # identifier on a disposable expected copy before comparing all bytes.
+    cp "$TEST_ROOT/active.real" "$TEST_ROOT/expected.real"
+    codesign --verify --strict "$TEST_ROOT/bin/agent-bridge.real"
+    signed_id="$(codesign -d --verbose=2 "$TEST_ROOT/bin/agent-bridge.real" 2>&1 | sed -n 's/^Identifier=//p')"
+    [ -n "$signed_id" ]
+    codesign --force --sign - --identifier "$signed_id" "$TEST_ROOT/expected.real"
+    cmp "$TEST_ROOT/expected.real" "$TEST_ROOT/bin/agent-bridge.real"
+else
+    cmp "$TEST_ROOT/active.real" "$TEST_ROOT/bin/agent-bridge.real"
+fi
 printf 'PASS: default maintenance omits R9 while enforcing active-baseline identity and capability parity\n'

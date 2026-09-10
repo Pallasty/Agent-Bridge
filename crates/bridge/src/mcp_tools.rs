@@ -47558,9 +47558,9 @@ fn enrich_plan_json(rec: &PlanRecord) -> Value {
         .iter()
         .find(|step| {
             !completed_ids.contains(step.id.as_str())
-                && !matches!(
+                && matches!(
                     step.status.as_str(),
-                    "blocked" | "obsolete" | "cancelled" | "canceled"
+                    "pending" | "in_progress" | "not_yet" | "done"
                 )
                 && step
                     .deps
