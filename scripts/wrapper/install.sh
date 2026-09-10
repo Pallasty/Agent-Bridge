@@ -201,9 +201,11 @@ acquire_publisher_mutex() {
                 fail "cannot inspect opened publisher mutex device"
             ;;
         Darwin)
-            fd_inode="$(stat -f %i /dev/fd/9 2>/dev/null)" ||
+            # /dev/fd is a synthetic filesystem on Darwin: stat reports its
+            # entry, not the opened regular file. Inspect the inherited fd.
+            fd_inode="$(/usr/bin/python3 -I -c 'import os; print(os.fstat(9).st_ino)')" ||
                 fail "cannot inspect opened publisher mutex inode"
-            fd_device="$(stat -f %d /dev/fd/9 2>/dev/null)" ||
+            fd_device="$(/usr/bin/python3 -I -c 'import os; print(os.fstat(9).st_dev)')" ||
                 fail "cannot inspect opened publisher mutex device"
             ;;
         *) fail "unsupported publisher mutex platform: $host_os" ;;
