@@ -6,6 +6,12 @@ rules. Read `docs/ACTIVE-PRODUCT-ROADMAP.md` before opening a product lane.
 Do not trigger CI. Synchronize code over SSH, include `[skip ci]` in sync
 commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.
 
+At task start, make the intended outcome and meaningful acceptance conditions
+briefly visible. For material goal changes, state the before/after difference,
+reason, and available user-change reference; keep missing provenance unknown.
+Reuse existing authorization for route changes. Do not repeat unchanged goals
+or require a new contract for small tasks. See `docs/operations/GOAL_REVIEW.md`.
+
 ## Validation collection status
 
 Follow the current decision board and

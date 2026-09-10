@@ -10,6 +10,7 @@ pub mod a2ui;
 pub mod ag_ui_readonly_projection;
 pub mod agent_spawn_governor;
 pub mod agent_task_contract;
+pub mod agent_task_contract_review;
 pub mod agent_task_outcome;
 pub mod agent_world_trajectory;
 pub mod anthropic_api;

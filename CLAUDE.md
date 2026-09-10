@@ -29,6 +29,12 @@ none of them acts on any third-party system:
 
 ## Working in this repo
 
+- **Goal visibility**: briefly state the intended outcome and acceptance at
+  task start. Explain material goal changes with before/after, reason, and the
+  available user-change reference; missing provenance stays unknown. Continue
+  authorized route changes without repeated approval or unchanged summaries.
+  Reuse existing contracts; see `docs/operations/GOAL_REVIEW.md`.
+
 - **Source sync**: do not trigger CI. Use SSH, include `[skip ci]` in sync
   commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.
 

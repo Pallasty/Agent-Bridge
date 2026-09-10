@@ -1223,7 +1223,23 @@ async fn agent_task_contract_preview_next_step_review_preserves_default_output()
         .await
         .unwrap();
     assert!(!default.is_error);
-    assert_eq!(result_json(&default), expected);
+    let mut default_body = result_json(&default);
+    let summary = default_body
+        .as_object_mut()
+        .unwrap()
+        .remove("goal_summary")
+        .unwrap();
+    assert_eq!(summary["objective"], contract["objective"]);
+    assert_eq!(
+        summary["acceptance_criteria"],
+        contract["acceptance_criteria"]
+    );
+    assert_eq!(summary["preview_status"], "ready");
+    assert!(summary["display"]
+        .as_str()
+        .unwrap()
+        .contains("Preview a bounded task"));
+    assert_eq!(default_body, expected);
     assert!(expected.get("next_step_review_instruction").is_none());
 
     let disabled = tool
@@ -1255,6 +1271,10 @@ async fn agent_task_contract_preview_next_step_review_preserves_default_output()
         ))
     );
     // The opt-in attachment must leave every existing field unchanged.
+    assert_eq!(
+        enabled_body.as_object_mut().unwrap().remove("goal_summary"),
+        Some(summary)
+    );
     assert_eq!(enabled_body, expected);
 
     let input_schema = tool.schema().input_schema;
@@ -1288,8 +1308,123 @@ async fn agent_task_contract_preview_next_step_review_never_attaches_to_blocked(
             .await
             .unwrap();
         assert!(!result.is_error);
-        assert_eq!(result_json(&result), expected);
+        let mut body = result_json(&result);
+        let summary = body
+            .as_object_mut()
+            .unwrap()
+            .remove("goal_summary")
+            .unwrap();
+        assert_eq!(summary["objective"], contract["objective"]);
+        assert_eq!(summary["preview_status"], "blocked");
+        assert!(summary["display"].is_string());
+        assert_eq!(body, expected);
     }
+}
+
+#[tokio::test]
+async fn agent_task_contract_preview_goal_comparison_preserves_contract_authority() {
+    let previous = agent_task_contract_preview_test_contract();
+    let mut current = previous.clone();
+    current["objective"] = json!("Expand a reviewed task");
+    current["revision"] = json!(2);
+    current["authority_boundary"] = json!("project_write");
+    // A caller's claimed user reference cannot substitute for existing evidence.
+    let expected = json!(preview_agent_task_contract(
+        serde_json::from_value(current.clone()).unwrap()
+    ));
+    let result = AgentTaskContractPreviewTool::new()
+        .execute(
+            json!({
+                "contract": current,
+                "previous_contract": previous,
+                "change_context": [{
+                    "field": "authority_boundary",
+                    "reason": "Caller proposes implementation",
+                    "user_change_ref": "caller-claimed:user:continue"
+                }],
+                "include_next_step_review": true
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    assert!(!result.is_error);
+    let mut body = result_json(&result);
+    assert_eq!(body["status"], "blocked");
+    assert_eq!(body["compiled_instruction"], "");
+    assert!(body.get("next_step_review_instruction").is_none());
+    let review = body
+        .as_object_mut()
+        .unwrap()
+        .remove("goal_change_review")
+        .unwrap();
+    assert_eq!(review["authority_granted"], false);
+    assert_eq!(review["user_authorization_verified"], false);
+    let changes = review["changes"].as_array().unwrap();
+    let authority = changes
+        .iter()
+        .find(|c| c["field"] == "authority_boundary")
+        .unwrap();
+    assert_eq!(authority["before"], "read_only");
+    assert_eq!(authority["after"], "project_write");
+    assert_eq!(authority["user_change_ref"], "caller-claimed:user:continue");
+    let objective = changes.iter().find(|c| c["field"] == "objective").unwrap();
+    assert!(objective["reason"].is_null());
+    assert!(objective["user_change_ref"].is_null());
+    body.as_object_mut()
+        .unwrap()
+        .remove("goal_summary")
+        .unwrap();
+    assert_eq!(body, expected);
+}
+
+#[tokio::test]
+async fn agent_task_contract_preview_goal_comparison_validates_optional_input() {
+    let tool = AgentTaskContractPreviewTool::new();
+    let ctx = ToolContext::default();
+    let contract = agent_task_contract_preview_test_contract();
+    let schema = tool.schema().input_schema;
+    assert_eq!(
+        schema["properties"]["previous_contract"]["required"],
+        schema["properties"]["contract"]["required"]
+    );
+    assert_eq!(
+        schema["properties"]["change_context"]["items"]["additionalProperties"],
+        false
+    );
+    for patch in [
+        json!({"previous_contract": null}),
+        json!({"previous_contract": {"objective":"incomplete"}}),
+        json!({"change_context": null}),
+        json!({"change_context": {}}),
+        json!({"change_context": [{"field":"objective"}]}),
+        json!({"previous_contract":contract.clone(), "change_context":[{"field":"not_a_goal_field"}]}),
+        json!({"previous_contract":contract.clone(), "change_context":[{"field":"objective", "approved":true}]}),
+        json!({"previous_contract":contract.clone(), "change_context":[{"field":"objective", "reason":false}]}),
+    ] {
+        let mut args = json!({"contract":contract.clone()});
+        args.as_object_mut()
+            .unwrap()
+            .extend(patch.as_object().unwrap().clone());
+        let result = tool.execute(args, &ctx).await.unwrap();
+        assert!(
+            result.is_error,
+            "invalid optional review input must be reported"
+        );
+    }
+    let compatible = tool
+        .execute(
+            json!({
+                "contract":contract, "change_context":[], "old_caller_extra":"retained"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(!compatible.is_error);
+    let body = result_json(&compatible);
+    assert!(body.get("goal_summary").is_some());
+    assert!(body.get("goal_change_review").is_none());
 }
 
 #[tokio::test]

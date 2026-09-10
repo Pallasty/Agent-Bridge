@@ -2,6 +2,7 @@
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
 use crate::agent_task_contract::{preview_agent_task_contract, AgentTaskContract};
+use crate::agent_task_contract_review::{compare_goals, summarize_goal, GoalChangeContext};
 use crate::effect_inventory::McpEffectInventory;
 use crate::operator_request::{
     configured_chatgpt_collab_capabilities, configured_chatgpt_collab_channel, OperatorRequestStore,
@@ -23919,9 +23920,9 @@ impl McpTool for AgentTaskContractPreviewTool {
     }
 
     fn schema(&self) -> ToolSchema {
-        ToolSchema {
+        let mut schema = ToolSchema {
             name: self.name().into(),
-            description: "Compile and validate a deterministic, read-only agent task contract preview. The tool never spawns or steers agents, never writes durable memory or work_memory, never promotes canon, and never enables runtime behavior. A blocked preview has typed violations and an empty compiled_instruction."
+            description: "Compile and validate a deterministic, read-only agent task contract preview with a readable goal_summary. Optionally compare a caller-supplied previous_contract and show exact goal/boundary changes with change_context; route changes remain separate. Summaries and user references are caller-supplied, not verified authorization. The tool never spawns or steers agents, never writes durable memory or work_memory, never promotes canon, and never enables runtime behavior. A blocked preview retains typed violations and an empty compiled_instruction."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -24020,7 +24021,31 @@ impl McpTool for AgentTaskContractPreviewTool {
                     }
                 }
             }),
-        }
+        };
+        let mut previous_contract = schema.input_schema["properties"]["contract"].clone();
+        previous_contract["description"] = json!(
+            "Optional earlier contract supplied by the caller for comparison. This tool does not retrieve, persist, or attest a user-approved baseline."
+        );
+        schema.input_schema["properties"]["previous_contract"] = previous_contract;
+        schema.input_schema["properties"]["change_context"] = json!({
+            "type": "array",
+            "default": [],
+            "description": "Optional explanations for changed goal/boundary fields; requires previous_contract when non-empty. Missing reasons and user references remain unknown. References are not verified and do not grant authority.",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["field"],
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": ["objective", "acceptance_criteria", "authority_boundary", "reserved_actions", "continuity_locks", "allowed_changes"]
+                    },
+                    "reason": { "type": ["string", "null"] },
+                    "user_change_ref": { "type": ["string", "null"] }
+                }
+            }
+        });
+        schema
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
@@ -24044,8 +24069,39 @@ impl McpTool for AgentTaskContractPreviewTool {
                 )))
             }
         };
+        let previous_contract = match args.get("previous_contract") {
+            None => None,
+            Some(value) => match serde_json::from_value::<AgentTaskContract>(value.clone()) {
+                Ok(contract) => Some(contract),
+                Err(error) => {
+                    return Ok(ToolResult::error(format!(
+                        "invalid previous_contract: {error}"
+                    )))
+                }
+            },
+        };
+        let change_context = match args.get("change_context") {
+            None => Vec::new(),
+            Some(value) => match serde_json::from_value::<Vec<GoalChangeContext>>(value.clone()) {
+                Ok(context) => context,
+                Err(error) => {
+                    return Ok(ToolResult::error(format!(
+                        "invalid change_context: {error}"
+                    )))
+                }
+            },
+        };
+        if previous_contract.is_none() && !change_context.is_empty() {
+            return Ok(ToolResult::error(
+                "non-empty change_context requires previous_contract",
+            ));
+        }
         let preview = preview_agent_task_contract(contract);
         let mut body = json!(preview);
+        body["goal_summary"] = json!(summarize_goal(&preview));
+        if let Some(previous) = previous_contract.as_ref() {
+            body["goal_change_review"] = json!(compare_goals(&preview, previous, &change_context));
+        }
         if include_next_step_review && preview.status == "ready" {
             body["next_step_review_instruction"] =
                 json!(crate::agent_task_contract::AGENT_TASK_CONTRACT_NEXT_STEP_REVIEW);

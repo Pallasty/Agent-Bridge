@@ -95,6 +95,15 @@ column.
 
 ## Stop-drift operating rule
 
+On 2026-09-10 the owner authorized the bounded PI-Desktop-inspired goal-review
+increment: expose the current submitted goal and criteria through the existing
+contract preview, explain concrete goal/boundary changes against a supplied
+earlier contract, and preserve freedom to adjust routes within existing
+authorization. This is readable, caller-supplied review material, not a new
+goal state machine, semantic drift detector, approval gate, or completion
+producer. PI installation/integration remains conditional. See
+[the operating procedure](operations/GOAL_REVIEW.md).
+
 On 2026-09-09 the owner explicitly authorized a bounded ordinary-maintenance
 release compatibility repair: R10 becomes per-plan `agent_reported` versus
 `evidence_gated` without downgrading existing strict bindings; R9 durable
