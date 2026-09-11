@@ -46,6 +46,44 @@ Do not repeat the complete unchanged goal after each tool call.
 
 ## Read the result accurately
 
+### Carry requirements through an execution handoff
+
+The preview and `agent_spawn` are separate interfaces. `agent_spawn` accepts a
+prompt and runtime options; it does not accept a task contract or automatically
+attach `compiled_instruction`. A ready preview therefore does not establish
+that a child received the contract, followed it, or delivered its criteria.
+
+When an already-authorized task needs a handoff, carry its existing objective,
+acceptance criteria, and boundaries into the prompt. Retain the contract ID and
+revision in the existing task context when available; do not create a contract
+solely for a small handoff. Identify assistant-selected implementation choices
+as such, separately from user requirements. Keep the available user reference;
+missing provenance stays unknown. This does not require another approval.
+
+For example: "Requirement: preserve keyboard navigation (user message 17).
+Implementation choice: reuse the existing event handler (assistant choice).
+Acceptance: the existing keyboard navigation check passes." Changing the
+handler is a route choice; dropping keyboard navigation changes acceptance.
+
+For runtime settings that matter to acceptance, distinguish the requested
+setting from the returned or observed setting. An omitted model delegates
+selection to the backend/configuration; it is not evidence of a particular
+model. `runtime_id` identifies the backend, not the provider's actual model.
+The spawn response reports a fallback when a backup runtime is used. Record a
+relevant fallback in existing task context instead of silently treating it as
+the originally intended backend. Do not copy credentials or full environment
+variables into that context.
+
+At completion, check the actual output against the retained criteria and name
+any skipped or substituted requirement. Session termination, exit code, and
+resource receipts do not independently establish semantic task completion.
+Use the existing outcome provenance fields where that workflow already applies;
+do not promote an agent report to independent verification or reopen a frozen
+completion gate. These handoff practices provide visibility, not automatic
+contract-to-process binding or a demonstrated reduction in goal drift.
+
+### Interpret preview fields
+
 - `goal_summary` is present for both ready and blocked submitted contracts.
 - `goal_change_review` is present only when a baseline was supplied.
 - A different contract identity or invalid baseline does not establish history.
