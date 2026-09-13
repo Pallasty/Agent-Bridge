@@ -1,0 +1,75 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "s21-dream-identity-section-presentation-20260913",
+  "source_base": "02141eeab7a31ca55b2bc91584848747ea5e1f4e",
+  "main_rs_before_sha256": "33fe62062712aa439aeb8ac36643fb2f9585c507719fa5b3b4bba4f28ff8c8be",
+  "main_rs_after_sha256": "3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1",
+  "changes": [
+    {
+      "region": "pct_delta and print_identity_section",
+      "category": "pure_logic",
+      "summary": "Extract completed IdentityWindow section presentation to binary-private cli::dream_identity_view; reuse unchanged short_key.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S21-DREAM-IDENTITY-VIEW-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s21-verification.json",
+        "scripts/eval/dream_identity_view_parity.py",
+        "crates/bridge/tests/cli_dream_identity_s21_extraction.rs"
+      ]
+    },
+    {
+      "region": "run_dream_identity section call",
+      "category": "authority_or_effect_adapter",
+      "summary": "Qualify the sole section call; retain validation, time, database queries, JSON and text prologue at the root.",
+      "disposition": "root_visible",
+      "root_reason": "The composition root owns window acquisition, query error propagation and branch/output ordering; the renderer receives only completed windows.",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S21-DREAM-IDENTITY-VIEW-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s21-verification.json",
+        "scripts/eval/dream_identity_cli_parity.py",
+        "crates/bridge/tests/cli_dream_identity_s21_extraction.rs"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "CLI declarations and dispatch are byte-identical. The 30-case CLI suite verifies root/dream/identity help, default seven days, explicit days and invalid values."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "44 actual IdentityWindow fixed-input exit/stdout/stderr comparisons pass with an output negative control. CLI passes 24 exact cases plus 6 JSON cases with only validated window endpoint normalization; original JSON branch is byte-identical."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "passed",
+      "evidence": [
+        "Identity remains its existing query/report adapter. No new preview, confirmation or write authority is introduced; four fixture business tables remain unchanged on successful and failed query paths."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Root days gate, clock, DB open and current-then-prior query sequence are byte-identical. CLI zero-days with obstructed DB, open errors and separately induced current/prior query errors preserve failure context and empty stdout."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Only the two helper bodies move and their sole call becomes qualified. Root JSON early return and text prologue stay in place; new module has no Store, environment, clock, filesystem, process or runtime capability. Existing Dream module stays unchanged."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "44 view and30 CLI cases pass;3 S21 plus3 existing S11/S12/S13 tests pass after expected3-test ownership RED. All-targets check,20 governance unit tests,3positive/7negative schema checks,scoped rustfmt and diff check pass."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert S21 to restore the original inline helpers and call. No schema, state or configuration migration is required. Preserve prior governance decisions."
+  ]
+}
