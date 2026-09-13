@@ -16560,24 +16560,8 @@ async fn run_worktree_session_new(name: Option<&str>, base: Option<&str>) -> Res
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let name_part = name
-        .map(|s| {
-            s.chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '-'
-                    }
-                })
-                .collect::<String>()
-        })
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "anon".to_string());
-    let slug = format!("{name_part}-{ts}");
-    let branch = format!("session/{slug}");
-    let dir_name = format!("session-{slug}");
-    let path = repo_root.join(".worktrees").join(&dir_name);
+    let cli::worktree_session_view::SessionPlan { branch, path } =
+        cli::worktree_session_view::plan_new_session(&repo_root, name, ts);
 
     // Make sure parent dir exists; `git worktree add` won't create
     // .worktrees/ itself.
@@ -16655,37 +16639,7 @@ async fn run_worktree_session_list() -> Result<()> {
         );
     }
 
-    // Porcelain blocks are separated by blank lines; each block has
-    // `worktree <path>`, optional `HEAD <sha>`, optional `branch <ref>`.
-    let mut shown = 0;
-    let mut path = String::new();
-    let mut head = String::new();
-    let mut branch = String::new();
-    for raw in String::from_utf8_lossy(&out.stdout).lines() {
-        if raw.is_empty() {
-            if path.contains("/.worktrees/session-") {
-                println!("{path}  {branch}  {head}");
-                shown += 1;
-            }
-            path.clear();
-            head.clear();
-            branch.clear();
-            continue;
-        }
-        if let Some(rest) = raw.strip_prefix("worktree ") {
-            path = rest.to_string();
-        } else if let Some(rest) = raw.strip_prefix("HEAD ") {
-            head = rest.chars().take(8).collect();
-        } else if let Some(rest) = raw.strip_prefix("branch ") {
-            branch = rest.to_string();
-        }
-    }
-    // Flush any trailing block (porcelain output may end without trailing
-    // blank line on some git versions).
-    if path.contains("/.worktrees/session-") {
-        println!("{path}  {branch}  {head}");
-        shown += 1;
-    }
+    let shown = cli::worktree_session_view::render_session_rows(&out.stdout);
     if shown == 0 {
         eprintln!(
             "(no session worktrees under {})",

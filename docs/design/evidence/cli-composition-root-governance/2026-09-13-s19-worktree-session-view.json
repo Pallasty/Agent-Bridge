@@ -1,0 +1,85 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "s19-worktree-session-plan-and-result-view-20260913",
+  "source_base": "7fba67a8b006bac4fe59b5e74a260eaebc17c77b",
+  "main_rs_before_sha256": "4bd92dcb596e7d7132f9f351fdfcd25ed91b1e38be44c3b20164722eb26d44de",
+  "main_rs_after_sha256": "beabf78a92fb46fcde5cedb8f35ed5e91405f6d0e9abfa6bf5c2872ffd0a83f2",
+  "changes": [
+    {
+      "region": "run_worktree_session_new name/slug/branch/path construction",
+      "category": "pure_logic",
+      "summary": "Extract deterministic session planning with an already-acquired timestamp and repository path.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S19-WORKTREE-SESSION-VIEW-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s19-verification.json",
+        "scripts/eval/worktree_session_view_parity.py"
+      ]
+    },
+    {
+      "region": "run_worktree_session_list completed stdout decoding/parsing/rendering",
+      "category": "pure_logic",
+      "summary": "Extract the original streaming block parser and row printing, returning the original i32 count.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S19-WORKTREE-SESSION-VIEW-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s19-verification.json",
+        "scripts/eval/worktree_session_view_parity.py"
+      ]
+    },
+    {
+      "region": "Two root calls into cli::worktree_session_view",
+      "category": "authority_or_effect_adapter",
+      "summary": "Preserve repository/time acquisition, mkdir, Git argument/status handling and final output ordering at original positions.",
+      "disposition": "root_visible",
+      "root_reason": "The composition root retains observable effect/error order, final created path output and empty-list diagnostics.",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S19-WORKTREE-SESSION-VIEW-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s19-verification.json",
+        "crates/bridge/tests/cli_worktree_session_s19_extraction.rs",
+        "scripts/eval/worktree_session_cli_parity.py"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "CLI declarations and real_main dispatch are byte-identical; exact root/worktree-session/new/list help and invalid-option comparisons pass."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "64 baseline/candidate plan/row probes and 34 CLI cases pass. Existing commands expose text only; no JSON CLI surface is added."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "not_applicable",
+      "evidence": [
+        "Existing WorktreeSession new executes directly, with no dry-run or confirmation flag. This extraction preserves that interface; isolated real Git cases verify explicit creation and failures."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "The whole root outside two blocks is byte-identical. 3 root-boundary tests and CLI discovery/mkdir/Git errors preserve fail-before-render behavior."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "New module receives Path/name/timestamp or completed bytes only. CLI tests verify exact Git argv, mkdir before add, stderr ordering, final stdout path, base/refs/worktree state and partial failure effects."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "64 probe cases with an extra-output negative control, 34 CLI cases, 3 boundary tests, 20 Git/hook tests and 3 positive/7 negative schema controls pass. cargo check -p ab-bridge --all-targets --quiet, scoped rustfmt and diff checks pass."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert S19 source extraction to restore original inline blocks. No runtime configuration or schema migration is required; earlier S14-S18 decisions and code remain intact."
+  ]
+}

@@ -1,0 +1,442 @@
+{
+  "schema": "agent_bridge.main_rs_s19_verification.v1",
+  "source_audit": {
+    "source_base": "7fba67a8b006bac4fe59b5e74a260eaebc17c77b",
+    "main_rs_before_sha256": "4bd92dcb596e7d7132f9f351fdfcd25ed91b1e38be44c3b20164722eb26d44de",
+    "main_rs_after_sha256": "beabf78a92fb46fcde5cedb8f35ed5e91405f6d0e9abfa6bf5c2872ffd0a83f2",
+    "outside_two_blocks_byte_identical": true,
+    "normalized_root_sha256": "d5d6adf1f34593d80433cd46b879acadcbb7c91f3f47f41ba054eb54254dee31",
+    "unchanged_function_sha256": {
+      "main": "5a433f0be65add79fce9bf6f654b3d6eac7630d9f2c4d9d7af73300d7db65417",
+      "real_main": "046ce3abecd0d635762830cdd9f3c5a39654108a4ce6ba32fe4b19211573f710",
+      "build_hub": "299e73510167ac7a03a812c098d1c6cce02d408e4ef67b9b9f0a464522a3a94e"
+    },
+    "cli_schema_byte_identical": true,
+    "lines_before": 22070,
+    "lines_after": 22024
+  },
+  "view_parity": {
+    "schema_version": 1,
+    "mode": "pure-view-parity",
+    "scope": "session plan branch/path and porcelain stdout/row count; no clock, Git, or filesystem effects",
+    "baseline_commit": "7fba67a8b006bac4fe59b5e74a260eaebc17c77b",
+    "baseline_main_sha256": "4bd92dcb596e7d7132f9f351fdfcd25ed91b1e38be44c3b20164722eb26d44de",
+    "candidate_head": "7fba67a8b006bac4fe59b5e74a260eaebc17c77b",
+    "harness_sha256": "55600efa84e23bdaa7576451f774f3d16def43646097f926f0f4c9a0b8339094",
+    "candidate_main_sha256": "beabf78a92fb46fcde5cedb8f35ed5e91405f6d0e9abfa6bf5c2872ffd0a83f2",
+    "baseline_module_sha256": "adb4c3691dda06d5690c71980515b346f0f042262a1cda200c08df1aea3b9cf7",
+    "candidate_module_sha256": "84d64cf90bc931820a08ee0779eb3d2aa1a5fb3f1823af39046e06884e90f5f4",
+    "extracted_blocks": {
+      "plan_new_session": {
+        "function": "run_worktree_session_new",
+        "first_line": 16563,
+        "last_line": 16580,
+        "original_block_sha256": "b1ad4abc7c4c5b1457ac002e0fbad690aedd2035c0021fa1e1a0952e057a7f9a",
+        "original_block_bytes": 618
+      },
+      "render_session_rows": {
+        "function": "run_worktree_session_list",
+        "first_line": 16658,
+        "last_line": 16688,
+        "original_block_sha256": "bbe5d62e01c2e5df84b2342ff8e1ba16ad71a83d46283693a1dfa64fbdc73614",
+        "original_block_bytes": 1189
+      }
+    },
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)\nbinary: rustc\ncommit-hash: 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd\ncommit-date: 2026-06-26\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.1\nLLVM version: 22.1.2",
+    "negative_control": {
+      "case": "list-empty",
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "cd05f2a8eaba7220dbce115612d36bfd5579f6c8b3641d802ef31ad154e0d0be",
+        "stderr_sha256": "619fb4d747ff27a4d26cbc0fce297942893d4e6b43e56cdaad4856b10b32b8c0",
+        "stdout_bytes": 38,
+        "stderr_bytes": 16,
+        "stdout_file": "negative-control.candidate.stdout",
+        "stderr_file": "negative-control.candidate.stderr"
+      },
+      "comparison": {
+        "equal": false,
+        "equal_fields": {
+          "exit_code": true,
+          "stdout": false,
+          "stderr": true
+        }
+      },
+      "caught": true
+    },
+    "source_unchanged_during_run": true,
+    "total": 64,
+    "baseline_successes": 64,
+    "operation_counts": {
+      "plan": 22,
+      "list": 42
+    },
+    "passed": 64,
+    "success": true,
+    "per_operation_cases": {
+      "plan": 22,
+      "list": 42
+    },
+    "full_report_sha256": "40ac104e2c41ccd11119143e07ecfde0ca52cfc1432b77e636c0276841a02729"
+  },
+  "cli_parity": {
+    "schema": "agent_bridge.worktree_session_cli_parity.v1",
+    "baseline_sha256": "7f823d4921b05c8a703a0b4c7c8c0c3a62d51336c6f47bd007397eabca9225d9",
+    "candidate_sha256": "df314327c1bc3af5a7e8a73c860d3e7f90ad9bb039577f944a5d7fc9798e7b73",
+    "script_sha256": "32d53f8662b077e0d3728e576847ed3886c60dc9a7683a8fc0122f82208d9bc5",
+    "inputs_unchanged_during_comparison": true,
+    "passed": 34,
+    "total": 34,
+    "scope": "CLI bytes; only validated new slug normalized; fake Git argv/effects and real Git refs/worktrees/contents",
+    "excluded": [
+      "real user repositories/configuration/hooks",
+      "Git index/database byte equivalence",
+      "same-second real Git collision timing",
+      "cross-stream wall-clock ordering"
+    ],
+    "full_report_sha256": "d5dec88ff669d3fe1c49699e361e724b1695db8e411ece8a771702b38c3bb393",
+    "evidence_counts": {
+      "exact_cli_and_fixture_effect": 22,
+      "validated_slug_cli_and_git_effect": 12
+    },
+    "backend_counts": {
+      "fake": 27,
+      "real": 7
+    },
+    "cases": [
+      {
+        "case": "root-help",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "group-help",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "new-help",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "list-help",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "new-invalid-option",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 2,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff"
+      },
+      {
+        "case": "list-invalid-option",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 2,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6"
+      },
+      {
+        "case": "fake-list-empty",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a5889e38983e00487c06a1f538bdf843b6cd4808708920a43321e6be938626c"
+      },
+      {
+        "case": "fake-list-unrelated",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a5889e38983e00487c06a1f538bdf843b6cd4808708920a43321e6be938626c"
+      },
+      {
+        "case": "fake-list-normal",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fake-list-no-trailing-blank",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fake-list-detached",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fake-list-missing-head",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fake-list-lossy",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fake-list-order-and-reset",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fake-list-discovery",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a5889e38983e00487c06a1f538bdf843b6cd4808708920a43321e6be938626c"
+      },
+      {
+        "case": "fake-list-discovery-failure",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa"
+      },
+      {
+        "case": "fake-list-git-failure",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709"
+      },
+      {
+        "case": "fake-new-named",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "bde4933528e57f9c6edc02466fe122e20ebf39c29058ede153099503b600e106",
+        "compared_stderr_sha256": "92e4591cdd2eecb5b6846072eb638dee5752f96b3b102448ed3394b0b619c2d4"
+      },
+      {
+        "case": "fake-new-anonymous",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1127d41bf2815696adff8d6961e9f6bc0c2b5344dc620165a98c9aecdbc5468f",
+        "compared_stderr_sha256": "08f3deb0bf18e4e0e991f454786fe403be416f89e40043ac403c6e2b8bbe324d"
+      },
+      {
+        "case": "fake-new-empty-name",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1127d41bf2815696adff8d6961e9f6bc0c2b5344dc620165a98c9aecdbc5468f",
+        "compared_stderr_sha256": "08f3deb0bf18e4e0e991f454786fe403be416f89e40043ac403c6e2b8bbe324d"
+      },
+      {
+        "case": "fake-new-sanitized",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "5c185934aa613341ab5d32cc017045eabc4cb162683481a7762716b8ec21d1a0",
+        "compared_stderr_sha256": "73cae2389eb6467d2d1dcd76e187a164ce2de2e31bcd988aeaffb4419a91771c"
+      },
+      {
+        "case": "fake-new-explicit-base",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1127d41bf2815696adff8d6961e9f6bc0c2b5344dc620165a98c9aecdbc5468f",
+        "compared_stderr_sha256": "2ee27738de7a401cccb86077acadf17d414dc5fc6b89f62144ebd9d6d94be6d3"
+      },
+      {
+        "case": "fake-new-discovery",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "c3054aabdb1c4c39cd015486e361599cebbb2fc75ffb825a0894c04c81db0c4d",
+        "compared_stderr_sha256": "85eb8ad456c98beb3e451a0e30deee0cb5c4c9e156e87ea04061c1aed113b72f"
+      },
+      {
+        "case": "fake-new-override-priority",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1127d41bf2815696adff8d6961e9f6bc0c2b5344dc620165a98c9aecdbc5468f",
+        "compared_stderr_sha256": "08f3deb0bf18e4e0e991f454786fe403be416f89e40043ac403c6e2b8bbe324d"
+      },
+      {
+        "case": "fake-new-git-failure",
+        "backend": "fake",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "485582c55a97b3ce82ca855b5a34c67db1132595a0af271557e98a028b243124"
+      },
+      {
+        "case": "fake-new-mkdir-failure",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "ffd7a6c0137cb869fa396ff8543d350c5efcf733408a77a6a012865794d89fa2"
+      },
+      {
+        "case": "fake-new-discovery-failure",
+        "backend": "fake",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa"
+      },
+      {
+        "case": "real-head",
+        "backend": "real",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "e685e745deef1abbf222421f5aa84aa42bc86695009dae30a64d8680307ede27",
+        "compared_stderr_sha256": "cf1b24c77b318ab77dc49757b5e42b43a3495464d329c7c0be47d340e75fd2ce"
+      },
+      {
+        "case": "real-base",
+        "backend": "real",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1127d41bf2815696adff8d6961e9f6bc0c2b5344dc620165a98c9aecdbc5468f",
+        "compared_stderr_sha256": "e916930a74fdad65a4fe69891d3628053d898c818d8afe40438136146c4aa4b0"
+      },
+      {
+        "case": "real-discovery",
+        "backend": "real",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1127d41bf2815696adff8d6961e9f6bc0c2b5344dc620165a98c9aecdbc5468f",
+        "compared_stderr_sha256": "585fa315681728928bb83d0fb9cc0cb9332fa124bafbd5aaca684da3b44fcda9"
+      },
+      {
+        "case": "real-invalid-base",
+        "backend": "real",
+        "evidence_type": "validated_slug_cli_and_git_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "1f05445703b098697f7db59604fa218ceda06bf128e57ee2e1dc0ac748121935"
+      },
+      {
+        "case": "real-mkdir-failure",
+        "backend": "real",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 1,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "ffd7a6c0137cb869fa396ff8543d350c5efcf733408a77a6a012865794d89fa2"
+      },
+      {
+        "case": "real-list-empty",
+        "backend": "real",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a5889e38983e00487c06a1f538bdf843b6cd4808708920a43321e6be938626c"
+      },
+      {
+        "case": "real-list-seeded",
+        "backend": "real",
+        "evidence_type": "exact_cli_and_fixture_effect",
+        "equal": true,
+        "exit_code": 0,
+        "compared_stdout_sha256": "1eb3ee8f2421c5dfd85c01218572fc807226fcb04d73a1434f861b06eaa044ea",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ]
+  },
+  "rust_test_runs": {
+    "boundary-tests.log": {
+      "passed": 3,
+      "failed": 0,
+      "log_sha256": "a4ad0ee633d815c276ba8e24572eac4df9d991f996d9ff5cb9c26487866a4525"
+    }
+  },
+  "governance_tests": 20,
+  "governance_schema_self_tests": {
+    "positive": 3,
+    "negative": 7
+  },
+  "all_target_check": "passed",
+  "scoped_rustfmt": "passed",
+  "diff_check": "passed",
+  "ci": "skipped per AGENTS.md",
+  "deployment": "not performed",
+  "check_log_sha256": "c300c85d96973e4b41d842610449f6cd09a66115e022e63b053529aac767a78c",
+  "governance_test_log_sha256": "650c3a3710293c9a7ff32007a3c3586e4e7bc0ebbf1af5f94e37fa8c0e760ec7",
+  "artifact_directory": "/Data/CascadeProjects/.analysis-reports/main-rs-governance-s19-20260913",
+  "notes": [
+    "All main.rs bytes outside the two moved blocks are identical to source_base; skeleton substitutes one marker for each original block and corresponding candidate call.",
+    "64 standalone probe cases compare baseline source blocks with the actual candidate module; 34 separate CLI cases exercise discovery, Git and root effects.",
+    "Only generated slug timestamps validated against each invocation are normalized in 12 CLI cases; 22 CLI cases compare unmodified bytes. All arguments, ordinary paths, output text and fixture effects otherwise remain exact.",
+    "Real Git cases compare refs, registered worktrees and checkout content; Git object/index database bytes and cross-stream wall-clock scheduling are not equivalence claims.",
+    "The row count remains i32, matching the original unconstrained integer default. No additional conflict retry, confirmation, cleanup or path normalization was added."
+  ]
+}

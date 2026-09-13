@@ -13,6 +13,7 @@ mod shell_init;
 mod skill_retro;
 mod substrate;
 mod walkthrough;
+pub(super) mod worktree_session_view;
 pub(super) mod workflow_feedback;
 
 pub(super) use avatar::render_avatar_backend_probe_result;
