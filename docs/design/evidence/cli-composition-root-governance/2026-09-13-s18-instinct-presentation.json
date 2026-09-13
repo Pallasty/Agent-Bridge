@@ -1,0 +1,73 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "s18-instinct-completed-result-presentation-20260913",
+  "source_base": "4e57079292d8245fe3c721d57a6bb99adb7e806a",
+  "main_rs_before_sha256": "ba8802e8949532f0cf3cf1859ed06000418eb3dadbfb0884d36cbc74c075b03e",
+  "main_rs_after_sha256": "4bd92dcb596e7d7132f9f351fdfcd25ed91b1e38be44c3b20164722eb26d44de",
+  "changes": [
+    {
+      "region": "Nine InstinctOp JSON/text presentation tails inside real_main",
+      "category": "pure_logic",
+      "summary": "Move completed-result field selection, defaults, truncation and rendering into binary-private cli::instinct_presentation.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S18-INSTINCT-PRESENTATION-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s18-verification.json",
+        "scripts/eval/instinct_presentation_parity.py"
+      ]
+    },
+    {
+      "region": "Nine qualified presentation calls at original Instinct dispatch output positions",
+      "category": "authority_or_effect_adapter",
+      "summary": "Keep root-owned domain calls, validation, effect sequence and explicit flags; replace only final output blocks with narrow renderer calls.",
+      "disposition": "root_visible",
+      "root_reason": "The root must retain admission, memory construction, store/save/receipt ordering and the point where completed output becomes observable.",
+      "evidence": [
+        "crates/bridge/tests/cli_instinct_s18_extraction.rs",
+        "scripts/eval/instinct_cli_parity.py",
+        "docs/reports/main-rs-governance/2026-09-13-s18-verification.json"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "CLI declarations are byte-identical; root, instinct and all nine subcommand help outputs match exactly in the 79-case CLI report."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "236/236 completed-Value exit/stdout/stderr comparisons, including fallback, truncation, Unicode and 18 JSON flag-invariance groups; extra-print negative control is rejected."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "passed",
+      "evidence": [
+        "79/79 isolated CLI cases include read-only/preview effects and blocked memory-write without database creation; actual saved-memory and receipt-failure postconditions pass."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "All root code outside the nine presentation tails is byte-identical. Four boundary tests and CLI errors preserve admission before database open and save before receipt before render."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Presentation receives immutable Value and display flags only. Database, credential/path/time acquisition and domain calls remain at the root; explicit local excerpt flags remain at both acquisition and display."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "14 existing Instinct domain tests, 4 focused boundary tests, 20 Git/hook tests and 3 positive/7 negative schema controls pass; cargo check -p ab-bridge --all-targets --quiet, scoped rustfmt and diff checks pass."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert S18 source extraction to restore inline presentation; no runtime state/configuration/schema migration is required. Preserve S14-S17 implementation and receipts."
+  ]
+}
