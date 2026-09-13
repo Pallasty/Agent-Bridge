@@ -47,6 +47,12 @@ use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod cli;
+#[cfg(feature = "r9-workload-receipts")]
+use cli::startup_report::log_workload_receipt_reconciliation_report;
+use cli::avatar_observer_view::{
+    focus_observer_context_from_plan, focus_observer_identity_from_plan,
+    focus_observer_terminal_context, focus_observer_travel_px,
+};
 mod doctor;
 mod seed_substrate;
 mod setup;
@@ -9341,22 +9347,7 @@ fn run_avatar_sprite_asset_audit(
         target_height,
         max_baseline_drift_px,
     )?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!(
-            "Xiao Shu sprite asset: {} ({}, {}x{}, expected {}x{})",
-            if report.accepted { "accepted" } else { "rejected" },
-            report.color_type,
-            report.width,
-            report.height,
-            report.expected_width,
-            report.expected_height,
-        );
-        for failure in &report.failures {
-            println!("- {failure}");
-        }
-    }
+    cli::avatar_presentation::render_sprite_asset_audit(&report, as_json)?;
     if report.accepted {
         Ok(())
     } else {
@@ -9366,20 +9357,7 @@ fn run_avatar_sprite_asset_audit(
 
 fn run_avatar_sprite_asset_contract(asset_root: &Path, as_json: bool) -> Result<()> {
     let contract = ab_bridge::avatar_asset_audit::focus_follow_asset_contract(asset_root);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&contract)?);
-    } else {
-        println!(
-            "Xiao Shu focus-follow assets: {}/{} accepted, {} missing, {} rejected",
-            contract.accepted,
-            contract.assets.len(),
-            contract.missing,
-            contract.rejected,
-        );
-        for item in &contract.assets {
-            println!("- {}: {} ({})", item.spec.action, item.status, item.path);
-        }
-    }
+    cli::avatar_presentation::render_sprite_asset_contract(&contract, as_json)?;
     Ok(())
 }
 
@@ -9411,20 +9389,7 @@ fn run_avatar_sprite_asset_compile(
         },
         execute,
     )?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!(
-            "Xiao Shu sprite compile: {} {}x{} -> {}x{} ({} frames)",
-            if report.executed { "written" } else { "preview" },
-            report.source_width,
-            report.source_height,
-            report.output_width,
-            report.output_height,
-            report.frame_count,
-        );
-        println!("output: {}", report.output);
-    }
+    cli::avatar_presentation::render_sprite_asset_compile(&report, as_json)?;
     Ok(())
 }
 
@@ -9441,25 +9406,7 @@ async fn run_avatar_focus_follow_plan(
         max_step_px,
     };
     let plan = ab_bridge::avatar_focus_follow::focus_follow_plan_from_sway_tree(&tree, &opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
-    } else {
-        println!(
-            "Xiao Shu focus-follow plan: {}",
-            plan.get("status").and_then(serde_json::Value::as_str).unwrap_or("unknown")
-        );
-        println!("  read_only: true");
-        println!("  movement_authorized: false");
-        if let Some(edge) = plan.pointer("/docking/edge").and_then(serde_json::Value::as_str) {
-            println!("  proposed_edge: {}", edge);
-        }
-        if let Some(points) = plan
-            .pointer("/path/point_count")
-            .and_then(serde_json::Value::as_u64)
-        {
-            println!("  path_points: {}", points);
-        }
-    }
+    cli::avatar_presentation::render_focus_follow_plan(&plan, as_json)?;
     Ok(())
 }
 
@@ -9485,23 +9432,7 @@ async fn run_avatar_focus_follow_recommend(
         last_target_node_id,
         min_travel_px,
     );
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&recommendation)?);
-    } else {
-        println!(
-            "Xiao Shu focus-follow recommendation: {} ({})",
-            recommendation
-                .get("decision")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("suppress"),
-            recommendation
-                .get("reason")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown")
-        );
-        println!("  read_only: true");
-        println!("  dispatch: none");
-    }
+    cli::avatar_presentation::render_focus_follow_recommendation(&recommendation, as_json)?;
     Ok(())
 }
 
@@ -10378,19 +10309,7 @@ async fn run_avatar_focus_follow_prompt(
         }
     }
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&prompt)?);
-    } else {
-        println!(
-            "Xiao Shu focus-follow prompt: {}",
-            prompt
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown")
-        );
-        println!("  emits_audio: false");
-        println!("  executes_recommendation: false");
-    }
+    cli::avatar_presentation::render_focus_follow_prompt(&prompt, as_json)?;
     Ok(())
 }
 
@@ -11112,18 +11031,7 @@ async fn run_avatar_focus_follow_action(
         None,
     )
     .await?;
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&action)?);
-    } else {
-        println!(
-            "Xiao Shu focus-follow action: {}",
-            action.get("status").and_then(serde_json::Value::as_str).unwrap_or("unknown")
-        );
-        println!("  ready: {}", action.get("ready").and_then(serde_json::Value::as_bool).unwrap_or(false));
-        println!("  executed_steps: {}", action.get("executed_steps").and_then(serde_json::Value::as_u64).unwrap_or(0));
-        println!("  moves_pointer: false");
-        println!("  changes_focus: false");
-    }
+    cli::avatar_presentation::render_focus_follow_action(&action, as_json)?;
     Ok(())
 }
 
@@ -11194,35 +11102,7 @@ fn write_focus_follow_observer_receipt(receipt: &serde_json::Value) -> Result<()
     result
 }
 
-fn focus_observer_travel_px(plan: &serde_json::Value) -> Option<i64> {
-    let from = plan.pointer("/avatar/current_rect")?;
-    let to = plan.pointer("/avatar/destination_rect")?;
-    Some(
-        (to.get("x")?.as_i64()? - from.get("x")?.as_i64()?)
-            .abs()
-            .max((to.get("y")?.as_i64()? - from.get("y")?.as_i64()?).abs()),
-    )
-}
 
-fn focus_observer_identity_from_plan(
-    plan: &serde_json::Value,
-) -> ab_bridge::avatar_focus_observer::FocusTargetIdentity {
-    use ab_bridge::avatar_focus_observer::FocusTargetIdentity;
-
-    let value = plan
-        .pointer("/target/app_id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    match (
-        plan.pointer("/target/identity_kind")
-            .and_then(serde_json::Value::as_str),
-        value,
-    ) {
-        (Some("wayland_app_id"), Some(value)) => FocusTargetIdentity::WaylandAppId(value),
-        (Some("xwayland_class"), Some(value)) => FocusTargetIdentity::XwaylandClass(value),
-        _ => FocusTargetIdentity::Missing,
-    }
-}
 
 fn focus_observer_target_geometry_from_plan(
     plan: &serde_json::Value,
@@ -11309,43 +11189,6 @@ fn focus_observer_action_gate(
     None
 }
 
-fn focus_observer_context_from_plan(
-    plan: &serde_json::Value,
-    observed_at_ms: u64,
-    acknowledged_target_node_id: Option<i64>,
-    paused: bool,
-    action_busy: bool,
-) -> ab_bridge::avatar_focus_observer::FocusObserverContext {
-    use ab_bridge::avatar_focus_observer::FocusObserverContext;
-
-    let target_node_id = plan
-        .pointer("/target/node_id")
-        .and_then(serde_json::Value::as_i64);
-    let identity = focus_observer_identity_from_plan(plan);
-    let status = plan
-        .get("status")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
-    FocusObserverContext {
-        observed_at_ms,
-        plan_actionable: matches!(status, "planned" | "already_near_focus"),
-        target_node_id,
-        travel_px: focus_observer_travel_px(plan),
-        fullscreen: status == "fullscreen_target"
-            || plan
-                .pointer("/target/fullscreen")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-        sensitive_mark: plan
-            .pointer("/target/sensitive_mark")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        identity,
-        acknowledged_target_node_id,
-        paused,
-        action_busy,
-    }
-}
 
 fn focus_observer_action_busy(operation_directory: &std::path::Path) -> Result<bool> {
     match AvatarExclusiveOperationLock::try_acquire(
@@ -11361,53 +11204,7 @@ fn focus_observer_action_busy(operation_directory: &std::path::Path) -> Result<b
     }
 }
 
-fn render_focus_observer_json(payload: &serde_json::Value, as_json: bool) -> Result<()> {
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(payload)?);
-    } else {
-        println!(
-            "Xiao Shu bounded focus observer: {}",
-            payload
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown")
-        );
-        if let Some(reason) = payload
-            .get("terminal_reason")
-            .and_then(serde_json::Value::as_str)
-        {
-            println!("  terminal_reason: {reason}");
-        }
-        println!(
-            "  attempts: {}",
-            payload
-                .get("attempt_count")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0)
-        );
-        println!("  moves_pointer: false");
-        println!("  changes_focus: false");
-        println!("  emits_input: false");
-    }
-    Ok(())
-}
 
-fn focus_observer_terminal_context(
-    observed_at_ms: u64,
-) -> ab_bridge::avatar_focus_observer::FocusObserverContext {
-    ab_bridge::avatar_focus_observer::FocusObserverContext {
-        observed_at_ms,
-        plan_actionable: false,
-        target_node_id: None,
-        travel_px: None,
-        fullscreen: false,
-        sensitive_mark: false,
-        identity: ab_bridge::avatar_focus_observer::FocusTargetIdentity::Missing,
-        acknowledged_target_node_id: None,
-        paused: false,
-        action_busy: false,
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 async fn run_avatar_focus_follow_observe(
@@ -11469,7 +11266,7 @@ async fn run_avatar_focus_follow_observe(
         if !runtime_ready {
             plan["blocked_reason"] = serde_json::json!("runtime_unavailable");
         }
-        return render_focus_observer_json(&plan, as_json);
+        return cli::avatar_presentation::render_focus_observer_json(&plan, as_json);
     }
 
     let runtime_directory = focus_follow_runtime_dir()?;
@@ -11484,7 +11281,7 @@ async fn run_avatar_focus_follow_observe(
     let Some(_observer_lock) = observer_lock else {
         let mut plan = focus_observer_plan_json(&policy, true, false);
         plan["blocked_reason"] = serde_json::json!("observer_in_progress");
-        return render_focus_observer_json(&plan, as_json);
+        return cli::avatar_presentation::render_focus_observer_json(&plan, as_json);
     };
 
     let started = tokio::time::Instant::now();
@@ -11768,7 +11565,7 @@ async fn run_avatar_focus_follow_observe(
 
     let receipt = state.receipt_json(started.elapsed().as_millis() as u64);
     write_focus_follow_observer_receipt(&receipt)?;
-    render_focus_observer_json(&receipt, as_json)
+    cli::avatar_presentation::render_focus_observer_json(&receipt, as_json)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -12163,88 +11960,19 @@ async fn run_avatar_linux_live(
         &renderer_opts,
         false,
     );
-    let plan = json!({
-        "surface": "linux_avatar_live_plan",
-        "schema": 1,
-        "dry_run": true,
-        "ready": native_compiled
-            && backend.backend == ab_bridge::avatar_floater::AvatarBackend::NativeTransparent
-            && voice_plan.get("ready").and_then(Value::as_bool).unwrap_or(false),
-        "platform": std::env::consts::OS,
-        "native_feature_compiled": native_compiled,
-        "native_feature_contract": ab_bridge::avatar_native::NATIVE_FEATURE_CONTRACT,
-        "backend": {
-            "recommended": backend.backend.as_str(),
-            "transparency_available": backend.transparency_available,
-            "reason": backend.reason,
-        },
-        "presence": {
-            "session_id": presence_args.get("session_id").cloned().unwrap_or(Value::Null),
-            "agent_id": presence_args.get("agent_id").cloned().unwrap_or(Value::Null),
-            "project": presence_args.get("project").cloned().unwrap_or(Value::Null),
-            "role": presence_args.get("role").cloned().unwrap_or(Value::Null),
-            "runtime": presence_args.get("runtime").cloned().unwrap_or(Value::Null),
-            "pet_id": presence_args.get("pet_id").cloned().unwrap_or(Value::Null),
-            "heartbeat_interval_secs": heartbeat_interval_secs,
-            "stable_identity": true,
-            "projects_current_sidecar_facets": true,
-        },
-        "renderer": renderer_plan,
-        "voice_feedback": voice_plan,
-        "observation": {
-            "enabled": true,
-            "read_only": true,
-            "configured_poll_ms": state_poll_ms,
-            "transition_sample_limit": 32,
-            "measures": [
-                "sidecar_poll_count",
-                "sidecar_read_failures",
-                "mode_transitions",
-                "max_observed_poll_gap_ms",
-                "process_peak_rss_bytes",
-                "voice_invocation_latency_ms"
-            ],
-            "does_not_measure": [
-                "compositor_pixels",
-                "physical_display",
-                "physical_audio",
-                "worker_vram"
-            ],
-        },
-        "safety": {
-            "foreground_only": true,
-            "installs_service": false,
-            "writes_presence_only": !voice_feedback,
-            "persistent_writes_presence_only": true,
-            "creates_ephemeral_audio_files": voice_feedback,
-            "writes_pet_sidecar": false,
-            "audio_default_off": true,
-            "emits_audio": voice_feedback,
-            "emits_notification": false,
-            "controls_desktop": false,
-            "executes_actions": false,
-            "enables_embodiment_runtime_p4": false,
-        },
-    });
+    let plan = cli::avatar_live_view::linux_live_plan(
+        native_compiled,
+        &backend,
+        &presence_args,
+        heartbeat_interval_secs,
+        &renderer_plan,
+        &voice_plan,
+        state_poll_ms,
+        voice_feedback,
+    );
 
     if dry_run {
-        if as_json {
-            println!("{}", serde_json::to_string_pretty(&plan)?);
-        } else {
-            println!("Linux avatar live plan (dry run)");
-            println!(
-                "ready={} backend={} project={} pet_id={} session_id={}",
-                plan["ready"],
-                plan["backend"]["recommended"],
-                presence_args["project"],
-                presence_args["pet_id"],
-                presence_args["session_id"]
-            );
-            println!(
-                "duration_ms={} heartbeat_interval_secs={} audio={} actions=false",
-                duration_ms, heartbeat_interval_secs, voice_feedback
-            );
-        }
+        cli::avatar_live_view::render_linux_live_plan(&plan, &presence_args, duration_ms, heartbeat_interval_secs, voice_feedback, as_json)?;
         return Ok(());
     }
 
@@ -12380,41 +12108,28 @@ async fn run_avatar_linux_live(
         }
     }
 
-    let receipt = json!({
-        "surface": "linux_avatar_live_receipt",
-        "schema": 1,
-        "dry_run": false,
-        "completed": true,
-        "elapsed_ms": started.elapsed().as_millis() as u64,
-        "presence": {
-            "session_id": presence_args.get("session_id").cloned().unwrap_or(Value::Null),
-            "heartbeat_count": heartbeat_count,
-            "heartbeat_failures": heartbeat_failures,
-            "last_error": last_heartbeat_error,
-            "last_projection": last_presence,
-        },
-        "renderer": {
-            "completed": true,
-            "launch_plan": ab_bridge::avatar_native::native_transparent_plan_json(&renderer_opts, true),
-            "dynamic_state_source": "pet_state_sidecar",
-            "dynamic_state_polling_ran": true,
-            "final_visual_state_observed": false,
-            "reason": "the native surface completed and polled the sidecar, but this foreground receipt does not capture compositor pixels or infer the final visible sprite",
-        },
-        "voice_feedback": voice_receipt,
-        "observation": observation_receipt,
-        "safety": plan.get("safety").cloned().unwrap_or(Value::Null),
-    });
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&receipt)?);
-    } else {
-        println!(
-            "Linux avatar live completed heartbeats={} failures={} elapsed_ms={}",
-            heartbeat_count,
-            heartbeat_failures,
-            receipt["elapsed_ms"]
-        );
-    }
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let completed_renderer_plan =
+        ab_bridge::avatar_native::native_transparent_plan_json(&renderer_opts, true);
+    let receipt = cli::avatar_live_view::linux_live_receipt(
+        elapsed_ms,
+        &presence_args,
+        heartbeat_count,
+        heartbeat_failures,
+        &last_heartbeat_error,
+        &last_presence,
+        &completed_renderer_plan,
+        &voice_receipt,
+        &observation_receipt,
+        &plan,
+    );
+
+    cli::avatar_live_view::render_linux_live_receipt(
+        &receipt,
+        heartbeat_count,
+        heartbeat_failures,
+        as_json,
+    )?;
     Ok(())
 }
 
@@ -12507,47 +12222,17 @@ async fn run_avatar_voice_observe(
         .get("ready")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let plan = json!({
-        "surface": "linux_avatar_voice_observer_plan",
-        "schema": 1,
-        "dry_run": true,
-        "ready": ready,
-        "pet_id": pet_id,
-        "initial_mode": ab_bridge::avatar_live_voice::lifecycle_mode(&state),
-        "duration_ms": duration_ms,
-        "state_poll_ms": state_poll_ms,
-        "voice_feedback": voice_plan,
-        "ownership": {
-            "renderer": false,
-            "presence": false,
-            "pet_state": false,
-            "desktop_control": false,
-            "voice_observer": true,
-        },
-        "safety": {
-            "foreground_only": true,
-            "bounded_duration": true,
-            "initial_state_silent": true,
-            "fixed_lines_only": true,
-            "continuous_listening": false,
-            "installs_service": false,
-            "starts_renderer": false,
-            "writes_presence": false,
-            "writes_pet_sidecar": false,
-            "controls_desktop": false,
-            "emits_audio_when_live": true,
-        },
-    });
+    let plan = cli::avatar_live_view::voice_observer_plan(
+        ready,
+        &pet_id,
+        &ab_bridge::avatar_live_voice::lifecycle_mode(&state),
+        duration_ms,
+        state_poll_ms,
+        &voice_plan,
+    );
 
     if dry_run {
-        if as_json {
-            println!("{}", serde_json::to_string_pretty(&plan)?);
-        } else {
-            println!(
-                "Avatar voice observer plan ready={} pet_id={} duration_ms={} renderer=false presence=false",
-                ready, pet_id, duration_ms
-            );
-        }
+        cli::avatar_live_view::render_voice_observer_plan(&plan, ready, &pet_id, duration_ms, as_json)?;
         return Ok(());
     }
     if !ready {
@@ -12565,27 +12250,11 @@ async fn run_avatar_voice_observe(
         state_poll_ms,
     )
     .await;
-    let receipt = json!({
-        "surface": "linux_avatar_voice_observer_receipt",
-        "schema": 1,
-        "dry_run": false,
-        "completed": true,
-        "pet_id": pet_id,
-        "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-        "voice_feedback": voice_receipt,
-        "ownership": plan.get("ownership").cloned().unwrap_or(Value::Null),
-        "safety": plan.get("safety").cloned().unwrap_or(Value::Null),
-    });
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&receipt)?);
-    } else {
-        println!(
-            "Avatar voice observer completed pet_id={} utterances={} elapsed_ms={}",
-            pet_id,
-            receipt["voice_feedback"]["utterance_count"],
-            receipt["elapsed_ms"]
-        );
-    }
+    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let receipt =
+        cli::avatar_live_view::voice_observer_receipt(&pet_id, elapsed_ms, &voice_receipt, &plan);
+
+    cli::avatar_live_view::render_voice_observer_receipt(&receipt, &pet_id, as_json)?;
     Ok(())
 }
 
@@ -21551,31 +21220,6 @@ async fn run_rescue_snapshot(
     }
 }
 
-#[cfg(feature = "r9-workload-receipts")]
-fn log_workload_receipt_reconciliation_report(
-    report: &ab_bridge::workload_receipt_reconciliation::WorkloadReceiptReconciliationReport,
-) {
-    if report.scanned_receipts > 0
-        || report.unresolved > 0
-        || report.invalid > 0
-        || report.commit_failures > 0
-    {
-        tracing::info!(
-            scanned = report.scanned_receipts,
-            inserted = report.inserted_commits,
-            duplicate = report.duplicate_commits,
-            conflicts = report.conflicts,
-            acknowledged = report.acknowledged,
-            already_acknowledged = report.already_acknowledged,
-            acknowledgement_failures = report.acknowledgement_failures,
-            unresolved = report.unresolved,
-            active_producers = report.active_producers,
-            invalid = report.invalid,
-            commit_failures = report.commit_failures,
-            "durable workload receipt startup reconciliation completed"
-        );
-    }
-}
 
 /// Construct the shared backend bundle used by both modes.
 ///
@@ -21759,7 +21403,7 @@ mod tests {
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
             .without_time()
-            .with_target(false)
+            .with_target(true)
             .with_writer(move || SharedTraceWriter(writer_output.clone()))
             .finish();
         let report =
@@ -21777,6 +21421,7 @@ mod tests {
         let rendered = String::from_utf8(output.lock().expect("trace buffer lock").clone())
             .expect("trace output utf8");
         for expected in [
+            "agent_bridge:",
             "durable workload receipt startup reconciliation completed",
             "scanned=1",
             "inserted=0",

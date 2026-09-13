@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Repo-level pre-commit hook — two jobs:
+# Repo-level pre-commit hook — staged review, governance admission and Rust check:
 #
 #   1. Print `git diff --cached --stat` so the author can eyeball what
 #      is actually about to be committed. Closes the add→commit gap
@@ -17,7 +17,9 @@
 #      sibling-sweep that drops your real edits AND brings in someone
 #      else's is visible before the commit reaches origin.
 #
-#   2. Run `cargo check -p ab-bridge --all-targets --quiet` on commits
+#   2. Validate staged main.rs and governance receipts before Rust checks.
+#
+#   3. Run `cargo check -p ab-bridge --all-targets --quiet` on commits
 #      that touch Rust (broken-HEAD guard from P23, 2026-05-13). The
 #      original trigger: commit `f88e5ef` shipped a
 #      `TombstoneAgedArchived` enum variant + match-arm dispatch but
@@ -74,6 +76,10 @@ if [[ "${AGENT_BRIDGE_PRECOMMIT_QUIET:-0}" != "1" ]]; then
         echo >&2
     fi
 fi
+
+# Validate the staged tree, including receipt-only edits. This remains useful
+# when CI is deliberately skipped; an unstaged receipt cannot authorize a commit.
+python3 scripts/eval/cli_composition_root_governance.py validate --base HEAD --head INDEX
 
 # 2) Skip cargo check when no rust changes — saves time on docs-only
 #    or memory-only commits. Use the staged diff so unstaged sibling

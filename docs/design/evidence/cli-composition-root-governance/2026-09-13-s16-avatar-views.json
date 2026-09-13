@@ -1,0 +1,107 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "s16-avatar-views-and-startup-report-20260913",
+  "source_base": "c41629531995fabc0954c6bf27ccb3d218bc3bf0",
+  "main_rs_before_sha256": "183e45e818c0ad7d6ab62d24216963b89c744169093c719515d67d305dd58967",
+  "main_rs_after_sha256": "ba8802e8949532f0cf3cf1859ed06000418eb3dadbfb0884d36cbc74c075b03e",
+  "changes": [
+    {
+      "region": "Ten post-S7 Avatar command result rendering and LinuxLive/VoiceObserve plan/receipt projection",
+      "category": "pure_logic",
+      "summary": "Extract immutable result presentation into cli::avatar_presentation and cli::avatar_live_view.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/reports/main-rs-governance/2026-09-13-verification.json",
+        "crates/bridge/tests/cli_avatar_s16_extraction.rs",
+        "crates/bridge/tests/avatar_composition_views.rs"
+      ]
+    },
+    {
+      "region": "focus_observer_travel_px, identity_from_plan, context_from_plan and terminal_context",
+      "category": "pure_logic",
+      "summary": "Extract value-only observer context projection into cli::avatar_observer_view; keep action gating at the root.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/reports/main-rs-governance/2026-09-13-verification.json",
+        "crates/bridge/tests/cli_avatar_s16_extraction.rs",
+        "crates/bridge/tests/avatar_composition_views.rs"
+      ]
+    },
+    {
+      "region": "log_workload_receipt_reconciliation_report",
+      "category": "pure_logic",
+      "summary": "Extract completed startup tracing report into feature-gated cli::startup_report.",
+      "disposition": "extracted",
+      "evidence": [
+        "Existing r9-workload-receipts startup trace test passes with all 11 fields and the message preserved.",
+        "startup_report_has_no_reconciliation_authority source-boundary test passes."
+      ]
+    },
+    {
+      "region": "Avatar command adapter calls and binary-private imports",
+      "category": "authority_or_effect_adapter",
+      "summary": "Replace inline projections with narrow calls at their original positions; retain acquisition, admission, clock, error/print/write/task order.",
+      "disposition": "root_visible",
+      "root_reason": "The composition root retains CLI dispatch and observable ordering of execution, output and failure.",
+      "evidence": [
+        "docs/reports/main-rs-governance/2026-09-13-verification.json",
+        "crates/bridge/tests/cli_avatar_s16_extraction.rs",
+        "crates/bridge/tests/avatar_composition_views.rs"
+      ]
+    },
+    {
+      "region": "startup_workload_receipt_log_exposes_complete_duplicate_evidence binary test",
+      "category": "startup_or_dependency_injection",
+      "summary": "Strengthen the existing trace contract test to include the original agent_bridge target, which is now explicit in the extracted logger.",
+      "disposition": "root_visible",
+      "root_reason": "This non-runtime binary regression test verifies the composition-root startup log contract.",
+      "evidence": [
+        "Feature-gated r9 startup test passed with target display enabled."
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "82/82 baseline/candidate CLI and filesystem parity cases passed, including root/avatar and all ten affected command help surfaces. CLI declarations are byte-identical."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "82/82 exact stdout/stderr/exit/effect comparisons passed; completed live receipt snapshots preserve errors, ownership and observation limits."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "passed",
+      "evidence": [
+        "Parity covers all affected preview paths, missing/invalid fixtures, confirmed fixture-only atlas write, unconfirmed write rejection, and clap confirmation dependencies."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "cli_avatar_s16_extraction tests preserve admission-before-write, render-before-audit-rejection and the JSON-only prompt early-failure branch."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Five current root-boundary tests and 14 root Avatar safety tests pass; main, real_main and build_hub bodies are unchanged."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "See verification.json for exact overlapping runs: 62 original focused tests; 10 final view/boundary tests; 7 supervisor-filter tests; 5 coactivation tests; feature-gated startup trace and Resident parser tests; 14 root Avatar safety tests.",
+        "cargo check -p ab-bridge --all-targets --quiet passed.",
+        "Touched module/test rustfmt checks, main inserted-call formatting, git diff --check and 20 real Git/hook admission tests passed."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert the S16 pure-view extraction and startup-report move; no runtime state or configuration migration is needed.",
+    "Retrospective receipt correction and admission tooling can be reviewed/reverted separately; do not revert unrelated historical product features."
+  ]
+}

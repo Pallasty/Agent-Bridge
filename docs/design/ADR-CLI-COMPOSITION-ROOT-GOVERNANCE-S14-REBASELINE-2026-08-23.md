@@ -4,6 +4,10 @@
 
 Accepted on 2026-08-23.
 
+Current continuation: [S16/S17 implementation and evaluation](ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md).
+The baseline and planned sequence below are historical; see that continuation
+for the ten-command inventory and continuous-admission repair.
+
 - Decision scope: governance of `crates/bridge/src/main.rs`; this unit changes no
   Rust source, runtime behavior, deployment, or client process
 - Audited source base: `77600c9170703fbf9f93a5d9c91a5312c51df372`

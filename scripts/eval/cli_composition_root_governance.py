@@ -59,7 +59,7 @@ def sha256(data: bytes) -> str:
 
 def git_blob(revision: str, path: str) -> bytes:
     proc = subprocess.run(
-        ["git", "show", f"{revision}:{path}"],
+        ["git", "show", f"{revision}:{path}" if revision != "INDEX" else f":{path}"],
         cwd=ROOT,
         check=False,
         stdout=subprocess.PIPE,
@@ -158,41 +158,89 @@ def validate_receipt(
 
 
 def changed_paths(base: str, head: str) -> list[str]:
-    output = git("diff", "--name-only", base, head)
-    return [line for line in output.splitlines() if line]
+    args = ("diff", "--cached", "--name-only", base) if head == "INDEX" else (
+        "diff", "--name-only", base, head
+    )
+    return git(*args).splitlines()
 
 
 def validate_repository(base_ref: str, head_ref: str) -> None:
     base = git("rev-parse", f"{base_ref}^{{commit}}")
-    head = git("rev-parse", f"{head_ref}^{{commit}}")
+    head = "INDEX" if head_ref == "INDEX" else git("rev-parse", f"{head_ref}^{{commit}}")
+    ancestry_head = "HEAD" if head == "INDEX" else head
     paths = changed_paths(base, head)
-    if MAIN_RS not in paths:
-        print(f"PASS: {MAIN_RS} unchanged between {base[:12]} and {head[:12]}")
-        return
-
     receipt_paths = [
-        path
-        for path in paths
+        path for path in paths
         if path.startswith(RECEIPT_PREFIX) and path.endswith(".json")
         and not path.endswith(".example.json")
     ]
-    if len(receipt_paths) != 1:
-        raise GovernanceError(
-            f"a main.rs change requires exactly one changed governance receipt; found {len(receipt_paths)}"
-        )
+    if MAIN_RS not in paths and not receipt_paths:
+        print(f"PASS: {MAIN_RS} unchanged between {base[:12]} and {head[:12]}")
+        return
+    if MAIN_RS in paths and not receipt_paths:
+        raise GovernanceError("a main.rs change requires a changed governance receipt; found 0")
 
-    try:
-        receipt = json.loads(git_blob(head, receipt_paths[0]).decode("utf-8"))
-    except (GovernanceError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise GovernanceError(f"cannot read governance receipt {receipt_paths[0]}: {exc}") from exc
+    before = sha256(git_blob(base, MAIN_RS))
+    after = sha256(git_blob(head, MAIN_RS))
+    edges: dict[str, set[str]] = {}
+    historical_sources: set[str] = set()
+    for path in receipt_paths:
+        try:
+            receipt = json.loads(git_blob(head, path).decode("utf-8"))
+        except (GovernanceError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise GovernanceError(f"cannot read governance receipt {path}: {exc}") from exc
+        if not isinstance(receipt, dict):
+            raise GovernanceError(f"{path}: receipt must be a JSON object")
+        source = nonempty_string(receipt.get("source_base"), "source_base")
+        resolved = git("rev-parse", f"{source}^{{commit}}")
+        # A rebased/merged comparison base may be a different commit with the
+        # identical main.rs blob. Never waive file binding or accept an unrelated
+        # history. Each edge still binds its own exact, canonical source commit.
+        if git("merge-base", resolved, ancestry_head) != resolved:
+            raise GovernanceError(f"{path}: source_base must be an ancestor of the proposed head")
+        source_hash = sha256(git_blob(resolved, MAIN_RS))
+        target_hash = nonempty_string(receipt.get("main_rs_after_sha256"), "main_rs_after_sha256")
+        if len(target_hash) != 64 or any(c not in "0123456789abcdef" for c in target_hash):
+            raise GovernanceError(f"{path}: main_rs_after_sha256 must be a SHA-256 digest")
+        validate_receipt(receipt, base=resolved, before_sha256=source_hash, after_sha256=target_hash)
+        edges.setdefault(source_hash, set()).add(target_hash)
+        if git("merge-base", resolved, base) == resolved:
+            historical_sources.add(source_hash)
 
-    validate_receipt(
-        receipt,
-        base=base,
-        before_sha256=sha256(git_blob(base, MAIN_RS)),
-        after_sha256=sha256(git_blob(head, MAIN_RS)),
-    )
-    print(f"PASS: {receipt_paths[0]} governs {MAIN_RS} from {base[:12]} to {head[:12]}")
+    # Multi-commit pushes/PRs may contain several independently bound receipts.
+    # They must form a complete path from the actual comparison blob to head.
+    # A stale receipt or an uncovered intermediate change cannot bridge a gap.
+    reachable = {before}
+    pending = [before]
+    while pending:
+        for target in edges.get(pending.pop(), set()):
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+    if after not in reachable:
+        raise GovernanceError("governance receipts do not cover the exact base-to-head main.rs transition")
+    # Every supplied receipt must participate in a path ending at the actual
+    # proposed file; this also rejects dangling/fabricated output digests.
+    def predecessors(target: str) -> set[str]:
+        result = {target}
+        while True:
+            added = {source for source, targets in edges.items() if targets & result} - result
+            if not added:
+                return result
+            result.update(added)
+
+    to_head = predecessors(after)
+    to_base = predecessors(before)
+    for source, targets in edges.items():
+        for target in targets:
+            forward = source in reachable and target in to_head
+            # Retrospective repairs may prepend a fully bound chain ending at
+            # the comparison base. They cannot replace or bypass its forward
+            # transition, and their sources must be actual base ancestors.
+            retrospective = source in historical_sources and target in to_base
+            if not (forward or retrospective):
+                raise GovernanceError("governance receipts contain an unrelated or incomplete transition")
+    print(f"PASS: {len(receipt_paths)} receipt(s) govern {MAIN_RS} from {base[:12]} to {head[:12]}")
 
 
 def valid_synthetic_receipt() -> dict[str, Any]:

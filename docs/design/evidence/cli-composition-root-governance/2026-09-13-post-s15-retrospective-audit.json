@@ -1,0 +1,93 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "post-s15-retrospective-audit-20260913",
+  "source_base": "588fac652eb48b711307c47d56f4d7147b5c779c",
+  "main_rs_before_sha256": "fbdfbcca6d19a4aac0999427751ad41ed9213dc883dd54c916f1a945e28dc857",
+  "main_rs_after_sha256": "183e45e818c0ad7d6ab62d24216963b89c744169093c719515d67d305dd58967",
+  "changes": [
+    {
+      "region": "Cmd::Resident, ResidentOp and five typed conversions; daemon-http help/default; dispatch arms",
+      "category": "cli_schema_or_routing",
+      "summary": "Classify post-S15 CLI contract growth and retain the local-default HTTP listener.",
+      "disposition": "root_visible",
+      "evidence": [
+        "Post-S15 current-state audit in ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md"
+      ],
+      "root_reason": "Public schema and cross-domain dispatch are composition-root responsibilities."
+    },
+    {
+      "region": "Resident early dispatch and store construction; internal supervisor entry; build_hub reconciliation",
+      "category": "authority_or_effect_adapter",
+      "summary": "Retain risk/credential/SIGPIPE/SQLite ordering and default-off R9 custody.",
+      "disposition": "root_visible",
+      "evidence": [
+        "Post-S15 current-state audit in ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md"
+      ],
+      "root_reason": "These are explicit process and authority boundaries, not pure helpers."
+    },
+    {
+      "region": "log_workload_receipt_reconciliation_report at the c4162953 snapshot",
+      "category": "pure_logic",
+      "summary": "Retrospectively classify the completed report logger at the audited historical snapshot.",
+      "disposition": "exception",
+      "evidence": [
+        "Post-S15 current-state audit in ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md"
+      ],
+      "exception_reason": "The historical snapshot retains this pure logger. The adjacent S16/current receipt resolves the exception by extracting it to cli::startup_report in the same candidate; it is not admitted as new root logic."
+    },
+    {
+      "region": "main.rs tests for Resident parsing and startup reconciliation traces",
+      "category": "cli_schema_or_routing",
+      "summary": "Account for the non-runtime regression tests added after S15.",
+      "disposition": "root_visible",
+      "evidence": [
+        "Post-S15 current-state audit in ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md"
+      ],
+      "root_reason": "Binary-private parser and startup boundary tests exercise the root contracts."
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "Current Resident parser test; main.rs CLI declarations are byte-identical before/after this governance extraction. Historical daemon-http default change is intentionally retained, not reverted."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "Current startup trace test verifies all reconciliation fields; Resident outputs are direct serialized domain results. Historical API evolution is audited, not claimed behavior-equivalent to S15."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "passed",
+      "evidence": [
+        "Source audit: Resident risk admission precedes SQLite, dry-run avoids store construction, explicit shadow record flag passes through unchanged."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "main, real_main and build_hub are byte-identical between c4162953 and this extraction; current Resident parser and feature-gated startup trace tests pass."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Source audit in ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md records pre-credentials Resident dispatch, supervisor-before-SIGPIPE, risk-before-SQLite and feature-gated reconciliation custody."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "Current cargo check -p ab-bridge --all-targets --quiet passed; r9-workload-receipts startup trace test and Resident CLI parser test passed. Historical commits were not rebuilt individually."
+      ]
+    }
+  },
+  "rollback": [
+    "This is a retrospective classification, not permission to revert accumulated features. Revert this audit separately from source changes."
+  ],
+  "audit_kind": "retrospective_current_source_review",
+  "audited_on": "2026-09-13",
+  "audited_target_commit": "c41629531995fabc0954c6bf27ccb3d218bc3bf0"
+}

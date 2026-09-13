@@ -1,3 +1,8 @@
+#[cfg(feature = "r9-workload-receipts")]
+pub(super) mod startup_report;
+pub(super) mod avatar_live_view;
+pub(super) mod avatar_presentation;
+pub(super) mod avatar_observer_view;
 mod avatar;
 mod biocortex;
 mod browser_lite;

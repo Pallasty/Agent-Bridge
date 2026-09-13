@@ -1,8 +1,8 @@
 {
   "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
   "change_id": "s15-daemon-supervisors-integration-20260823",
-  "source_base": "77600c9170703fbf9f93a5d9c91a5312c51df372",
-  "main_rs_before_sha256": "c3c47f6a62d1465321a5bf66540234563e4cc95efcd15aed9d59a465b0ab6f7f",
+  "source_base": "209514a7c5b2dcb662459fca28d0e9e7b2ee1b74",
+  "main_rs_before_sha256": "94809b1d755d324fb668fff4be60c81f38ddb4c68807c7c0830d6470e1372a3a",
   "main_rs_after_sha256": "fbdfbcca6d19a4aac0999427751ad41ed9213dc883dd54c916f1a945e28dc857",
   "changes": [
     {
@@ -29,23 +29,33 @@
   "contracts": {
     "clap_help_and_defaults": {
       "status": "not_applicable",
-      "evidence": ["No clap schema, command spelling, option, or help text changes."]
+      "evidence": [
+        "No clap schema, command spelling, option, or help text changes."
+      ]
     },
     "json_and_text_output": {
       "status": "not_applicable",
-      "evidence": ["The supervisors emit tracing only; no command response format changes."]
+      "evidence": [
+        "The supervisors emit tracing only; no command response format changes."
+      ]
     },
     "dry_run_preview_confirmation": {
       "status": "not_applicable",
-      "evidence": ["No interactive preview or confirmation surface changed."]
+      "evidence": [
+        "No interactive preview or confirmation surface changed."
+      ]
     },
     "validation_and_error_ordering": {
       "status": "passed",
-      "evidence": ["Existing enablement, store admission, parameter validation, and per-pass error handling remain in their original order."]
+      "evidence": [
+        "Existing enablement, store admission, parameter validation, and per-pass error handling remain in their original order."
+      ]
     },
     "authority_and_effect_ordering": {
       "status": "passed",
-      "evidence": ["Composition-root tests preserve startup order and each module timer test preserves its first-pass contract."]
+      "evidence": [
+        "Composition-root tests preserve startup order and each module timer test preserves its first-pass contract."
+      ]
     },
     "focused_tests_and_check": {
       "status": "passed",
@@ -60,5 +70,11 @@
   },
   "rollback": [
     "Revert the cumulative S15 daemon-supervisor integration commit to restore the four inline daemon loops without changing runtime environment configuration."
-  ]
+  ],
+  "retrospective_correction": {
+    "audited_on": "2026-09-13",
+    "reason": "01317deb rebound only the after hash; the integration comparison base is the first parent of 588fac65, not 77600c91. Original Git history is unchanged.",
+    "source_base_before_correction": "77600c9170703fbf9f93a5d9c91a5312c51df372",
+    "verification": "All four extracted supervisor modules and their four ownership tests are byte-identical from 588fac65 to c4162953; current timer and ownership tests pass. This correction does not claim the original CI ran."
+  }
 }
