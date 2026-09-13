@@ -74,10 +74,18 @@ fn memory_admission_save_and_receipt_stay_ordered_before_presentation() {
     ordered(
         prepare,
         &[
+            "prepare_memory_record(value)?",
+            "SystemTime::now()",
+            "prepared.into_record(now)",
+        ],
+    );
+    ordered(
+        include_str!("../src/cli/instinct_memory.rs"),
+        &[
             "memory_record.key is required",
             "memory_record.kind is required",
             "memory_record.content is required",
-            "SystemTime::now()",
+            "Ok(PreparedMemoryRecord",
         ],
     );
 }

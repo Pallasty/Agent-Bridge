@@ -7,6 +7,7 @@ mod avatar;
 mod biocortex;
 mod browser_lite;
 mod dream;
+pub(super) mod instinct_memory;
 pub(super) mod instinct_presentation;
 mod local_control;
 mod shell_init;

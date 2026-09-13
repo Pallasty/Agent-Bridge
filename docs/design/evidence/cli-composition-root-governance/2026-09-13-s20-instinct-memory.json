@@ -1,0 +1,75 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "s20-instinct-memory-record-preparation-20260913",
+  "source_base": "dd04c98bc58882195392f8649d88808863c77ed1",
+  "main_rs_before_sha256": "beabf78a92fb46fcde5cedb8f35ed5e91405f6d0e9abfa6bf5c2872ffd0a83f2",
+  "main_rs_after_sha256": "33fe62062712aa439aeb8ac36643fb2f9585c507719fa5b3b4bba4f28ff8c8be",
+  "changes": [
+    {
+      "region": "memory_record_from_instinct_plan field validation/normalization and passive Record assembly",
+      "category": "pure_logic",
+      "summary": "Extract seven prepared fields and post-clock Record construction into binary-private cli::instinct_memory.",
+      "disposition": "extracted",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S20-INSTINCT-MEMORY-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s20-verification.json",
+        "scripts/eval/instinct_memory_record_parity.py",
+        "crates/bridge/tests/cli_instinct_s20_extraction.rs"
+      ]
+    },
+    {
+      "region": "memory_record_from_instinct_plan root wrapper",
+      "category": "authority_or_effect_adapter",
+      "summary": "Prepare successfully before the exact original clock read, then construct the Record; preserve the original call site and its full write sequence.",
+      "disposition": "root_visible",
+      "root_reason": "The root owns time acquisition after validation and before store construction; the passive conversion receives only already-acquired time.",
+      "evidence": [
+        "docs/design/ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S20-INSTINCT-MEMORY-2026-09-13.md",
+        "docs/reports/main-rs-governance/2026-09-13-s20-verification.json",
+        "crates/bridge/tests/cli_instinct_s18_extraction.rs",
+        "scripts/eval/instinct_cli_parity.py"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "CLI declarations and real_main are byte-identical. The unchanged 79-case Instinct CLI harness rechecks help/default/error surfaces against the S19 baseline."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "61 exact direct-record comparisons cover all14 fields, errors and importance bit patterns;79 CLI output/effect cases pass. Existing presentation code is unchanged."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "passed",
+      "evidence": [
+        "MemoryWrite gate and preview branch are byte-identical. CLI preview/blocked cases create no database and retain original output. No confirmation or new write authority is introduced."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "The exact old/new helpers with only clock substituted compare on61 cases:20 failures perform0 root clock reads,41 successes perform1. Original key-kind-content priority and exact error chains remain."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Root clock expression and entire MemoryWrite branch are byte-identical; prepare precedes time and into_record follows it. CLI success/receipt-failure cases preserve save before receipt before render."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "61 record probes with3 negative controls,79 existing CLI cases,4 S18 and3 S20 tests,20Git/hook and3positive/7negative schema tests pass. All-targets check, scoped rustfmt and diff checks pass."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert S20 helper extraction to restore original inline validation/construction. No schema, state, or configuration migration is required; preserve earlier stages."
+  ]
+}
