@@ -54,3 +54,8 @@ For portable, read-only CLI evidence review, follow
 `docs/design/CLI-GOVERNANCE-PORTABLE-EVIDENCE-GOAL-2026-09-14.md`. Always select
 the tested implementation commit independently; the later evidence-only commit
 has a different tree. Offline verification does not replace fresh pre-commit runs.
+
+Fresh regression execution also requires no tracked `assume-unchanged` or
+`skip-worktree` flags; see
+`docs/design/CLI-GOVERNANCE-INDEX-CUSTODY-GOAL-2026-09-14.md`. Use a complete
+checkout for execution. The gate reports these flags without clearing them.

@@ -70,6 +70,9 @@ not a server-side enforcement guarantee and deliberate bypass remains possible.
 - Execution requires INDEX or the checked-out HEAD, matching tracked worktree
   and index, and no untracked Rust/Python/Cargo configuration inputs. Explicit
   revision validation remains read-only and does not execute an unrelated tree.
+- Execution also rejects tracked assume-unchanged/skip-worktree index flags;
+  see [G6 custody checks](CLI-GOVERNANCE-INDEX-CUSTODY-GOAL-2026-09-14.md).
+  Plain diff/status can hide changed files carrying these flags.
 - Child regression processes receive no inherited GIT_* context. Fixture test
   suites also isolate that environment themselves; parent repository refs,
   index and configuration are regression-tested for preservation.

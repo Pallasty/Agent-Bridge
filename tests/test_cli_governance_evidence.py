@@ -254,6 +254,66 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(self.git('rev-parse', 'HEAD'), head)
             self.assertEqual([p.read_bytes() for p in watched], before)
 
+    def test_hidden_tracked_changes_rejected_for_both_index_flags(self):
+        for flag, undo in [('--assume-unchanged', '--no-assume-unchanged'),
+                           ('--skip-worktree', '--no-skip-worktree')]:
+            with self.subTest(flag=flag):
+                self.git('update-index', flag, '--', e.g.MAIN_RS)
+                self.write(e.g.MAIN_RS, '// different unstaged source\n')
+                self.assertEqual(self.git('diff', '--name-only'), '')
+                before = (self.root / '.git/index').read_bytes()
+                with self.assertRaisesRegex(e.g.GovernanceError, 'assume-unchanged/skip-worktree'):
+                    e.ensure_checkout('INDEX')
+                self.assertEqual((self.root / '.git/index').read_bytes(), before)
+                self.git('update-index', undo, '--', e.g.MAIN_RS)
+                self.write(e.g.MAIN_RS, 'fn main() {}\n')
+        self.assertEqual(e.ensure_checkout('INDEX'), self.git('write-tree'))
+
+    def test_clean_flagged_and_combined_flags_fail_closed(self):
+        self.git('update-index', '--skip-worktree', '--', e.g.MAIN_RS)
+        self.git('update-index', '--assume-unchanged', '--', e.g.MAIN_RS)
+        self.assertTrue(self.git('ls-files', '-v', '--', e.g.MAIN_RS).startswith('s '))
+        with self.assertRaisesRegex(e.g.GovernanceError, 'assume-unchanged/skip-worktree'):
+            e.ensure_checkout('INDEX')
+
+    def test_flagged_path_with_newline_is_not_split_or_lost(self):
+        path = 'docs/name with space\nand newline.md'
+        self.write(path, 'fixture'); self.commit()
+        self.git('update-index', '--assume-unchanged', '--', path)
+        with self.assertRaises(e.g.GovernanceError) as error:
+            e.ensure_checkout('INDEX')
+        self.assertIn(repr(path), str(error.exception))
+
+    def test_revision_validation_does_not_require_worktree_flags_cleared(self):
+        self.git('update-index', '--assume-unchanged', '--', e.g.MAIN_RS)
+        self.write(e.g.MAIN_RS, '// hidden worktree change\n')
+        self.assertEqual(e.validate(self.base, 'HEAD'), [])
+        with self.assertRaisesRegex(e.g.GovernanceError, 'assume-unchanged/skip-worktree'):
+            e.ensure_checkout('HEAD')
+
+    def test_hidden_input_blocks_before_creating_build_target(self):
+        target = self.root / 'unused-target'
+        self.git('update-index', '--skip-worktree', '--', e.g.MAIN_RS)
+        with patch.dict(os.environ, {'CARGO_TARGET_DIR': str(target)}):
+            with self.assertRaisesRegex(e.g.GovernanceError, 'assume-unchanged/skip-worktree'):
+                e.run_selected(['s21'], 'INDEX')
+        self.assertFalse(target.exists())
+        e.run_cli_suites.assert_not_called()
+
+    def test_flag_introduced_during_regressions_is_rejected(self):
+        actual_run = subprocess.run
+        def fake_regression(command, **kwargs):
+            if command[0] == 'cargo' or command[0] == sys.executable:
+                return subprocess.CompletedProcess(command, 0)
+            return actual_run(command, **kwargs)
+        # No real Cargo/probes; Git and all custody checks remain real.
+        with patch.object(e.subprocess, 'run', side_effect=fake_regression):
+            e.run_cli_suites.side_effect = lambda *args: self.git(
+                'update-index', '--assume-unchanged', '--', e.g.MAIN_RS)
+            with self.assertRaisesRegex(e.g.GovernanceError, 'assume-unchanged/skip-worktree'):
+                e.run_selected(['s21'], 'INDEX')
+            e.run_cli_suites.assert_called_once()
+
     def test_fixed_runner_and_post_run_index_guard(self):
         with patch.object(e, 'ensure_checkout', side_effect=['before', 'after']), patch.object(e.subprocess, 'check_output', return_value='ext4'), patch.object(e.subprocess, 'run') as run:
             with self.assertRaisesRegex(e.g.GovernanceError, 'index changed'):

@@ -129,6 +129,14 @@ def ensure_checkout(head):
             'execution requires INDEX or the checked-out HEAD')
     if head != 'INDEX':
         require(not g.git('diff', '--cached', '--name-only'), 'execution requires index equal to HEAD')
+    # diff/status honor these index hints and can hide changed tracked files.
+    # Reject them before trusting the worktree comparison, including sparse
+    # checkouts. NUL delimiters preserve paths containing whitespace/newlines.
+    entries = g.git('ls-files', '-v', '-z').split('\0')
+    hidden = [entry[2:] for entry in entries if entry and
+              (entry[0].islower() or entry[0] == 'S')]
+    require(not hidden, 'execution requires no assume-unchanged/skip-worktree flags; '
+            f'inspect index entries: {hidden!r}')
     require(not g.git('diff', '--name-only'), 'execution requires tracked worktree equal to index')
     untracked = g.git('ls-files', '--others', '--exclude-standard').splitlines()
     require(not any(p.endswith(('.rs', '.py')) or Path(p).name in ('Cargo.toml', 'Cargo.lock')
