@@ -1,6 +1,6 @@
 # CLI governance: current status and maintenance entry point
 
-Updated: 2026-09-14. Audited source: `d7a001b342b36615c46db2d107e9629d9ac8334b`.
+Updated: 2026-09-14. Audited source: `f7f70bfba49dfedd1033fc2afd279d6ae4a59ed5`.
 
 ## Decision
 
@@ -150,7 +150,7 @@ remain outside this change.
 Date consolidation acceptance: `d7a001b342b36615c46db2d107e9629d9ac8334b`;
 four new date tests pass in addition to the existing gate, 150 CLI cases
 (143 comparisons plus seven weekly cases), and all-targets check.
-[Current verification](../reports/main-rs-governance/2026-09-14-civil-date-verification.json).
+[Date verification](../reports/main-rs-governance/2026-09-14-civil-date-verification.json).
 The date receipt chain had nine transitions. At that point main.rs was 21,828 lines,
 SHA-256 `aaa1fecf5d6431414bbbc184955ed7ae9401e7981c29612126f01fb55ae643e4`.
 For offline review use `2026-09-14-civil-date-cli-bundle` with the date
@@ -163,4 +163,18 @@ consolidation. The [finite contract](CLI-DREAM-DIFF-PLAN-2026-09-14.md) records
 `cli::dream_diff_plan`, with Store reads/access metadata writes, validation and
 rendering retained at root. Six focused tests include 256 pure input pairs and
 22 exact CLI output/state/read-order cases. main.rs is now 21,647 lines.
-Full gate acceptance and implementation identity are recorded at closeout.
+Acceptance: `f7f70bfba49dfedd1033fc2afd279d6ae4a59ed5`, tested tree
+`b8695aa126b4d4e3503c1be3984d920a5cb9b65c`. All 77 gate tests, receipt
+controls, 13 boundary tests, four date tests, six Dream diff tests, seven weekly
+CLI cases, 405 existing pure cases and 143 existing CLI comparisons passed,
+with ab-bridge all-targets check. The 22 new CLI cases also passed against the
+final candidate binary. The receipt chain has ten transitions.
+[Current verification](../reports/main-rs-governance/2026-09-14-dream-diff-verification.json)
+records hashes and coverage limits. Current main.rs SHA-256:
+`3a5358236d64994e9c146a484a323570f5473de42f671926f3920aa6b35ebca6`.
+
+Offline review of the existing 143 comparisons uses
+`2026-09-14-dream-diff-cli-bundle` and the implementation commit above; the
+additional 22-case CLI log is separately hashed. Earlier bundles remain
+historical. This bounded extraction is complete; no further implementation
+goal is automatically scheduled.

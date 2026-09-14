@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.cli_dream_diff_plan_verification.v1",
+  "implementation_commit": "f7f70bfba49dfedd1033fc2afd279d6ae4a59ed5",
+  "source_base": "e34700ca0adf5b21c892d872f6ab8fa09f146fa3",
+  "candidate_tree": "b8695aa126b4d4e3503c1be3984d920a5cb9b65c",
+  "checks": {
+    "normal_precommit_exit": 0,
+    "python_gate_tests": 77,
+    "receipt_positive": 3,
+    "receipt_negative": 7,
+    "rust_boundary_tests": 13,
+    "civil_date_tests": 4,
+    "dream_diff_rust_tests": 6,
+    "dream_diff_pure_value_pairs": 256,
+    "dream_diff_cli_cases": 22,
+    "weekly_cli_cases": 7,
+    "pure_behavior_cases": 405,
+    "existing_cli_parity_cases": 143,
+    "ab_bridge_all_targets_check": "passed",
+    "new_module_and_test_rustfmt": "passed",
+    "portable_cli_bundle": "passed",
+    "receipt_chain_count": 10
+  },
+  "main_rs_lines_before": 21828,
+  "main_rs_lines_after": 21647,
+  "source_sha256": {
+    "crates/bridge/src/main.rs": "3a5358236d64994e9c146a484a323570f5473de42f671926f3920aa6b35ebca6",
+    "crates/bridge/src/cli/dream_diff_plan.rs": "bf48d91a7b7653c4450a4c8b582d089f14b88eca6bc488686cf00d520a39b5d6",
+    "crates/bridge/tests/cli_dream_diff_plan.rs": "0bd67f289f712f9f60aa1bcdbb4a2a1ee7ef5883096f855d4d6ed52baa8535ce",
+    "crates/bridge/tests/fixtures/dream_diff_plan_baseline.rs": "1941a303c8c77037438b590b847f3edba8ae9fc63d11f608034a763eea3e4ae2",
+    "crates/bridge/tests/fixtures/dream_diff_cli_baseline.json": "d2a792289cd254445ee2013034e9027269b80c1e2be76aa193a1dd18a9e27ac9",
+    "scripts/eval/dream_diff_plan_cli_check.py": "08dc4e7a1e7f8927bd8058fd3b2b10fe8eb2da384f51dc6f85e72b7e4a4821f3"
+  },
+  "bundle_path": "docs/reports/main-rs-governance/2026-09-14-dream-diff-cli-bundle",
+  "bundle_files_sha256": {
+    "baseline-build.log": "e59d9d08f301bea370ec63088b67ec1855eacfb919f887f37c3b66d9b424f9d4",
+    "candidate-build.log": "a9251d5400ccd575d0944f30410e2b6ece505179588ea5602a0603006f94cd4c",
+    "commit-gate.log": "eef4a529ea0b2f418496a717804047bb23d21d85dd39fe6e5efc2cfbd876db1b",
+    "dream-diff-cli.log": "77fe268547351f7acd6e07f997cd0653113645d210a61f5c2abcb26e984941d6",
+    "identity.json": "113405ae046849efacf0d5fc570b0226645cfb5fb2efbaa8705699dc33c129bb",
+    "instinct.json": "38e0601af11ddba1f4788447fab5605e849cecc078ab35e5625c7e091f6b5c72",
+    "summary.json": "6f3bafad4b8eaf610eb5c54a79a495363d9dcf471efc290004afd7ef1af9b544",
+    "worktree.json": "36d79b513256fa1bc103132f2ebb19ca2ba160c26cb87524984292fddc178f34"
+  },
+  "limits": [
+    "Three HashMap-derived access lists retain their original unspecified ordering; only pure comparisons normalize those lists. Exact CLI fixtures have at most one item per such result group.",
+    "Only temporary paths and bounded last_accessed_at timestamps are normalized in the 22-case CLI oracle; other memory columns and ordered read traces are compared exactly.",
+    "The portable G5 verifier covers the existing 143 CLI comparisons; new Dream diff and weekly tests are separate gate evidence.",
+    "Integer overflow and unsigned casts remain unchanged. Existing compiler warnings remain. No deployment or service restart."
+  ]
+}
