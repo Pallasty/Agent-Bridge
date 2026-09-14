@@ -1,0 +1,45 @@
+{
+  "schema": "agent_bridge.weekly_snapshot_repair_verification.v1",
+  "implementation_commit": "98d905886c18e4bd294bb7c8362cf43e2e78942b",
+  "source_base": "d2d280f236401c7bf62ab0bc624fdb19f9f3825d",
+  "candidate_tree": "df03fb15f146622905f23cf5ce134cade4e3cc09",
+  "checks": {
+    "normal_precommit_exit": 0,
+    "python_gate_tests": 77,
+    "receipt_positive": 3,
+    "receipt_negative": 7,
+    "receipt_chain_count": 8,
+    "rust_boundary_tests": 13,
+    "weekly_cli_regression_cases": 7,
+    "baseline_weekly_passed": 4,
+    "baseline_weekly_failed": 3,
+    "pure_behavior_cases": 405,
+    "existing_cli_parity_cases": 143,
+    "ab_bridge_all_targets_check": "passed",
+    "changed_functions_and_new_test_rustfmt": "passed",
+    "baseline_whole_file_rustfmt_exit": 1,
+    "portable_cli_bundle": "passed"
+  },
+  "main_rs_lines": 21860,
+  "main_rs_sha256": "5e93086a66df915654f2e792f31362dfa803b1dba6e1458424170cfff5b9cfd0",
+  "weekly_harness_sha256": "c25d951c96cceee3eeb6821d20cfed52de5396b02fa5b75696fdedfb50cb5efd",
+  "bundle_path": "docs/reports/main-rs-governance/2026-09-14-weekly-fix-cli-bundle",
+  "bundle_files_sha256": {
+    "baseline-build.log": "c7c123fbd19975089e1ca4a87ce3d88020baa73c1f86ffa51a48096c663e88fc",
+    "candidate-build.log": "11fe46a863a41fef480751b8edf9a41692a2c3890e7e657e20b6b6c89645caa2",
+    "identity.json": "d1532dbde9504c12a4f041503ef5feb19d044144a226413c12956b78d2920626",
+    "instinct.json": "9a68afccbb925a201f83bd59236ae7f9fa6d3901f787cfa5f9cded5e0d36e3f0",
+    "summary.json": "f396bc367f90abeb3f1ec0b6f86fd1e0a414545e720789dd2696988f913b824f",
+    "weekly-baseline-negative.log": "e474ffb83de6b4f99f7daeaa47bc203057641fb8e3aa65a0fc3df0797223ac07",
+    "weekly-candidate.log": "fa3fd7abceab34ba31b13731b2db5cf6624b959f9b96517225eca05cddfcc3c9",
+    "worktree.json": "3d5bd787797f6e37a71a43bab037e88ee90b43922d538af90e4a706e6211339b"
+  },
+  "commit_gate_log_sha256": "701b9546fbbdc29b2a05c09551a46fa96952febc9a58c2789d2a26eb6b193b25",
+  "limits": [
+    "Weekly output changes intentionally correct a broken composed CLI contract.",
+    "Existing 143-case parity does not include weekly; seven separate state-asserting cases cover the fix.",
+    "Date/diff candidates remain deferred; first-parent history does not measure actual merge conflicts.",
+    "Existing compiler warnings and whole-file formatting differences remain; no broad formatting sweep.",
+    "Source delivered without installation or service restart."
+  ]
+}

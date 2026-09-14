@@ -83,3 +83,20 @@ Stop after this repair, assessment delivery and source sync. Date consolidation
 and diff extraction are not scheduled by this report. Rollback the wrapper,
 key propagation and new regression enrollment together if needed; that restores
 the previous known output defect. No database migration or deployment is needed.
+
+## Completed acceptance
+
+Implementation `98d905886c18e4bd294bb7c8362cf43e2e78942b` passed normal
+pre-commit, all-targets check, 77 gate tests, 13 existing Rust boundary tests,
+405 pure cases and 143 existing CLI comparisons. Seven additional real CLI
+cases pass; three of those fail on the verified pre-fix binary. The same seven
+also passed against the final live-run candidate binary with matching SHA-256.
+The receipt chain now contains eight transitions.
+
+The [verification record](../reports/main-rs-governance/2026-09-14-weekly-fix-verification.json)
+binds current source, harness, build and test evidence. The committed
+[CLI bundle](../reports/main-rs-governance/2026-09-14-weekly-fix-cli-bundle/summary.json)
+passes G5 offline verification against the implementation commit. Its weekly
+candidate/negative-control logs are additional evidence, separately hashed by
+the verification record; the G5 verifier still checks its original 143 cases.
+main.rs is now 21,860 lines. Assessment and targeted repair are complete.

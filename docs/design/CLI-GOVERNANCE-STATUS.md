@@ -1,6 +1,6 @@
 # CLI governance: current status and maintenance entry point
 
-Updated: 2026-09-14. Audited source: `5d94933b12851a96518ff5c8c32b9f25fc484c66`.
+Updated: 2026-09-14. Audited source: `98d905886c18e4bd294bb7c8362cf43e2e78942b`.
 
 ## Decision
 
@@ -127,3 +127,12 @@ Seven new isolated CLI cases run through `cli_dream_weekly_snapshot` whenever
 regression profiles are selected, in addition to the existing G4 comparisons.
 Date arithmetic duplication and Dream diff extraction remain unscheduled.
 This is defect-triggered maintenance, not a reopened extraction sequence.
+
+Latest repair acceptance: `98d905886c18e4bd294bb7c8362cf43e2e78942b`;
+77 gate tests, 13 boundary tests, 405 pure cases, 143 existing CLI comparisons
+and seven weekly/snapshot cases pass, with ab-bridge all-targets check.
+See the [current verification record](../reports/main-rs-governance/2026-09-14-weekly-fix-verification.json).
+The receipt chain now has eight transitions. Current main.rs is 21,860 lines,
+SHA-256 `5e93086a66df915654f2e792f31362dfa803b1dba6e1458424170cfff5b9cfd0`.
+The earlier G6 bundle above remains historical; offline review of the new run
+uses `2026-09-14-weekly-fix-cli-bundle` and the repair implementation commit.

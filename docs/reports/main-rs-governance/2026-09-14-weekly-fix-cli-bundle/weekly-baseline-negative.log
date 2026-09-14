@@ -1,0 +1,48 @@
+test_failed_save_leaves_single_report_null_key_and_warning (__main__.SnapshotCompositionTests.test_failed_save_leaves_single_report_null_key_and_warning) ... ERROR
+test_print_only_keeps_json_without_saving (__main__.SnapshotCompositionTests.test_print_only_keeps_json_without_saving) ... ok
+test_standalone_json_keeps_payload_and_saved_acknowledgement (__main__.SnapshotCompositionTests.test_standalone_json_keeps_payload_and_saved_acknowledgement) ... ok
+test_standalone_text_keeps_payload_and_saved_acknowledgement (__main__.SnapshotCompositionTests.test_standalone_text_keeps_payload_and_saved_acknowledgement) ... ok
+test_weekly_json_is_one_document_with_persisted_key (__main__.SnapshotCompositionTests.test_weekly_json_is_one_document_with_persisted_key) ... ERROR
+test_weekly_no_snapshot_does_not_save (__main__.SnapshotCompositionTests.test_weekly_no_snapshot_does_not_save) ... ok
+test_weekly_text_reports_persisted_key_without_snapshot_payload (__main__.SnapshotCompositionTests.test_weekly_text_reports_persisted_key_without_snapshot_payload) ... FAIL
+
+======================================================================
+ERROR: test_failed_save_leaves_single_report_null_key_and_warning (__main__.SnapshotCompositionTests.test_failed_save_leaves_single_report_null_key_and_warning)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Data/CascadeProjects/.ab-worktrees/agent-bridge-cli-governance-live-parity-20260914/scripts/eval/dream_weekly_snapshot_check.py", line 55, in test_failed_save_leaves_single_report_null_key_and_warning
+    self.assertIsNone(json.loads(out)['snapshot_key'])
+                      ~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 348, in decode
+    raise JSONDecodeError("Extra data", s, end)
+json.decoder.JSONDecodeError: Extra data: line 88 column 1 (char 1671)
+
+======================================================================
+ERROR: test_weekly_json_is_one_document_with_persisted_key (__main__.SnapshotCompositionTests.test_weekly_json_is_one_document_with_persisted_key)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Data/CascadeProjects/.ab-worktrees/agent-bridge-cli-governance-live-parity-20260914/scripts/eval/dream_weekly_snapshot_check.py", line 33, in test_weekly_json_is_one_document_with_persisted_key
+    report = json.loads(out)  # Reject concatenated snapshot + weekly JSON.
+  File "/usr/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 348, in decode
+    raise JSONDecodeError("Extra data", s, end)
+json.decoder.JSONDecodeError: Extra data: line 88 column 1 (char 1671)
+
+======================================================================
+FAIL: test_weekly_text_reports_persisted_key_without_snapshot_payload (__main__.SnapshotCompositionTests.test_weekly_text_reports_persisted_key_without_snapshot_payload)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Data/CascadeProjects/.ab-worktrees/agent-bridge-cli-governance-live-parity-20260914/scripts/eval/dream_weekly_snapshot_check.py", line 40, in test_weekly_text_reports_persisted_key_without_snapshot_payload
+    self.assertIn('  saved: ' + keys[0] + '\n', out)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '  saved: snapshot_weekly_1789396019_20260914_1426\n' not found in '{\n  "schema_version": 2,\n  "captured_at": 1789396019,\n  "node": "tb14",\n  "name": "weekly_1789396019",\n  "memory": {\n    "active_total": 0,\n    "archived_total": 0,\n    "edge_count": 0,\n    "avg_importance_active": 0.0,\n    "by_kind_non_skill": []\n  },\n  "coactivation": {\n    "total_pairs": 0,\n    "pairs_burst_lt_1h": 0,\n    "pairs_persistent_ge_6h": 0,\n    "top10_to_median_ratio": 0.0,\n    "top_5_persistent": []\n  },\n  "access": {\n    "top_10_keys": []\n  },\n  "identity": {\n    "days": 1,\n    "current": {\n      "window_start": 1789309619,\n      "window_end": 1789396019,\n      "tool_calls_total": 0,\n      "tool_calls_ok": 0,\n      "top_tools": [],\n      "forum_posts": 0,\n      "forum_kinds": [],\n      "forum_avg_body_len": 0.0,\n      "memory_saves": 0\n    },\n    "prior": {\n      "window_start": 1789223219,\n      "window_end": 1789309619,\n      "tool_calls_total": 0,\n      "tool_calls_ok": 0,\n      "top_tools": [],\n      "forum_posts": 0,\n      "forum_kinds": [],\n      "forum_avg_body_len": 0.0,\n      "memory_saves": 0\n    }\n  },\n  "transitions": {\n    "top_5": []\n  },\n  "topology": {\n    "non_skill_active_total": 0,\n    "orphan_count": 0,\n    "p4_evolved_coverage": 0,\n    "degree_histogram": [\n      {\n        "bucket": "0",\n        "count": 0\n      },\n      {\n        "bucket": "1",\n        "count": 0\n      },\n      {\n        "bucket": "2-3",\n        "count": 0\n      },\n      {\n        "bucket": "4-5",\n        "count": 0\n      },\n      {\n        "bucket": "6-10",\n        "count": 0\n      },\n      {\n        "bucket": "11-20",\n        "count": 0\n      },\n      {\n        "bucket": "21+",\n        "count": 0\n      }\n    ],\n    "top_5_hubs": []\n  }\n}\n════════════════════════════════════════════════════════════\n  dream weekly — Monday-morning composite\n  DB: /tmp/tmp7cm521ea/data/agent-bridge/state.db\n  generated_at_epoch: 1789396019\n════════════════════════════════════════════════════════════\n\n[1/3] replay-audit (P5 summary quality)\n─────────────────────────────────────────\n  (no p5_replay summaries yet — run `dream replay` first)\n\n[2/3] signal-fidelity (Hebbian closure observability)\n─────────────────────────────────────────\n  (not enough rows to compute correlation)\n\n[3/3] snapshot\n─────────────────────────────────────────\n  saved: snapshot_weekly_1789396019\n\n[bonus] substrate-readiness (P-ε)\n─────────────────────────────────────────\n  substrate: 0 components ((empty)) · 0.000 edges/active · 0.0% L2-covered · signal=n/a\n  (run `dream substrate-audit` for full M1-M8 breakdown)\n\n[bonus #2] gap-audit (§6.5 rule 4)\n─────────────────────────────────────────\n\n[bonus #3] substrate↔α cofires correlation (§4 P2)\n─────────────────────────────────────────\n  ρ n/a · 0 qualifying / 0 substrate-empty · no bilateral pairs — insufficient overlap\n  (need more snapshot history or more cofires edges; check back next week)\n\n[bonus #4] shadow-cortex attention (v25)\n─────────────────────────────────────────\n  verdict: seed_shadow_ready_for_review | mode=Heuristic | source=codex | events=1\n  totals: tool_calls=0 errors=0 memory_queries=0 misses=0 forum_posts=0\n  heuristic: covered (1/1, 100%) rank_tie=ok saturation=ok top_k_cap_hits=0/1\n  seed_shadow: covered (1/1, 100%) rank_tie=ok saturation=ok top_k_cap_hits=0/1\n  seed_runtime: not_enabled (0/1, 0%) rank_tie=ok saturation=ok top_k_cap_hits=0/0\n  heuristic top: Tool/Continuity mcp_dispatch (0.25)\n    No MCP tool calls were observed in the selected window.\n  seed-shadow top: Tool/Continuity mcp_dispatch (0.29)\n    The deterministic shadow scorer saw no events for this source window.\n  feedback 7d: 0 accepted / 0 ignored (0 in-window, 0 total)\n  (run `dream shadow-cortex --source codex --json` for replay detail)\n\nnext: re-run `dream weekly` in 7 days; compare via `dream diff <prev_key> <this_key>` for drift.\n'
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.579s
+
+FAILED (failures=1, errors=2)

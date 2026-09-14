@@ -1,0 +1,12 @@
+test_failed_save_leaves_single_report_null_key_and_warning (__main__.SnapshotCompositionTests.test_failed_save_leaves_single_report_null_key_and_warning) ... ok
+test_print_only_keeps_json_without_saving (__main__.SnapshotCompositionTests.test_print_only_keeps_json_without_saving) ... ok
+test_standalone_json_keeps_payload_and_saved_acknowledgement (__main__.SnapshotCompositionTests.test_standalone_json_keeps_payload_and_saved_acknowledgement) ... ok
+test_standalone_text_keeps_payload_and_saved_acknowledgement (__main__.SnapshotCompositionTests.test_standalone_text_keeps_payload_and_saved_acknowledgement) ... ok
+test_weekly_json_is_one_document_with_persisted_key (__main__.SnapshotCompositionTests.test_weekly_json_is_one_document_with_persisted_key) ... ok
+test_weekly_no_snapshot_does_not_save (__main__.SnapshotCompositionTests.test_weekly_no_snapshot_does_not_save) ... ok
+test_weekly_text_reports_persisted_key_without_snapshot_payload (__main__.SnapshotCompositionTests.test_weekly_text_reports_persisted_key_without_snapshot_payload) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.586s
+
+OK
