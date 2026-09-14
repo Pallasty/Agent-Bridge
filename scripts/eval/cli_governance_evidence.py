@@ -172,7 +172,7 @@ def run_selected(stages, head, check_gate=False):
     for stage in stages:
         command += ['--test', PROFILES[stage][2]]
     # This real CLI regression covers the retained weekly/snapshot adapter.
-    command += ['--test', 'cli_dream_weekly_snapshot']
+    command += ['--test', 'cli_dream_weekly_snapshot', '--test', 'cli_civil_date']
     # These source-bound tests must not be mistaken for behavior probes.
     subprocess.run(command, cwd=g.ROOT, env=env, check=True)
     for stage in stages:

@@ -136,3 +136,13 @@ The receipt chain now has eight transitions. Current main.rs is 21,860 lines,
 SHA-256 `5e93086a66df915654f2e792f31362dfa803b1dba6e1458424170cfff5b9cfd0`.
 The earlier G6 bundle above remains historical; offline review of the new run
 uses `2026-09-14-weekly-fix-cli-bundle` and the repair implementation commit.
+
+## Authorized date consolidation
+
+Following the hotspot assessment, the owner explicitly selected the two root
+date conversions for consolidation. See the
+[finite contract](CLI-CIVIL-DATE-CONSOLIDATION-2026-09-14.md).
+`cli::civil_date` owns that arithmetic; clock reads and all three formatting
+callers remain at the root. Four source-bound date tests join the selected
+regression command. Cross-domain date consolidation and Dream diff extraction
+remain outside this change.

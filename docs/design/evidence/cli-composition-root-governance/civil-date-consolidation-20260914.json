@@ -1,0 +1,63 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "civil-date-consolidation-20260914",
+  "source_base": "69081c537ae3ce25647e49a29ca79f9fd093d2e3",
+  "main_rs_before_sha256": "5e93086a66df915654f2e792f31362dfa803b1dba6e1458424170cfff5b9cfd0",
+  "main_rs_after_sha256": "aaa1fecf5d6431414bbbc184955ed7ae9401e7981c29612126f01fb55ae643e4",
+  "changes": [
+    {
+      "region": "civil_from_days, days_to_ymd, three date-formatter calls",
+      "category": "pure_logic",
+      "disposition": "extracted",
+      "summary": "Unify two equivalent civil-date calculations in private cli::civil_date; keep clocks and output formatting at root.",
+      "evidence": [
+        "crates/bridge/src/cli/civil_date.rs",
+        "crates/bridge/tests/cli_civil_date.rs",
+        "docs/design/CLI-CIVIL-DATE-CONSOLIDATION-2026-09-14.md"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "not_applicable",
+      "evidence": [
+        "No schema, flags, defaults or routing changes."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "Date module matches both originals on era sweep and signed timestamp samples; source review confirms caller formats and clock reads unchanged."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "not_applicable",
+      "evidence": [
+        "No command execution, persistence or confirmation branches changed."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "not_applicable",
+      "evidence": [
+        "Pure arithmetic extraction adds no fallible calls; existing validation/error ordering unchanged."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "New private module receives only an i64 day count, returns a value, and has no I/O/clock/Store capability. All three callers retain time acquisition and formatting."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "cargo test --locked -p ab-bridge --test cli_civil_date: four tests passed, including pinned reference source binding.",
+        "cargo check --locked -p ab-bridge --all-targets --quiet passed with existing warnings; CARGO_TARGET_DIR=/Data/ab-main-rs-governance-target CARGO_BUILD_JOBS=4.",
+        "Module and test rustfmt passed; frozen reference fixture remains byte-exact."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert the private module, three call-site changes, removed root helpers and added regression enrollment together; no state migration."
+  ]
+}

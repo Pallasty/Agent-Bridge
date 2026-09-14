@@ -1,3 +1,4 @@
+pub(super) mod civil_date;
 #[cfg(feature = "r9-workload-receipts")]
 pub(super) mod startup_report;
 pub(super) mod avatar_live_view;

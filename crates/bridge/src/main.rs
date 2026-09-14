@@ -18397,7 +18397,7 @@ fn chrono_like_date(unix_secs: i64) -> String {
     let hour = sod / 3600;
     let minute = (sod % 3600) / 60;
     // Use civil_from_days (Howard Hinnant algorithm) for date.
-    let (y, mo, d) = civil_from_days(days_since_epoch);
+    let (y, mo, d) = cli::civil_date::from_days(days_since_epoch);
     format!("{:04}-{:02}-{:02} {:02}:{:02} UTC", y, mo, d, hour, minute)
 }
 
@@ -18407,24 +18407,8 @@ fn time_slug(unix_secs: i64) -> String {
     let sod = unix_secs.rem_euclid(86_400);
     let hour = sod / 3600;
     let minute = (sod % 3600) / 60;
-    let (y, mo, d) = civil_from_days(days_since_epoch);
+    let (y, mo, d) = cli::civil_date::from_days(days_since_epoch);
     format!("{:04}{:02}{:02}_{:02}{:02}", y, mo, d, hour, minute)
-}
-
-/// Convert days-since-1970-01-01 to (year, month, day) using Hinnant's
-/// civil_from_days algorithm. No external date library needed.
-fn civil_from_days(z: i64) -> (i32, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
-    let y = if m <= 2 { y + 1 } else { y };
-    (y as i32, m, d)
 }
 
 /// ζ-3 (2026-05-11) — Diff two `dream snapshot` memories.
@@ -20211,24 +20195,8 @@ fn chrono_now_utc_string() -> String {
     let h = secs_of_day / 3600;
     let m = (secs_of_day % 3600) / 60;
     let s = secs_of_day % 60;
-    let (y, mo, d) = days_to_ymd(days);
+    let (y, mo, d) = cli::civil_date::from_days(days);
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02}Z")
-}
-
-fn days_to_ymd(days_since_epoch: i64) -> (i32, u32, u32) {
-    // Civil-from-days (Howard Hinnant). Handles negative days too, though
-    // we'll never see those in practice. Returns (year, month, day).
-    let z = days_since_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = y + if m <= 2 { 1 } else { 0 };
-    (year as i32, m, d)
 }
 
 // ─── L7 P2 — AGENT.md drift detector ────────────────────────────────
