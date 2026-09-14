@@ -18073,6 +18073,19 @@ async fn run_dream_snapshot(
     print_only: bool,
     as_json: bool,
 ) -> Result<()> {
+    capture_dream_snapshot(name, days, print_only, as_json, false)
+        .await
+        .map(|_| ())
+}
+
+// Return only a successfully saved key; composite callers can suppress output.
+async fn capture_dream_snapshot(
+    name: Option<&str>,
+    days: u32,
+    print_only: bool,
+    as_json: bool,
+    quiet: bool,
+) -> Result<Option<String>> {
     use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18234,9 +18247,9 @@ async fn run_dream_snapshot(
         },
     });
 
-    if as_json {
+    if as_json && !quiet {
         println!("{}", serde_json::to_string_pretty(&payload)?);
-    } else {
+    } else if !quiet {
         // Human summary — same fields, narrative layout. Goes to stdout
         // so it composes with shell pipelines.
         println!(
@@ -18332,8 +18345,10 @@ async fn run_dream_snapshot(
     }
 
     if print_only {
-        eprintln!("(--print-only: not saving)");
-        return Ok(());
+        if !quiet {
+            eprintln!("(--print-only: not saving)");
+        }
+        return Ok(None);
     }
 
     // ── save as kind=snapshot memory ─────────────────────────────────────
@@ -18363,14 +18378,11 @@ async fn run_dream_snapshot(
         .memory_save(&rec)
         .await
         .map_err(|e| anyhow::anyhow!("memory_save: {e}"))?;
-    if !as_json {
-        eprintln!("saved as memory: {key}");
-    } else {
-        // In JSON mode, echo the key on stderr so the JSON payload itself
-        // stays clean on stdout (pipeline-friendly).
+    if !quiet {
+        // Keep standalone snapshot acknowledgement on stderr in both modes.
         eprintln!("saved as memory: {key}");
     }
-    Ok(())
+    Ok(Some(key))
 }
 
 /// Format unix-epoch seconds as `YYYY-MM-DD HH:MM` in the local timezone.
@@ -18846,8 +18858,8 @@ async fn run_dream_weekly(no_snapshot: bool, as_json: bool) -> Result<()> {
         None
     } else {
         let auto_name = format!("weekly_{now_epoch}");
-        match run_dream_snapshot(Some(&auto_name), 1, false, true).await {
-            Ok(()) => Some(format!("snapshot_{auto_name}")),
+        match capture_dream_snapshot(Some(&auto_name), 1, false, true, true).await {
+            Ok(key) => key,
             Err(e) => {
                 eprintln!("(snapshot save skipped: {e})");
                 None

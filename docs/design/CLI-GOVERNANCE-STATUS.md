@@ -32,9 +32,9 @@ These labels are goals, not a count of commits; S5 in particular includes many
 substeps. Old records describe their tested version. For example, G1–G3's
 statement that full CLI reports were historical predates G4 automation.
 
-## Latest accepted behavior evidence
+## G6 behavior evidence
 
-The latest full execution tested implementation
+The G6 full execution tested implementation
 `65ae01b6ce04cdc3e50ab2b7a5955c360a1fcf2d`, tree
 `395214b125f3b4954e968b769e5d51023c24bcd3`: 77 Python tests, receipt controls
 (3 positive / 7 negative), 13 Rust boundary tests, 405 pure behavior cases and
@@ -43,7 +43,7 @@ behavior tests for G7. Subsequent archive and status commits have different
 trees; do not substitute them as the tested implementation.
 
 The [G6 bundle](../reports/main-rs-governance/2026-09-14-g6-cli-bundle/summary.json)
-is fully committed. Current main.rs remains 21,848 lines, SHA-256
+is fully committed. At G6, main.rs had 21,848 lines, SHA-256
 `3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1`.
 Line count is context, not an optimization target or reason to reopen extraction.
 
@@ -115,3 +115,15 @@ main.rs digest/line count were checked. No fresh Rust/CLI behavior execution was
 performed for G7. The change is limited to this status page, AGENTS.md and the
 maintenance-document navigation link. G7 acceptance is complete; the governance
 sequence is closed and future work follows the restart conditions above.
+
+## Assessed maintenance: weekly snapshot result
+
+The owner accepted a retained-region hotspot assessment after G7. The
+[assessment and repair contract](MAIN-RS-HOTSPOT-ASSESSMENT-2026-09-14.md)
+records 116 mainline commits with no body changes in ten inspected functions,
+but separately reproduces a weekly snapshot-key/output defect. The targeted
+root-local repair returns the saved key and suppresses nested snapshot output.
+Seven new isolated CLI cases run through `cli_dream_weekly_snapshot` whenever
+regression profiles are selected, in addition to the existing G4 comparisons.
+Date arithmetic duplication and Dream diff extraction remain unscheduled.
+This is defect-triggered maintenance, not a reopened extraction sequence.

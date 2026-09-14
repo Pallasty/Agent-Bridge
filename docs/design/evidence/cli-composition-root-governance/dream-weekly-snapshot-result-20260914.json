@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "dream-weekly-snapshot-result-20260914",
+  "source_base": "d2d280f236401c7bf62ab0bc624fdb19f9f3825d",
+  "main_rs_before_sha256": "3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1",
+  "main_rs_after_sha256": "5e93086a66df915654f2e792f31362dfa803b1dba6e1458424170cfff5b9cfd0",
+  "changes": [
+    {
+      "region": "run_dream_snapshot, capture_dream_snapshot, run_dream_weekly",
+      "category": "authority_or_effect_adapter",
+      "summary": "Return the actually persisted snapshot key to weekly and suppress nested snapshot output; retain standalone presentation and root Store custody.",
+      "disposition": "root_visible",
+      "root_reason": "Snapshot acquisition, best-effort write ordering and composite CLI presentation remain explicit at the composition root.",
+      "evidence": [
+        "docs/design/MAIN-RS-HOTSPOT-ASSESSMENT-2026-09-14.md",
+        "crates/bridge/tests/cli_dream_weekly_snapshot.rs",
+        "scripts/eval/dream_weekly_snapshot_check.py"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "not_applicable",
+      "evidence": [
+        "No Clap schema, flags or default values changed."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "Seven real CLI cases pass in cli_dream_weekly_snapshot; old verified G6 binary fails three. Weekly single-document output and actual key are intentional corrections; standalone text/JSON remain covered."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "passed",
+      "evidence": [
+        "print-only standalone and weekly --no-snapshot cases assert no snapshot rows."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "SQLite trigger rejects snapshot insert: weekly warns, continues with null key and one report; Store-read ordering unchanged by source review."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Source review: capture remains root-local; key returned only after memory_save; weekly no-snapshot and failure branches unchanged; no clocks reconstructed or write authority moved.",
+        "crates/bridge/tests/cli_dream_weekly_snapshot.rs"
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "CARGO_TARGET_DIR=/Data/ab-main-rs-governance-target CARGO_BUILD_JOBS=4 cargo test --locked -p ab-bridge --test cli_dream_weekly_snapshot passed.",
+        "cargo check --locked -p ab-bridge --all-targets --quiet passed with existing warnings.",
+        "Changed snapshot functions and new Rust test pass rustfmt; git diff --check passes."
+      ]
+    }
+  },
+  "rollback": [
+    "Revert this adapter fix and its new regression enrollment together; preserve this historical record. This restores the known weekly JSON/key defect; no database migration is involved."
+  ]
+}

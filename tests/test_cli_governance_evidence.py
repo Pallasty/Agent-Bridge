@@ -318,7 +318,7 @@ class EvidenceTests(unittest.TestCase):
         with patch.object(e, 'ensure_checkout', side_effect=['before', 'after']), patch.object(e.subprocess, 'check_output', return_value='ext4'), patch.object(e.subprocess, 'run') as run:
             with self.assertRaisesRegex(e.g.GovernanceError, 'index changed'):
                 e.run_selected(['s21'], 'INDEX')
-            self.assertEqual(run.call_args_list[0].args[0], ['cargo', 'test', '-p', 'ab-bridge', '--test', 'cli_dream_identity_s21_extraction'])
+            self.assertEqual(run.call_args_list[0].args[0], ['cargo', 'test', '-p', 'ab-bridge', '--test', 'cli_dream_identity_s21_extraction', '--test', 'cli_dream_weekly_snapshot'])
             self.assertIn('scripts/eval/dream_identity_view_parity.py', run.call_args_list[1].args[0])
 
 
