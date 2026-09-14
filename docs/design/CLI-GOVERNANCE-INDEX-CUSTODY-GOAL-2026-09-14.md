@@ -60,3 +60,21 @@ integrity review, not fresh execution or report-author authentication.
 
 Stop after verified source delivery and a durable execution record. No additional
 extraction or maintenance stage is automatically opened.
+
+## Verified completion
+
+Implementation `65ae01b6ce04cdc3e50ab2b7a5955c360a1fcf2d` passed its normal
+pre-commit: 77 Python tests, receipt controls (3 positive / 7 negative),
+13 Rust boundary tests, 405 pure cases and 143 fresh CLI cases.
+The [verification record](../reports/main-rs-governance/2026-09-14-g6-verification.json)
+binds the exact candidate tree and complete CLI evidence. Offline G5 review
+of the archived bundle passed against that implementation commit:
+
+```sh
+python3 scripts/eval/cli_governance_bundle.py \
+  --run-dir docs/reports/main-rs-governance/2026-09-14-g6-cli-bundle \
+  --candidate-commit 65ae01b6ce04cdc3e50ab2b7a5955c360a1fcf2d
+```
+
+main.rs remains 21,848 lines and byte-identical to the G5 baseline. G6 is
+complete within the stated scope; no further goal is opened by this record.

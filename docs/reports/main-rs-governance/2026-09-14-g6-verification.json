@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.cli_governance_index_custody_verification.v1",
+  "implementation_commit": "65ae01b6ce04cdc3e50ab2b7a5955c360a1fcf2d",
+  "candidate_tree": "395214b125f3b4954e968b769e5d51023c24bcd3",
+  "invocation": "normal pre-commit; no bypass",
+  "checks": {
+    "python_tests": 77,
+    "new_real_index_tests": 6,
+    "receipt_positive": 3,
+    "receipt_negative": 7,
+    "rust_boundary_tests": 13,
+    "pure_behavior_cases": 405,
+    "fresh_cli_cases": 143,
+    "portable_bundle_verified": true
+  },
+  "reproduction_before_fix": {
+    "assume_unchanged": {
+      "modified_tracked_fixture_hidden_by_diff": true,
+      "old_ensure_checkout_accepted": true
+    },
+    "skip_worktree": {
+      "modified_tracked_fixture_hidden_by_diff": true,
+      "old_ensure_checkout_accepted": true
+    }
+  },
+  "bundle_path": "docs/reports/main-rs-governance/2026-09-14-g6-cli-bundle",
+  "bundle_files_sha256": {
+    "baseline-build.log": "203f1e34ded3ca9971b28818533002718e2233923b7cf99ef5e34644a2bdb86f",
+    "candidate-build.log": "11fe46a863a41fef480751b8edf9a41692a2c3890e7e657e20b6b6c89645caa2",
+    "identity.json": "6a68d40ba46434b11903349a5690e0adc5261ad803043383375c69a9aa91a273",
+    "instinct.json": "bdc521f3d6fdd6e965d22b251ad4fad65269aa01b08647effcf7227db5cf8955",
+    "summary.json": "1f87b753a7e8d929809081a818e8dbd26b46384ea91dfdb38d63851c0e8c5499",
+    "worktree.json": "63dde46905382795cd4103559b83495020d0346d5c2dde20b39d68a6b2a289bd"
+  },
+  "commit_gate_log_sha256": "7bd1ec4ba3ba53defdf928136eb333815c2baec8f1288aaeed2dcb238963be5f",
+  "main_rs_sha256": "3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1",
+  "limits": [
+    "Fresh execution rejects flagged tracked files even when unchanged; use a complete checkout.",
+    "Checks do not prevent arbitrary concurrent mutations between checkpoints.",
+    "Offline bundle verification retains G5 integrity/authentication limits.",
+    "Existing compiler warnings remained; no runtime code or deployment changes."
+  ]
+}
