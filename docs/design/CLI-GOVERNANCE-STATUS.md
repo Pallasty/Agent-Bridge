@@ -27,6 +27,9 @@ changing code, enrollment, runtime authority or deployment.
 | G5 | Portable offline evidence review against a caller-selected commit | `3cddd674`; [G5 record](../reports/main-rs-governance/2026-09-14-g5-verification.json) |
 | G6 | Reject assume-unchanged/skip-worktree states before and after execution | `65ae01b6`; [G6 record](../reports/main-rs-governance/2026-09-14-g6-verification.json) |
 | G7 | Unified status, verification entry points and stop/restart rules | This page and repository instructions; documentation-only closeout |
+| Authorized weekly repair | One weekly document and the actual persisted snapshot key | `98d90588`; [repair verification](../reports/main-rs-governance/2026-09-14-weekly-fix-verification.json) |
+| Authorized date consolidation | Two root civil-date calculations share private arithmetic | `d7a001b3`; [date verification](../reports/main-rs-governance/2026-09-14-civil-date-verification.json) |
+| Authorized Dream diff extraction | Pure calculation separated; reads, checks and rendering remain at root | `f7f70bfb`; [diff verification](../reports/main-rs-governance/2026-09-14-dream-diff-verification.json) |
 
 These labels are goals, not a count of commits; S5 in particular includes many
 substeps. Old records describe their tested version. For example, G1–G3's
@@ -81,8 +84,13 @@ isolation in fixtures. See [G4](CLI-GOVERNANCE-LIVE-PARITY-GOAL-2026-09-14.md),
 | Startup/dependency construction/cross-domain routing | Retained at root | A concrete defect or independently characterized stable boundary with observable benefit |
 | Avatar execution, locks, timers, cancellation and per-step authority | Retained under [S17](ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S16-S17-2026-09-13.md) | Second real consumer or stable authority interface, with deterministic acceptance |
 | BioCortex file/Store/runtime custody | Retained under [S5-V](ADR-CLI-COMPOSITION-ROOT-GOVERNANCE-S5V-BIOCORTEX-EFFECTFUL-EXECUTOR-AUDIT-2026-07-31.md) | Apply its exact reopening conditions; renderer recurrence includes two independent merge conflicts or three non-format behavior changes in 90 days |
-| Dream diff/weekly and date/JSON helpers | Unscheduled candidates | Actual command change/defect, repeated conflict, demonstrated duplication or real new consumer; preserve weekly snapshot-write authority |
+| Remaining Dream snapshot/weekly orchestration, diff reads/checks/rendering and other root helpers | Retained; no further extraction scheduled | Actual command change/defect, repeated conflict, demonstrated duplication or real new consumer; preserve snapshot-write authority and diff read effects |
 | Gate reliability/coverage | Maintenance on demand | Reproducible failure, real source-custody gap or an uncovered behavior relevant to an actual change |
+
+The weekly snapshot repair, root civil-date consolidation and Dream diff pure
+calculation extraction are complete, as listed above. The retained-region row
+describes the responsibilities left after those changes; it does not reschedule
+completed work. Historical assessments below retain their original decisions.
 
 For a new request to continue, inspect the current state and name the concrete
 trigger, benefit, owner/input/output boundary, effect/error order and finite
