@@ -1,0 +1,21 @@
+{
+  "schema": "agent_bridge.cli_governance_evidence_registry.v1",
+  "stages": {
+    "s18": {
+      "report": "docs/reports/main-rs-governance/2026-09-13-s18-verification.json",
+      "sha256": "bd3afdfe7a9dd7fe8b4a8caa8c3c95bc0607018fb4303df618d35afc7ebe1e05"
+    },
+    "s19": {
+      "report": "docs/reports/main-rs-governance/2026-09-13-s19-verification.json",
+      "sha256": "8ded73740025133e277958816d973b7bad3e1f98db665fadbd9ceec331b707ab"
+    },
+    "s20": {
+      "report": "docs/reports/main-rs-governance/2026-09-13-s20-verification.json",
+      "sha256": "67f8615ef0928a646a5f431655a296ac8c170d91393616dfc83d5c6c4888a00e"
+    },
+    "s21": {
+      "report": "docs/reports/main-rs-governance/2026-09-13-s21-verification.json",
+      "sha256": "7b3f423c2319807566fab332f5081d1f226fabdf7c593af6cf9559d228f83386"
+    }
+  }
+}

@@ -30,3 +30,16 @@ or checking an already explicit due commitment, follow
 identification, preview, and eligible record submission; do not require the
 owner to notice the event or type the command. This is a foreground workflow,
 not an automatic event source, background monitor, or wake authorization.
+
+## CLI governance maintenance
+
+S0–S21 sequential extraction is closed. Follow
+`docs/design/CLI-GOVERNANCE-MAINTENANCE-GOALS-2026-09-14.md` for the finite
+maintenance contract and existing S5-V/S17 retention decisions. Do not invent
+another extraction stage solely because main.rs is large.
+
+S18–S21 report/source bindings and selected behavior probes are enforced by
+`scripts/eval/cli_governance_evidence.py` in pre-commit, including module-only
+changes. Update and stage the matching evidence when bound files change;
+execution requires the tracked worktree and index to agree. Keep actual
+behavior evidence separate from historical report digest validation.

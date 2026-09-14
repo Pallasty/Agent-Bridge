@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/eval/cli_composition_root_governance.py'
 spec = importlib.util.spec_from_file_location('governance', SCRIPT)
@@ -16,6 +17,9 @@ spec.loader.exec_module(g)
 
 class RepositoryAdmissionTests(unittest.TestCase):
     def setUp(self):
+        isolated = patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}, clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -177,6 +181,7 @@ class RepositoryAdmissionTests(unittest.TestCase):
         script = self.root / 'scripts/eval/cli_composition_root_governance.py'
         script.parent.mkdir(parents=True)
         shutil.copyfile(SCRIPT, script)
+        shutil.copyfile(SCRIPT.with_name('cli_governance_evidence.py'), script.with_name('cli_governance_evidence.py'))
         hook = self.root / '.githooks/pre-commit'
         hook.parent.mkdir()
         shutil.copyfile(SCRIPT.parents[2] / '.githooks/pre-commit', hook)

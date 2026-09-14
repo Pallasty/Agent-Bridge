@@ -81,6 +81,9 @@ fi
 # when CI is deliberately skipped; an unstaged receipt cannot authorize a commit.
 python3 scripts/eval/cli_composition_root_governance.py validate --base HEAD --head INDEX
 
+# Bind enrolled reports to staged sources, then execute selected local regressions.
+python3 scripts/eval/cli_governance_evidence.py --base HEAD --head INDEX --run
+
 # 2) Skip cargo check when no rust changes — saves time on docs-only
 #    or memory-only commits. Use the staged diff so unstaged sibling
 #    work doesn't trigger a needless check.
