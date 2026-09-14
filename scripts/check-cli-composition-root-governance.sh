@@ -15,6 +15,7 @@ fi
 python3 scripts/eval/cli_composition_root_governance.py self-test
 python3 -m unittest discover -s tests -p test_cli_composition_root_governance.py
 python3 -m unittest discover -s tests -p test_cli_governance_evidence.py
+python3 -m unittest discover -s tests -p test_cli_governance_live.py
 python3 scripts/eval/cli_composition_root_governance.py validate \
   --base "$base" \
   --head "$head"

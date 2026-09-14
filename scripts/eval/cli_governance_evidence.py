@@ -8,11 +8,14 @@ import subprocess
 import sys
 
 import cli_composition_root_governance as g
+from cli_governance_live import run_cli_suites
 
 REGISTRY = 'docs/design/evidence/cli-governance-registry.json'
 SCHEMA = 'agent_bridge.cli_governance_evidence_registry.v1'
 SELF = 'scripts/eval/cli_governance_evidence.py'
 GATE_INPUTS = {REGISTRY, SELF, '.githooks/pre-commit',
+               'scripts/eval/cli_governance_live.py',
+               'tests/test_cli_governance_live.py',
                'scripts/check-cli-composition-root-governance.sh',
                'scripts/eval/cli_composition_root_governance.py',
                'tests/test_cli_governance_evidence.py',
@@ -150,7 +153,7 @@ def run_selected(stages, head, check_gate=False):
     env['CARGO_TARGET_DIR'] = str(target)
     env.setdefault('CARGO_BUILD_JOBS', '4')
     if check_gate:
-        for test in ('test_cli_governance_evidence.py', 'test_cli_composition_root_governance.py'):
+        for test in ('test_cli_governance_evidence.py', 'test_cli_composition_root_governance.py', 'test_cli_governance_live.py'):
             subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', test],
                            cwd=g.ROOT, env=env, check=True)
         subprocess.run([sys.executable, 'scripts/eval/cli_composition_root_governance.py', 'self-test'],
@@ -165,6 +168,8 @@ def run_selected(stages, head, check_gate=False):
                    '--deps-dir', str(target / 'debug/deps'),
                    '--output-dir', str(target / 'governance-evidence' / stage)]
         subprocess.run(command, cwd=g.ROOT, env=env, check=True)
+    require(ensure_checkout(head) == initial, 'index changed before CLI execution')
+    run_cli_suites(stages, target, env, initial)
     require(ensure_checkout(head) == initial, 'index changed during regression execution')
 
 
@@ -172,7 +177,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', default='HEAD')
     parser.add_argument('--head', default='INDEX')
-    parser.add_argument('--run', action='store_true', help='run fixed boundary and pure behavior suites')
+    parser.add_argument('--run', action='store_true', help='run fixed boundary, pure behavior and fresh CLI suites')
     args = parser.parse_args()
     try:
         stages = validate(args.base, args.head)

@@ -181,7 +181,8 @@ class RepositoryAdmissionTests(unittest.TestCase):
         script = self.root / 'scripts/eval/cli_composition_root_governance.py'
         script.parent.mkdir(parents=True)
         shutil.copyfile(SCRIPT, script)
-        shutil.copyfile(SCRIPT.with_name('cli_governance_evidence.py'), script.with_name('cli_governance_evidence.py'))
+        for sibling in ('cli_governance_evidence.py', 'cli_governance_live.py'):
+            shutil.copyfile(SCRIPT.with_name(sibling), script.with_name(sibling))
         hook = self.root / '.githooks/pre-commit'
         hook.parent.mkdir()
         shutil.copyfile(SCRIPT.parents[2] / '.githooks/pre-commit', hook)

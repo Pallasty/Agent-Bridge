@@ -46,9 +46,9 @@ from the registry to bypass admission.
 Fresh execution is separate. The runner invokes fixed Python scripts and Cargo
 test targets, not command strings taken from a JSON report. These exercise
 actual completed-value transformations/rendering against their original Git
-baselines. Full clock-dependent CLI/SQLite harnesses remain separately run
-acceptance evidence; they are not automatically rerun by this focused runner.
-Their source hashes are checked, but that alone is not a fresh CLI execution.
+baselines. G4 now adds fresh isolated CLI/SQLite comparisons using the existing
+harnesses; see [the finite live-parity goal](CLI-GOVERNANCE-LIVE-PARITY-GOAL-2026-09-14.md).
+Historical report digest validation remains separate from fresh CLI execution.
 
 The gate does not provide cryptographic attestation that an author truthfully
 produced every historical report. Review is still required for report/test
@@ -59,9 +59,9 @@ not a server-side enforcement guarantee and deliberate bypass remains possible.
 
 - An enrolled module, its boundary test, its bound harness/dependency, or its
   report selects that profile.
-- Registry, runner, pre-commit, check wrapper, transition checker and either gate-test changes
+- Registry, runner, pre-commit, check wrapper, transition checker and any gate-test changes
   conservatively select all four profiles. These infrastructure changes also run
-  both Python gate suites and receipt schema self-tests before domain tests.
+  all three Python gate suites and receipt schema self-tests before domain tests.
 - main.rs and other shared Rust, Cargo manifest/lock or .cargo configuration
   changes also select all four. Only one enrolled module/test changing does
   not itself select unrelated profiles, although a needed registry update does.
@@ -120,7 +120,7 @@ CARGO_TARGET_DIR=/Data/ab-main-rs-governance-target \
   python3 scripts/eval/cli_governance_evidence.py --base HEAD --head INDEX --run
 ```
 
-The check wrapper runs both gate test suites and revision-bound validation; it
+The check wrapper runs all three gate test suites and revision-bound validation; it
 does not silently execute behavior tests against a different checked-out tree.
 The hook runs both transition and evidence admission before its original
 all-targets check. Update evidence in the worktree first, stage the reviewed

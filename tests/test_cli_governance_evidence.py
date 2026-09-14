@@ -23,6 +23,9 @@ class EvidenceTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        cli = patch.object(e, 'run_cli_suites')
+        cli.start()
+        self.addCleanup(cli.stop)
         old = e.g.ROOT
         e.g.ROOT = self.root
         self.addCleanup(setattr, e.g, 'ROOT', old)
@@ -187,7 +190,7 @@ class EvidenceTests(unittest.TestCase):
             self.validate()
 
     def test_actual_hook_blocks_module_only_change_before_cargo(self):
-        for script in ('cli_governance_evidence.py', 'cli_composition_root_governance.py'):
+        for script in ('cli_governance_evidence.py', 'cli_composition_root_governance.py', 'cli_governance_live.py'):
             dest = self.root / 'scripts/eval' / script
             shutil.copyfile(SCRIPTS / script, dest)
         hook = self.root / '.githooks/pre-commit'
@@ -224,8 +227,9 @@ class EvidenceTests(unittest.TestCase):
             commands = [call.args[0] for call in run.call_args_list]
             self.assertEqual(commands[0][-1], 'test_cli_governance_evidence.py')
             self.assertEqual(commands[1][-1], 'test_cli_composition_root_governance.py')
-            self.assertEqual(commands[2][-1], 'self-test')
-            self.assertEqual(commands[3][0], 'cargo')
+            self.assertEqual(commands[2][-1], 'test_cli_governance_live.py')
+            self.assertEqual(commands[3][-1], 'self-test')
+            self.assertEqual(commands[4][0], 'cargo')
 
     def test_runner_does_not_export_parent_git_context(self):
         with patch.dict(os.environ, {'GIT_DIR': '/parent', 'GIT_INDEX_FILE': '/parent/index', 'GIT_CONFIG_COUNT': '1'}), patch.object(e, 'ensure_checkout', return_value='tree'), patch.object(e.subprocess, 'check_output', return_value='ext4'), patch.object(e.subprocess, 'run') as run:

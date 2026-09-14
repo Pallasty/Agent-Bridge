@@ -43,3 +43,9 @@ S18–S21 report/source bindings and selected behavior probes are enforced by
 changes. Update and stage the matching evidence when bound files change;
 execution requires the tracked worktree and index to agree. Keep actual
 behavior evidence separate from historical report digest validation.
+
+Fresh isolated CLI comparisons are also required for selected profiles under
+`docs/design/CLI-GOVERNANCE-LIVE-PARITY-GOAL-2026-09-14.md`. The runner builds
+a pinned archive baseline and the staged candidate; allow both builds to finish
+without modifying the index or source. Reports and build logs remain under
+`CARGO_TARGET_DIR/governance-live/run-*`.
