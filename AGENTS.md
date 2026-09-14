@@ -33,6 +33,12 @@ not an automatic event source, background monitor, or wake authorization.
 
 ## CLI governance maintenance
 
+Start with `docs/design/CLI-GOVERNANCE-STATUS.md` for current completion,
+verification routes and restart conditions. Sequential extraction and the
+finite G1–G7 work are closed; continue only from a demonstrated maintenance
+trigger or explicitly changed scope. Do not generate a new stage merely to
+satisfy a generic continuation request.
+
 S0–S21 sequential extraction is closed. Follow
 `docs/design/CLI-GOVERNANCE-MAINTENANCE-GOALS-2026-09-14.md` for the finite
 maintenance contract and existing S5-V/S17 retention decisions. Do not invent

@@ -1,5 +1,8 @@
 # CLI governance maintenance goals
 
+Current status and verification entry point: [CLI governance status](CLI-GOVERNANCE-STATUS.md).
+This document retains the original G1–G3 contract and its historical completion.
+
 ## Decision and scope
 
 On 2026-09-14 the owner requested implementation of the overall-assessment
