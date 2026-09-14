@@ -1,0 +1,67 @@
+{
+  "schema": "agent_bridge.cli_governance_maintenance_verification.v1",
+  "tested_commit": "affc6a7148250ce0aba022934626a09c89761149",
+  "source_base": "f7a4d030d884835242a2b0b688d50f6e35ccbccf",
+  "goals": {
+    "G1": "implemented and verified",
+    "G2": "implemented and verified",
+    "G3": "maintenance instructions adopted"
+  },
+  "main_rs_unchanged": true,
+  "main_rs_sha256": "3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1",
+  "source_sha256": {
+    ".githooks/pre-commit": "b5b7b3fa6c6d6f117733cc6b6358cf22d3822d586903cb342d301052546c5ef3",
+    "scripts/check-cli-composition-root-governance.sh": "9710983c1e21ada68168a2b0c1435f71b88d92fd104fb67b7750e5d4a700c59c",
+    "scripts/eval/cli_governance_evidence.py": "b9f4b13d5d51833460b6b7a93f21cfa8e59ac640dd70cc80a8bba2f75f4edbe4",
+    "tests/test_cli_governance_evidence.py": "e545e55871e83343b4856003e7ed21a77b559e9e079f86b99241811bad50797c",
+    "tests/test_cli_composition_root_governance.py": "061fe89be32ca10ad9b5db01b6b88b7bfc1eb358dfc9c98c129e8ca5848e57c9",
+    "docs/design/evidence/cli-governance-registry.json": "9f15568daae5c2cb51b13994540811a942208d045f93c74ba651c1326ae1ac76"
+  },
+  "normal_precommit_exit_code": 0,
+  "precommit_log_sha256": "f278dad06cada4d546b256776172735630ecf31539fe15369a6b16f50b62dc4e",
+  "tests": {
+    "evidence_gate": 26,
+    "existing_transition_gate": 20,
+    "schema_positive": 3,
+    "schema_negative": 7,
+    "rust_boundaries": 13
+  },
+  "profiles": {
+    "s18": {
+      "passed": 236,
+      "total": 236,
+      "full_report_sha256": "8079744bee1e99f356a580bc807dd11d704e78b64c856587c5ccfedc6b25f823",
+      "negative_controls_detected": true
+    },
+    "s19": {
+      "passed": 64,
+      "total": 64,
+      "full_report_sha256": "99e0ec97262d800ff09f36bc1e1156c46cac795dd4560321c8156f1255c35b30",
+      "negative_controls_detected": true
+    },
+    "s20": {
+      "passed": 61,
+      "total": 61,
+      "full_report_sha256": "1218b43e949b430fe439ab82134178fafe1e6003d4c0d9f1dcdd345812436c5f",
+      "negative_controls_detected": true
+    },
+    "s21": {
+      "passed": 44,
+      "total": 44,
+      "full_report_sha256": "e09409c4eeb3809a97dabf9f1dc576fbf69d4cfce3b090e6abed2f6bf69e3ebb",
+      "negative_controls_detected": true
+    }
+  },
+  "limits": [
+    "Initial enrollment is S18\u2013S21, not all private CLI modules.",
+    "Fresh automatic probes validate completed-value behavior; historical full CLI reports are digest-checked, not rerun by this runner.",
+    "No Rust runtime changes, deployment or CI dispatch. Existing main.rs receipt chain remains seven receipts.",
+    "Historical report claims still require review; local hooks are not a server-side anti-bypass boundary."
+  ],
+  "integration_repair": {
+    "issue": "Git fixture tests inherited parent Git context under a real pre-commit invocation.",
+    "resolution": "Strip GIT_* for child regressions and inside both fixture suites. Add parent refs/index/config preservation regression.",
+    "recovery": "Unpublished local fixture commit and Git metadata were restored to source base before the accepted commit. Original repair worktree verified clean; no fixture commit was pushed."
+  },
+  "artifact_directory": "/Data/CascadeProjects/.analysis-reports/main-rs-governance-evidence-20260914"
+}

@@ -128,6 +128,21 @@ files, then run/commit; an unstaged report cannot authorize a staged module.
 New behavior failures require investigation or rollback, not lowering counts
 or changing baselines to manufacture parity.
 
+## Completion
+
+G1–G3 are implemented. The normal pre-commit hook accepted implementation
+commit `affc6a7148250ce0aba022934626a09c89761149`: 26 evidence-gate tests,
+20 transition-gate tests, 3 positive/7 negative schema controls, 13 Rust boundary
+tests and 405 fixed-input behavior cases passed. Negative controls were detected.
+Main.rs is byte-identical to the source base.
+
+The hook integration also exercises child Git-environment isolation; tests
+verify that fixture repositories preserve the parent refs, index and config.
+The source-bound acceptance record is
+[maintenance verification](../reports/main-rs-governance/2026-09-14-maintenance-verification.json).
+This closes the finite maintenance goals above. Deferred Dream work remains
+trigger-based, not an automatically scheduled next stage.
+
 ## Rollback
 
 Revert the new hook invocation, evidence runner/registry/tests and maintenance
