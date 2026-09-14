@@ -228,8 +228,9 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(commands[0][-1], 'test_cli_governance_evidence.py')
             self.assertEqual(commands[1][-1], 'test_cli_composition_root_governance.py')
             self.assertEqual(commands[2][-1], 'test_cli_governance_live.py')
-            self.assertEqual(commands[3][-1], 'self-test')
-            self.assertEqual(commands[4][0], 'cargo')
+            self.assertEqual(commands[3][-1], 'test_cli_governance_bundle.py')
+            self.assertEqual(commands[4][-1], 'self-test')
+            self.assertEqual(commands[5][0], 'cargo')
 
     def test_runner_does_not_export_parent_git_context(self):
         with patch.dict(os.environ, {'GIT_DIR': '/parent', 'GIT_INDEX_FILE': '/parent/index', 'GIT_CONFIG_COUNT': '1'}), patch.object(e, 'ensure_checkout', return_value='tree'), patch.object(e.subprocess, 'check_output', return_value='ext4'), patch.object(e.subprocess, 'run') as run:

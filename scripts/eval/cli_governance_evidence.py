@@ -14,6 +14,7 @@ REGISTRY = 'docs/design/evidence/cli-governance-registry.json'
 SCHEMA = 'agent_bridge.cli_governance_evidence_registry.v1'
 SELF = 'scripts/eval/cli_governance_evidence.py'
 GATE_INPUTS = {REGISTRY, SELF, '.githooks/pre-commit',
+               'scripts/eval/cli_governance_bundle.py', 'tests/test_cli_governance_bundle.py',
                'scripts/eval/cli_governance_live.py',
                'tests/test_cli_governance_live.py',
                'scripts/check-cli-composition-root-governance.sh',
@@ -153,7 +154,7 @@ def run_selected(stages, head, check_gate=False):
     env['CARGO_TARGET_DIR'] = str(target)
     env.setdefault('CARGO_BUILD_JOBS', '4')
     if check_gate:
-        for test in ('test_cli_governance_evidence.py', 'test_cli_composition_root_governance.py', 'test_cli_governance_live.py'):
+        for test in ('test_cli_governance_evidence.py', 'test_cli_composition_root_governance.py', 'test_cli_governance_live.py', 'test_cli_governance_bundle.py'):
             subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', test],
                            cwd=g.ROOT, env=env, check=True)
         subprocess.run([sys.executable, 'scripts/eval/cli_composition_root_governance.py', 'self-test'],

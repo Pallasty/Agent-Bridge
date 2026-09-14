@@ -61,7 +61,7 @@ not a server-side enforcement guarantee and deliberate bypass remains possible.
   report selects that profile.
 - Registry, runner, pre-commit, check wrapper, transition checker and any gate-test changes
   conservatively select all four profiles. These infrastructure changes also run
-  all three Python gate suites and receipt schema self-tests before domain tests.
+  all four Python gate suites and receipt schema self-tests before domain tests.
 - main.rs and other shared Rust, Cargo manifest/lock or .cargo configuration
   changes also select all four. Only one enrolled module/test changing does
   not itself select unrelated profiles, although a needed registry update does.
@@ -120,7 +120,7 @@ CARGO_TARGET_DIR=/Data/ab-main-rs-governance-target \
   python3 scripts/eval/cli_governance_evidence.py --base HEAD --head INDEX --run
 ```
 
-The check wrapper runs all three gate test suites and revision-bound validation; it
+The check wrapper runs all four gate test suites and revision-bound validation; it
 does not silently execute behavior tests against a different checked-out tree.
 The hook runs both transition and evidence admission before its original
 all-targets check. Update evidence in the worktree first, stage the reviewed

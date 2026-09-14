@@ -49,3 +49,8 @@ Fresh isolated CLI comparisons are also required for selected profiles under
 a pinned archive baseline and the staged candidate; allow both builds to finish
 without modifying the index or source. Reports and build logs remain under
 `CARGO_TARGET_DIR/governance-live/run-*`.
+
+For portable, read-only CLI evidence review, follow
+`docs/design/CLI-GOVERNANCE-PORTABLE-EVIDENCE-GOAL-2026-09-14.md`. Always select
+the tested implementation commit independently; the later evidence-only commit
+has a different tree. Offline verification does not replace fresh pre-commit runs.
