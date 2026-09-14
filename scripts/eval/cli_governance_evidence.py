@@ -14,6 +14,8 @@ REGISTRY = 'docs/design/evidence/cli-governance-registry.json'
 SCHEMA = 'agent_bridge.cli_governance_evidence_registry.v1'
 SELF = 'scripts/eval/cli_governance_evidence.py'
 GATE_INPUTS = {REGISTRY, SELF, '.githooks/pre-commit',
+               'scripts/eval/dream_diff_plan_cli_check.py',
+               'crates/bridge/tests/fixtures/dream_diff_cli_baseline.json',
                'scripts/eval/dream_weekly_snapshot_check.py',
                'scripts/eval/cli_governance_bundle.py', 'tests/test_cli_governance_bundle.py',
                'scripts/eval/cli_governance_live.py',
@@ -172,7 +174,7 @@ def run_selected(stages, head, check_gate=False):
     for stage in stages:
         command += ['--test', PROFILES[stage][2]]
     # This real CLI regression covers the retained weekly/snapshot adapter.
-    command += ['--test', 'cli_dream_weekly_snapshot', '--test', 'cli_civil_date']
+    command += ['--test', 'cli_dream_weekly_snapshot', '--test', 'cli_civil_date', '--test', 'cli_dream_diff_plan']
     # These source-bound tests must not be mistaken for behavior probes.
     subprocess.run(command, cwd=g.ROOT, env=env, check=True)
     for stage in stages:

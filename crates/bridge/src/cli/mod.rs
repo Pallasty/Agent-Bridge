@@ -1,3 +1,4 @@
+pub(super) mod dream_diff_plan;
 pub(super) mod civil_date;
 #[cfg(feature = "r9-workload-receipts")]
 pub(super) mod startup_report;

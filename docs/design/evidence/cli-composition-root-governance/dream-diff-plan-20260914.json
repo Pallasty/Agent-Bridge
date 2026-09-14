@@ -1,0 +1,61 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "dream-diff-plan-20260914",
+  "source_base": "e34700ca0adf5b21c892d872f6ab8fa09f146fa3",
+  "main_rs_before_sha256": "aaa1fecf5d6431414bbbc184955ed7ae9401e7981c29612126f01fb55ae643e4",
+  "main_rs_after_sha256": "3a5358236d64994e9c146a484a323570f5473de42f671926f3920aa6b35ebca6",
+  "changes": [
+    {
+      "region": "run_dream_diff calculation; kind_map, access_map, trans_set",
+      "category": "pure_logic",
+      "disposition": "extracted",
+      "summary": "Extract pure snapshot difference calculation into a typed private plan; preserve root reads, checks and rendering.",
+      "evidence": [
+        "crates/bridge/src/cli/dream_diff_plan.rs",
+        "crates/bridge/tests/cli_dream_diff_plan.rs",
+        "docs/design/CLI-DREAM-DIFF-PLAN-2026-09-14.md"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "passed",
+      "evidence": [
+        "22-case CLI oracle includes help and argument validation; declarations unchanged."
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "Frozen pre-extraction CLI oracle: 22 output/state/read-order cases passed; pure corpus covers 256 pairs and normalizes only originally unordered access groups."
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "not_applicable",
+      "evidence": [
+        "No preview, confirmation or dry-run branch changes."
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "CLI oracle covers missing keys, kind-before-parse, parse A before B and unsupported schemas."
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Store reads and their access metadata writes remain at root. CLI fixtures compare all memory columns and trigger-captured read order, normalizing only bounded access times. New module has no I/O."
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "Six cli_dream_diff_plan tests and cargo check --locked -p ab-bridge --all-targets passed; existing warnings remain."
+      ]
+    }
+  },
+  "rollback": [
+    "Restore original root calculation and helpers together with module/test enrollment removal; no state migration."
+  ]
+}
