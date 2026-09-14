@@ -1,0 +1,72 @@
+{
+  "schema": "agent_bridge.cli_governance_live_verification.v1",
+  "implementation_commit": "af914459005c393cd3759e568f745a72dbdcf98a",
+  "goal": "G4 fresh isolated CLI parity",
+  "invocation": "normal git commit pre-commit hook; no bypass",
+  "checks": {
+    "python_gate_tests": 61,
+    "receipt_positive_cases": 3,
+    "receipt_negative_cases": 7,
+    "rust_boundary_tests": 13,
+    "pure_behavior_cases": 405,
+    "fresh_cli_cases": 143
+  },
+  "run": {
+    "schema": "agent_bridge.cli_governance_live_run.v1",
+    "success": true,
+    "baseline_commit": "4287aee34b2286ffe38c08316f1b52f1d755bc75",
+    "candidate_tree": "6880ca1d8e0642376466ad49d542ef30d09e6114",
+    "started_at_unix": 1789392717.993926,
+    "suites": {
+      "identity": {
+        "passed": 30,
+        "report_sha256": "348dd540dc30080724ee28e4a6a127f8f3674a1e23ce6683087db495e8c38960",
+        "harness_sha256": "6c0370150d6a8bf07fff8b608686f3385d87ebd96b0728749552cba7e559f273"
+      },
+      "instinct": {
+        "passed": 79,
+        "report_sha256": "2cc357fd8b8bb1fb5da83c6770f80faf0fab19c3673db1635bc5435e7d8e38dd",
+        "harness_sha256": "822248e7176be5136ca87c7aa3fefa8620625a0f4d87bf58715d1b2673a1e2e1"
+      },
+      "worktree": {
+        "passed": 34,
+        "report_sha256": "f32ae3e5dfba5fbb65142f1fecb9b7bebe799799e43e36a8a63552f5bca2d1ed",
+        "harness_sha256": "32d53f8662b077e0d3728e576847ed3886c60dc9a7683a8fc0122f82208d9bc5"
+      }
+    },
+    "enrolled_suites": [
+      "identity",
+      "instinct",
+      "worktree"
+    ],
+    "baseline_archive_sha256": "f0dc117cbe82f11a5f57f271a76a08859d4fbb25630e93d98c7e059c4e0a4048",
+    "baseline": {
+      "sha256": "4ea0bbe0a7c7ca559962553a2385a5886355c7cd388daa4b1792f6d6a56c9099",
+      "build_log_sha256": "05171aad79feb149f62786452eb641ebaffe53641b69b9e16bc107b21c600cb8",
+      "build_identity": "4287aee34b2286ffe38c08316f1b52f1d755bc75"
+    },
+    "candidate": {
+      "sha256": "dcb8f5809b43d605b321860aa8d6c6fd6e6bc01952a74ae40f4a37f641639642",
+      "build_log_sha256": "1ab3d765ca230aa9111868d1b49c5e7a79356faa85112853771b13022722c8be",
+      "build_identity": "tree-6880ca1d8e0642376466ad49d542ef30d09e6114"
+    },
+    "finished_at_unix": 1789392864.7314172
+  },
+  "local_artifacts": "/Data/ab-main-rs-governance-target/governance-live/run-6tqwx5u1",
+  "commit_gate_log": {
+    "path": "/Data/CascadeProjects/.analysis-reports/cli-governance-live-parity-20260914/commit-gate.log",
+    "sha256": "89b847024af47e6e0f351afbc2e119970640adea47b44b02aed3b55b090d45e4"
+  },
+  "source_hashes": {
+    "crates/bridge/src/main.rs": "3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1",
+    "scripts/eval/cli_governance_live.py": "bbe30b0acc437b9dc5eb97b274ddb2a6c5f98b7a2b43dc6f79d1dbcd91c3832f",
+    "scripts/eval/cli_governance_evidence.py": "ef6a2665d5e7695586f95db95ba62bcafc0ff8516431d690d4a72ca40e056a91",
+    "tests/test_cli_governance_live.py": "9c1f1b10558b5e9473b4f349ac12aca02c5a0a189c9541d5db89d681a53c28a6"
+  },
+  "limits": [
+    "Existing harness exclusions and timing normalization apply.",
+    "Local pre-commit is not server-side enforcement.",
+    "No runtime code, historical report binding or installed binary was changed.",
+    "Build warnings were present; compilation and all selected tests succeeded."
+  ]
+}

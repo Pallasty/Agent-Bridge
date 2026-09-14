@@ -60,3 +60,17 @@ attestation. Local hooks remain locally bypassable.
 
 Stop after verified source delivery and a durable execution record. Further
 extraction or coverage expansion requires a separately bounded maintenance goal.
+
+## Verified completion
+
+Implementation `af914459005c393cd3759e568f745a72dbdcf98a` passed its normal
+pre-commit: 61 Python tests, receipt controls (3 positive / 7 negative),
+13 Rust boundary tests, 405 pure behavior cases and 143 fresh CLI cases.
+Both CLI builds succeeded; the comparison/build portion took about 147 seconds
+on this workstation. Existing compiler warnings remained.
+
+The [verification record](../reports/main-rs-governance/2026-09-14-live-parity-verification.json)
+binds the actual candidate tree, binaries, harnesses and local reports.
+main.rs remains 21,848 lines and byte-identical to the pinned baseline.
+G4 implementation and local acceptance are complete; future scope is not
+automatically opened by this closeout.
