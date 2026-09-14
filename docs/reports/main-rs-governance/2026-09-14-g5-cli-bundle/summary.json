@@ -1,0 +1,41 @@
+{
+  "schema": "agent_bridge.cli_governance_live_run.v1",
+  "success": true,
+  "baseline_commit": "4287aee34b2286ffe38c08316f1b52f1d755bc75",
+  "candidate_tree": "b30ed430bc4591014b339be7f10cab08d6e45541",
+  "started_at_unix": 1789393321.5666368,
+  "suites": {
+    "identity": {
+      "passed": 30,
+      "report_sha256": "fdfcfa289ab5c65bb2eb775e33fe152e02afd78174de9b3382a8ef386ef18d0d",
+      "harness_sha256": "6c0370150d6a8bf07fff8b608686f3385d87ebd96b0728749552cba7e559f273"
+    },
+    "instinct": {
+      "passed": 79,
+      "report_sha256": "af2438f833c638a3f445d4220a8814d75c58e0aa892839660b3355bfb786d165",
+      "harness_sha256": "822248e7176be5136ca87c7aa3fefa8620625a0f4d87bf58715d1b2673a1e2e1"
+    },
+    "worktree": {
+      "passed": 34,
+      "report_sha256": "94a9fcad71702529836e51786dc0a5df4627af764fcebdfcdf798b113a435e68",
+      "harness_sha256": "32d53f8662b077e0d3728e576847ed3886c60dc9a7683a8fc0122f82208d9bc5"
+    }
+  },
+  "enrolled_suites": [
+    "identity",
+    "instinct",
+    "worktree"
+  ],
+  "baseline_archive_sha256": "f0dc117cbe82f11a5f57f271a76a08859d4fbb25630e93d98c7e059c4e0a4048",
+  "baseline": {
+    "sha256": "1c6a21d37af83f6fda25657c2312db95300015f9bfc1aaf4da342c6902ea74ed",
+    "build_log_sha256": "65bde477eaccc693064ff63cb731fe8883b8b616730b20379b0673f4acfba049",
+    "build_identity": "4287aee34b2286ffe38c08316f1b52f1d755bc75"
+  },
+  "candidate": {
+    "sha256": "55358bba7aa2ebbf9d343813d56452d10ce375ede435dadd1e51ae2d93aa56f7",
+    "build_log_sha256": "70ef10ea9a79dcf946195762a31790e6ed5c131f3c2610208feacb3a13a915e3",
+    "build_identity": "tree-b30ed430bc4591014b339be7f10cab08d6e45541"
+  },
+  "finished_at_unix": 1789393463.9983296
+}

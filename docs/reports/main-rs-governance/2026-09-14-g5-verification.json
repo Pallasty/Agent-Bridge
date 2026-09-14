@@ -1,0 +1,31 @@
+{
+  "schema": "agent_bridge.cli_governance_portable_verification.v1",
+  "implementation_commit": "3cddd6743a9d6fe3658a338d685363da4bdd92c1",
+  "candidate_tree": "b30ed430bc4591014b339be7f10cab08d6e45541",
+  "invocation": "normal pre-commit; no bypass",
+  "checks": {
+    "python_tests": 71,
+    "receipt_positive": 3,
+    "receipt_negative": 7,
+    "rust_boundary_tests": 13,
+    "pure_behavior_cases": 405,
+    "fresh_cli_cases": 143,
+    "portable_bundle_verified": true,
+    "relocated_copy_verified": true
+  },
+  "bundle_path": "docs/reports/main-rs-governance/2026-09-14-g5-cli-bundle",
+  "bundle_files_sha256": {
+    "baseline-build.log": "65bde477eaccc693064ff63cb731fe8883b8b616730b20379b0673f4acfba049",
+    "candidate-build.log": "70ef10ea9a79dcf946195762a31790e6ed5c131f3c2610208feacb3a13a915e3",
+    "identity.json": "fdfcfa289ab5c65bb2eb775e33fe152e02afd78174de9b3382a8ef386ef18d0d",
+    "instinct.json": "af2438f833c638a3f445d4220a8814d75c58e0aa892839660b3355bfb786d165",
+    "summary.json": "836a3d80fb0deb2efc7d891405d242205e3f09770c37a7427a481b7ba1845623",
+    "worktree.json": "94a9fcad71702529836e51786dc0a5df4627af764fcebdfcdf798b113a435e68"
+  },
+  "main_rs_sha256": "3a619a93efe07da437732685a0de943335b5cea1ed374cbee8c499406edc79b1",
+  "limits": [
+    "Offline integrity/source binding verification is not fresh execution or author authentication.",
+    "Deleted executable/archive hashes remain recorded claims; they are not recomputed offline.",
+    "Existing compiler warnings and CLI harness exclusions remain."
+  ]
+}

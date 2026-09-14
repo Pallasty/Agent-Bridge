@@ -59,3 +59,22 @@ exclusions, local-hook limitations and S5-V/S17 retention remain unchanged.
 - Archive that actual run, then verify against its implementation commit;
   record exact file hashes and source-sync commits without inventing SHAs.
 - Deliver by SSH with skip-ci, without runtime changes or deployment; stop.
+
+## Completion evidence
+
+Implementation `3cddd6743a9d6fe3658a338d685363da4bdd92c1` passed its normal
+pre-commit: 71 Python tests, 3 positive / 7 negative receipt controls,
+13 Rust boundary tests, 405 pure cases and 143 fresh CLI cases.
+The complete [CLI bundle](../reports/main-rs-governance/2026-09-14-g5-cli-bundle/)
+passed offline verification both in the archive directory and after relocation.
+The [verification record](../reports/main-rs-governance/2026-09-14-g5-verification.json)
+contains the exact tree and file digests.
+
+```sh
+python3 scripts/eval/cli_governance_bundle.py \
+  --run-dir docs/reports/main-rs-governance/2026-09-14-g5-cli-bundle \
+  --candidate-commit 3cddd6743a9d6fe3658a338d685363da4bdd92c1
+```
+
+G5 implementation and acceptance are complete. No runtime/main.rs changes or
+deployment were needed; no further maintenance goal is opened by this record.

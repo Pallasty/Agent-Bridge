@@ -1,0 +1,2139 @@
+{
+  "schema": "agent_bridge.worktree_session_cli_parity.v1",
+  "baseline_sha256": "1c6a21d37af83f6fda25657c2312db95300015f9bfc1aaf4da342c6902ea74ed",
+  "candidate_sha256": "55358bba7aa2ebbf9d343813d56452d10ce375ede435dadd1e51ae2d93aa56f7",
+  "script_sha256": "32d53f8662b077e0d3728e576847ed3886c60dc9a7683a8fc0122f82208d9bc5",
+  "inputs_unchanged_during_comparison": true,
+  "passed": 34,
+  "total": 34,
+  "scope": "CLI bytes; only validated new slug normalized; fake Git argv/effects and real Git refs/worktrees/contents",
+  "excluded": [
+    "real user repositories/configuration/hooks",
+    "Git index/database byte equivalence",
+    "same-second real Git collision timing",
+    "cross-stream wall-clock ordering"
+  ],
+  "cases": [
+    {
+      "case": "root-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.180944,
+        "invocation_end_unix": 1789393459.2017252,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.2054744,
+        "invocation_end_unix": 1789393459.2294927,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "group-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.231898,
+        "invocation_end_unix": 1789393459.2469616,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.2495966,
+        "invocation_end_unix": 1789393459.266071,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "new-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.2675874,
+        "invocation_end_unix": 1789393459.285943,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.2874212,
+        "invocation_end_unix": 1789393459.2974784,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "list-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.2990465,
+        "invocation_end_unix": 1789393459.3129008,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.3147993,
+        "invocation_end_unix": 1789393459.3294268,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "new-invalid-option",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.331306,
+        "invocation_end_unix": 1789393459.3512747,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.3531356,
+        "invocation_end_unix": 1789393459.3758361,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "list-invalid-option",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.3808744,
+        "invocation_end_unix": 1789393459.3998072,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.4023678,
+        "invocation_end_unix": 1789393459.4219034,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-empty",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.4247355,
+        "invocation_end_unix": 1789393459.4704103,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.4719732,
+        "invocation_end_unix": 1789393459.5178118,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-unrelated",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.5193074,
+        "invocation_end_unix": 1789393459.5641854,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.5659583,
+        "invocation_end_unix": 1789393459.603599,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-normal",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.6075265,
+        "invocation_end_unix": 1789393459.6494215,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.6509452,
+        "invocation_end_unix": 1789393459.6943104,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-no-trailing-blank",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.6958375,
+        "invocation_end_unix": 1789393459.742703,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.7441812,
+        "invocation_end_unix": 1789393459.788626,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-detached",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.7900832,
+        "invocation_end_unix": 1789393459.8358064,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.8395312,
+        "invocation_end_unix": 1789393459.8930051,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-missing-head",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.8945248,
+        "invocation_end_unix": 1789393459.9356055,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.9370294,
+        "invocation_end_unix": 1789393459.9849946,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-lossy",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393459.986527,
+        "invocation_end_unix": 1789393460.0366492,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.0402222,
+        "invocation_end_unix": 1789393460.0899098,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-order-and-reset",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.0913754,
+        "invocation_end_unix": 1789393460.1352918,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.1370754,
+        "invocation_end_unix": 1789393460.1879349,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-discovery",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.1895092,
+        "invocation_end_unix": 1789393460.2610312,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.2625031,
+        "invocation_end_unix": 1789393460.3275805,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-discovery-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.3291044,
+        "invocation_end_unix": 1789393460.3703759,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.3743508,
+        "invocation_end_unix": 1789393460.4256778,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-git-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.429447,
+        "invocation_end_unix": 1789393460.466253,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.4677618,
+        "invocation_end_unix": 1789393460.5245879,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-new-named",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "Fix-2_x"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "eecd86874b7afac53f3a0ecbcb5c2a8f36435a5d6c123ba27fdfc4517e5adeb0",
+        "stderr_sha256": "ef586a91619b08fc9ddc503c95919cea9badd6cb1b570f4164671405b94404eb",
+        "compared_stdout_sha256": "4bdf45378c6358bcff3b74070c953dea81d78b00656856b9587e3b161f7f801f",
+        "compared_stderr_sha256": "3567542d72f539db720555ee6c1f523c14f4abac4efd6621e7a87ce565c83b98",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix-2_x-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-Fix-2_x-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.528205,
+        "invocation_end_unix": 1789393460.5743055,
+        "validated_slug_timestamp": 1789393460
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "eecd86874b7afac53f3a0ecbcb5c2a8f36435a5d6c123ba27fdfc4517e5adeb0",
+        "stderr_sha256": "ef586a91619b08fc9ddc503c95919cea9badd6cb1b570f4164671405b94404eb",
+        "compared_stdout_sha256": "4bdf45378c6358bcff3b74070c953dea81d78b00656856b9587e3b161f7f801f",
+        "compared_stderr_sha256": "3567542d72f539db720555ee6c1f523c14f4abac4efd6621e7a87ce565c83b98",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix-2_x-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-Fix-2_x-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.5763743,
+        "invocation_end_unix": 1789393460.6283338,
+        "validated_slug_timestamp": 1789393460
+      }
+    },
+    {
+      "case": "fake-new-anonymous",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e0417d3fa2a5b54fb46b1e8e18a96eb2785013b7f2f29d00dd254beca7e15a32",
+        "stderr_sha256": "56e5d3c41f20e67ada7422c9f4c785a17b0ecd310a6f67cc05e60f8779dac165",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "7c15f27fb56da07a9a388d396f3a8ad8c708d486b19dd60b40c9c4e20560a885",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.6299367,
+        "invocation_end_unix": 1789393460.6775734,
+        "validated_slug_timestamp": 1789393460
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e0417d3fa2a5b54fb46b1e8e18a96eb2785013b7f2f29d00dd254beca7e15a32",
+        "stderr_sha256": "56e5d3c41f20e67ada7422c9f4c785a17b0ecd310a6f67cc05e60f8779dac165",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "7c15f27fb56da07a9a388d396f3a8ad8c708d486b19dd60b40c9c4e20560a885",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.6791575,
+        "invocation_end_unix": 1789393460.7339063,
+        "validated_slug_timestamp": 1789393460
+      }
+    },
+    {
+      "case": "fake-new-empty-name",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        ""
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e0417d3fa2a5b54fb46b1e8e18a96eb2785013b7f2f29d00dd254beca7e15a32",
+        "stderr_sha256": "56e5d3c41f20e67ada7422c9f4c785a17b0ecd310a6f67cc05e60f8779dac165",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "7c15f27fb56da07a9a388d396f3a8ad8c708d486b19dd60b40c9c4e20560a885",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.7354348,
+        "invocation_end_unix": 1789393460.7746255,
+        "validated_slug_timestamp": 1789393460
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e0417d3fa2a5b54fb46b1e8e18a96eb2785013b7f2f29d00dd254beca7e15a32",
+        "stderr_sha256": "56e5d3c41f20e67ada7422c9f4c785a17b0ecd310a6f67cc05e60f8779dac165",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "7c15f27fb56da07a9a388d396f3a8ad8c708d486b19dd60b40c9c4e20560a885",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.7763135,
+        "invocation_end_unix": 1789393460.815804,
+        "validated_slug_timestamp": 1789393460
+      }
+    },
+    {
+      "case": "fake-new-sanitized",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "Fix /中文_2"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "d484329c7697cb82a0ee951a09a86fa9e014e69e10eb356720bd8e4b7ac540d1",
+        "stderr_sha256": "ec04138cbf124ce7460c0a47dfb855ca741bd0a66386832b0de3d1638f6e02ea",
+        "compared_stdout_sha256": "53c98fc684c97db9e34b276e4fc1ffabb6e4675c10f45405125a9f7e186203c9",
+        "compared_stderr_sha256": "000db9b3b8d171f874dae64041bf4c5df4aed8d3e07043cb3f4a6ab3c2f357cb",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix----_2-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-Fix----_2-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.819793,
+        "invocation_end_unix": 1789393460.8724413,
+        "validated_slug_timestamp": 1789393460
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "d484329c7697cb82a0ee951a09a86fa9e014e69e10eb356720bd8e4b7ac540d1",
+        "stderr_sha256": "ec04138cbf124ce7460c0a47dfb855ca741bd0a66386832b0de3d1638f6e02ea",
+        "compared_stdout_sha256": "53c98fc684c97db9e34b276e4fc1ffabb6e4675c10f45405125a9f7e186203c9",
+        "compared_stderr_sha256": "000db9b3b8d171f874dae64041bf4c5df4aed8d3e07043cb3f4a6ab3c2f357cb",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix----_2-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-Fix----_2-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.8752074,
+        "invocation_end_unix": 1789393460.911146,
+        "validated_slug_timestamp": 1789393460
+      }
+    },
+    {
+      "case": "fake-new-explicit-base",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--base",
+        "fixture-base"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e0417d3fa2a5b54fb46b1e8e18a96eb2785013b7f2f29d00dd254beca7e15a32",
+        "stderr_sha256": "24444de39c6413ed7deaab33ac0bb51222783dd267b6fa2247962ebbe267d072",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "f05f5792c1512342dfeedebe3de50ed827203f84fc49a20d6e514ae7329e5018",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "fixture-base"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.913068,
+        "invocation_end_unix": 1789393460.963902,
+        "validated_slug_timestamp": 1789393460
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e0417d3fa2a5b54fb46b1e8e18a96eb2785013b7f2f29d00dd254beca7e15a32",
+        "stderr_sha256": "24444de39c6413ed7deaab33ac0bb51222783dd267b6fa2247962ebbe267d072",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "f05f5792c1512342dfeedebe3de50ed827203f84fc49a20d6e514ae7329e5018",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "fixture-base"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393460.9654114,
+        "invocation_end_unix": 1789393461.0193787,
+        "validated_slug_timestamp": 1789393460
+      }
+    },
+    {
+      "case": "fake-new-discovery",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "discovered"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "438f254c25fff49b8008a84a4e7937434cb185c06f8f0f883a4c4b343305edf7",
+        "stderr_sha256": "d09cd765f3f75f43e85daca2011f9287645599de481268ce7a81106eaca789c1",
+        "compared_stdout_sha256": "3c1724a1603cec5efa3ca4d380d978e369a975d787cb24c90894a7acb91a9b86",
+        "compared_stderr_sha256": "dfe477084926fc9cb5f0b5ae9a2d06883114f0f4a4ba8d6e49e869cc3e1b60be",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/discovered-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-discovered-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.0209289,
+        "invocation_end_unix": 1789393461.0837784,
+        "validated_slug_timestamp": 1789393461
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "438f254c25fff49b8008a84a4e7937434cb185c06f8f0f883a4c4b343305edf7",
+        "stderr_sha256": "d09cd765f3f75f43e85daca2011f9287645599de481268ce7a81106eaca789c1",
+        "compared_stdout_sha256": "3c1724a1603cec5efa3ca4d380d978e369a975d787cb24c90894a7acb91a9b86",
+        "compared_stderr_sha256": "dfe477084926fc9cb5f0b5ae9a2d06883114f0f4a4ba8d6e49e869cc3e1b60be",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/discovered-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-discovered-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.08534,
+        "invocation_end_unix": 1789393461.1592145,
+        "validated_slug_timestamp": 1789393461
+      }
+    },
+    {
+      "case": "fake-new-override-priority",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "722bcf445f48e6cdf58e17ea3ad94046dc800f982fdfd3c150d5ba0d947144d3",
+        "stderr_sha256": "42adb0ef27eeaa1ad3361f509f7f4df837609ca21d95c15962939ebbd3b66560",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "7c15f27fb56da07a9a388d396f3a8ad8c708d486b19dd60b40c9c4e20560a885",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.1608534,
+        "invocation_end_unix": 1789393461.2023149,
+        "validated_slug_timestamp": 1789393461
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "722bcf445f48e6cdf58e17ea3ad94046dc800f982fdfd3c150d5ba0d947144d3",
+        "stderr_sha256": "42adb0ef27eeaa1ad3361f509f7f4df837609ca21d95c15962939ebbd3b66560",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "7c15f27fb56da07a9a388d396f3a8ad8c708d486b19dd60b40c9c4e20560a885",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.203877,
+        "invocation_end_unix": 1789393461.25286,
+        "validated_slug_timestamp": 1789393461
+      }
+    },
+    {
+      "case": "fake-new-git-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "dacc74da6718084e4910624ff9f5b63a58c5711b42996b47ed578658d1016604",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "63136779e1c2927784b1b531af8384cd6be20678a066af632dddd57f9bebf0bf",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.2544076,
+        "invocation_end_unix": 1789393461.3035862,
+        "validated_slug_timestamp": 1789393461
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "dacc74da6718084e4910624ff9f5b63a58c5711b42996b47ed578658d1016604",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "63136779e1c2927784b1b531af8384cd6be20678a066af632dddd57f9bebf0bf",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.3053603,
+        "invocation_end_unix": 1789393461.3542352,
+        "validated_slug_timestamp": 1789393461
+      }
+    },
+    {
+      "case": "fake-new-mkdir-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.3559308,
+        "invocation_end_unix": 1789393461.3736649,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.3793705,
+        "invocation_end_unix": 1789393461.4022138,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-new-discovery-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.4057322,
+        "invocation_end_unix": 1789393461.4493387,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1789393461.4508054,
+        "invocation_end_unix": 1789393461.5012314,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "real-head",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "real"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "ff7ccee6dd8981e17d4bb217910680c0bb200b12aba5c0472f66ac35ad78f49a",
+        "stderr_sha256": "d9763e32507b28a822980841cb72e1f84551d6f53ec0d4fa0442c67c3aac7cbf",
+        "compared_stdout_sha256": "14da06dfa4d0988b4b6d03863911b853e20d31e5c43eacfd910faace935996f7",
+        "compared_stderr_sha256": "3ba38757d05aeea373ed107a86f0a39a39a15c32a09dbad4aff87ef28cab815a",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "1c7bcff45222ed1f89e15bbe634672720b60c2eeeeb12d7a0b2ebc6861d31235"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/real-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-real-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/real-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1789393461.528901,
+        "invocation_end_unix": 1789393461.559362,
+        "validated_slug_timestamp": 1789393461
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "ff7ccee6dd8981e17d4bb217910680c0bb200b12aba5c0472f66ac35ad78f49a",
+        "stderr_sha256": "d9763e32507b28a822980841cb72e1f84551d6f53ec0d4fa0442c67c3aac7cbf",
+        "compared_stdout_sha256": "14da06dfa4d0988b4b6d03863911b853e20d31e5c43eacfd910faace935996f7",
+        "compared_stderr_sha256": "3ba38757d05aeea373ed107a86f0a39a39a15c32a09dbad4aff87ef28cab815a",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "1c7bcff45222ed1f89e15bbe634672720b60c2eeeeb12d7a0b2ebc6861d31235"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/real-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-real-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/real-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1789393461.601233,
+        "invocation_end_unix": 1789393461.6401758,
+        "validated_slug_timestamp": 1789393461
+      }
+    },
+    {
+      "case": "real-base",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--base",
+        "fixture-base"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "722bcf445f48e6cdf58e17ea3ad94046dc800f982fdfd3c150d5ba0d947144d3",
+        "stderr_sha256": "8f3f28903e755df35135a437ed11255b5a19384be34cb49603bba9065beaff21",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "631469862a6eec07288b0d555dfdfaa121c6f2a2f1fa9befd86ef0e876481a2b",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "4bd34c16534c9d1bd625d93e63529ffb23f5767e5d9f9f228c76de4d71cb3fbe"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1789393461.684769,
+        "invocation_end_unix": 1789393461.7195113,
+        "validated_slug_timestamp": 1789393461
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "722bcf445f48e6cdf58e17ea3ad94046dc800f982fdfd3c150d5ba0d947144d3",
+        "stderr_sha256": "8f3f28903e755df35135a437ed11255b5a19384be34cb49603bba9065beaff21",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "631469862a6eec07288b0d555dfdfaa121c6f2a2f1fa9befd86ef0e876481a2b",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "4bd34c16534c9d1bd625d93e63529ffb23f5767e5d9f9f228c76de4d71cb3fbe"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1789393461.7648525,
+        "invocation_end_unix": 1789393461.7951496,
+        "validated_slug_timestamp": 1789393461
+      }
+    },
+    {
+      "case": "real-discovery",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "722bcf445f48e6cdf58e17ea3ad94046dc800f982fdfd3c150d5ba0d947144d3",
+        "stderr_sha256": "16c18cda4f65a616800efc9c6176aa22bf4fa366eccae380fe215b675b89ed35",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "9ad3fb3434a80a37fec55d184a882b0c644db69527bdb47bf347faddfa9142c1",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "4bd34c16534c9d1bd625d93e63529ffb23f5767e5d9f9f228c76de4d71cb3fbe"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1789393461.8354328,
+        "invocation_end_unix": 1789393461.87147,
+        "validated_slug_timestamp": 1789393461
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "722bcf445f48e6cdf58e17ea3ad94046dc800f982fdfd3c150d5ba0d947144d3",
+        "stderr_sha256": "16c18cda4f65a616800efc9c6176aa22bf4fa366eccae380fe215b675b89ed35",
+        "compared_stdout_sha256": "eac6b9d16463259130cd56c91878f01b5e555d66031f9bcdc24548693c391bd3",
+        "compared_stderr_sha256": "9ad3fb3434a80a37fec55d184a882b0c644db69527bdb47bf347faddfa9142c1",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "4bd34c16534c9d1bd625d93e63529ffb23f5767e5d9f9f228c76de4d71cb3fbe"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-anon-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1789393461.9170125,
+        "invocation_end_unix": 1789393461.9537897,
+        "validated_slug_timestamp": 1789393461
+      }
+    },
+    {
+      "case": "real-invalid-base",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--base",
+        "fixture-does-not-exist"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "25cf66a5c32f6be0168761e13b96dca85c6845d3564aa3b6710c4f4be4461531",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "f0d347c5a019c9b4aa4f02b97aa06eaff465b72a61a55f67d325f95e1b882835",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1789393461.9980898,
+        "invocation_end_unix": 1789393462.022804,
+        "validated_slug_timestamp": 1789393462
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "25cf66a5c32f6be0168761e13b96dca85c6845d3564aa3b6710c4f4be4461531",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "f0d347c5a019c9b4aa4f02b97aa06eaff465b72a61a55f67d325f95e1b882835",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1789393462.0599873,
+        "invocation_end_unix": 1789393462.0820568,
+        "validated_slug_timestamp": 1789393462
+      }
+    },
+    {
+      "case": "real-mkdir-failure",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1789393462.1224313,
+        "invocation_end_unix": 1789393462.1409776,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "9872a55784f373de0f36846b6852721bcc090ad8f754b6ddeab07faa064fe14f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1789393462.175725,
+        "invocation_end_unix": 1789393462.195351,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "real-list-empty",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1789393462.2333436,
+        "invocation_end_unix": 1789393462.2547755,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "14e868d599058b3e4e6436d3b0e37e4fd107eb70e4193003249d782bbdf75e6a",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1789393462.2906976,
+        "invocation_end_unix": 1789393462.311828,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "real-list-seeded",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e1ba238f71ea2fbc022284ba3907a126b27bc701c74476338de07d54085af551",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "e1ba238f71ea2fbc022284ba3907a126b27bc701c74476338de07d54085af551",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/seed": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-detached\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-seed\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/seed\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/ordinary\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\n"
+        },
+        "invocation_start_unix": 1789393462.3798914,
+        "invocation_end_unix": 1789393462.3998654,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e1ba238f71ea2fbc022284ba3907a126b27bc701c74476338de07d54085af551",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "e1ba238f71ea2fbc022284ba3907a126b27bc701c74476338de07d54085af551",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/seed": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-detached\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/.worktrees/session-seed\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/seed\n\nworktree /Data/ab-main-rs-governance-target/governance-live/run-kcwooda0/worktree-session-parity-ba3ykun0/repo/ordinary\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\n"
+        },
+        "invocation_start_unix": 1789393462.469027,
+        "invocation_end_unix": 1789393462.4885054,
+        "validated_slug_timestamp": null
+      }
+    }
+  ]
+}
