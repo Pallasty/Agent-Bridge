@@ -1,0 +1,179 @@
+warning: the usage of Script Group `Greek` in this crate consists solely of mixed script confusables
+     --> crates/store/src/sqlite.rs:29407:14
+      |
+29407 |     async fn coactivation_stats_β_trigger_threshold() {
+      |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |
+      = note: the usage includes 'β' (U+03B2)
+      = note: please recheck to make sure their usages are indeed what you want
+      = note: `#[warn(mixed_script_confusables)]` on by default
+
+warning: variable does not need to be mutable
+   --> crates/store/src/sqlite/temporal_evidence.rs:749:9
+    |
+749 |     let mut accepted_versions = vec![TEMPORAL_EVIDENCE_SCHEMA_VERSION];
+    |         ----^^^^^^^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ab-store` (lib) generated 2 warnings (run `cargo fix --lib -p ab-store` to apply 1 suggestion)
+   Compiling ab-bridge v0.14.0 (/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/sources-il2b4isy/baseline-source/crates/bridge)
+warning: function `tool_context_from_call` is never used
+   --> crates/mcp/src/server.rs:115:4
+    |
+115 | fn tool_context_from_call(params: &Value, args: &Value) -> ToolContext {
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ab-mcp` (lib) generated 1 warning
+warning: type `ToolPolicy` is more private than the item `build_registry_with_policy`
+     --> crates/bridge/src/mcp_tools.rs:55590:1
+      |
+55590 | pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> FinalizedToolRegistry {
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ function `build_registry_with_policy` is reachable at visibility `pub`
+      |
+note: but type `ToolPolicy` is only usable at visibility `pub(crate)`
+     --> crates/bridge/src/mcp_tools.rs:52112:1
+      |
+52112 | pub(crate) struct ToolPolicy {
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      = note: `#[warn(private_interfaces)]` on by default
+
+warning: function `next_head` is never used
+   --> crates/bridge/src/invocation_guardian_service.rs:345:4
+    |
+345 | fn next_head(
+    |    ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `spawn_with_failover` is never used
+     --> crates/bridge/src/mcp_tools.rs:18221:10
+      |
+18221 | async fn spawn_with_failover(
+      |          ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `WORK_MEMORY_SECONDS_PER_DAY` is never used
+     --> crates/bridge/src/mcp_tools.rs:23295:7
+      |
+23295 | const WORK_MEMORY_SECONDS_PER_DAY: i64 = 86_400;
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `OPTION_E_DEFAULT_MAX_PER_HOUR` is never used
+     --> crates/bridge/src/mcp_tools.rs:38114:7
+      |
+38114 | const OPTION_E_DEFAULT_MAX_PER_HOUR: u32 = 30;
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `OptionERateState` is never constructed
+     --> crates/bridge/src/mcp_tools.rs:38245:8
+      |
+38245 | struct OptionERateState {
+      |        ^^^^^^^^^^^^^^^^
+
+warning: static `OPTION_E_RATE_LIMITER` is never used
+     --> crates/bridge/src/mcp_tools.rs:38250:8
+      |
+38250 | static OPTION_E_RATE_LIMITER: std::sync::OnceLock<std::sync::Mutex<OptionERateState>> =
+      |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `option_e_rate_check_and_bump` is never used
+     --> crates/bridge/src/mcp_tools.rs:38256:15
+      |
+38256 | pub(crate) fn option_e_rate_check_and_bump() -> bool {
+      |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `resolve_audit_path` is never used
+     --> crates/bridge/src/mcp_tools.rs:38653:4
+      |
+38653 | fn resolve_audit_path(candidate: &str, repo_root: &std::path::Path) -> std::path::PathBuf {
+      |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `memory_related_keys_materialize_plan_from_records` is never used
+     --> crates/bridge/src/mcp_tools.rs:40285:4
+      |
+40285 | fn memory_related_keys_materialize_plan_from_records(
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variant `InvalidVoicePlan` is never constructed
+   --> crates/bridge/src/story_contract.rs:229:5
+    |
+221 | pub enum StoryContractError {
+    |          ------------------ variant in this enum
+...
+229 |     InvalidVoicePlan(String),
+    |     ^^^^^^^^^^^^^^^^
+    |
+    = note: `StoryContractError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: function `ingest_story_source` is never used
+   --> crates/bridge/src/story_contract.rs:264:8
+    |
+264 | pub fn ingest_story_source(
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_chapter_voice_plan` is never used
+   --> crates/bridge/src/story_contract.rs:468:8
+    |
+468 | pub fn build_chapter_voice_plan(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_story_command_preflight` is never used
+   --> crates/bridge/src/story_contract.rs:633:8
+    |
+633 | pub fn build_story_command_preflight(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `split_attributed_dialogue` is never used
+   --> crates/bridge/src/story_contract.rs:997:4
+    |
+997 | fn split_attributed_dialogue(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `source_line` is never used
+    --> crates/bridge/src/story_contract.rs:1090:4
+     |
+1090 | fn source_line(event: &Value) -> Result<u64, StoryContractError> {
+     |    ^^^^^^^^^^^
+
+warning: function `source_chars` is never used
+    --> crates/bridge/src/story_contract.rs:1098:4
+     |
+1098 | fn source_chars(event: &Value) -> Result<(usize, usize), StoryContractError> {
+     |    ^^^^^^^^^^^^
+
+warning: function `source_span` is never used
+    --> crates/bridge/src/story_contract.rs:1119:4
+     |
+1119 | fn source_span(
+     |    ^^^^^^^^^^^
+
+warning: function `selected_chapter_id` is never used
+    --> crates/bridge/src/story_contract.rs:1139:4
+     |
+1139 | fn selected_chapter_id<'a>(plan: &'a Value, line: u64) -> Result<&'a str, StoryContractError> {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `transition_after` is never used
+    --> crates/bridge/src/story_contract.rs:1161:4
+     |
+1161 | fn transition_after(
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `required_str` is never used
+    --> crates/bridge/src/story_contract.rs:1182:4
+     |
+1182 | fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str, StoryContractError> {
+     |    ^^^^^^^^^^^^
+
+warning: function `voice_plan_error` is never used
+    --> crates/bridge/src/story_contract.rs:1188:4
+     |
+1188 | fn voice_plan_error<T>(message: &str) -> Result<T, StoryContractError> {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: `ab-bridge` (lib) generated 22 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 04s

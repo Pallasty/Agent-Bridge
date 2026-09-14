@@ -65,3 +65,17 @@ three call sites, removed helpers and test enrollment together to restore the
 two original functions. No database migration, installation or service restart
 is needed. main.rs decreases from 21,860 to 21,828 lines; the result is one owner
 for duplicate arithmetic, not a target for further line reduction.
+
+## Verified completion
+
+Implementation `d7a001b342b36615c46db2d107e9629d9ac8334b` passed its normal
+pre-commit and all-targets check: 77 Python gate tests, 13 boundary tests, four
+date tests, seven weekly/snapshot cases, 405 pure cases and 143 original CLI
+comparisons. Receipt controls passed and the historical chain now has nine
+transitions. Existing compiler warnings remain.
+
+The [verification record](../reports/main-rs-governance/2026-09-14-civil-date-verification.json)
+binds source, tests, logs and the complete CLI bundle. Offline G5 verification
+of that bundle passed against the implementation commit; it covers the original
+143 CLI cases, with date-test evidence recorded separately. This consolidation
+is complete; no additional extraction is scheduled by this record.

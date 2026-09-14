@@ -1,0 +1,50 @@
+{
+  "schema": "agent_bridge.cli_civil_date_verification.v1",
+  "implementation_commit": "d7a001b342b36615c46db2d107e9629d9ac8334b",
+  "source_base": "69081c537ae3ce25647e49a29ca79f9fd093d2e3",
+  "candidate_tree": "311689dc58568a1a286a0c0c731c1b7777385f8e",
+  "checks": {
+    "normal_precommit_exit": 0,
+    "python_gate_tests": 77,
+    "receipt_positive": 3,
+    "receipt_negative": 7,
+    "rust_boundary_tests": 13,
+    "civil_date_tests": 4,
+    "dense_date_inputs": 292195,
+    "seconds_boundaries": 11,
+    "sampled_seconds_inputs": 10000,
+    "known_dates": 10,
+    "weekly_cli_cases": 7,
+    "pure_behavior_cases": 405,
+    "existing_cli_parity_cases": 143,
+    "ab_bridge_all_targets_check": "passed",
+    "new_module_and_test_rustfmt": "passed",
+    "portable_cli_bundle": "passed",
+    "receipt_chain_count": 9
+  },
+  "main_rs_lines_before": 21860,
+  "main_rs_lines_after": 21828,
+  "source_sha256": {
+    "crates/bridge/src/main.rs": "aaa1fecf5d6431414bbbc184955ed7ae9401e7981c29612126f01fb55ae643e4",
+    "crates/bridge/src/cli/civil_date.rs": "0b9e81d7dcaa7954a9b4566be57e557b96b27d0b9501827a4ab24d4fd1485ffd",
+    "crates/bridge/tests/cli_civil_date.rs": "ee1ddf47e4383a300b34cd26a7bb3492b5420d1567d2f2e6378f0b350f061454",
+    "crates/bridge/tests/fixtures/civil_date_baseline.rs": "f3a91b1d5da5eeae202e4ea14dd1700ca3013fab3d79e2ec6e0b4985689baf3b"
+  },
+  "bundle_path": "docs/reports/main-rs-governance/2026-09-14-civil-date-cli-bundle",
+  "bundle_files_sha256": {
+    "baseline-build.log": "ef0570bc98156abf06ac2cc8ee812cad97273113d87da586158e1eddeb16b262",
+    "candidate-build.log": "a9251d5400ccd575d0944f30410e2b6ece505179588ea5602a0603006f94cd4c",
+    "date-tests.log": "4a9d1bde79bdaa30a96783e653b5a9b0124063ba99eda6a7a9cbef3be13da472",
+    "identity.json": "a2307c928424f7b6877f54e82f08cff1c5a57452f6022bf002a9ee50ef233bdd",
+    "instinct.json": "e7e5669d2b96fbef49d7e83ccfc900c5ba39fadd3741fe59e0969da576c81bd9",
+    "summary.json": "41ec3e38ba7867b0856a00f602d0b8f76560ef980e398f2bd97737de58138f44",
+    "worktree.json": "d4deb4252f8ef6c0670684c6101d4f235f8bde48df272263039513c6b3293e27"
+  },
+  "commit_gate_log_sha256": "e457a3e82d5cf585fba089b9da80a807da4abc054f968e2c807e6353d985e4ff",
+  "limits": [
+    "Input contract is day counts derived from i64 Unix seconds, not every i64 day value.",
+    "Final i32 year cast is intentionally unchanged for extreme seconds.",
+    "Date comparisons are separate from the 143-case portable CLI verifier.",
+    "Existing compiler warnings remain; no installation or service restart."
+  ]
+}

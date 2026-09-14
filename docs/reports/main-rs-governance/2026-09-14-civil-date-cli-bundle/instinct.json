@@ -1,0 +1,3068 @@
+{
+  "schema": "agent_bridge.instinct_cli_parity.v1",
+  "baseline_sha256": "16032ff181d5067e6b49be38a82a83a4c437888ccbed3950b2bc1a3395608781",
+  "candidate_sha256": "838c65e4a4e673ae51500cd0391229acb39eb327a3b5741cf6bd6bfcb9119246",
+  "script_sha256": "822248e7176be5136ca87c7aa3fefa8620625a0f4d87bf58715d1b2673a1e2e1",
+  "binaries_unchanged_during_comparison": true,
+  "script_unchanged_during_comparison": true,
+  "passed": 79,
+  "total": 79,
+  "scope": "CLI bytes and fixture effects; two writes use validated business rows, not SQLite bytes",
+  "excluded": [
+    "live services",
+    "real credentials/state",
+    "dynamic successful JSON plans",
+    "successful timestamped packet/preflight/rotation outputs"
+  ],
+  "cases": [
+    {
+      "case": "root-help",
+      "argv": [
+        "agent-bridge",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.2466779,
+        "invocation_end_unix": 1789398653.2624133,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.2644148,
+        "invocation_end_unix": 1789398653.2756085,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "instinct-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "5401e600f220dd2b12677dd8eb5446f34e0d6bf6b48143b696bbe778a6c030ba",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.277519,
+        "invocation_end_unix": 1789398653.296696,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "5401e600f220dd2b12677dd8eb5446f34e0d6bf6b48143b696bbe778a6c030ba",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.3009152,
+        "invocation_end_unix": 1789398653.3135216,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "candidates-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "candidates",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "57e084b4c815b8bd450c46d4f4eff4635b22412bb5b468742b54027a5bfe9bb8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.3151915,
+        "invocation_end_unix": 1789398653.3260703,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "57e084b4c815b8bd450c46d4f4eff4635b22412bb5b468742b54027a5bfe9bb8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.3276613,
+        "invocation_end_unix": 1789398653.3393414,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "candidates-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "candidates",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d2ebd25ea33b7b8f5837e29f911fdc1199db8d9118fdc65dc71e0e502d06724b",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.341327,
+        "invocation_end_unix": 1789398653.3543563,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d2ebd25ea33b7b8f5837e29f911fdc1199db8d9118fdc65dc71e0e502d06724b",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.3563693,
+        "invocation_end_unix": 1789398653.369098,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-packet-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-packet",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "813f48c99dbdc5085409b286fb333c619c91a53f16c2cdd45acae90f3d6d8318",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.3711143,
+        "invocation_end_unix": 1789398653.381474,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "813f48c99dbdc5085409b286fb333c619c91a53f16c2cdd45acae90f3d6d8318",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.383295,
+        "invocation_end_unix": 1789398653.3949466,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-packet-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-packet",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "804ebcf94dc1f15ffd03067d0a750b5f6db93b82c25a2c172199e3690f37b05f",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.396803,
+        "invocation_end_unix": 1789398653.4064,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "804ebcf94dc1f15ffd03067d0a750b5f6db93b82c25a2c172199e3690f37b05f",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.4082053,
+        "invocation_end_unix": 1789398653.4198356,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "14fe379e7c775cc327a2c81c16b16db194efd4c9dc9154fb306ebfdb140c807a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.4216821,
+        "invocation_end_unix": 1789398653.4380453,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "14fe379e7c775cc327a2c81c16b16db194efd4c9dc9154fb306ebfdb140c807a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.4397576,
+        "invocation_end_unix": 1789398653.4533834,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4a691ff3377d76dd3c9f29f20dd5d14bf1c4f3d5b64e87e9f3e0163a62659570",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.455048,
+        "invocation_end_unix": 1789398653.471572,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4a691ff3377d76dd3c9f29f20dd5d14bf1c4f3d5b64e87e9f3e0163a62659570",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.4757972,
+        "invocation_end_unix": 1789398653.4908142,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "8cd8589e1ae60cc35d0876655cc648500cd8c0074769ed0c3fdf58ffcddb1744",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.4953628,
+        "invocation_end_unix": 1789398653.513368,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "8cd8589e1ae60cc35d0876655cc648500cd8c0074769ed0c3fdf58ffcddb1744",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.5150535,
+        "invocation_end_unix": 1789398653.529758,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b8f1f42c31957295226a89f38c5ee55f5ea253cfdd850f33e28aeb2c1f4e7597",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.531504,
+        "invocation_end_unix": 1789398653.5484905,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b8f1f42c31957295226a89f38c5ee55f5ea253cfdd850f33e28aeb2c1f4e7597",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.5510173,
+        "invocation_end_unix": 1789398653.5699534,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "30ffce6752e4589ab5b52d75d0cfe1c5ac87d14e6e83e1a3274055186ee276d7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.5735247,
+        "invocation_end_unix": 1789398653.5840933,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "30ffce6752e4589ab5b52d75d0cfe1c5ac87d14e6e83e1a3274055186ee276d7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.5858147,
+        "invocation_end_unix": 1789398653.5964506,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a851ca0e2862b413b15ffea69fc8bfba261be374c7d60b997e131f78c8e9c098",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.5981913,
+        "invocation_end_unix": 1789398653.6087942,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a851ca0e2862b413b15ffea69fc8bfba261be374c7d60b997e131f78c8e9c098",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.6105354,
+        "invocation_end_unix": 1789398653.6261015,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-status-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-status",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "11c423d8c33e4fe787b48d9e9816597f5a94994cbf67e94eb26e72bcbbb6f16f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.627912,
+        "invocation_end_unix": 1789398653.642494,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "11c423d8c33e4fe787b48d9e9816597f5a94994cbf67e94eb26e72bcbbb6f16f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.6441634,
+        "invocation_end_unix": 1789398653.6577458,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-status-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-status",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a809b3cd0708f60ee76c2ae26e4a6cc56604e3646a1b6d11487c1dd0be636380",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.6595144,
+        "invocation_end_unix": 1789398653.673037,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a809b3cd0708f60ee76c2ae26e4a6cc56604e3646a1b6d11487c1dd0be636380",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.6750748,
+        "invocation_end_unix": 1789398653.6894119,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "0ef08f233205fa27822da6616a9f7f2a8aca8b3bb10a075d1625dd95725c0836",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.6911511,
+        "invocation_end_unix": 1789398653.709295,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "0ef08f233205fa27822da6616a9f7f2a8aca8b3bb10a075d1625dd95725c0836",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.711405,
+        "invocation_end_unix": 1789398653.7301042,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "94be2832a8fc705d819bc93c8fb61a0f3cceaf60c325d1073765d78c2d0bf4ad",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.7340124,
+        "invocation_end_unix": 1789398653.7469008,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "94be2832a8fc705d819bc93c8fb61a0f3cceaf60c325d1073765d78c2d0bf4ad",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.7495615,
+        "invocation_end_unix": 1789398653.7654378,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "d53298c539b2bd812fc9546b9cb201e6371398a8c0a2e01a8b2e6f04af173629",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.7673912,
+        "invocation_end_unix": 1789398653.7811804,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "d53298c539b2bd812fc9546b9cb201e6371398a8c0a2e01a8b2e6f04af173629",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.782953,
+        "invocation_end_unix": 1789398653.8014855,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "16799a6fdb6665b34aa8b7026286d573e8d5257c9960c0a3207b8ff515f3ff87",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.8056753,
+        "invocation_end_unix": 1789398653.822731,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "16799a6fdb6665b34aa8b7026286d573e8d5257c9960c0a3207b8ff515f3ff87",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.8267934,
+        "invocation_end_unix": 1789398653.8427687,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "rotate-log-help",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "rotate-log",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "7c0a612fadd104919f72d538df7f115060d1b486eae175c5857d8b9142ca4b0e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.8445895,
+        "invocation_end_unix": 1789398653.8614104,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "7c0a612fadd104919f72d538df7f115060d1b486eae175c5857d8b9142ca4b0e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.8632636,
+        "invocation_end_unix": 1789398653.8758314,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "rotate-log-invalid-option",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "rotate-log",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ff5da87610a5732e52f52218d32684ad88cfb8016bb951d0fb70570049f9673d",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.877769,
+        "invocation_end_unix": 1789398653.8884854,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ff5da87610a5732e52f52218d32684ad88cfb8016bb951d0fb70570049f9673d",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.890582,
+        "invocation_end_unix": 1789398653.9093065,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "candidates-normal-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "candidates",
+        "--limit",
+        "3"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "065776376fd9b00b5b3038f9076094bb73330e047c77b42037e4efcded4977d3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.9111407,
+        "invocation_end_unix": 1789398653.9245687,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "065776376fd9b00b5b3038f9076094bb73330e047c77b42037e4efcded4977d3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.9263327,
+        "invocation_end_unix": 1789398653.941887,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "candidates-empty-observations-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "candidates",
+        "--limit",
+        "3"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "87cb5b2a78698a7fa66ca5297a7cadf91042f365d92d1df7abcebe232c7ff63f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.943765,
+        "invocation_end_unix": 1789398653.9554536,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "87cb5b2a78698a7fa66ca5297a7cadf91042f365d92d1df7abcebe232c7ff63f",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.9572163,
+        "invocation_end_unix": 1789398653.974625,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-status-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-status"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "0cda127047d4f0acece1c6e6226c4d6d0f7ad96c34dfb4b68fe284a54ecf50d8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.9786887,
+        "invocation_end_unix": 1789398653.9915638,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "0cda127047d4f0acece1c6e6226c4d6d0f7ad96c34dfb4b68fe284a54ecf50d8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398653.9935627,
+        "invocation_end_unix": 1789398654.0053065,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-limit-0-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--limit",
+        "0"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "4562598d6baab80788ac054775cdd82bd3c5d15aefa8af6e40159ab4714bfaed",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.0073967,
+        "invocation_end_unix": 1789398654.022392,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "4562598d6baab80788ac054775cdd82bd3c5d15aefa8af6e40159ab4714bfaed",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.0242093,
+        "invocation_end_unix": 1789398654.0347736,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-limit-1-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--limit",
+        "1"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "92e722d8729418d9cdc24432caafcfe844cdc4a0263bd4266f428b497a7918bc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.0367098,
+        "invocation_end_unix": 1789398654.0505915,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "92e722d8729418d9cdc24432caafcfe844cdc4a0263bd4266f428b497a7918bc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.0524063,
+        "invocation_end_unix": 1789398654.0681865,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-redacted-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "5a0d232d6e9cba1b4de4b8a294dd9e9e5039d997e0dba8f1812430babb64adfa",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.0700984,
+        "invocation_end_unix": 1789398654.085596,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "5a0d232d6e9cba1b4de4b8a294dd9e9e5039d997e0dba8f1812430babb64adfa",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.0873957,
+        "invocation_end_unix": 1789398654.1013904,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-excerpt-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--include-local-excerpt"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "d56f5a90291a302bc360d20f2372c43cb7475f555a9c9494202fbb378517776d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.1033032,
+        "invocation_end_unix": 1789398654.117878,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "d56f5a90291a302bc360d20f2372c43cb7475f555a9c9494202fbb378517776d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.119843,
+        "invocation_end_unix": 1789398654.1332924,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-missing.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ee6a9c1acf11efa2f06f053a41e344bbe49ff5a145b4835a1dd3e4061499091",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.1350021,
+        "invocation_end_unix": 1789398654.1482956,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ee6a9c1acf11efa2f06f053a41e344bbe49ff5a145b4835a1dd3e4061499091",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.1500747,
+        "invocation_end_unix": 1789398654.1657193,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-malformed.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "08bca26f9b234caef3b607cecca71b148d3a71adef4fb1ef2d39de8e16c8b8c3",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.1702607,
+        "invocation_end_unix": 1789398654.1835039,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "08bca26f9b234caef3b607cecca71b148d3a71adef4fb1ef2d39de8e16c8b8c3",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.185267,
+        "invocation_end_unix": 1789398654.1985996,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-wrong-schema.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a0a9df7c4781e5a05c4a38ba90df5144f07bb3b586a5708554b29ab8c7ad5c7c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2004442,
+        "invocation_end_unix": 1789398654.2146797,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a0a9df7c4781e5a05c4a38ba90df5144f07bb3b586a5708554b29ab8c7ad5c7c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2163944,
+        "invocation_end_unix": 1789398654.2303967,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-missing-candidate-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "absent",
+        "--decision",
+        "approve"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5b9c98aeab873f7bafbb0610938f7fbca75f30a9289fac6c937f2085c076a991",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2322645,
+        "invocation_end_unix": 1789398654.243371,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5b9c98aeab873f7bafbb0610938f7fbca75f30a9289fac6c937f2085c076a991",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2452207,
+        "invocation_end_unix": 1789398654.2582793,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-missing.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b429baad344893df9d0e0c370b50b82931fc9de4d34e9197c66797de19ed896f",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2625759,
+        "invocation_end_unix": 1789398654.2733786,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b429baad344893df9d0e0c370b50b82931fc9de4d34e9197c66797de19ed896f",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2751298,
+        "invocation_end_unix": 1789398654.288014,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-malformed.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "352f4c8e85272c8cd92defda83b9f8a9710d03d9def1e4582c74a480e62e0239",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.2922325,
+        "invocation_end_unix": 1789398654.3111541,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "352f4c8e85272c8cd92defda83b9f8a9710d03d9def1e4582c74a480e62e0239",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.3133194,
+        "invocation_end_unix": 1789398654.3235855,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-wrong-schema.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ce02cda18ff956402360dc8e4e85e8562e3b8d6898fcc09da9b53862865fc19",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.3253312,
+        "invocation_end_unix": 1789398654.3378756,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ce02cda18ff956402360dc8e4e85e8562e3b8d6898fcc09da9b53862865fc19",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.3398323,
+        "invocation_end_unix": 1789398654.351528,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-missing-candidate-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "absent"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "f77017d2b2955a96aa0a55ed917269baa81306061d403131d2e4f83284751688",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.3533158,
+        "invocation_end_unix": 1789398654.3663623,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "f77017d2b2955a96aa0a55ed917269baa81306061d403131d2e4f83284751688",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.368013,
+        "invocation_end_unix": 1789398654.3868656,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-missing.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1106b2ec8157d6d16c7f5f5a3225a29297eebed6fc0b2ebd9dcd14d77463b32",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.3913596,
+        "invocation_end_unix": 1789398654.4086447,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1106b2ec8157d6d16c7f5f5a3225a29297eebed6fc0b2ebd9dcd14d77463b32",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.4106066,
+        "invocation_end_unix": 1789398654.428716,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-malformed.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "42e396b6ff552ebb2d923bfe45585fcd57e31768c6ab61bd265ae7a35fcae8b6",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.4331512,
+        "invocation_end_unix": 1789398654.4473178,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "42e396b6ff552ebb2d923bfe45585fcd57e31768c6ab61bd265ae7a35fcae8b6",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.4491174,
+        "invocation_end_unix": 1789398654.4676054,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-wrong-schema.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--candidate-id",
+        "instinct-candidate-0001"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d532348599411ccd9440ae5d4428f42208824d476f897254e75dc073b3130b82",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.4718475,
+        "invocation_end_unix": 1789398654.4895494,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d532348599411ccd9440ae5d4428f42208824d476f897254e75dc073b3130b82",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.493169,
+        "invocation_end_unix": 1789398654.5117188,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-missing-candidate-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "absent"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "44b5e85a0f0ce567a25784ca7d761f6154e060f143c0ec17fd88354ba2c90a5d",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.5160437,
+        "invocation_end_unix": 1789398654.5356536,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "44b5e85a0f0ce567a25784ca7d761f6154e060f143c0ec17fd88354ba2c90a5d",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.5392492,
+        "invocation_end_unix": 1789398654.555622,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-packet-write-obstructed-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-packet",
+        "--write",
+        "--out-dir",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/not-a-directory"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "627a199255b8e3fe1feb40060803e92f5bf99912206644ec5777bedeb4d5ce0c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.5575037,
+        "invocation_end_unix": 1789398654.5698624,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "627a199255b8e3fe1feb40060803e92f5bf99912206644ec5777bedeb4d5ce0c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.5716465,
+        "invocation_end_unix": 1789398654.5835795,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-missing-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--review-dir",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/empty"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "23ba5fe56dcca1ac0f88983f5463b05f3629ebfae8dfef838cf90fa457453bb1",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.5878625,
+        "invocation_end_unix": 1789398654.6050172,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "23ba5fe56dcca1ac0f88983f5463b05f3629ebfae8dfef838cf90fa457453bb1",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.6067975,
+        "invocation_end_unix": 1789398654.6175892,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-status-malformed-decisions-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-status"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2082a4edbbaadb5f64c1752df9260d13389044588eca5b2a1862f785f36529f8",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.6207526,
+        "invocation_end_unix": 1789398654.632334,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2082a4edbbaadb5f64c1752df9260d13389044588eca5b2a1862f785f36529f8",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.6342528,
+        "invocation_end_unix": 1789398654.644543,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-missing.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "0ce8ef074ceedd57dd7a695d6f8248ca9f6404d3597643f7d29c180df5325533",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.6464937,
+        "invocation_end_unix": 1789398654.6622636,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "0ce8ef074ceedd57dd7a695d6f8248ca9f6404d3597643f7d29c180df5325533",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.6640685,
+        "invocation_end_unix": 1789398654.6776617,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-malformed.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a64c70c86c6b8d631813d2074b469d6982be266cec19e8815d00b2499aed1d8e",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.679543,
+        "invocation_end_unix": 1789398654.6950567,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a64c70c86c6b8d631813d2074b469d6982be266cec19e8815d00b2499aed1d8e",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.697553,
+        "invocation_end_unix": 1789398654.7093303,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-wrong-schema.json-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ffe6d971ec0fd3c689fb7b99c6cbfc15bc7113553512ad47b772a728de6a8260",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.711459,
+        "invocation_end_unix": 1789398654.7244287,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ffe6d971ec0fd3c689fb7b99c6cbfc15bc7113553512ad47b772a728de6a8260",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.7261333,
+        "invocation_end_unix": 1789398654.7397037,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-blocked-text",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/blocked.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ed1ebda5306ce951a917283e7cad549bb44ece1ed7257ae135a03460ef7672e4",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.7414944,
+        "invocation_end_unix": 1789398654.753301,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ed1ebda5306ce951a917283e7cad549bb44ece1ed7257ae135a03460ef7672e4",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.7549703,
+        "invocation_end_unix": 1789398654.7713141,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "candidates-normal-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "candidates",
+        "--limit",
+        "3",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "bb5c5923010e3f2f4007e8f732fdc4d0a50ee3fe8748f682546bc2bbecacf154",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.7730327,
+        "invocation_end_unix": 1789398654.7873986,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "bb5c5923010e3f2f4007e8f732fdc4d0a50ee3fe8748f682546bc2bbecacf154",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.7892835,
+        "invocation_end_unix": 1789398654.8025866,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "candidates-empty-observations-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "candidates",
+        "--limit",
+        "3",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "245de5ee71d463996ecf283401e326b84b316b96c37195c33427c1a3afda4be7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.80439,
+        "invocation_end_unix": 1789398654.8218915,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "245de5ee71d463996ecf283401e326b84b316b96c37195c33427c1a3afda4be7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.8260965,
+        "invocation_end_unix": 1789398654.8398159,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-status-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-status",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "7348bbe3d7e4f28e3e94a0fbe168ae6de73c2495700f26e17868eab5955e9258",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.8439498,
+        "invocation_end_unix": 1789398654.862339,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "7348bbe3d7e4f28e3e94a0fbe168ae6de73c2495700f26e17868eab5955e9258",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.8655925,
+        "invocation_end_unix": 1789398654.8773172,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-limit-0-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--limit",
+        "0",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "7906d80b37bc3a185b707b831eddc76c8e48cbec60a645c1dbd92c13249a03d4",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.8790827,
+        "invocation_end_unix": 1789398654.8945856,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "7906d80b37bc3a185b707b831eddc76c8e48cbec60a645c1dbd92c13249a03d4",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.8963466,
+        "invocation_end_unix": 1789398654.9148457,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-limit-1-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--limit",
+        "1",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e08624ae6d176fd0ff455f15c7492306edbc38f0f38f5fa22abdbc1e859313da",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.9165537,
+        "invocation_end_unix": 1789398654.928003,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e08624ae6d176fd0ff455f15c7492306edbc38f0f38f5fa22abdbc1e859313da",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.9297109,
+        "invocation_end_unix": 1789398654.9483767,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-redacted-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "ea33bea50681e0ae21d5c3e600dc21789f26781a034c18ad3aac7f0f7d7bdde3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.9528375,
+        "invocation_end_unix": 1789398654.967933,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "ea33bea50681e0ae21d5c3e600dc21789f26781a034c18ad3aac7f0f7d7bdde3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.9696653,
+        "invocation_end_unix": 1789398654.9889321,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-excerpt-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--include-local-excerpt",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "3ca6227197ed96ac081456286a37f992e72966f5df7daf45724fd0c2d8e03637",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398654.9936156,
+        "invocation_end_unix": 1789398655.005065,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "3ca6227197ed96ac081456286a37f992e72966f5df7daf45724fd0c2d8e03637",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.0069385,
+        "invocation_end_unix": 1789398655.0241644,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-missing.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ee6a9c1acf11efa2f06f053a41e344bbe49ff5a145b4835a1dd3e4061499091",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.0285234,
+        "invocation_end_unix": 1789398655.0390656,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ee6a9c1acf11efa2f06f053a41e344bbe49ff5a145b4835a1dd3e4061499091",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.04353,
+        "invocation_end_unix": 1789398655.0583048,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-malformed.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "08bca26f9b234caef3b607cecca71b148d3a71adef4fb1ef2d39de8e16c8b8c3",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.0601707,
+        "invocation_end_unix": 1789398655.0751123,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "08bca26f9b234caef3b607cecca71b148d3a71adef4fb1ef2d39de8e16c8b8c3",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.0769396,
+        "invocation_end_unix": 1789398655.0923805,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-wrong-schema.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a0a9df7c4781e5a05c4a38ba90df5144f07bb3b586a5708554b29ab8c7ad5c7c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.0942547,
+        "invocation_end_unix": 1789398655.112204,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a0a9df7c4781e5a05c4a38ba90df5144f07bb3b586a5708554b29ab8c7ad5c7c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.1164558,
+        "invocation_end_unix": 1789398655.1345482,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-missing-candidate-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "absent",
+        "--decision",
+        "approve",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5b9c98aeab873f7bafbb0610938f7fbca75f30a9289fac6c937f2085c076a991",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.1388235,
+        "invocation_end_unix": 1789398655.1571012,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5b9c98aeab873f7bafbb0610938f7fbca75f30a9289fac6c937f2085c076a991",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.1612926,
+        "invocation_end_unix": 1789398655.1792643,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-missing.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b429baad344893df9d0e0c370b50b82931fc9de4d34e9197c66797de19ed896f",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.1840012,
+        "invocation_end_unix": 1789398655.195152,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b429baad344893df9d0e0c370b50b82931fc9de4d34e9197c66797de19ed896f",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.1969604,
+        "invocation_end_unix": 1789398655.2150142,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-malformed.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "352f4c8e85272c8cd92defda83b9f8a9710d03d9def1e4582c74a480e62e0239",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.2192016,
+        "invocation_end_unix": 1789398655.2307017,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "352f4c8e85272c8cd92defda83b9f8a9710d03d9def1e4582c74a480e62e0239",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.2325156,
+        "invocation_end_unix": 1789398655.244692,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-wrong-schema.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ce02cda18ff956402360dc8e4e85e8562e3b8d6898fcc09da9b53862865fc19",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.2465887,
+        "invocation_end_unix": 1789398655.2611432,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8ce02cda18ff956402360dc8e4e85e8562e3b8d6898fcc09da9b53862865fc19",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.262972,
+        "invocation_end_unix": 1789398655.280222,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-preflight-missing-candidate-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-preflight",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "absent",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "f77017d2b2955a96aa0a55ed917269baa81306061d403131d2e4f83284751688",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.2818477,
+        "invocation_end_unix": 1789398655.2933621,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "f77017d2b2955a96aa0a55ed917269baa81306061d403131d2e4f83284751688",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.29499,
+        "invocation_end_unix": 1789398655.30536,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-missing.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1106b2ec8157d6d16c7f5f5a3225a29297eebed6fc0b2ebd9dcd14d77463b32",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.3073745,
+        "invocation_end_unix": 1789398655.3248827,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1106b2ec8157d6d16c7f5f5a3225a29297eebed6fc0b2ebd9dcd14d77463b32",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.3280518,
+        "invocation_end_unix": 1789398655.341563,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-malformed.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "42e396b6ff552ebb2d923bfe45585fcd57e31768c6ab61bd265ae7a35fcae8b6",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.3433318,
+        "invocation_end_unix": 1789398655.353465,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "42e396b6ff552ebb2d923bfe45585fcd57e31768c6ab61bd265ae7a35fcae8b6",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.3552032,
+        "invocation_end_unix": 1789398655.3735766,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-wrong-schema.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d532348599411ccd9440ae5d4428f42208824d476f897254e75dc073b3130b82",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.3752942,
+        "invocation_end_unix": 1789398655.3877985,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d532348599411ccd9440ae5d4428f42208824d476f897254e75dc073b3130b82",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.389503,
+        "invocation_end_unix": 1789398655.40927,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-context-missing-candidate-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-context",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "absent",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "44b5e85a0f0ce567a25784ca7d761f6154e060f143c0ec17fd88354ba2c90a5d",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.4113188,
+        "invocation_end_unix": 1789398655.423801,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "44b5e85a0f0ce567a25784ca7d761f6154e060f143c0ec17fd88354ba2c90a5d",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.425485,
+        "invocation_end_unix": 1789398655.4369688,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-packet-write-obstructed-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-packet",
+        "--write",
+        "--out-dir",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/not-a-directory",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "627a199255b8e3fe1feb40060803e92f5bf99912206644ec5777bedeb4d5ce0c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.4389408,
+        "invocation_end_unix": 1789398655.4504657,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "627a199255b8e3fe1feb40060803e92f5bf99912206644ec5777bedeb4d5ce0c",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.4524179,
+        "invocation_end_unix": 1789398655.4652574,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-inbox-missing-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-inbox",
+        "--review-dir",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/empty",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "23ba5fe56dcca1ac0f88983f5463b05f3629ebfae8dfef838cf90fa457453bb1",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.4670308,
+        "invocation_end_unix": 1789398655.4801311,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "23ba5fe56dcca1ac0f88983f5463b05f3629ebfae8dfef838cf90fa457453bb1",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.4818206,
+        "invocation_end_unix": 1789398655.4970472,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-status-malformed-decisions-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-status",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2082a4edbbaadb5f64c1752df9260d13389044588eca5b2a1862f785f36529f8",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.501536,
+        "invocation_end_unix": 1789398655.5165467,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2082a4edbbaadb5f64c1752df9260d13389044588eca5b2a1862f785f36529f8",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.5185273,
+        "invocation_end_unix": 1789398655.5323217,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-missing.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/missing.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "0ce8ef074ceedd57dd7a695d6f8248ca9f6404d3597643f7d29c180df5325533",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.5342395,
+        "invocation_end_unix": 1789398655.5502036,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "0ce8ef074ceedd57dd7a695d6f8248ca9f6404d3597643f7d29c180df5325533",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.5519397,
+        "invocation_end_unix": 1789398655.5642157,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-malformed.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/malformed.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a64c70c86c6b8d631813d2074b469d6982be266cec19e8815d00b2499aed1d8e",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.5662212,
+        "invocation_end_unix": 1789398655.5822227,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a64c70c86c6b8d631813d2074b469d6982be266cec19e8815d00b2499aed1d8e",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.5843801,
+        "invocation_end_unix": 1789398655.5972002,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-wrong-schema.json-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/wrong-schema.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ffe6d971ec0fd3c689fb7b99c6cbfc15bc7113553512ad47b772a728de6a8260",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.598953,
+        "invocation_end_unix": 1789398655.6094563,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ffe6d971ec0fd3c689fb7b99c6cbfc15bc7113553512ad47b772a728de6a8260",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.613774,
+        "invocation_end_unix": 1789398655.6249588,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-blocked-json",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/blocked.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write",
+        "--json"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ed1ebda5306ce951a917283e7cad549bb44ece1ed7257ae135a03460ef7672e4",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.6291013,
+        "invocation_end_unix": 1789398655.6465359,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ed1ebda5306ce951a917283e7cad549bb44ece1ed7257ae135a03460ef7672e4",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.6491594,
+        "invocation_end_unix": 1789398655.6643472,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-preview-approve",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "approve"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "14cf5ccb70c77096af425c4f38477b0ff48b48fd97e21746ff171745917044ec",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.6661587,
+        "invocation_end_unix": 1789398655.6775503,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "14cf5ccb70c77096af425c4f38477b0ff48b48fd97e21746ff171745917044ec",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.679292,
+        "invocation_end_unix": 1789398655.696811,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-preview-reject",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "reject"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "bcc11b3393a6976f44de4b076da30ffcce662eeaf1d2e5abf626517963cb203c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.6987922,
+        "invocation_end_unix": 1789398655.7101705,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "bcc11b3393a6976f44de4b076da30ffcce662eeaf1d2e5abf626517963cb203c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.7119696,
+        "invocation_end_unix": 1789398655.7288642,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "review-decision-preview-defer",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "review-decision",
+        "--packet-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/packet.json",
+        "--candidate-id",
+        "instinct-candidate-0001",
+        "--decision",
+        "defer"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "d010b4491da19d227cc9cf790e3cdfd8853355a19ee3f5d675b0635e31f82268",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.7305517,
+        "invocation_end_unix": 1789398655.7464619,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "d010b4491da19d227cc9cf790e3cdfd8853355a19ee3f5d675b0635e31f82268",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.7482464,
+        "invocation_end_unix": 1789398655.7627454,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-preview-ready",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/ready.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "d1a275617d3b5ff0b7f49ecd232dcc99b72902dbe444b5fdea0a4992aff5a3d3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.7647467,
+        "invocation_end_unix": 1789398655.7795775,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "d1a275617d3b5ff0b7f49ecd232dcc99b72902dbe444b5fdea0a4992aff5a3d3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.7842066,
+        "invocation_end_unix": 1789398655.797303,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-preview-blocked",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/blocked.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl"
+      ],
+      "evidence_type": "exact_cli_and_filesystem_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "2fa3a5a4062e7630f6c5fca56bb9b268aec84717b6d6b10b583cbc553b0babde",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.7991958,
+        "invocation_end_unix": 1789398655.8151097,
+        "validated_timestamps": {}
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "2fa3a5a4062e7630f6c5fca56bb9b268aec84717b6d6b10b583cbc553b0babde",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "business_effect": null,
+        "invocation_start_unix": 1789398655.8191993,
+        "invocation_end_unix": 1789398655.8401594,
+        "validated_timestamps": {}
+      }
+    },
+    {
+      "case": "memory-write-saved",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/ready.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write"
+      ],
+      "evidence_type": "exact_cli_and_validated_business_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "25e9d144846ed844d6b3242aa815a3eeba1df342760b974651edb8d1de092d33",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {
+          "db/state.sqlite.init.lock": {
+            "mode": 384,
+            "kind": "file",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "business_effect": {
+          "memory_rows": [
+            {
+              "key": "s18-parity-fixture-lesson",
+              "kind": "lesson",
+              "content": "Inspect the bounded fixture before changing its result.",
+              "tags": "[\"instinct\",\"human_reviewed\",\"phase1\"]",
+              "related_keys": "[]",
+              "created_at": "<validated-invocation-time>",
+              "updated_at": "<validated-invocation-time>",
+              "last_accessed_at": "<validated-invocation-time>",
+              "access_count": 0,
+              "scope": null,
+              "importance": 0.7,
+              "status": "active",
+              "trigger_pattern": null,
+              "embedding": {
+                "bytes": 3072,
+                "sha256": "e29755145d7c5dbdec0d66d2d7bbedda00e51084aa10311e83922fbdc6ca03e8"
+              },
+              "superseded_by": null,
+              "dedupe_key": null,
+              "embedding_backend": "fnv1a-hash-384",
+              "version_vector": "",
+              "last_decayed_at": "<validated-invocation-time>",
+              "fts_content": "Inspect the bounded fixture before changing its result.",
+              "embedding_i8": {
+                "bytes": 768,
+                "sha256": "3b95ebe38644f9e67030d885110dc0a71fdf78adf1c5d4efa9e09f62a72dc13d"
+              },
+              "embedding_i8_scale": 0.002924335887655616
+            }
+          ],
+          "table_counts": {
+            "agent_messages": 0,
+            "agent_presence": 0,
+            "agent_task_outcomes": 0,
+            "agent_world_capture": 0,
+            "body_operation_receipts": 0,
+            "codebase_calls": 0,
+            "codebase_imports": 0,
+            "codebase_symbols": 0,
+            "forum_posts": 0,
+            "forum_subscriptions": 0,
+            "forum_threads": 0,
+            "fusion_shadow": 0,
+            "mcp_tool_calls": 0,
+            "mcp_tool_errors": 0,
+            "memories": 1,
+            "memories_fts": 1,
+            "memories_fts_config": 1,
+            "memories_fts_content": 1,
+            "memories_fts_data": 3,
+            "memories_fts_docsize": 1,
+            "memories_fts_idx": 1,
+            "memory_coactivation": 0,
+            "memory_edges": 0,
+            "memory_query_log": 0,
+            "notifications": 0,
+            "plans": 0,
+            "resource_bindings": 0,
+            "resource_change_proposals": 0,
+            "resource_proposal_review_observations": 0,
+            "resource_versions": 0,
+            "retrieval_surfacing": 0,
+            "schema_meta": 8,
+            "semantic_events": 0,
+            "sessions": 0,
+            "tool_invocations": 0,
+            "truth_authority_policy_revisions": 0,
+            "truth_evidence_relationships": 0,
+            "truth_evidence_revisions": 0,
+            "truth_lineage_tombstones": 0,
+            "truth_lineages": 0
+          },
+          "receipt": {
+            "schema": "agent_bridge.instinct_observer.phase1_memory_write_receipt.v0",
+            "receipt_id": "instinct-memory-write-<validated-invocation-time>-s18-parity-fixture-lesson",
+            "generated_at_unix": "<validated-invocation-time>",
+            "preflight_json": "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/ready.json",
+            "preflight_id": "fixture-preflight",
+            "candidate_id": "instinct-candidate-0001",
+            "memory_key": "s18-parity-fixture-lesson",
+            "memory_kind": "lesson",
+            "db_path": "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+            "receipts_path": "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+            "writes_memory": true,
+            "raw_prompt_included": false,
+            "raw_tool_input_included": false,
+            "raw_tool_output_included": false
+          }
+        },
+        "invocation_start_unix": 1789398655.8418489,
+        "invocation_end_unix": 1789398656.053698,
+        "validated_timestamps": {
+          "created_at": 1789398656,
+          "updated_at": 1789398656,
+          "last_accessed_at": 1789398656,
+          "last_decayed_at": 1789398656,
+          "receipt.generated_at_unix": 1789398656
+        }
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "25e9d144846ed844d6b3242aa815a3eeba1df342760b974651edb8d1de092d33",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {
+          "db/state.sqlite.init.lock": {
+            "mode": 384,
+            "kind": "file",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "business_effect": {
+          "memory_rows": [
+            {
+              "key": "s18-parity-fixture-lesson",
+              "kind": "lesson",
+              "content": "Inspect the bounded fixture before changing its result.",
+              "tags": "[\"instinct\",\"human_reviewed\",\"phase1\"]",
+              "related_keys": "[]",
+              "created_at": "<validated-invocation-time>",
+              "updated_at": "<validated-invocation-time>",
+              "last_accessed_at": "<validated-invocation-time>",
+              "access_count": 0,
+              "scope": null,
+              "importance": 0.7,
+              "status": "active",
+              "trigger_pattern": null,
+              "embedding": {
+                "bytes": 3072,
+                "sha256": "e29755145d7c5dbdec0d66d2d7bbedda00e51084aa10311e83922fbdc6ca03e8"
+              },
+              "superseded_by": null,
+              "dedupe_key": null,
+              "embedding_backend": "fnv1a-hash-384",
+              "version_vector": "",
+              "last_decayed_at": "<validated-invocation-time>",
+              "fts_content": "Inspect the bounded fixture before changing its result.",
+              "embedding_i8": {
+                "bytes": 768,
+                "sha256": "3b95ebe38644f9e67030d885110dc0a71fdf78adf1c5d4efa9e09f62a72dc13d"
+              },
+              "embedding_i8_scale": 0.002924335887655616
+            }
+          ],
+          "table_counts": {
+            "agent_messages": 0,
+            "agent_presence": 0,
+            "agent_task_outcomes": 0,
+            "agent_world_capture": 0,
+            "body_operation_receipts": 0,
+            "codebase_calls": 0,
+            "codebase_imports": 0,
+            "codebase_symbols": 0,
+            "forum_posts": 0,
+            "forum_subscriptions": 0,
+            "forum_threads": 0,
+            "fusion_shadow": 0,
+            "mcp_tool_calls": 0,
+            "mcp_tool_errors": 0,
+            "memories": 1,
+            "memories_fts": 1,
+            "memories_fts_config": 1,
+            "memories_fts_content": 1,
+            "memories_fts_data": 3,
+            "memories_fts_docsize": 1,
+            "memories_fts_idx": 1,
+            "memory_coactivation": 0,
+            "memory_edges": 0,
+            "memory_query_log": 0,
+            "notifications": 0,
+            "plans": 0,
+            "resource_bindings": 0,
+            "resource_change_proposals": 0,
+            "resource_proposal_review_observations": 0,
+            "resource_versions": 0,
+            "retrieval_surfacing": 0,
+            "schema_meta": 8,
+            "semantic_events": 0,
+            "sessions": 0,
+            "tool_invocations": 0,
+            "truth_authority_policy_revisions": 0,
+            "truth_evidence_relationships": 0,
+            "truth_evidence_revisions": 0,
+            "truth_lineage_tombstones": 0,
+            "truth_lineages": 0
+          },
+          "receipt": {
+            "schema": "agent_bridge.instinct_observer.phase1_memory_write_receipt.v0",
+            "receipt_id": "instinct-memory-write-<validated-invocation-time>-s18-parity-fixture-lesson",
+            "generated_at_unix": "<validated-invocation-time>",
+            "preflight_json": "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/ready.json",
+            "preflight_id": "fixture-preflight",
+            "candidate_id": "instinct-candidate-0001",
+            "memory_key": "s18-parity-fixture-lesson",
+            "memory_kind": "lesson",
+            "db_path": "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+            "receipts_path": "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+            "writes_memory": true,
+            "raw_prompt_included": false,
+            "raw_tool_input_included": false,
+            "raw_tool_output_included": false
+          }
+        },
+        "invocation_start_unix": 1789398656.0611,
+        "invocation_end_unix": 1789398656.2082922,
+        "validated_timestamps": {
+          "created_at": 1789398656,
+          "updated_at": 1789398656,
+          "last_accessed_at": 1789398656,
+          "last_decayed_at": 1789398656,
+          "receipt.generated_at_unix": 1789398656
+        }
+      }
+    },
+    {
+      "case": "memory-write-receipt-failure",
+      "argv": [
+        "agent-bridge",
+        "instinct",
+        "memory-write",
+        "--preflight-json",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/review/ready.json",
+        "--db-path",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/db/state.sqlite",
+        "--receipt-out",
+        "/Data/ab-main-rs-governance-target/governance-live/run-312iny4q/instinct-parity-ctj6tzm6/write-receipt.jsonl",
+        "--write"
+      ],
+      "evidence_type": "exact_cli_and_validated_business_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "beeb69977c3bee5de59a42abe5d97eaf5f6c91d3b3892db792ff00eec56eee82",
+        "effects": {
+          "db/state.sqlite.init.lock": {
+            "mode": 384,
+            "kind": "file",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "business_effect": {
+          "memory_rows": [
+            {
+              "key": "s18-parity-fixture-lesson",
+              "kind": "lesson",
+              "content": "Inspect the bounded fixture before changing its result.",
+              "tags": "[\"instinct\",\"human_reviewed\",\"phase1\"]",
+              "related_keys": "[]",
+              "created_at": "<validated-invocation-time>",
+              "updated_at": "<validated-invocation-time>",
+              "last_accessed_at": "<validated-invocation-time>",
+              "access_count": 0,
+              "scope": null,
+              "importance": 0.7,
+              "status": "active",
+              "trigger_pattern": null,
+              "embedding": {
+                "bytes": 3072,
+                "sha256": "e29755145d7c5dbdec0d66d2d7bbedda00e51084aa10311e83922fbdc6ca03e8"
+              },
+              "superseded_by": null,
+              "dedupe_key": null,
+              "embedding_backend": "fnv1a-hash-384",
+              "version_vector": "",
+              "last_decayed_at": "<validated-invocation-time>",
+              "fts_content": "Inspect the bounded fixture before changing its result.",
+              "embedding_i8": {
+                "bytes": 768,
+                "sha256": "3b95ebe38644f9e67030d885110dc0a71fdf78adf1c5d4efa9e09f62a72dc13d"
+              },
+              "embedding_i8_scale": 0.002924335887655616
+            }
+          ],
+          "table_counts": {
+            "agent_messages": 0,
+            "agent_presence": 0,
+            "agent_task_outcomes": 0,
+            "agent_world_capture": 0,
+            "body_operation_receipts": 0,
+            "codebase_calls": 0,
+            "codebase_imports": 0,
+            "codebase_symbols": 0,
+            "forum_posts": 0,
+            "forum_subscriptions": 0,
+            "forum_threads": 0,
+            "fusion_shadow": 0,
+            "mcp_tool_calls": 0,
+            "mcp_tool_errors": 0,
+            "memories": 1,
+            "memories_fts": 1,
+            "memories_fts_config": 1,
+            "memories_fts_content": 1,
+            "memories_fts_data": 3,
+            "memories_fts_docsize": 1,
+            "memories_fts_idx": 1,
+            "memory_coactivation": 0,
+            "memory_edges": 0,
+            "memory_query_log": 0,
+            "notifications": 0,
+            "plans": 0,
+            "resource_bindings": 0,
+            "resource_change_proposals": 0,
+            "resource_proposal_review_observations": 0,
+            "resource_versions": 0,
+            "retrieval_surfacing": 0,
+            "schema_meta": 8,
+            "semantic_events": 0,
+            "sessions": 0,
+            "tool_invocations": 0,
+            "truth_authority_policy_revisions": 0,
+            "truth_evidence_relationships": 0,
+            "truth_evidence_revisions": 0,
+            "truth_lineage_tombstones": 0,
+            "truth_lineages": 0
+          },
+          "receipt": null
+        },
+        "invocation_start_unix": 1789398656.2151763,
+        "invocation_end_unix": 1789398656.3593826,
+        "validated_timestamps": {
+          "created_at": 1789398656,
+          "updated_at": 1789398656,
+          "last_accessed_at": 1789398656,
+          "last_decayed_at": 1789398656
+        }
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "beeb69977c3bee5de59a42abe5d97eaf5f6c91d3b3892db792ff00eec56eee82",
+        "effects": {
+          "db/state.sqlite.init.lock": {
+            "mode": 384,
+            "kind": "file",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "business_effect": {
+          "memory_rows": [
+            {
+              "key": "s18-parity-fixture-lesson",
+              "kind": "lesson",
+              "content": "Inspect the bounded fixture before changing its result.",
+              "tags": "[\"instinct\",\"human_reviewed\",\"phase1\"]",
+              "related_keys": "[]",
+              "created_at": "<validated-invocation-time>",
+              "updated_at": "<validated-invocation-time>",
+              "last_accessed_at": "<validated-invocation-time>",
+              "access_count": 0,
+              "scope": null,
+              "importance": 0.7,
+              "status": "active",
+              "trigger_pattern": null,
+              "embedding": {
+                "bytes": 3072,
+                "sha256": "e29755145d7c5dbdec0d66d2d7bbedda00e51084aa10311e83922fbdc6ca03e8"
+              },
+              "superseded_by": null,
+              "dedupe_key": null,
+              "embedding_backend": "fnv1a-hash-384",
+              "version_vector": "",
+              "last_decayed_at": "<validated-invocation-time>",
+              "fts_content": "Inspect the bounded fixture before changing its result.",
+              "embedding_i8": {
+                "bytes": 768,
+                "sha256": "3b95ebe38644f9e67030d885110dc0a71fdf78adf1c5d4efa9e09f62a72dc13d"
+              },
+              "embedding_i8_scale": 0.002924335887655616
+            }
+          ],
+          "table_counts": {
+            "agent_messages": 0,
+            "agent_presence": 0,
+            "agent_task_outcomes": 0,
+            "agent_world_capture": 0,
+            "body_operation_receipts": 0,
+            "codebase_calls": 0,
+            "codebase_imports": 0,
+            "codebase_symbols": 0,
+            "forum_posts": 0,
+            "forum_subscriptions": 0,
+            "forum_threads": 0,
+            "fusion_shadow": 0,
+            "mcp_tool_calls": 0,
+            "mcp_tool_errors": 0,
+            "memories": 1,
+            "memories_fts": 1,
+            "memories_fts_config": 1,
+            "memories_fts_content": 1,
+            "memories_fts_data": 3,
+            "memories_fts_docsize": 1,
+            "memories_fts_idx": 1,
+            "memory_coactivation": 0,
+            "memory_edges": 0,
+            "memory_query_log": 0,
+            "notifications": 0,
+            "plans": 0,
+            "resource_bindings": 0,
+            "resource_change_proposals": 0,
+            "resource_proposal_review_observations": 0,
+            "resource_versions": 0,
+            "retrieval_surfacing": 0,
+            "schema_meta": 8,
+            "semantic_events": 0,
+            "sessions": 0,
+            "tool_invocations": 0,
+            "truth_authority_policy_revisions": 0,
+            "truth_evidence_relationships": 0,
+            "truth_evidence_revisions": 0,
+            "truth_lineage_tombstones": 0,
+            "truth_lineages": 0
+          },
+          "receipt": null
+        },
+        "invocation_start_unix": 1789398656.3660574,
+        "invocation_end_unix": 1789398656.503918,
+        "validated_timestamps": {
+          "created_at": 1789398656,
+          "updated_at": 1789398656,
+          "last_accessed_at": 1789398656,
+          "last_decayed_at": 1789398656
+        }
+      }
+    }
+  ]
+}
