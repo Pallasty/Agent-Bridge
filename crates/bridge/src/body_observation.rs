@@ -70,10 +70,10 @@ pub fn body_observation_envelope(
         body_id,
         source: BODY_OBSERVATION_SOURCE.into(),
         observed_at_unix_ms,
-        freshness_ms: body_status
-            .pointer("/freshness/age_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+        // The envelope retains the original capture timestamp. World-core
+        // already computes elapsed age from that timestamp at consumption;
+        // adding the collector's cached age would count that time twice.
+        freshness_ms: 0,
         confidence,
         world_revision,
         payload: serde_json::json!({
@@ -150,5 +150,19 @@ mod tests {
     #[test]
     fn aggregation_enforces_absolute_age() {
         assert!(assemble_body_world(&status("ok", 1.0, "fresh"), 1, 2_000, 100).is_err());
+    }
+
+    #[test]
+    fn cached_sample_age_is_counted_once_at_consumption() {
+        let mut cached = status("ok", 1.0, "fresh");
+        cached["freshness"]["age_ms"] = json!(600);
+        cached["freshness"]["received_at_unix_ms"] = json!(1_600);
+        cached["freshness"]["expires_at_unix_ms"] = json!(2_000);
+
+        let world = assemble_body_world(&cached, 7, 1_600, 1_000)
+            .expect("600ms cached sample is still within its 1000ms TTL");
+        assert_eq!(world.observations[0].observed_at_unix_ms, 1_000);
+        assert!(assemble_body_world(&cached, 7, 2_000, 1_000).is_ok());
+        assert!(assemble_body_world(&cached, 7, 2_001, 1_000).is_err());
     }
 }
