@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "installed_at": "2026-09-27",
+  "source_commit": "61bce9a607b0598f2fdbe897c85861365fc882bb",
+  "source_branch": "codex/film-production-skill-20260927",
+  "source_remote": "git@gitlab.com:pallasting/agent-bridge.git",
+  "installation": "/home/pallasting/.codex/skills/film-production",
+  "resolved_installation": "/Media/Ubuntu/Documents/.codex/skills.active-20260526/film-production",
+  "file_count": 12,
+  "file_sha256": {
+    "SKILL.md": "21b664e1119d5d53d4e0d388f8cadd6046f94e38c165a8c905d8921f542c78af",
+    "agents/openai.yaml": "83f7203d08790876418f7813b864084ed945278198fd4b7848de1be7d99f26c9",
+    "assets/templates/bible.json": "b74000ff42a25934d063e0af4b08376413f7991f05e26bfd26a361bb3723f60e",
+    "assets/templates/brief.json": "83cf74c491d4f1b4779d26e7c17ca443b88a185a2a6d5d1ca6df93f2a2a204a6",
+    "assets/templates/generations.json": "665e8f5b48e1d7c2ce1ce9662219913471bd8504ad10f359dbd8d909f1543d73",
+    "assets/templates/handoff.json": "8cdb3f7f39af4f8b2f6f065849e996bb0de57899473e94ec64b10fd2722d3064",
+    "assets/templates/shots.json": "49003150170796042a8ea3c02e10f2762d0b5ba801f33a241a3416dcb2104946",
+    "references/ab-memory.md": "6fd63e94c39109a4737961da9f6ea1dc5a847f97b3df9b9d66ebd108cde8497f",
+    "references/project-records.md": "8165365cc162f7a5b29d844347bf4ae55a04245fa01968a2813d89e54a4fb6c3",
+    "references/sources.md": "16e3f308a465033bba7bf831da2243103ddee655daa65bc4ae137255df116362",
+    "references/workflow.md": "a490b5112ab59385626435f8cbe34ec4e395815125e56ea0590f19a2a9397865",
+    "scripts/project.py": "22dd00723764d33e599db6b51a5cc31e2cbffa7e8bef8b568530c6d2bea4d4b4"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-27",
+  "implementation_commit": "61bce9a607b0598f2fdbe897c85861365fc882bb",
+  "memory_key": "film_production_workflow_v1",
+  "skill_key": "skill:agent-bridge-film-production-20260927/film-production",
+  "memory_exact_readback": true,
+  "fts": {
+    "query": "film-production",
+    "mode": "fts",
+    "limit": 5,
+    "memory_entry_rank": 1,
+    "skill_rank": 2
+  },
+  "recommendation": {
+    "query": "影视制作 短片 分镜 镜头选片",
+    "count": 1,
+    "skills": [
+      {
+        "key": "skill:agent-bridge-film-production-20260927/film-production",
+        "src": "agent-bridge-film-production-20260927",
+        "summary": "Plan or resume film, short video and narrative advertising production: script, character and location continuity, storyboard, generation review, editing and handoff. 用于影视制作、短片、广告片、分镜、镜头选片与跨会话续作。",
+        "tools": null,
+        "lint": "lint:clean",
+        "score": 44.51024937508732,
+        "install": "agent-bridge skills install skill:agent-bridge-film-production-20260927/film-production --yes"
+      }
+    ],
+    "hint": "review the top hit's `summary` and `lint`; install with the `install` command (or call `memory_get` on the key for the full SKILL.md)."
+  },
+  "bootstrap": {
+    "cwd": "/Data/CascadeProjects",
+    "query": "制作一支30秒剧情短片，需要角色连续性、分镜、镜头生成选片和后续会话恢复",
+    "limit": 3,
+    "frontend": "cursor",
+    "contains_memory_entry": true,
+    "contains_procedure_panel": true,
+    "actual_new_codex_session_tested": false
+  },
+  "installed_cli_init": {
+    "status": "planning",
+    "records": 5
+  },
+  "scope": "Discovery and deterministic local project-record recovery",
+  "retrieval_calls_write_telemetry": true,
+  "media_generation_tested": false,
+  "quality_or_cost_benefit_proven": false
+}
