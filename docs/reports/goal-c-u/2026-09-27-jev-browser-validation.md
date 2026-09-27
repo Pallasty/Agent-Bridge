@@ -157,3 +157,34 @@ target, then run `cargo test -p ab-browser --test observation_ref_e2e -- --ignor
 The observation harness header documents its separate opt-in environment; its
 pinned script and license are included in the evidence bundle. Use a new profile
 and new output path, and verify owned-browser/profile cleanup after the run.
+
+## Subsequent source-merge admission — 2026-09-27
+
+The owner subsequently authorized merging if the conditions were met, otherwise
+retiring the worktree and temporary files. Admission is **GO for the narrow P0
+repair and its evidence**. P1 remains HOLD and P2 remains NOT_RUN; neither adds a
+production integration. The seven existing Clippy findings remain disclosed
+baseline debt, not a claim of strict lint success.
+
+The freshly fetched public main and both backup mainlines agreed at
+`952dcf23424b1eb992fe2b6f1e0c2df3a0859ad0`. Since the original base, main added
+seven independent Agno readback source/test/report files and changed no Rust,
+Cargo or enrolled CLI-governance inputs. Main was merged without conflict into
+the reviewed branch at `8d562778449c2c1e5674767ea800392612dbe34f`, preserving both
+histories. No tested Rust file changed during this integration.
+
+Fresh checks on the combined checkout passed: 19 Agno readback tests, 8 browser
+unit tests, and the real-Chrome reference regression (five negative and six
+positive checks). The portable verifier again accepted the original 143-case
+CLI bundle against `af12defe`; that verifies the retained evidence, not a new
+execution of those 143 cases. Independent review found no new correctness or
+API blocker, and all retained evidence/source hashes matched.
+
+This merge goes through the normal pre-commit hook with no bypass. Because its
+delta from the reviewed branch consists only of the mainline's independent
+readback files and this admission note, the prior Rust validation remains bound
+to its original implementation; no full Rust/CLI rerun is represented here.
+Admission logs and the exact remote readback receipt are retained under
+`/Data/session-archives/20260927-jev-ultrafast-research/merge-closeout/`.
+Publication uses explicit non-forced refs and skip-CI. This authorizes source
+merging only; no binary install, runtime enablement or deployment is included.
