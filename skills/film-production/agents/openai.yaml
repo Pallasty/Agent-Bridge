@@ -1,0 +1,4 @@
+interface:
+  display_name: "影视制作"
+  short_description: "Plan and resume film production with versioned assets"
+  default_prompt: "Use $film-production to plan or resume this film project from its current records."

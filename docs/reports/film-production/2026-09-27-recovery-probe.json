@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-27",
+  "kind": "synthetic_record_recovery",
+  "python": "3.14.4",
+  "fresh_cli_processes": true,
+  "original_media_generated": false,
+  "checkpoint": {
+    "exit_code": 0,
+    "report": {
+      "project_id": "film-demo",
+      "status": "record_consistent",
+      "phase": "brief",
+      "source_mode": "fiction",
+      "script_revision": "v3",
+      "asset_versions": {
+        "hero": "v2"
+      },
+      "selected": {
+        "s1": "g1"
+      },
+      "next_actions": [
+        {
+          "shot_id": "s2",
+          "action": "review_candidates"
+        }
+      ],
+      "handoff_matches_files": true,
+      "handoff_summary": "s1 uses g1; review s2 candidate g3 next.",
+      "handoff_next_actions": [
+        "Review s2 / g3 against its acceptance conditions."
+      ],
+      "handoff_unresolved": [],
+      "document_sha256": {
+        "brief.json": "8d7b37d4b90dfa8a05c503fa83b37eea9eb2e700e631789f4ed75b8e6090f8c1",
+        "bible.json": "949d491e0883a1034a1fcdfbacd89a061c9ca86fd9913b6811bab554467c442d",
+        "shots.json": "f86eba8ec1d8152703b1fd0602bcfc5f1db49fd151280e2911aeb4ae99dbf58e",
+        "generations.json": "3027654367c99ffbde107c8b57c352c79dfcd944160308e38283297d5ec5f021"
+      },
+      "errors": [],
+      "limits": "Record/file consistency only; no media quality, factual truth, rights or publication approval."
+    }
+  },
+  "recovery": {
+    "exit_code": 0,
+    "report": {
+      "project_id": "film-demo",
+      "status": "record_consistent",
+      "phase": "brief",
+      "source_mode": "fiction",
+      "script_revision": "v3",
+      "asset_versions": {
+        "hero": "v2"
+      },
+      "selected": {
+        "s1": "g1"
+      },
+      "next_actions": [
+        {
+          "shot_id": "s2",
+          "action": "review_candidates"
+        }
+      ],
+      "handoff_matches_files": true,
+      "handoff_summary": "s1 uses g1; review s2 candidate g3 next.",
+      "handoff_next_actions": [
+        "Review s2 / g3 against its acceptance conditions."
+      ],
+      "handoff_unresolved": [],
+      "document_sha256": {
+        "brief.json": "8d7b37d4b90dfa8a05c503fa83b37eea9eb2e700e631789f4ed75b8e6090f8c1",
+        "bible.json": "949d491e0883a1034a1fcdfbacd89a061c9ca86fd9913b6811bab554467c442d",
+        "shots.json": "f86eba8ec1d8152703b1fd0602bcfc5f1db49fd151280e2911aeb4ae99dbf58e",
+        "generations.json": "3027654367c99ffbde107c8b57c352c79dfcd944160308e38283297d5ec5f021"
+      },
+      "errors": [],
+      "limits": "Record/file consistency only; no media quality, factual truth, rights or publication approval."
+    }
+  },
+  "asset_revision_change": {
+    "exit_code": 2,
+    "report": {
+      "project_id": "film-demo",
+      "status": "needs_review",
+      "phase": "brief",
+      "source_mode": "fiction",
+      "script_revision": "v3",
+      "asset_versions": {
+        "hero": "v3"
+      },
+      "selected": {},
+      "next_actions": [
+        {
+          "shot_id": "s1",
+          "action": "reconcile_records"
+        },
+        {
+          "shot_id": "s2",
+          "action": "reconcile_records"
+        }
+      ],
+      "handoff_matches_files": false,
+      "handoff_summary": null,
+      "handoff_next_actions": [],
+      "handoff_unresolved": [],
+      "document_sha256": {
+        "brief.json": "8d7b37d4b90dfa8a05c503fa83b37eea9eb2e700e631789f4ed75b8e6090f8c1",
+        "bible.json": "4a72cb3d90e4bc85a461e5d128b9a50e61b4cf3122ee818e2738b2bec57a4b43",
+        "shots.json": "f86eba8ec1d8152703b1fd0602bcfc5f1db49fd151280e2911aeb4ae99dbf58e",
+        "generations.json": "3027654367c99ffbde107c8b57c352c79dfcd944160308e38283297d5ec5f021"
+      },
+      "errors": [
+        "s1: asset version changed/missing: hero",
+        "s2: asset version changed/missing: hero"
+      ],
+      "limits": "Record/file consistency only; no media quality, factual truth, rights or publication approval."
+    }
+  }
+}

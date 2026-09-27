@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "project_id": "",
+  "title": "",
+  "source_mode": "fiction",
+  "phase": "brief",
+  "intent": "",
+  "audience": "",
+  "script": {"revision": "draft-1", "path": null, "sha256": null},
+  "deliverable": {"duration_seconds": null, "aspect_ratio": null, "format": null},
+  "budget": {"currency": null, "limit": null, "spent": null},
+  "current_authorization": {"generation": "unspecified", "publication": "unspecified"}
+}
