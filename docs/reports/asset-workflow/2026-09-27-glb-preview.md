@@ -60,6 +60,19 @@ RED/GREEN 日志、真实调用参数及产物、摘要、独立检查与提交�
 R7 普通任务只读诊断仍返回 `resident_m2_shadow_invalid_configuration`，依操作规程
 停止，没有提交样本或修改运行时配置。
 
+## 最终收口
+
+实现提交：`e5a84fa54c71d8f0dc4b8cd156b9436a7e0e65f1`；被测 tree：
+`1424afa7820a0be55e1675003aa85a0242cbd746`。正常提交钩子退出 0，实际完成：
+
+- S18–S21 源码/报告绑定、对应边界测试和 405 项纯行为案例及负对照。
+- 143 项新鲜 CLI 对比：Identity 30、Instinct 79、WorktreeSession 34。
+- `cargo check -p ab-bridge --all-targets`；保留既有警告，没有编译错误。
+
+`governance-final/summary.json` 和三份 CLI 报告已独立核验摘要及候选 tree；四组
+行为报告亦已保留。`validation.json` 绑定最终源码、专项日志和实现提交。
+本报告的后续文档提交不改变实现，不替代上述被测 tree。
+
 PNG 的有效性和摘要不是美术验收；当前中性无光照结果主要表达轮廓，不能证明原材质
 还原、视觉风格、实际模型输出兼容或节省了作者时间。人工视觉审阅仍待真实用途下的
 接受/返工意见。源代码与本地调用通过不代表新版本已发布或当前 MCP 会话已更新。

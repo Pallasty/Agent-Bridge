@@ -8,8 +8,8 @@
 
 ## 准备与调用
 
-适用 Linux/POSIX；需要 Python 3.13+、Godot 4.x 的 OpenGL Compatibility 渲染器，
-以及可用 X11 显示或显式指定的 Xvfb。已验证的具体工具版本见本次验证报告。
+本片在 Linux 上验证；需要 Python 3.13+、Godot 4.6.2 的 OpenGL Compatibility
+渲染器，以及可用 X11 显示或显式指定的 Xvfb。其他 Godot 版本尚未验证。
 使用已安装的受信任可执行文件；配方不会安装软件、下载模型或调用 Cargo。
 
 先构建薄检查入口，它直接调用与 MCP 相同的 Rust 检查核心，不启动数据库：
