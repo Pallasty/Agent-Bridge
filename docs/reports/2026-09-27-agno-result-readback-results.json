@@ -1,0 +1,102 @@
+{
+  "source_revision": "6c4b1a9f332d8b9e9329f8d2914deed7db713453",
+  "selection": "Purposive fixed repository texts; exact query anchors are supplied, not discovered by an agent.",
+  "mechanics_passed": true,
+  "cases": [
+    {
+      "path": "docs/reports/main-rs-governance/2026-09-13-s18-verification.json",
+      "kind": "historical_verification_output",
+      "sha256": "bd3afdfe7a9dd7fe8b4a8caa8c3c95bc0607018fb4303df618d35afc7ebe1e05",
+      "input_bytes": 35536,
+      "inline": {
+        "anchors_visible": 2,
+        "response_count": 1,
+        "wire_bytes": 38461
+      },
+      "head_tail": {
+        "anchors_visible": 1,
+        "response_count": 1,
+        "wire_bytes": 8992
+      },
+      "selective": {
+        "preview_anchors_visible": 0,
+        "anchors_recovered": 2,
+        "response_count": 5,
+        "content_bytes": 2116,
+        "wire_bytes": 3212
+      },
+      "roundtrip": {
+        "sha256_matches": true,
+        "response_count": 9,
+        "wire_bytes": 39955
+      },
+      "response_byte_reduction_vs_inline": 0.916487,
+      "task_value_proven": false
+    },
+    {
+      "path": "README.md",
+      "kind": "repository_document",
+      "sha256": "afc5187334081562d1be58a426314faaa6d751701503f4faf327fc608e260b05",
+      "input_bytes": 56325,
+      "inline": {
+        "anchors_visible": 2,
+        "response_count": 1,
+        "wire_bytes": 57694
+      },
+      "head_tail": {
+        "anchors_visible": 1,
+        "response_count": 1,
+        "wire_bytes": 8542
+      },
+      "selective": {
+        "preview_anchors_visible": 0,
+        "anchors_recovered": 2,
+        "response_count": 5,
+        "content_bytes": 2034,
+        "wire_bytes": 3020
+      },
+      "roundtrip": {
+        "sha256_matches": true,
+        "response_count": 14,
+        "wire_bytes": 60108
+      },
+      "response_byte_reduction_vs_inline": 0.947655,
+      "task_value_proven": false
+    },
+    {
+      "path": "crates/store/src/lib.rs",
+      "kind": "repository_source",
+      "sha256": "a4a2329317a48df65211c6a58a11bdbe0b418da120bc3252a422b22b370ef2f1",
+      "input_bytes": 250630,
+      "inline": {
+        "anchors_visible": 2,
+        "response_count": 1,
+        "wire_bytes": 257540
+      },
+      "head_tail": {
+        "anchors_visible": 1,
+        "response_count": 1,
+        "wire_bytes": 8687
+      },
+      "selective": {
+        "preview_anchors_visible": 0,
+        "anchors_recovered": 2,
+        "response_count": 5,
+        "content_bytes": 2119,
+        "wire_bytes": 3176
+      },
+      "roundtrip": {
+        "sha256_matches": true,
+        "response_count": 62,
+        "wire_bytes": 268921
+      },
+      "response_byte_reduction_vs_inline": 0.987668,
+      "task_value_proven": false
+    }
+  ],
+  "model_calls": 0,
+  "tokens_measured": false,
+  "end_to_end_task_latency_measured": false,
+  "task_value_proven": false,
+  "runtime_promotion_authorized": false
+}
