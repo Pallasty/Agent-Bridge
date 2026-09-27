@@ -55,7 +55,10 @@ use dashmap::DashMap;
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Mutex, Notify, RwLock};
 use tracing::{debug, info, warn};
@@ -97,10 +100,13 @@ pub struct ChromiumCdpBackend {
     /// pump and replaces the entry.
     captures: Arc<Mutex<HashMap<String, (Arc<CaptureState>, tokio::task::AbortHandle)>>>,
     /// PageId → map of ephemeral `@eN` refs (assigned by the last
-    /// `snapshot_a11y`) to the element's backend DOM node id, so `click_by_ref`
+    /// published `snapshot_a11y`) to its backend DOM node id, so `click_by_ref`
     /// can resolve a ref the agent saw in a snapshot back to a real element. A
     /// fresh snapshot of the same page replaces its entry.
     ref_maps: Arc<DashMap<String, HashMap<String, i64>>>,
+    /// Shared by clones and all pages. Never reset when a page or browser is
+    /// replaced: a retired ref must never name a node in a later snapshot.
+    last_ref_id: Arc<AtomicU64>,
 }
 
 /// Per-page capture state for `capture_response_start` /
@@ -154,6 +160,7 @@ impl ChromiumCdpBackend {
             pause_waiters: Arc::new(Mutex::new(HashMap::new())),
             captures: Arc::new(Mutex::new(HashMap::new())),
             ref_maps: Arc::new(DashMap::new()),
+            last_ref_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -344,6 +351,18 @@ impl ChromiumCdpBackend {
             .map(|p| p.clone())
             .ok_or_else(|| Error::NotFound(format!("page id {page} not tracked")))
     }
+
+    fn resolve_snapshot_ref(&self, page: &PageId, node_ref: &str) -> Result<i64> {
+        self.ref_maps
+            .get(page.as_str())
+            .and_then(|refs| refs.get(node_ref).copied())
+            .ok_or_else(|| {
+                Error::InvalidArgument(format!(
+                    "unknown ref {node_ref} — call browser_snapshot again \
+                     (only refs from the latest published snapshot of this page are valid)"
+                ))
+            })
+    }
 }
 
 #[async_trait]
@@ -403,7 +422,7 @@ impl BrowserBackend for ChromiumCdpBackend {
         // `resp.result.nodes` is a flat list of Accessibility.AXNode.
         let nodes = &resp.result.nodes;
         let mut ref_map = HashMap::new();
-        let tree = build_a11y_tree(nodes, &mut ref_map);
+        let tree = build_a11y_tree(nodes, &mut ref_map, &self.last_ref_id)?;
         // Replace this page's ref table so click_by_ref resolves the refs the
         // agent is about to see (and stale refs from a prior snapshot drop out).
         self.ref_maps.insert(page.as_str().to_string(), ref_map);
@@ -424,16 +443,7 @@ impl BrowserBackend for ChromiumCdpBackend {
 
     async fn click_by_ref(&self, page: &PageId, node_ref: &str) -> Result<()> {
         let p = self.page_handle(page)?;
-        let backend_id = self
-            .ref_maps
-            .get(page.as_str())
-            .and_then(|m| m.get(node_ref).copied())
-            .ok_or_else(|| {
-                Error::InvalidArgument(format!(
-                    "unknown ref {node_ref} — call browser_snapshot first \
-                     (refs are re-numbered each snapshot)"
-                ))
-            })?;
+        let backend_id = self.resolve_snapshot_ref(page, node_ref)?;
         // backend node id → live JS object handle.
         let resolved = p
             .execute(
@@ -1669,29 +1679,40 @@ fn json_eval_result_as_plain_text(v: &serde_json::Value) -> String {
 fn build_a11y_tree(
     nodes: &[chromiumoxide::cdp::browser_protocol::accessibility::AxNode],
     ref_map: &mut HashMap<String, i64>,
-) -> A11yNode {
+    last_ref_id: &AtomicU64,
+) -> Result<A11yNode> {
     let mut by_id: HashMap<String, &chromiumoxide::cdp::browser_protocol::accessibility::AxNode> =
         HashMap::with_capacity(nodes.len());
     for n in nodes {
         by_id.insert(n.node_id.inner().clone(), n);
     }
-    let mut counter: u32 = 0;
     let root = nodes
         .first()
-        .cloned()
-        .map(|n| convert(&n, &by_id, ref_map, &mut counter));
-    root.unwrap_or_else(|| A11yNode {
+        .map(|n| convert(n, &by_id, ref_map, last_ref_id))
+        .transpose()?;
+    Ok(root.unwrap_or_else(|| A11yNode {
         role: "root".into(),
         name: None,
         value: None,
         node_ref: None,
         children: vec![],
-    })
+    }))
+}
+
+fn next_node_ref(last_ref_id: &AtomicU64) -> Result<String> {
+    // The atomic only allocates unique identities; ref-map publication supplies
+    // its own synchronization. Exhaustion must fail instead of wrapping.
+    let previous = last_ref_id
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            last.checked_add(1)
+        })
+        .map_err(|_| Error::Backend("browser snapshot ref namespace exhausted".into()))?;
+    Ok(format!("@e{}", previous + 1))
 }
 
 /// Interactive AX roles that earn a clickable `@eN` ref. Conservative on
 /// purpose — only roles a human would click or type into — so the ref list
-/// stays short and the pre-order numbering is stable across snapshots.
+/// stays short. Refs are unique across snapshots, even when the DOM is unchanged.
 fn is_interactive(role: &str) -> bool {
     matches!(
         role,
@@ -1722,8 +1743,8 @@ fn convert(
         &chromiumoxide::cdp::browser_protocol::accessibility::AxNode,
     >,
     ref_map: &mut HashMap<String, i64>,
-    counter: &mut u32,
-) -> A11yNode {
+    last_ref_id: &AtomicU64,
+) -> Result<A11yNode> {
     let role = node
         .role
         .as_ref()
@@ -1738,16 +1759,17 @@ fn convert(
         .as_ref()
         .and_then(|v| ax_value_to_string(&v.value));
     // A non-ignored interactive node with a backend DOM node id earns a
-    // clickable ref. Assigned pre-order (parent before children) so the
-    // numbering matches reading order. The backend id is the handle
-    // click_by_ref later resolves against.
+    // clickable ref. Allocation follows pre-order within this tree, and never
+    // reuses a retired ref. The backend id is the handle click_by_ref resolves.
     let node_ref = if !node.ignored && is_interactive(&role) {
-        node.backend_dom_node_id.as_ref().map(|b| {
-            *counter += 1;
-            let r = format!("@e{}", *counter);
-            ref_map.insert(r.clone(), *b.inner());
-            r
-        })
+        node.backend_dom_node_id
+            .as_ref()
+            .map(|b| -> Result<String> {
+                let r = next_node_ref(last_ref_id)?;
+                ref_map.insert(r.clone(), *b.inner());
+                Ok(r)
+            })
+            .transpose()?
     } else {
         None
     };
@@ -1759,24 +1781,213 @@ fn convert(
                 .filter_map(|id| {
                     by_id
                         .get(id.inner())
-                        .map(|c| convert(c, by_id, ref_map, counter))
+                        .map(|c| convert(c, by_id, ref_map, last_ref_id))
                 })
-                .collect()
+                .collect::<Result<Vec<_>>>()
         })
+        .transpose()?
         .unwrap_or_default();
 
-    A11yNode {
+    Ok(A11yNode {
         role,
         name,
         value,
         node_ref,
         children,
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_interactive;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{atomic::AtomicU64, Arc, Barrier};
+
+    use ab_core::PageId;
+    use chromiumoxide::cdp::browser_protocol::accessibility::AxNode;
+    use serde_json::json;
+
+    use super::{build_a11y_tree, is_interactive, ChromiumCdpBackend};
+
+    fn button_node(name: &str, backend_id: i64) -> serde_json::Result<AxNode> {
+        serde_json::from_value(json!({
+            "nodeId": format!("button-{backend_id}"),
+            "ignored": false,
+            "role": {"type": "role", "value": "button"},
+            "name": {"type": "computedString", "value": name},
+            "backendDOMNodeId": backend_id
+        }))
+    }
+
+    fn publish_button(
+        backend: &ChromiumCdpBackend,
+        page: &PageId,
+        name: &str,
+        backend_id: i64,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut refs = HashMap::new();
+        let tree = build_a11y_tree(
+            &[button_node(name, backend_id)?],
+            &mut refs,
+            &backend.last_ref_id,
+        )?;
+        let node_ref = tree.node_ref.ok_or("button must have a ref")?;
+        backend.ref_maps.insert(page.as_str().to_owned(), refs);
+        Ok(node_ref)
+    }
+
+    #[test]
+    fn test_new_snapshot_does_not_rebind_old_ref_to_another_node(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let backend = ChromiumCdpBackend::new();
+        let page = PageId::new();
+        let mut first_map = HashMap::new();
+        let first = build_a11y_tree(
+            &[button_node("Save", 11)?],
+            &mut first_map,
+            &backend.last_ref_id,
+        )?;
+        let first_ref = first.node_ref.ok_or("first button must have a ref")?;
+        assert_eq!(first_map.get(&first_ref), Some(&11));
+        backend.ref_maps.insert(page.as_str().to_owned(), first_map);
+
+        let mut second_map = HashMap::new();
+        let second = build_a11y_tree(
+            &[button_node("Delete", 22)?],
+            &mut second_map,
+            &backend.last_ref_id,
+        )?;
+        let second_ref = second.node_ref.ok_or("second button must have a ref")?;
+        backend
+            .ref_maps
+            .insert(page.as_str().to_owned(), second_map);
+
+        assert_eq!(backend.resolve_snapshot_ref(&page, &second_ref)?, 22);
+        assert!(
+            backend.resolve_snapshot_ref(&page, &first_ref).is_err(),
+            "a stale Save ref must not resolve to the new Delete button"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_identical_snapshot_retires_previous_ref() -> Result<(), Box<dyn std::error::Error>> {
+        let backend = ChromiumCdpBackend::new();
+        let page = PageId::new();
+        let first = publish_button(&backend, &page, "Save", 11)?;
+        let second = publish_button(&backend, &page, "Save", 11)?;
+
+        assert_ne!(first, second);
+        assert!(backend.resolve_snapshot_ref(&page, &first).is_err());
+        assert_eq!(backend.resolve_snapshot_ref(&page, &second)?, 11);
+        Ok(())
+    }
+
+    #[test]
+    fn test_pages_and_clones_share_a_non_reused_ref_namespace(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let backend = ChromiumCdpBackend::new();
+        let clone = backend.clone();
+        let first_page = PageId::new();
+        let second_page = PageId::new();
+        let first = publish_button(&backend, &first_page, "Save", 11)?;
+        let second = publish_button(&clone, &second_page, "Delete", 22)?;
+
+        assert_ne!(first, second);
+        assert_eq!(clone.resolve_snapshot_ref(&first_page, &first)?, 11);
+        assert_eq!(backend.resolve_snapshot_ref(&second_page, &second)?, 22);
+        assert!(clone.resolve_snapshot_ref(&second_page, &first).is_err());
+        assert!(backend.resolve_snapshot_ref(&first_page, &second).is_err());
+
+        backend.ref_maps.remove(first_page.as_str());
+        assert!(clone.resolve_snapshot_ref(&first_page, &first).is_err());
+        let reopened = publish_button(&clone, &first_page, "Replacement", 33)?;
+        assert_ne!(reopened, first);
+        assert_ne!(reopened, second);
+        assert!(backend.resolve_snapshot_ref(&first_page, &first).is_err());
+        assert_eq!(backend.resolve_snapshot_ref(&first_page, &reopened)?, 33);
+        Ok(())
+    }
+
+    #[test]
+    fn test_concurrent_snapshot_refs_do_not_collide() -> Result<(), Box<dyn std::error::Error>> {
+        let backend = ChromiumCdpBackend::new();
+        let barrier = Arc::new(Barrier::new(8));
+        let node = button_node("Concurrent", 11)?;
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let clone = backend.clone();
+            let barrier = Arc::clone(&barrier);
+            let node = node.clone();
+            workers.push(std::thread::spawn(
+                move || -> Result<Vec<String>, String> {
+                    barrier.wait();
+                    let mut allocated = Vec::new();
+                    for _ in 0..64 {
+                        let mut refs = HashMap::new();
+                        let tree = build_a11y_tree(
+                            std::slice::from_ref(&node),
+                            &mut refs,
+                            &clone.last_ref_id,
+                        )
+                        .map_err(|error| error.to_string())?;
+                        let node_ref = tree.node_ref.ok_or("button must have a ref")?;
+                        if refs.get(&node_ref) != Some(&11) {
+                            return Err("generated ref must preserve backend identity".into());
+                        }
+                        allocated.push(node_ref);
+                    }
+                    Ok(allocated)
+                },
+            ));
+        }
+        let mut allocated = HashSet::new();
+        for worker in workers {
+            for node_ref in worker.join().map_err(|_| "snapshot worker panicked")?? {
+                assert!(node_ref[2..].bytes().all(|byte| byte.is_ascii_digit()));
+                assert!(allocated.insert(node_ref), "refs must never collide");
+            }
+        }
+        assert_eq!(allocated.len(), 512);
+        Ok(())
+    }
+
+    #[test]
+    fn test_ref_exhaustion_rejects_snapshots_without_reusing_a_ref(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let backend = ChromiumCdpBackend {
+            last_ref_id: Arc::new(AtomicU64::new(u64::MAX - 1)),
+            ..ChromiumCdpBackend::new()
+        };
+        let page = PageId::new();
+        let last = publish_button(&backend, &page, "Last", 11)?;
+        assert_eq!(last, format!("@e{}", u64::MAX));
+        for _ in 0..2 {
+            let mut refs = HashMap::new();
+            let result = build_a11y_tree(
+                &[button_node("Must not be published", 22)?],
+                &mut refs,
+                &backend.last_ref_id,
+            );
+            assert!(matches!(result, Err(ab_core::Error::Backend(_))));
+            assert!(refs.is_empty());
+            assert_eq!(backend.resolve_snapshot_ref(&page, &last)?, 11);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_noninteractive_nodes_do_not_consume_refs() -> Result<(), Box<dyn std::error::Error>> {
+        let backend = ChromiumCdpBackend::new();
+        let mut ignored = button_node("Ignored", 11)?;
+        ignored.ignored = true;
+        let mut refs = HashMap::new();
+        let tree = build_a11y_tree(&[ignored], &mut refs, &backend.last_ref_id)?;
+        assert!(tree.node_ref.is_none());
+        assert!(refs.is_empty());
+        let page = PageId::new();
+        assert_eq!(publish_button(&backend, &page, "Visible", 22)?, "@e1");
+        Ok(())
+    }
 
     #[test]
     fn interactive_roles_are_clickable() {

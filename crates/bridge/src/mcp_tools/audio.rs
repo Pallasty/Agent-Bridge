@@ -3780,9 +3780,10 @@ impl McpTool for BrowserSnapshotTool {
             description: "Return the page's accessibility tree (role/name/value + children). \
                  Far cheaper than a screenshot for letting the agent reason about page \
                  structure: the same content takes 10–50× fewer tokens than a PNG. \
-                 Interactive nodes (button/link/textbox/…) carry a stable \"ref\" like \
+                 Interactive nodes (button/link/textbox/…) carry a snapshot \"ref\" like \
                  \"@e1\" — pass it as browser_click's selector to click by ref instead of \
-                 a brittle CSS selector. Refs are re-numbered on each snapshot."
+                 a brittle CSS selector. Use refs from the latest snapshot of that page; \
+                 earlier refs expire and are never reassigned within the browser backend."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3817,7 +3818,9 @@ impl McpTool for BrowserSnapshotTool {
     }
 }
 
-/// Additive, content-bound identity for a browser accessibility observation.
+/// Additive identity for the full accessibility output, including snapshot refs.
+/// This is not a normalized DOM digest: a fresh capture issues fresh refs even
+/// when the page's visible content has not changed.
 pub(super) fn browser_snapshot_observation(page: &PageId, tree: &Value) -> Value {
     let canonical = serde_json::to_vec(tree).unwrap_or_default();
     let digest = Sha256::digest(&canonical);
@@ -3859,9 +3862,10 @@ impl McpTool for BrowserClickTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Click an element by CSS selector, OR by a stable \"@eN\" ref from \
-                a prior browser_snapshot (e.g. \"@e3\"). Refs resolve to the element's backend \
-                DOM node, so they survive dynamic class names that break CSS selectors."
+            description: "Click an element by CSS selector, OR by an \"@eN\" ref from \
+                the latest browser_snapshot of this page (e.g. \"@e3\"). Refs resolve to the \
+                element's backend DOM node, so they survive dynamic class names that break \
+                CSS selectors. An expired ref requires a new snapshot and decision."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -3887,8 +3891,8 @@ impl McpTool for BrowserClickTool {
         if sel.is_empty() {
             return Ok(ToolResult::error("missing 'selector'"));
         }
-        // An `@eN` value (literally @e followed by digits) is a stable ref from a
-        // prior browser_snapshot; route it to the ref-based click. Match the exact
+        // An `@eN` value (literally @e followed by digits) is a snapshot ref;
+        // route it to the ref-based click, which rejects expired refs. Match the exact
         // ref grammar — not a loose "@e" prefix — so a selector like "@email" or an
         // attribute selector still goes down the CSS path. (Real CSS selectors never
         // begin with a literal '@', so backward compat is intact.) No schema change.

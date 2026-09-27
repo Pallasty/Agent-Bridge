@@ -20,9 +20,10 @@ pub struct A11yNode {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    /// Stable `@eN` ref assigned to interactive nodes by `snapshot_a11y`, so the
+    /// Snapshot-scoped `@eN` ref assigned to interactive nodes by `snapshot_a11y`, so the
     /// agent can `browser_click` an element by ref instead of a brittle CSS
-    /// selector. Ephemeral: re-numbered on each snapshot of the same page.
+    /// selector. The CDP backend never reuses a ref within its lifetime; only
+    /// refs from the page's latest published snapshot remain valid.
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub node_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -96,9 +97,9 @@ pub trait BrowserBackend: Send + Sync {
 
     async fn click(&self, page: &PageId, selector: &str) -> Result<()>;
 
-    /// Click an element by the stable `@eN` ref surfaced in the most recent
+    /// Click an element by the `@eN` ref surfaced in the latest published
     /// [`snapshot_a11y`](BrowserBackend::snapshot_a11y) of this page. Refs are
-    /// ephemeral (re-numbered on each snapshot). CDP-native: resolves the ref to
+    /// ephemeral and never reused by the CDP backend. CDP-native: resolves the ref to
     /// its backend DOM node and dispatches a real click, so it survives dynamic
     /// class names that break CSS selectors. The default impl errors; the CDP
     /// backend overrides it.
