@@ -1,8 +1,5 @@
 # agent-bridge
 
-[![CI](https://github.com/pallasting/Agent-Bridge/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/pallasting/Agent-Bridge/actions/workflows/ci.yml)
-[![Verify Warp Integration](https://github.com/pallasting/Agent-Bridge/actions/workflows/verify-warp-integration.yml/badge.svg?branch=master)](https://github.com/pallasting/Agent-Bridge/actions/workflows/verify-warp-integration.yml)
-
 A Unix-native AI-agent control plane: desktop notifications, cross-session memory,
 MCP tool registry, terminal multiplexer glue, browser automation (CDP), git-worktree
 orchestration, and sub-agent spawning — all pluggable via Rust traits.
@@ -13,11 +10,14 @@ Current single-developer priorities and frozen research lanes are maintained in
 ## Install
 
 agent-bridge is distributed as **source only** — there are no prebuilt
-binaries or release tarballs. The code is published to two forges; either
-works as your install source:
+binaries or release tarballs. The public release repository is:
 
-- GitHub: `https://github.com/pallasting/Agent-Bridge`
-- GitLab: `https://gitlab.com/pallasting/agent-bridge`
+- GitHub: `https://github.com/Pallasty/Agent-Bridge`
+
+The `pallasting/Agent-Bridge` GitHub repository and the
+`pallasting/agent-bridge` GitLab repository are backup mirrors. Maintainer
+sync rules and branch mappings are in
+[`docs/operations/REPOSITORY_PUBLICATION_AND_BACKUP.md`](docs/operations/REPOSITORY_PUBLICATION_AND_BACKUP.md).
 
 ### Version provenance
 
@@ -53,8 +53,8 @@ bundled feature are pure Rust).
 ### `cargo install --git` (recommended)
 
 ```bash
-cargo install --git https://github.com/pallasting/Agent-Bridge.git --bin agent-bridge
-# or from GitLab:
+cargo install --git https://github.com/Pallasty/Agent-Bridge.git --bin agent-bridge
+# backup source, when its verified commit matches the release repository:
 cargo install --git https://gitlab.com/pallasting/agent-bridge.git --bin agent-bridge
 ```
 
@@ -65,8 +65,8 @@ to **[Configure](#configure)**.
 ### Source build (for hacking on agent-bridge itself)
 
 ```bash
-git clone https://github.com/pallasting/Agent-Bridge.git ~/agent-bridge
-# or: git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
+git clone https://github.com/Pallasty/Agent-Bridge.git ~/agent-bridge
+# backup source: git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 ```
 

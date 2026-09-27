@@ -51,7 +51,7 @@ edition = "2021"
 rust-version = "1.85"
 license = "MIT"
 authors = ["agent-bridge contributors"]
-repository = "https://gitlab.com/pallasting/agent-bridge"
+repository = "https://github.com/Pallasty/Agent-Bridge"
 
 [workspace.dependencies]
 # Async runtime

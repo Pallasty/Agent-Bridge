@@ -37,6 +37,11 @@ none of them acts on any third-party system:
 
 - **Source sync**: do not trigger CI. Use SSH, include `[skip ci]` in sync
   commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.
+- **Repository roles**: `Pallasty/Agent-Bridge` on GitHub (`main`) is the public
+  release repository. `pallasting/Agent-Bridge` on GitHub and
+  `pallasting/agent-bridge` on GitLab (`master`) are backups. Use explicit,
+  verified refs for publication and backup sync; see
+  `docs/operations/REPOSITORY_PUBLICATION_AND_BACKUP.md`.
 
 - **Validation collection status**: read `docs/ACTIVE-PRODUCT-ROADMAP.md` and
   `docs/reports/goal-c-u/2026-09-08-validation-collection-closeout.md` before
