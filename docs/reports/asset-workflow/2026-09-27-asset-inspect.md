@@ -48,8 +48,28 @@ registry 和 structured result，无新依赖。工具 `Tier::Niche`，默认工
 cargo test --locked -p ab-bridge --lib asset_inspect
 ```
 
-共享 Rust 改动还需经仓库 pre-commit 的四组 CLI governance 选择、实际 CLI 对比及
-`cargo check -p ab-bridge --all-targets`；提交时执行，不能用旧报告替代。
+实现提交为 `f4654ed60cfebb3bdc208f1038762ca5b552e89d`，其 Git tree 为
+`4decd54dd9612ca7302bfe9feb1e9ffaaeb9e972`。以下提交钩子检查均已实际通过：
+
+- S18–S21 四组源码/报告绑定，以及选择的边界与集成测试。
+- 405 项纯行为案例及其负对照。
+- 143 项新鲜 CLI 对比：Identity 30、Instinct 79、WorktreeSession 34。
+- `cargo check -p ab-bridge --all-targets`；存在既有警告，退出码为 0。
+
+CLI 对比报告绑定上述实现 tree；本报告的后续文档提交具有不同 tree，不能用它
+替代被测实现身份。完整提交日志为证据目录中的 `precommit-posix.log`；
+`governance-final/summary.json`、三组 CLI 报告及 `receipt.json` 保留对应身份和摘要。
+
+首次提交尝试因验证环境失败，未产生提交：`/Data` 的 fuseblk 挂载将测试目录呈现为
+root 所有，触发既有数据库目录所有权检查。使用同一候选二进制在 `/home` 的 ext4
+用户私有目录（UID 1000、0700）复现后通过；随后将验证根目录改为
+`/home/pallasting/.cache/agent-bridge-asset-inspect-target-20260927` 并重新运行完整钩子。
+`debug` 链接复用原磁盘构建缓存，CLI 状态目录位于用户私有文件系统。没有修改
+所有权安全检查，也没有绕过提交钩子。两次初始化诊断及失败日志均保留在证据目录。
+
+按仓库 R7 普通任务诊断流程执行只读 `resident shadow-review` 时，已安装运行时
+返回 `resident_m2_shadow_invalid_configuration`；依流程停止，没有预览、提交样本
+或修改运行时策略。这不改变 R7 的 HOLD 状态。
 
 新增两个 Rust 文件的格式检查和 `git diff --check` 通过。工作区
 `cargo fmt --all -- --check` 暴露既有多个文件的格式差异；没有进行跨模块格式重写。
