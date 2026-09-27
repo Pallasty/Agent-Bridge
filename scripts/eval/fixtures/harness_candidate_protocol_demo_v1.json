@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "trial_id": "synthetic-protocol-demo-no-task-value",
+  "candidate_module": "context_mgmt",
+  "baseline_revision": "1111111111111111111111111111111111111111",
+  "candidate_revision": "2222222222222222222222222222222222222222",
+  "exploration_task_ids": ["practice-only"],
+  "evaluation_task_ids": ["held-1", "held-2"],
+  "runs": [
+    {"task_id": "held-1", "arm": "baseline", "model": "fixed-model", "budget": 100, "memory_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "outcome": "fail", "verifier_kind": "independent", "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "score_visible_to_learning": false},
+    {"task_id": "held-1", "arm": "candidate", "model": "fixed-model", "budget": 100, "memory_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "outcome": "pass", "verifier_kind": "independent", "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "score_visible_to_learning": false},
+    {"task_id": "held-2", "arm": "baseline", "model": "fixed-model", "budget": 100, "memory_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "outcome": "pass", "verifier_kind": "independent", "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "score_visible_to_learning": false},
+    {"task_id": "held-2", "arm": "candidate", "model": "fixed-model", "budget": 100, "memory_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "outcome": "pass", "verifier_kind": "independent", "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "score_visible_to_learning": false}
+  ]
+}
