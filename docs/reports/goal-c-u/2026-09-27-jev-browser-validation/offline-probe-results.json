@@ -1,0 +1,70 @@
+{
+  "upstream_commit": "1231850a0bf1a0c0341fe408ef1668dbbfdfac46",
+  "method": "reviewed original AST function bodies",
+  "cases": [
+    {
+      "name": "zero_confidence_is_accepted_no_abstention_gate",
+      "passed": true
+    },
+    {
+      "name": "reject_unknown",
+      "passed": true
+    },
+    {
+      "name": "reject_nan",
+      "passed": true
+    },
+    {
+      "name": "reject_missing",
+      "passed": true
+    },
+    {
+      "name": "reject_non_argmax",
+      "passed": true
+    },
+    {
+      "name": "reject_boolean_confidence",
+      "passed": true
+    },
+    {
+      "name": "one_node_one_index_multiple_supported_operations",
+      "passed": true
+    },
+    {
+      "name": "one_request_consumes_only_selected_head",
+      "passed": true
+    },
+    {
+      "name": "all_compatible_heads_share_one_request",
+      "passed": true
+    },
+    {
+      "name": "low_confidence_reaches_choice_without_escalation",
+      "passed": true
+    },
+    {
+      "name": "helper_input_changes_with_visible_evidence",
+      "passed": true
+    },
+    {
+      "name": "flight_checker_positive_fixture",
+      "passed": true
+    },
+    {
+      "name": "flight_checker_accepts_changed_unchecked_passengers_and_cabin",
+      "passed": true
+    },
+    {
+      "name": "flight_checker_rejects_changed_checked_origin",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "limitations": [
+    "explicit transport and prompt doubles",
+    "not upstream pytest",
+    "no real DOM or browser",
+    "no model inference",
+    "no timing or task-value measurement"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "checked_unix": 1790516601.473407,
+  "profiles": [
+    {
+      "profile": "/home/pallasting/.cache/ab-jev-legacy-browser-20260927-run1",
+      "exact_profile_pids": [],
+      "path_absent": true
+    },
+    {
+      "profile": "/home/pallasting/.cache/ab-jev-observation-20260927-run1",
+      "exact_profile_pids": [],
+      "path_absent": true
+    },
+    {
+      "profile": "/home/pallasting/.cache/ab-jev-observation-20260927-run2",
+      "exact_profile_pids": [],
+      "path_absent": true
+    },
+    {
+      "profile": "/home/pallasting/.cache/ab-observation-ref-e2e-2036944-1790513009334839117",
+      "exact_profile_pids": [],
+      "path_absent": true
+    },
+    {
+      "profile": "/home/pallasting/.cache/ab-observation-ref-e2e-2176745-1790513944357366143",
+      "exact_profile_pids": [],
+      "path_absent": true
+    }
+  ]
+}

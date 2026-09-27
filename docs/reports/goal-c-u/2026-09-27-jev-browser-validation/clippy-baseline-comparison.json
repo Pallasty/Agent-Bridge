@@ -1,0 +1,53 @@
+{
+  "base": "6c4b1a9f332d8b9e9329f8d2914deed7db713453",
+  "file": "crates/browser/src/chromium_cdp.rs",
+  "method": "source comparison only; baseline clippy not executed",
+  "strict_current_exit_code": 101,
+  "findings": [
+    {
+      "lint": "type_complexity",
+      "current_line": 101,
+      "base_line": 98,
+      "unchanged_line": "    captures: Arc<Mutex<HashMap<String, (Arc<CaptureState>, tokio::task::AbortHandle)>>>,"
+    },
+    {
+      "lint": "ptr_arg",
+      "current_line": 216,
+      "base_line": 209,
+      "unchanged_line": "    async fn try_adopt_existing(profile: &PathBuf) -> Option<Arc<Browser>> {"
+    },
+    {
+      "lint": "clone_on_copy",
+      "current_line": 564,
+      "base_line": 554,
+      "unchanged_line": "            .backend_node_id(el.backend_node_id.clone())"
+    },
+    {
+      "lint": "redundant_closure",
+      "current_line": 670,
+      "base_line": 660,
+      "unchanged_line": "        let sel_lit = serde_json::to_string(selector).map_err(|e| Error::Serde(e))?;"
+    },
+    {
+      "lint": "redundant_closure",
+      "current_line": 671,
+      "base_line": 661,
+      "unchanged_line": "        let val_lit = serde_json::to_string(value).map_err(|e| Error::Serde(e))?;"
+    },
+    {
+      "lint": "clone_on_copy",
+      "current_line": 1063,
+      "base_line": 1053,
+      "unchanged_line": "        let ctx_id = iw.result.execution_context_id.clone();"
+    },
+    {
+      "lint": "items_after_test_module",
+      "current_test_line": 1801,
+      "base_test_line": 1778,
+      "current_function_line": 2031,
+      "base_function_line": 1820,
+      "unchanged_function_signature": "fn ax_value_to_string(v: &Option<serde_json::Value>) -> Option<String> {"
+    }
+  ],
+  "new_harness_lint": "manual_is_multiple_of fixed using parity bit test; preserve declared MSRV1.85"
+}

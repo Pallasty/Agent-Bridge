@@ -1,0 +1,36 @@
+[
+  {
+    "command": [
+      "cargo",
+      "clippy",
+      "-p",
+      "ab-browser",
+      "--all-targets"
+    ],
+    "exit_code": 0,
+    "log": "browser-clippy-final.log",
+    "environment_overrides": {}
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "ab-browser",
+      "--test",
+      "jev_observation_probe",
+      "--",
+      "--ignored",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "log": "observation-probe-final.log",
+    "environment_overrides": {
+      "AGENT_BRIDGE_HEADLESS": "1",
+      "AGENT_BRIDGE_BROWSER_PROFILE": "/home/pallasting/.cache/ab-jev-observation-20260927-run2",
+      "JEV_SNAPSHOT_JS": "/Data/session-archives/20260927-jev-ultrafast-research/upstream/jev_ultrafast/snapshot.js",
+      "JEV_OBSERVATION_OUTPUT": "/Data/session-archives/20260927-jev-ultrafast-research/validation/observation-probe-final.json"
+    }
+  }
+]

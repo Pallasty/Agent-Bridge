@@ -1,0 +1,102 @@
+[
+  {
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "ab-browser"
+    ],
+    "log": "browser-package.log",
+    "exit_code": 0,
+    "cargo_target": "/Data/ab-jev-browser-target-20260927",
+    "environment_overrides": {}
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "ab-browser",
+      "--test",
+      "observation_ref_e2e",
+      "--",
+      "--ignored",
+      "--nocapture"
+    ],
+    "log": "green-browser.log",
+    "exit_code": 0,
+    "cargo_target": "/Data/ab-jev-browser-target-20260927",
+    "environment_overrides": {}
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "ab-browser",
+      "--test",
+      "click_by_ref_e2e",
+      "--",
+      "--ignored",
+      "--nocapture"
+    ],
+    "log": "legacy-browser.log",
+    "exit_code": 0,
+    "cargo_target": "/Data/ab-jev-browser-target-20260927",
+    "environment_overrides": {
+      "AGENT_BRIDGE_HEADLESS": "1",
+      "AGENT_BRIDGE_BROWSER_PROFILE": "/home/pallasting/.cache/ab-jev-legacy-browser-20260927-run1"
+    },
+    "cleanup": {
+      "profile": "/home/pallasting/.cache/ab-jev-legacy-browser-20260927-run1",
+      "exact_profile_pids_before": [],
+      "exact_profile_pids_after": [],
+      "path_absent": true
+    }
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "ab-browser",
+      "--test",
+      "jev_observation_probe",
+      "--",
+      "--ignored",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "log": "observation-probe.log",
+    "exit_code": 0,
+    "cargo_target": "/Data/ab-jev-browser-target-20260927",
+    "environment_overrides": {
+      "AGENT_BRIDGE_HEADLESS": "1",
+      "AGENT_BRIDGE_BROWSER_PROFILE": "/home/pallasting/.cache/ab-jev-observation-20260927-run1",
+      "JEV_SNAPSHOT_JS": "/Data/session-archives/20260927-jev-ultrafast-research/upstream/jev_ultrafast/snapshot.js",
+      "JEV_OBSERVATION_OUTPUT": "/Data/session-archives/20260927-jev-ultrafast-research/validation/observation-probe.json"
+    },
+    "cleanup": {
+      "profile": "/home/pallasting/.cache/ab-jev-observation-20260927-run1",
+      "exact_profile_pids_before": [],
+      "exact_profile_pids_after": [],
+      "path_absent": true
+    }
+  },
+  {
+    "command": [
+      "cargo",
+      "clippy",
+      "-p",
+      "ab-browser",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "log": "browser-clippy.log",
+    "exit_code": 101,
+    "cargo_target": "/Data/ab-jev-browser-target-20260927",
+    "environment_overrides": {}
+  }
+]

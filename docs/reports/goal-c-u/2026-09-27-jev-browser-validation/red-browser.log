@@ -1,0 +1,25 @@
+   Compiling ab-browser v0.14.0 (/Data/CascadeProjects/agent-bridge-jev-browser-validation-20260927/crates/browser)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.75s
+     Running tests/observation_ref_e2e.rs (/Data/CascadeProjects/agent-bridge/target/debug/deps/observation_ref_e2e-34b2b2c0502aab96)
+
+running 1 test
+owned Chrome profile: /home/pallasting/.cache/ab-observation-ref-e2e-2036944-1790513009334839117
+
+thread 'observation_refs_never_alias_across_snapshots_or_pages' (2036945) panicked at crates/browser/tests/observation_ref_e2e.rs:365:5:
+replacement rejects snapshot A ref: ref=@e1, result=Ok(()), counts=[0,1,1], expected=[0,0,0]
+same node new snapshot rejects prior ref: ref=@e1, result=Ok(()), counts=[0,1,1], expected=[0,0,0]
+reload plus snapshot cannot revive old ref: ref=@e1, result=Ok(()), counts=[0,1,1], expected=[0,0,0]
+cross-page ref is rejected: ref=@e1, result=Ok(()), counts=[0,1,1], expected=[0,0,0]
+clone snapshot invalidates old shared ref: ref=@e1, result=Ok(()), counts=[0,1,1], expected=[0,0,0]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+owned profile cleanup failed (/home/pallasting/.cache/ab-observation-ref-e2e-2036944-1790513009334839117): Directory not empty (os error 39)
+test observation_refs_never_alias_across_snapshots_or_pages ... FAILED
+
+failures:
+
+failures:
+    observation_refs_never_alias_across_snapshots_or_pages
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.95s
+
+error: test failed, to rerun pass `-p ab-browser --test observation_ref_e2e`

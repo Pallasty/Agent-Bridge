@@ -1,0 +1,2139 @@
+{
+  "schema": "agent_bridge.worktree_session_cli_parity.v1",
+  "baseline_sha256": "bc5ae582b04593355857eed568bd45966b746a7edf3b1b2c73fbed54d8819e87",
+  "candidate_sha256": "dd7957ef7c54f696a72398d8ddac7876a3c2b1e74cc72cb56524dcc6abd4982a",
+  "script_sha256": "32d53f8662b077e0d3728e576847ed3886c60dc9a7683a8fc0122f82208d9bc5",
+  "inputs_unchanged_during_comparison": true,
+  "passed": 34,
+  "total": 34,
+  "scope": "CLI bytes; only validated new slug normalized; fake Git argv/effects and real Git refs/worktrees/contents",
+  "excluded": [
+    "real user repositories/configuration/hooks",
+    "Git index/database byte equivalence",
+    "same-second real Git collision timing",
+    "cross-stream wall-clock ordering"
+  ],
+  "cases": [
+    {
+      "case": "root-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516488.5831866,
+        "invocation_end_unix": 1790516488.7100523,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "379e0e48f5d5183de7a21c7efcd69ba58df5ad13c15fc1aa125e701d517cc248",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516488.7245784,
+        "invocation_end_unix": 1790516488.8273082,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "group-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516488.8413184,
+        "invocation_end_unix": 1790516488.9476483,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "c415457e9d807336eaa2093c9912fdc97129de09c7aea2a7bbe3b578269770eb",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516488.9593687,
+        "invocation_end_unix": 1790516489.0687141,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "new-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.0796902,
+        "invocation_end_unix": 1790516489.1891167,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "60bf5c94b3aca2b1cc01fdd8f835036c7380141bceefe3288032ae884bea3407",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.2000697,
+        "invocation_end_unix": 1790516489.3112772,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "list-help",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list",
+        "--help"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.3229218,
+        "invocation_end_unix": 1790516489.4190762,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "b6ab9068153594711d0f3638b100dd5bbcf80870a0fa25c0a3708f435564b12a",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.4304278,
+        "invocation_end_unix": 1790516489.541063,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "new-invalid-option",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.5548792,
+        "invocation_end_unix": 1790516489.657936,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "2a995cae016fbe222c2ba0ef87c50c9601be80517e972fc1fbbfecd1ced1f3ff",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.6714435,
+        "invocation_end_unix": 1790516489.7721388,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "list-invalid-option",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list",
+        "--fixture-invalid"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.7830262,
+        "invocation_end_unix": 1790516489.8935845,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 2,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "c1eb35d6444f79fa7d3add956f9955866294207172ca4139d774307bc28eb7a6",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516489.9048214,
+        "invocation_end_unix": 1790516490.0179899,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-empty",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516490.0288582,
+        "invocation_end_unix": 1790516490.1997995,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516490.2114038,
+        "invocation_end_unix": 1790516490.3896735,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-unrelated",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516490.4012432,
+        "invocation_end_unix": 1790516490.5669699,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516490.5804145,
+        "invocation_end_unix": 1790516490.7717953,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-normal",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516490.7841032,
+        "invocation_end_unix": 1790516490.9625251,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516490.97505,
+        "invocation_end_unix": 1790516491.1400666,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-no-trailing-blank",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516491.1510272,
+        "invocation_end_unix": 1790516491.32775,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "0e0ba1082f3abeb7c226ece0d15f53090a0085495cfa89027f1f4158f3e2f064",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516491.337426,
+        "invocation_end_unix": 1790516491.4959562,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-detached",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516491.5102503,
+        "invocation_end_unix": 1790516491.6767294,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "70763188b07687070dce3bae76b2a27731fa5935cb490f28a6f42d399fb6c263",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516491.6888375,
+        "invocation_end_unix": 1790516491.8525672,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-missing-head",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516491.8649294,
+        "invocation_end_unix": 1790516492.0330386,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "31f729de3be5dc99fd061d23598446c53d5ea15ca57e90537926c5c350da2d79",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516492.046644,
+        "invocation_end_unix": 1790516492.2243962,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-lossy",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516492.2366407,
+        "invocation_end_unix": 1790516492.4041514,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "673dcc01e7c153ce9906f79eba0cc853567000fb7e87a3caf1fc6396eac98791",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516492.4158041,
+        "invocation_end_unix": 1790516492.5927882,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-order-and-reset",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516492.602837,
+        "invocation_end_unix": 1790516492.7864249,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "6e2ce86a92755acd0a58b539c6e22ee517fc951fda50969659ab702d07919677",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516492.796922,
+        "invocation_end_unix": 1790516492.970547,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-discovery",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516492.9818954,
+        "invocation_end_unix": 1790516493.1882498,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516493.2013185,
+        "invocation_end_unix": 1790516493.4275079,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-discovery-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516493.439282,
+        "invocation_end_unix": 1790516493.6147606,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516493.6257472,
+        "invocation_end_unix": 1790516493.8321052,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-list-git-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516493.8440502,
+        "invocation_end_unix": 1790516494.0211132,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "da716befbceaa9a7b8f09e41055edcb37853464f92b01727cf546e05b6cab709",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "list",
+              "--porcelain"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516494.0350354,
+        "invocation_end_unix": 1790516494.2118056,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-new-named",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "Fix-2_x"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "44487cd3e4f9daab34345a46f80c5117ee432d7fc41f36872f2af821c7664d7b",
+        "stderr_sha256": "94c79555836a7ad110983e6200adde348ad75aa6c92828f698f55cf27be54da6",
+        "compared_stdout_sha256": "c9f00f4003e093a0cf0b4ce69080a065641e49317816f12137359abc5ab4e777",
+        "compared_stderr_sha256": "de57fcab3cbd9683dfc13af90efad73ed3cd16f8d30b45b81ecc0280c1d9e20f",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix-2_x-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-Fix-2_x-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516494.2237294,
+        "invocation_end_unix": 1790516494.406934,
+        "validated_slug_timestamp": 1790516494
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "44487cd3e4f9daab34345a46f80c5117ee432d7fc41f36872f2af821c7664d7b",
+        "stderr_sha256": "94c79555836a7ad110983e6200adde348ad75aa6c92828f698f55cf27be54da6",
+        "compared_stdout_sha256": "c9f00f4003e093a0cf0b4ce69080a065641e49317816f12137359abc5ab4e777",
+        "compared_stderr_sha256": "de57fcab3cbd9683dfc13af90efad73ed3cd16f8d30b45b81ecc0280c1d9e20f",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix-2_x-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-Fix-2_x-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516494.421663,
+        "invocation_end_unix": 1790516494.5941615,
+        "validated_slug_timestamp": 1790516494
+      }
+    },
+    {
+      "case": "fake-new-anonymous",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "d37a9a77ff0d1b4a49dbecacff7d33bec279d2446b34d2131d36e1466ee70797",
+        "stderr_sha256": "e379a0cdc0e5fddb760ff878a17520ba6b4bc007c3fcaf281d20faa1a2a7c5b0",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "0c7127b1bc9f70aa8cbd112ce7c9c74095c4e9776dfc3df4844c0272ab9477b0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516494.6059315,
+        "invocation_end_unix": 1790516494.775748,
+        "validated_slug_timestamp": 1790516494
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "d37a9a77ff0d1b4a49dbecacff7d33bec279d2446b34d2131d36e1466ee70797",
+        "stderr_sha256": "e379a0cdc0e5fddb760ff878a17520ba6b4bc007c3fcaf281d20faa1a2a7c5b0",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "0c7127b1bc9f70aa8cbd112ce7c9c74095c4e9776dfc3df4844c0272ab9477b0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516494.7877712,
+        "invocation_end_unix": 1790516494.9395971,
+        "validated_slug_timestamp": 1790516494
+      }
+    },
+    {
+      "case": "fake-new-empty-name",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        ""
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "724b4840f9c08c65d523b1353fbcf964ffa318b2c759239abfa465cbd3ae0b75",
+        "stderr_sha256": "4467a83fa60d59c2be2514b5a3fc28369bd1bbc4226210680c8c98da0dacb706",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "0c7127b1bc9f70aa8cbd112ce7c9c74095c4e9776dfc3df4844c0272ab9477b0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516494.95186,
+        "invocation_end_unix": 1790516495.1406713,
+        "validated_slug_timestamp": 1790516495
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "724b4840f9c08c65d523b1353fbcf964ffa318b2c759239abfa465cbd3ae0b75",
+        "stderr_sha256": "4467a83fa60d59c2be2514b5a3fc28369bd1bbc4226210680c8c98da0dacb706",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "0c7127b1bc9f70aa8cbd112ce7c9c74095c4e9776dfc3df4844c0272ab9477b0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516495.152517,
+        "invocation_end_unix": 1790516495.3299267,
+        "validated_slug_timestamp": 1790516495
+      }
+    },
+    {
+      "case": "fake-new-sanitized",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "Fix /中文_2"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "9657b21b506793d9a88beb541dc1afbf66a2058417bab1681af2df558c6c4edf",
+        "stderr_sha256": "ce810f6c414cb5b4f6ad23971875bbaba95adc67745cac1625664fd21e274e10",
+        "compared_stdout_sha256": "dc639f21202af09dd96630f665b68045ece1373a61d77e2b46512d948b1bc40f",
+        "compared_stderr_sha256": "e74b86ca7f19bb4348fbd24cedc58a1f142d91b0d7f2f70d5db4e8630632efe0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix----_2-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-Fix----_2-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516495.343259,
+        "invocation_end_unix": 1790516495.5179765,
+        "validated_slug_timestamp": 1790516495
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "9657b21b506793d9a88beb541dc1afbf66a2058417bab1681af2df558c6c4edf",
+        "stderr_sha256": "ce810f6c414cb5b4f6ad23971875bbaba95adc67745cac1625664fd21e274e10",
+        "compared_stdout_sha256": "dc639f21202af09dd96630f665b68045ece1373a61d77e2b46512d948b1bc40f",
+        "compared_stderr_sha256": "e74b86ca7f19bb4348fbd24cedc58a1f142d91b0d7f2f70d5db4e8630632efe0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/Fix----_2-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-Fix----_2-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516495.529851,
+        "invocation_end_unix": 1790516495.7156649,
+        "validated_slug_timestamp": 1790516495
+      }
+    },
+    {
+      "case": "fake-new-explicit-base",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--base",
+        "fixture-base"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "724b4840f9c08c65d523b1353fbcf964ffa318b2c759239abfa465cbd3ae0b75",
+        "stderr_sha256": "6346b34d8143d44873d515087de954df4360e2e71547baffb86589985155f6be",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "dd47ecd3d52149d1c27e5323792d696f0c954ab927f5e34b2c371f490063b39c",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "fixture-base"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516495.727662,
+        "invocation_end_unix": 1790516495.9021335,
+        "validated_slug_timestamp": 1790516495
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "9d4e4cca87b19999b3950b7e21b8726de954ca8db6106605c374fd96a5c3501f",
+        "stderr_sha256": "af8a5083ede03188d6f808c784dc98889cb0e17dc132608f028bb82c8dbaae3e",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "dd47ecd3d52149d1c27e5323792d696f0c954ab927f5e34b2c371f490063b39c",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "fixture-base"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516495.9139085,
+        "invocation_end_unix": 1790516496.0885634,
+        "validated_slug_timestamp": 1790516496
+      }
+    },
+    {
+      "case": "fake-new-discovery",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "discovered"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "33bdd88f0ff6e11dd2b2a72c4afadf968c291714c39f6a26a6fc4f89c3055327",
+        "stderr_sha256": "ab13488b1103f7f2620a6577f4687281cbc87e7c6e19257694c982b9163b0da8",
+        "compared_stdout_sha256": "e72d94ea4e7de975aaf2d55f76394d6bc6692bcf768df2fd6c01177c8ab7d486",
+        "compared_stderr_sha256": "39989c45f2cba1b3c0bdbdc8a3e5f8faf33c1ed345bbf47af1b50ef9c0d94b93",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/discovered-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-discovered-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516496.1033728,
+        "invocation_end_unix": 1790516496.343589,
+        "validated_slug_timestamp": 1790516496
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "33bdd88f0ff6e11dd2b2a72c4afadf968c291714c39f6a26a6fc4f89c3055327",
+        "stderr_sha256": "ab13488b1103f7f2620a6577f4687281cbc87e7c6e19257694c982b9163b0da8",
+        "compared_stdout_sha256": "e72d94ea4e7de975aaf2d55f76394d6bc6692bcf768df2fd6c01177c8ab7d486",
+        "compared_stderr_sha256": "39989c45f2cba1b3c0bdbdc8a3e5f8faf33c1ed345bbf47af1b50ef9c0d94b93",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          },
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/discovered-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-discovered-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516496.3566515,
+        "invocation_end_unix": 1790516496.5996618,
+        "validated_slug_timestamp": 1790516496
+      }
+    },
+    {
+      "case": "fake-new-override-priority",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "9d4e4cca87b19999b3950b7e21b8726de954ca8db6106605c374fd96a5c3501f",
+        "stderr_sha256": "941ce01254a63c97933b06f00c581927682e7f8ac5bd3049727753f0b2a6b358",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "0c7127b1bc9f70aa8cbd112ce7c9c74095c4e9776dfc3df4844c0272ab9477b0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516496.6122034,
+        "invocation_end_unix": 1790516496.800969,
+        "validated_slug_timestamp": 1790516496
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "9d4e4cca87b19999b3950b7e21b8726de954ca8db6106605c374fd96a5c3501f",
+        "stderr_sha256": "941ce01254a63c97933b06f00c581927682e7f8ac5bd3049727753f0b2a6b358",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "0c7127b1bc9f70aa8cbd112ce7c9c74095c4e9776dfc3df4844c0272ab9477b0",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516496.8132842,
+        "invocation_end_unix": 1790516496.9885304,
+        "validated_slug_timestamp": 1790516496
+      }
+    },
+    {
+      "case": "fake-new-git-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9ab83e7c79f6a2aa42d9499b3574cf310c379fe78b06a0e43ecb999ee4d12aa3",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "b5fd29e60dce643011dd12f32065744975dd7260258de70f51ea67984da85aee",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516497.0016668,
+        "invocation_end_unix": 1790516497.1873949,
+        "validated_slug_timestamp": 1790516497
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9ab83e7c79f6a2aa42d9499b3574cf310c379fe78b06a0e43ecb999ee4d12aa3",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "b5fd29e60dce643011dd12f32065744975dd7260258de70f51ea67984da85aee",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [
+          {
+            "argv": [
+              "-C",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo",
+              "worktree",
+              "add",
+              "-b",
+              "session/anon-<validated-unix>",
+              "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>",
+              "HEAD"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": true
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516497.2030034,
+        "invocation_end_unix": 1790516497.3867846,
+        "validated_slug_timestamp": 1790516497
+      }
+    },
+    {
+      "case": "fake-new-mkdir-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516497.398565,
+        "invocation_end_unix": 1790516497.5264106,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516497.540166,
+        "invocation_end_unix": 1790516497.6575532,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "fake-new-discovery-failure",
+      "backend": "fake",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516497.6659808,
+        "invocation_end_unix": 1790516497.8407552,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "4f18f161e028da3434053cd946b28df4b7e06ae8188f8c43b1e92f62305030fa",
+        "effects": {},
+        "git_calls": [
+          {
+            "argv": [
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "cwd": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/outside",
+            "parent_exists": false
+          }
+        ],
+        "git_business_state": null,
+        "invocation_start_unix": 1790516497.8524702,
+        "invocation_end_unix": 1790516498.0252414,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "real-head",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--name",
+        "real"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "4e900da311c44d0fd7d76fdf39f52f8808c08d9175d1f88ad7aaf2a0f40a08c0",
+        "stderr_sha256": "7ac16c407a76ce6716f52297400a41b2568615db4903dfffe19e646adaca446d",
+        "compared_stdout_sha256": "4f77a79a0abab6ff961a91b4e0a0e76c2870a8f1cf6fbbbcec74d89b2f92a5c8",
+        "compared_stderr_sha256": "89567cbc606c4b14452f0efa7491baa089f6b910685c134c768e710de9b4aa78",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "6b2d2922a9df759eee523f7a4d5b603b551c6ddf5297765bf294ffa755d74649"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/real-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-real-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/real-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1790516498.1172154,
+        "invocation_end_unix": 1790516498.2618814,
+        "validated_slug_timestamp": 1790516498
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "4e900da311c44d0fd7d76fdf39f52f8808c08d9175d1f88ad7aaf2a0f40a08c0",
+        "stderr_sha256": "7ac16c407a76ce6716f52297400a41b2568615db4903dfffe19e646adaca446d",
+        "compared_stdout_sha256": "4f77a79a0abab6ff961a91b4e0a0e76c2870a8f1cf6fbbbcec74d89b2f92a5c8",
+        "compared_stderr_sha256": "89567cbc606c4b14452f0efa7491baa089f6b910685c134c768e710de9b4aa78",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "6b2d2922a9df759eee523f7a4d5b603b551c6ddf5297765bf294ffa755d74649"
+          },
+          "repo/.worktrees/session-real-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/real-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-real-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/real-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1790516498.3833983,
+        "invocation_end_unix": 1790516498.504137,
+        "validated_slug_timestamp": 1790516498
+      }
+    },
+    {
+      "case": "real-base",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--base",
+        "fixture-base"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "52c2aad955af5061deb8a5183d00b2a7617f6de8de5cca69abfbdf8f1df86bd4",
+        "stderr_sha256": "b62e0e50d256c3a5b083bbbd2bf121ef44d5f8d723462ba2a6ac0d8cad85c537",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "7e6bec915ada6fd622636197bc5abf77d2457963fb4652aa8bd23892a6f117d6",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27a0822babb9569291dfa24f692db5aaa06b38aaaf506a736b79e011b10d02d8"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1790516498.6146915,
+        "invocation_end_unix": 1790516498.736339,
+        "validated_slug_timestamp": 1790516498
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "52c2aad955af5061deb8a5183d00b2a7617f6de8de5cca69abfbdf8f1df86bd4",
+        "stderr_sha256": "b62e0e50d256c3a5b083bbbd2bf121ef44d5f8d723462ba2a6ac0d8cad85c537",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "7e6bec915ada6fd622636197bc5abf77d2457963fb4652aa8bd23892a6f117d6",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27a0822babb9569291dfa24f692db5aaa06b38aaaf506a736b79e011b10d02d8"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1790516498.8472598,
+        "invocation_end_unix": 1790516498.9885333,
+        "validated_slug_timestamp": 1790516498
+      }
+    },
+    {
+      "case": "real-discovery",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "8c32ccab8ed424c0db52f9caf7ed6145c9cb0435f7023790e8f074b655bb8943",
+        "stderr_sha256": "bdb30642cab49bae32b602bc83b8f5010e41cbf897afdf6f82b786239918e834",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "d1ec0c9daf36f3ce0a83435e0c69e25280c2150b58d9eab4bb9e00b76b40baca",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27a0822babb9569291dfa24f692db5aaa06b38aaaf506a736b79e011b10d02d8"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1790516499.0964725,
+        "invocation_end_unix": 1790516499.252985,
+        "validated_slug_timestamp": 1790516499
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "8c32ccab8ed424c0db52f9caf7ed6145c9cb0435f7023790e8f074b655bb8943",
+        "stderr_sha256": "bdb30642cab49bae32b602bc83b8f5010e41cbf897afdf6f82b786239918e834",
+        "compared_stdout_sha256": "3a2ad762f3a9c768839e66ab643099d0cd0061f4d0858e7277301bcacdbe355a",
+        "compared_stderr_sha256": "d1ec0c9daf36f3ce0a83435e0c69e25280c2150b58d9eab4bb9e00b76b40baca",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>": {
+            "mode": 509,
+            "kind": "directory"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/.git": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27a0822babb9569291dfa24f692db5aaa06b38aaaf506a736b79e011b10d02d8"
+          },
+          "repo/.worktrees/session-anon-<validated-unix>/fixture.txt": {
+            "mode": 436,
+            "kind": "file",
+            "sha256": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/anon-<validated-unix>": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-anon-<validated-unix>\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/session/anon-<validated-unix>\n\n"
+        },
+        "invocation_start_unix": 1790516499.3557112,
+        "invocation_end_unix": 1790516499.5176663,
+        "validated_slug_timestamp": 1790516499
+      }
+    },
+    {
+      "case": "real-invalid-base",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new",
+        "--base",
+        "fixture-does-not-exist"
+      ],
+      "evidence_type": "validated_slug_cli_and_git_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9ab7fe6072207d499eb56c4ff57772200b22589840f1071744be4f78bed4d114",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "174ffa9a0ea3d8f5486e8044133807b948504cf0c95ec33417e42470c4f7b050",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1790516499.6276846,
+        "invocation_end_unix": 1790516499.7465322,
+        "validated_slug_timestamp": 1790516499
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "9ab7fe6072207d499eb56c4ff57772200b22589840f1071744be4f78bed4d114",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "174ffa9a0ea3d8f5486e8044133807b948504cf0c95ec33417e42470c4f7b050",
+        "effects": {
+          "repo/.worktrees": {
+            "mode": 509,
+            "kind": "directory"
+          }
+        },
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1790516499.849777,
+        "invocation_end_unix": 1790516499.9672089,
+        "validated_slug_timestamp": 1790516499
+      }
+    },
+    {
+      "case": "real-mkdir-failure",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "new"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1790516500.0646515,
+        "invocation_end_unix": 1790516500.1783462,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "764737a4489593b800a9fbcaa9adc4008675b2b35dcc88687d9c7fa91260a43f",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1790516500.2815557,
+        "invocation_end_unix": 1790516500.3875434,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "real-list-empty",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1790516500.4835587,
+        "invocation_end_unix": 1790516500.584784,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "compared_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stderr_sha256": "7df13aa4b0ed32db32bf3b86725a2695d77539e7c5dad57ac2b0c04d5678df7e",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\n"
+        },
+        "invocation_start_unix": 1790516500.6750574,
+        "invocation_end_unix": 1790516500.7952547,
+        "validated_slug_timestamp": null
+      }
+    },
+    {
+      "case": "real-list-seeded",
+      "backend": "real",
+      "argv": [
+        "agent-bridge",
+        "worktree-session",
+        "list"
+      ],
+      "evidence_type": "exact_cli_and_fixture_effect",
+      "equal": true,
+      "baseline": {
+        "exit_code": 0,
+        "stdout_sha256": "f9c72b2c00ef4e0419e7f66477425ef84fa857a4c919178a32769550579c52f3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "f9c72b2c00ef4e0419e7f66477425ef84fa857a4c919178a32769550579c52f3",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/seed": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-detached\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-seed\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/seed\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/ordinary\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\n"
+        },
+        "invocation_start_unix": 1790516500.963326,
+        "invocation_end_unix": 1790516501.0834365,
+        "validated_slug_timestamp": null
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "f9c72b2c00ef4e0419e7f66477425ef84fa857a4c919178a32769550579c52f3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compared_stdout_sha256": "f9c72b2c00ef4e0419e7f66477425ef84fa857a4c919178a32769550579c52f3",
+        "compared_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "effects": {},
+        "git_calls": [],
+        "git_business_state": {
+          "refs": {
+            "refs/heads/fixture-base": "d3225acb3ac610d8fe36165ea5c7f732b3b55611",
+            "refs/heads/fixture-main": "6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb",
+            "refs/heads/session/seed": "d3225acb3ac610d8fe36165ea5c7f732b3b55611"
+          },
+          "worktree_porcelain": "worktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\nbranch refs/heads/fixture-main\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-detached\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/.worktrees/session-seed\nHEAD d3225acb3ac610d8fe36165ea5c7f732b3b55611\nbranch refs/heads/session/seed\n\nworktree /home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927/governance-live/run-6u0em7e4/worktree-session-parity-mizvrzla/repo/ordinary\nHEAD 6ed7a95a1690ce9e2cd3317b9d99ab8cd73e05fb\ndetached\n\n"
+        },
+        "invocation_start_unix": 1790516501.2575462,
+        "invocation_end_unix": 1790516501.3743103,
+        "validated_slug_timestamp": null
+      }
+    }
+  ]
+}

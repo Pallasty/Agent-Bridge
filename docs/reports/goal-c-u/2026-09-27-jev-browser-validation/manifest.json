@@ -1,0 +1,162 @@
+{
+  "schema": "jev-browser-validation-evidence-v1",
+  "implementation_commit": "af12defe56aa93f5cbb7c6257e7e9d0229a70030",
+  "implementation_tree": "e689c15976db89e7c8aca3d4c680cb6589c08485",
+  "source_sha256": {
+    "crates/browser/src/chromium_cdp.rs": "1280a8b345be316453da68549022b5a753ab6b94d9394704b93f35624f41dc51",
+    "crates/browser/src/lib.rs": "4ab30670e44e2b4f3592f074f883a6ff08b16fc403f2149984b35327f63efc2c",
+    "crates/bridge/src/mcp_tools/audio.rs": "8da4b1f31437dbb23d74062ba287e3d11a5df2da5ce18d4c66505cc4120a933e",
+    "crates/browser/tests/observation_ref_e2e.rs": "97fc1dc84751a43d76feb36388cd1a7887f040ce521ccfac76d537ebeae8675c",
+    "crates/browser/tests/jev_observation_probe.rs": "f958e76d83b5489f4920d8ab4aa4a6f4f9eed280dbfc73841be5c431c613962a"
+  },
+  "cli_read_only_verification": {
+    "command": [
+      "python3",
+      "scripts/eval/cli_governance_bundle.py",
+      "--run-dir",
+      "/Data/CascadeProjects/agent-bridge-jev-browser-validation-20260927/docs/reports/goal-c-u/2026-09-27-jev-browser-validation/cli-bundle",
+      "--candidate-commit",
+      "af12defe56aa93f5cbb7c6257e7e9d0229a70030"
+    ],
+    "exit_code": 0,
+    "log": "portable-verification.log"
+  },
+  "files": {
+    "README.md": {
+      "sha256": "ccd1e85d284d5127931e45b82273ace2b424a0cef1184581f330488cd420511e",
+      "bytes": 2595
+    },
+    "browser-clippy-final.log": {
+      "sha256": "b31e75b2d4a87fb103e6f1274430328bbbe8123a59e5c158757b00cec0d5814d",
+      "bytes": 4160
+    },
+    "browser-clippy.log": {
+      "sha256": "8a34a4012a7b3ee8ded20585b489daf58ad3178b6beca4e9d98f68147d05f12a",
+      "bytes": 8552
+    },
+    "browser-package.log": {
+      "sha256": "81f52e2b7a8de1b7b49a0226c1b23d4e1ba14f9c7a58c276b8ccfb616bf28a80",
+      "bytes": 6442
+    },
+    "cli-bundle/baseline-build.log": {
+      "sha256": "019cea9bf672d7c231f6842dde19bf71209314baabc31496d99c2e0fd6b839f6",
+      "bytes": 6933
+    },
+    "cli-bundle/candidate-build.log": {
+      "sha256": "7e31ab9a67819f2fa0bfe61f22aa15faaeccffd70521e07c5373b47aaf86695a",
+      "bytes": 6869
+    },
+    "cli-bundle/identity.json": {
+      "sha256": "9fc9bfe7fcd6ea7b9406984687f0cee48f9b3d1946589c9147cdacdaf784be34",
+      "bytes": 188848
+    },
+    "cli-bundle/instinct.json": {
+      "sha256": "1558934fc6c7c4e172c967d12c5f710ea89bc3cee714fb8a5f7c66fd4f81fe77",
+      "bytes": 119227
+    },
+    "cli-bundle/summary.json": {
+      "sha256": "78684f03e0206347d315b672555fc01f3619116731d2cc7080f44ebcb39567f7",
+      "bytes": 1685
+    },
+    "cli-bundle/worktree.json": {
+      "sha256": "a6dad5972d7deabdc4d6cc4562605e8a0d54948c78a0885a0a66786cd185c680",
+      "bytes": 96914
+    },
+    "clippy-baseline-comparison.json": {
+      "sha256": "527042335042f957e002b1d9cd9da724a2404263bf3eea8412ad909498b0e8ce",
+      "bytes": 1815
+    },
+    "final-browser-custody.json": {
+      "sha256": "53d72ceebfad213765b9e23f1a8e682ba8e0186330f162dc9e1026d4dd8436b5",
+      "bytes": 839
+    },
+    "final-harness-checks.json": {
+      "sha256": "c9195c973380b7c46febf7504681f5dc601921499d9408613f13fbdc82848ae1",
+      "bytes": 910
+    },
+    "final-probe-cleanup.json": {
+      "sha256": "9e65fa9e6b5f26747ebfed4a646f38f9ce2a3772ef61cd8ea5441826ffa37548",
+      "bytes": 133
+    },
+    "green-browser.log": {
+      "sha256": "36e8e26f9a0a974a83b4eed8861c8babbb976947e35ffba6f4097bfae28b9bbd",
+      "bytes": 478
+    },
+    "implementation-commit.json": {
+      "sha256": "a1a33d5efceff1340cb590b9fc5f3c7ab17cf7fe01141c79bdc9837fc9fc1eb5",
+      "bytes": 418
+    },
+    "legacy-browser.log": {
+      "sha256": "b24f60c3cf940e3f0510b84a3982769b2140f1badb30e6840ce70789ea5cd9e6",
+      "bytes": 349
+    },
+    "observation-probe-final.json": {
+      "sha256": "3cb6329fd0a8151db83ab55587bac9711701362bcf94b4834028db933ff6e63a",
+      "bytes": 333762
+    },
+    "observation-probe.json": {
+      "sha256": "4145386cd7ca2ad4b6ea020767166a594c433ed0da7e2676bce165547d9f682d",
+      "bytes": 333828
+    },
+    "observation-summary-final.json": {
+      "sha256": "a1e806a22d3dbdc4cda13613cc27c42532febafc45c9944fffc50cc622133a1b",
+      "bytes": 3787
+    },
+    "observation-summary.json": {
+      "sha256": "9b6233aea20bf587388aa082bb4bf5bfd4a64ee8f06a6aedde4ddb11dd51a233",
+      "bytes": 3698
+    },
+    "offline-probe-results.json": {
+      "sha256": "d01a33b5886d3012a04c7ffd58fa1b9a0403994e4f28f4ae0b193bee551f65c5",
+      "bytes": 1556
+    },
+    "package-checks.json": {
+      "sha256": "0fff83c166f5f3a2bb080cfd9f597ad37af57c0c836ce3f10f0d017ebbf6284f",
+      "bytes": 2513
+    },
+    "portable-verification.log": {
+      "sha256": "4a8eca53a6b4ea94371ecf13422b61a2868f8bcc768ff8f613f7b43cad7ccdf9",
+      "bytes": 99
+    },
+    "precommit.log": {
+      "sha256": "faeaaac2cbe9491dbad8eb093fbc83303174d78d389c3d51834e51737a63698c",
+      "bytes": 13446
+    },
+    "red-browser.log": {
+      "sha256": "2d041b451b591b455ff40fec3bd877ab6f46741102a401fc68d6f96bc7d08dd8",
+      "bytes": 1601
+    },
+    "red-profile-cleanup.json": {
+      "sha256": "59e19f1b7450262a189273f3146a83dd961d1a8bcc33ad7b9c992dc5e6d83c09",
+      "bytes": 277
+    },
+    "red-unit.log": {
+      "sha256": "d35460bb8ff82a3c3c631c9e17050f8530a007a548ebe31fdeb9b1233e1a23bd",
+      "bytes": 2561
+    },
+    "reference-test-cleanup.json": {
+      "sha256": "8da7ba36d073c049d2e63d27aa3e3798c0f8f82c3f1650ca467d9b76eadb53b2",
+      "bytes": 307
+    },
+    "tested-source-final-sha256.json": {
+      "sha256": "8a2da8bf718c9eb0657aa2d7cb49672c46bc1ba613dad5e963ae80fbd3b6f6eb",
+      "bytes": 556
+    },
+    "tested-source-sha256.json": {
+      "sha256": "4baec6cc48925778d15480c100f8c43f2865a19103383606e41ec9f91eb15788",
+      "bytes": 556
+    },
+    "upstream/LICENSE": {
+      "sha256": "5afa3d97bf1e6f998d587fa101e3fe0d0c416840b7fe77bcd6ae97690a334631",
+      "bytes": 1068
+    },
+    "upstream/snapshot.js": {
+      "sha256": "e50473501c8fb8e70f3b21866d987393e3f2315c639d638bd477d170e81ed78d",
+      "bytes": 6490
+    },
+    "validation-binding.json": {
+      "sha256": "7501b29d242a9600f01419f2fcf077ae8183fa870a7461b447dce9bcc002febf",
+      "bytes": 710
+    }
+  }
+}

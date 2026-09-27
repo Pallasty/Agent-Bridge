@@ -1,0 +1,14 @@
+{
+  "command": [
+    "git",
+    "commit",
+    "-m",
+    "fix(browser): prevent stale snapshot refs from targeting new elements [skip ci]"
+  ],
+  "exit_code": 0,
+  "started_unix": 1790514442.0005414,
+  "finished_unix": 1790517265.361688,
+  "cargo_target": "/home/pallasting/.cache/agent-bridge-jev-browser-governance-20260927",
+  "log": "precommit.log",
+  "resulting_head": "af12defe56aa93f5cbb7c6257e7e9d0229a70030"
+}

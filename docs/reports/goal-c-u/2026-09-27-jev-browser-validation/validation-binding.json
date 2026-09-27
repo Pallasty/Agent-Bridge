@@ -1,0 +1,16 @@
+{
+  "base_commit": "6c4b1a9f332d8b9e9329f8d2914deed7db713453",
+  "staged_tree": "e689c15976db89e7c8aca3d4c680cb6589c08485",
+  "package_and_p0_test_binding": "tested-source-sha256.json",
+  "final_harness_binding": "tested-source-final-sha256.json",
+  "only_post_package_change": {
+    "path": "crates/browser/tests/jev_observation_probe.rs",
+    "change": "Replace alternating-order parity modulo with bit test to satisfy Clippy while preserving MSRV1.85.",
+    "rerun": [
+      "cargo fmt -p ab-browser --check",
+      "cargo clippy -p ab-browser --all-targets",
+      "cargo test -p ab-browser --test jev_observation_probe -- --ignored --nocapture --test-threads=1"
+    ]
+  },
+  "runtime_deployment": false
+}

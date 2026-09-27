@@ -1,0 +1,74 @@
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/browser/src/chromium_cdp.rs:101:15
+    |
+101 |     captures: Arc<Mutex<HashMap<String, (Arc<CaptureState>, tokio::task::AbortHandle)>>>,
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#type_complexity
+    = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do
+   --> crates/browser/src/chromium_cdp.rs:216:42
+    |
+216 |     async fn try_adopt_existing(profile: &PathBuf) -> Option<Arc<Browser>> {
+    |                                          ^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#ptr_arg
+    = note: `#[warn(clippy::ptr_arg)]` on by default
+help: change this to
+    |
+216 -     async fn try_adopt_existing(profile: &PathBuf) -> Option<Arc<Browser>> {
+216 +     async fn try_adopt_existing(profile: &Path) -> Option<Arc<Browser>> {
+    |
+
+warning: using `clone` on type `BackendNodeId` which implements the `Copy` trait
+   --> crates/browser/src/chromium_cdp.rs:564:30
+    |
+564 |             .backend_node_id(el.backend_node_id.clone())
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try removing the `clone` call: `el.backend_node_id`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#clone_on_copy
+    = note: `#[warn(clippy::clone_on_copy)]` on by default
+
+warning: redundant closure
+   --> crates/browser/src/chromium_cdp.rs:670:63
+    |
+670 |         let sel_lit = serde_json::to_string(selector).map_err(|e| Error::Serde(e))?;
+    |                                                               ^^^^^^^^^^^^^^^^^^^ help: replace the closure with the tuple variant itself: `Error::Serde`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#redundant_closure
+    = note: `#[warn(clippy::redundant_closure)]` on by default
+
+warning: redundant closure
+   --> crates/browser/src/chromium_cdp.rs:671:60
+    |
+671 |         let val_lit = serde_json::to_string(value).map_err(|e| Error::Serde(e))?;
+    |                                                            ^^^^^^^^^^^^^^^^^^^ help: replace the closure with the tuple variant itself: `Error::Serde`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#redundant_closure
+
+warning: using `clone` on type `ExecutionContextId` which implements the `Copy` trait
+    --> crates/browser/src/chromium_cdp.rs:1063:22
+     |
+1063 |         let ctx_id = iw.result.execution_context_id.clone();
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try removing the `clone` call: `iw.result.execution_context_id`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#clone_on_copy
+
+warning: items after a test module
+    --> crates/browser/src/chromium_cdp.rs:1801:1
+     |
+1801 | mod tests {
+     | ^^^^^^^^^
+...
+2031 | fn ax_value_to_string(v: &Option<serde_json::Value>) -> Option<String> {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#items_after_test_module
+     = note: `#[warn(clippy::items_after_test_module)]` on by default
+     = help: move the items to before the test module was defined
+
+warning: `ab-browser` (lib) generated 6 warnings (run `cargo clippy --fix --lib -p ab-browser -- ` to apply 4 suggestions)
+warning: `ab-browser` (lib test) generated 7 warnings (6 duplicates) (run `cargo clippy --fix --lib -p ab-browser --tests -- ` to apply 1 suggestion)
+    Checking ab-browser v0.14.0 (/Data/CascadeProjects/agent-bridge-jev-browser-validation-20260927/crates/browser)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.44s

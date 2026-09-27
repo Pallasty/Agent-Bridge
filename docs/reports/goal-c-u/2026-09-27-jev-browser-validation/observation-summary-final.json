@@ -1,0 +1,146 @@
+{
+  "status": "completed_observation_only",
+  "source_sha256": "e50473501c8fb8e70f3b21866d987393e3f2315c639d638bd477d170e81ed78d",
+  "source_report": "observation-probe-final.json",
+  "fixtures": [
+    {
+      "fixture": "ordinary_html",
+      "status": "observed",
+      "methods": {
+        "ax": {
+          "samples": 15,
+          "p50_ms": 7.756674,
+          "p95_ms": 51.309728,
+          "targets_present_per_observation": [
+            3
+          ],
+          "targets_total": 3,
+          "missing_target_ids": [],
+          "missing_expected_state": {}
+        },
+        "jev_dom": {
+          "samples": 15,
+          "p50_ms": 6.226008,
+          "p95_ms": 20.355501,
+          "targets_present_per_observation": [
+            3
+          ],
+          "targets_total": 3,
+          "missing_target_ids": [],
+          "missing_expected_state": {}
+        }
+      }
+    },
+    {
+      "fixture": "checkbox_and_native_select",
+      "status": "observed",
+      "methods": {
+        "ax": {
+          "samples": 15,
+          "p50_ms": 7.342466,
+          "p95_ms": 8.012226,
+          "targets_present_per_observation": [
+            2
+          ],
+          "targets_total": 2,
+          "missing_target_ids": [],
+          "missing_expected_state": {
+            "consent": [
+              "checked"
+            ]
+          }
+        },
+        "jev_dom": {
+          "samples": 15,
+          "p50_ms": 6.272497,
+          "p95_ms": 7.313659,
+          "targets_present_per_observation": [
+            2
+          ],
+          "targets_total": 2,
+          "missing_target_ids": [],
+          "missing_expected_state": {}
+        }
+      }
+    },
+    {
+      "fixture": "open_shadow_root",
+      "status": "observed",
+      "methods": {
+        "ax": {
+          "samples": 15,
+          "p50_ms": 7.672953,
+          "p95_ms": 23.226534,
+          "targets_present_per_observation": [
+            3
+          ],
+          "targets_total": 3,
+          "missing_target_ids": [],
+          "missing_expected_state": {}
+        },
+        "jev_dom": {
+          "samples": 15,
+          "p50_ms": 5.960049000000001,
+          "p95_ms": 8.483288,
+          "targets_present_per_observation": [
+            1
+          ],
+          "targets_total": 3,
+          "missing_target_ids": [
+            "shadow_primary",
+            "shadow_query"
+          ],
+          "missing_expected_state": {
+            "shadow_query": [
+              "current_value"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "fixture": "same_origin_srcdoc_iframe",
+      "status": "observed",
+      "methods": {
+        "ax": {
+          "samples": 15,
+          "p50_ms": 4.167207,
+          "p95_ms": 7.050688999999999,
+          "targets_present_per_observation": [
+            1
+          ],
+          "targets_total": 3,
+          "missing_target_ids": [
+            "frame_primary",
+            "frame_query"
+          ],
+          "missing_expected_state": {
+            "frame_query": [
+              "current_value"
+            ]
+          }
+        },
+        "jev_dom": {
+          "samples": 15,
+          "p50_ms": 4.67498,
+          "p95_ms": 7.059571,
+          "targets_present_per_observation": [
+            1
+          ],
+          "targets_total": 3,
+          "missing_target_ids": [
+            "frame_primary",
+            "frame_query"
+          ],
+          "missing_expected_state": {
+            "frame_query": [
+              "current_value"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "timing_limit": "Local observation only; synthetic fixtures; no model, input execution, full-task latency or cost. n=15 nearest-rank p95 is the sample maximum.",
+  "adoption": "HOLD_DIRECT_DOM_REPLACEMENT: candidate does not preserve AX target coverage"
+}

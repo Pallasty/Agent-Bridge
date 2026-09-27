@@ -1,0 +1,7 @@
+{
+  "crates/browser/src/chromium_cdp.rs": "1280a8b345be316453da68549022b5a753ab6b94d9394704b93f35624f41dc51",
+  "crates/browser/src/lib.rs": "4ab30670e44e2b4f3592f074f883a6ff08b16fc403f2149984b35327f63efc2c",
+  "crates/bridge/src/mcp_tools/audio.rs": "8da4b1f31437dbb23d74062ba287e3d11a5df2da5ce18d4c66505cc4120a933e",
+  "crates/browser/tests/observation_ref_e2e.rs": "97fc1dc84751a43d76feb36388cd1a7887f040ce521ccfac76d537ebeae8675c",
+  "crates/browser/tests/jev_observation_probe.rs": "f958e76d83b5489f4920d8ab4aa4a6f4f9eed280dbfc73841be5c431c613962a"
+}

@@ -1,0 +1,7 @@
+{
+  "profile": "/home/pallasting/.cache/ab-observation-ref-e2e-2036944-1790513009334839117",
+  "test_teardown_warning": "Directory not empty",
+  "post_test_exact_profile_process_matches": [],
+  "root_removed_only_task_owned_leftover": true,
+  "independent_path_absent": true
+}
