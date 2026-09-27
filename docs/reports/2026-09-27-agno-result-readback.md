@@ -1,11 +1,13 @@
 # Agno-inspired bounded result readback
 
-Status: bounded offline validation complete; retain the manual utility on a
-review branch. Production integration remains unproven and is not enabled.
+Status: bounded offline validation complete; owner approved retaining the
+manual utility and merging its source into public `main` on 2026-09-27.
+Production integration remains unproven and is not enabled.
 
 ## Goal and authorization
 
 Owner request: after the Agno review, plan validation and land feasible goals.
+Follow-up authorization: retain the validated tool, merge and submit the code.
 The accepted increment is one isolated offline readback prototype and a
 reproducible comparison on fixed repository texts. It does not register an MCP
 tool, capture live results, change storage or retrieval, or enable a runtime.
@@ -145,7 +147,7 @@ bounded subset and can locate it.
 
 ## Reproduce and use
 
-From the branch worktree:
+From the repository checkout:
 
 ```bash
 python3 -m unittest discover -s tests -p '*tool_result_readback.py' -v
