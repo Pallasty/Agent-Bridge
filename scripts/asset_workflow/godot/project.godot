@@ -1,0 +1,20 @@
+; Standalone geometry preview, copied into an owned run directory by the recipe.
+config_version=5
+
+[application]
+config/name="Agent Bridge asset geometry preview"
+
+[display]
+window/size/viewport_width=512
+window/size/viewport_height=512
+window/size/window_width_override=512
+window/size/window_height_override=512
+window/vsync/vsync_mode=0
+
+[debug]
+file_logging/enable_file_logging=false
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0, 0, 0, 0)

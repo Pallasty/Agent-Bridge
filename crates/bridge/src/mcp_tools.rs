@@ -14819,6 +14819,8 @@ mod audio;
 pub use audio::*;
 mod a2ui;
 pub use a2ui::*;
+mod asset;
+pub use asset::*;
 // D3 source gate: registered only for the explicit codex-ag-ui-readonly
 // toolset and all-dev. It remains absent from normal/default profiles.
 mod ag_ui_readonly;
@@ -57578,6 +57580,13 @@ fn build_registry_builder_with_policy_surface(
         ceremony,
         Tier::Niche,
         Box::new(LswrReadonlyBridgeDisplayTool::new()),
+    );
+    // Explicit local asset inspection; no generation, execution, or persistence.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Box::new(AssetInspectTool::new()),
     );
     // Audio embodiment: emit a known tone + read it back off the system bus (sink
     // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
