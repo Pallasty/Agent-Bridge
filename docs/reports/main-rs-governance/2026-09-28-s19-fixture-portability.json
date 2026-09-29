@@ -1,0 +1,235 @@
+{
+  "schema": "agent_bridge.cli_fixture_portability_verification.v1",
+  "scope": "Fresh macOS fake-Git fixture evidence with Python bytecode writes disabled. Filesystem effect assertions unchanged. Full pre-commit execution required separately.",
+  "source_report_digests": [
+    "93d26c885d30a430db1926cd89cd340d5bcf6e0cc182df41e872c5d7537e7c5b  /Users/pallasting/.local/state/ab-reprovision-20260928.PbvP8q/fresh-s19-view/report.json",
+    "e367e35553030ea6d155da3311e9e196e2eabaa1419a33256dcb2e8636085008  /Users/pallasting/.cache/ab-mcp-shutdown-fix-20260928/governance-live/run-aodedu7w/worktree.json"
+  ],
+  "view_parity": {
+    "schema_version": 1,
+    "mode": "pure-view-parity",
+    "scope": "session plan branch/path and porcelain stdout/row count; no clock, Git, or filesystem effects",
+    "baseline_commit": "7fba67a8b006bac4fe59b5e74a260eaebc17c77b",
+    "baseline_main_sha256": "4bd92dcb596e7d7132f9f351fdfcd25ed91b1e38be44c3b20164722eb26d44de",
+    "candidate_head": "e6786a374b0ec68dd7a631d527d547d726a4a8a0",
+    "harness_sha256": "55600efa84e23bdaa7576451f774f3d16def43646097f926f0f4c9a0b8339094",
+    "candidate_main_sha256": "ef4c38c8ed7ed54c811d399e69d720f493c708e31ce1587f384de04db4ac292a",
+    "baseline_module_sha256": "adb4c3691dda06d5690c71980515b346f0f042262a1cda200c08df1aea3b9cf7",
+    "candidate_module_sha256": "84d64cf90bc931820a08ee0779eb3d2aa1a5fb3f1823af39046e06884e90f5f4",
+    "extracted_blocks": {
+      "plan_new_session": {
+        "function": "run_worktree_session_new",
+        "first_line": 16563,
+        "last_line": 16580,
+        "original_block_sha256": "b1ad4abc7c4c5b1457ac002e0fbad690aedd2035c0021fa1e1a0952e057a7f9a",
+        "original_block_bytes": 618
+      },
+      "render_session_rows": {
+        "function": "run_worktree_session_list",
+        "first_line": 16658,
+        "last_line": 16688,
+        "original_block_sha256": "bbe5d62e01c2e5df84b2342ff8e1ba16ad71a83d46283693a1dfa64fbdc73614",
+        "original_block_bytes": 1189
+      }
+    },
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)\nbinary: rustc\ncommit-hash: 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd\ncommit-date: 2026-06-26\nhost: aarch64-apple-darwin\nrelease: 1.96.1\nLLVM version: 22.1.2",
+    "serde_json_dependency": {
+      "path": "/Users/pallasting/.cache/ab-mcp-shutdown-fix-20260928/debug/deps/libserde_json-bbb87925ff1c0650.rlib",
+      "sha256": "20cd076cbde0dd8a218c8164c8c6356d81ac4636be7f621275cacb4b79c1ed4e",
+      "features": [
+        "alloc",
+        "default",
+        "float_roundtrip",
+        "indexmap",
+        "preserve_order",
+        "raw_value",
+        "std"
+      ],
+      "profile": 8919035219001802000
+    },
+    "negative_control": {
+      "case": "list-empty",
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "cd05f2a8eaba7220dbce115612d36bfd5579f6c8b3641d802ef31ad154e0d0be",
+        "stderr_sha256": "619fb4d747ff27a4d26cbc0fce297942893d4e6b43e56cdaad4856b10b32b8c0",
+        "stdout_bytes": 38,
+        "stderr_bytes": 16,
+        "stdout_file": "negative-control.candidate.stdout",
+        "stderr_file": "negative-control.candidate.stderr"
+      },
+      "comparison": {
+        "equal": false,
+        "equal_fields": {
+          "exit_code": true,
+          "stdout": false,
+          "stderr": true
+        }
+      },
+      "caught": true
+    },
+    "source_unchanged_during_run": true,
+    "total": 64,
+    "baseline_successes": 64,
+    "operation_counts": {
+      "plan": 22,
+      "list": 42
+    },
+    "passed": 64,
+    "success": true
+  },
+  "cli_parity": {
+    "schema": "agent_bridge.worktree_session_cli_parity.v1",
+    "baseline_sha256": "03c21a3124867e520885567a8397ea762fab501c534b8470e3eb3b4eef98f94d",
+    "candidate_sha256": "31332606c347d6cdc7695e96746d6c65671a3dc41305a7c160a57fefaec15bb2",
+    "script_sha256": "dd4068630d354d996d372d48d93c4e255c0628cca8b66d072f6a63775cdeb0db",
+    "inputs_unchanged_during_comparison": true,
+    "passed": 34,
+    "total": 34,
+    "scope": "CLI bytes; only validated new slug normalized; fake Git argv/effects and real Git refs/worktrees/contents",
+    "excluded": [
+      "real user repositories/configuration/hooks",
+      "Git index/database byte equivalence",
+      "same-second real Git collision timing",
+      "cross-stream wall-clock ordering"
+    ],
+    "cases": [
+      {
+        "case": "root-help",
+        "equal": true
+      },
+      {
+        "case": "group-help",
+        "equal": true
+      },
+      {
+        "case": "new-help",
+        "equal": true
+      },
+      {
+        "case": "list-help",
+        "equal": true
+      },
+      {
+        "case": "new-invalid-option",
+        "equal": true
+      },
+      {
+        "case": "list-invalid-option",
+        "equal": true
+      },
+      {
+        "case": "fake-list-empty",
+        "equal": true
+      },
+      {
+        "case": "fake-list-unrelated",
+        "equal": true
+      },
+      {
+        "case": "fake-list-normal",
+        "equal": true
+      },
+      {
+        "case": "fake-list-no-trailing-blank",
+        "equal": true
+      },
+      {
+        "case": "fake-list-detached",
+        "equal": true
+      },
+      {
+        "case": "fake-list-missing-head",
+        "equal": true
+      },
+      {
+        "case": "fake-list-lossy",
+        "equal": true
+      },
+      {
+        "case": "fake-list-order-and-reset",
+        "equal": true
+      },
+      {
+        "case": "fake-list-discovery",
+        "equal": true
+      },
+      {
+        "case": "fake-list-discovery-failure",
+        "equal": true
+      },
+      {
+        "case": "fake-list-git-failure",
+        "equal": true
+      },
+      {
+        "case": "fake-new-named",
+        "equal": true
+      },
+      {
+        "case": "fake-new-anonymous",
+        "equal": true
+      },
+      {
+        "case": "fake-new-empty-name",
+        "equal": true
+      },
+      {
+        "case": "fake-new-sanitized",
+        "equal": true
+      },
+      {
+        "case": "fake-new-explicit-base",
+        "equal": true
+      },
+      {
+        "case": "fake-new-discovery",
+        "equal": true
+      },
+      {
+        "case": "fake-new-override-priority",
+        "equal": true
+      },
+      {
+        "case": "fake-new-git-failure",
+        "equal": true
+      },
+      {
+        "case": "fake-new-mkdir-failure",
+        "equal": true
+      },
+      {
+        "case": "fake-new-discovery-failure",
+        "equal": true
+      },
+      {
+        "case": "real-head",
+        "equal": true
+      },
+      {
+        "case": "real-base",
+        "equal": true
+      },
+      {
+        "case": "real-discovery",
+        "equal": true
+      },
+      {
+        "case": "real-invalid-base",
+        "equal": true
+      },
+      {
+        "case": "real-mkdir-failure",
+        "equal": true
+      },
+      {
+        "case": "real-list-empty",
+        "equal": true
+      },
+      {
+        "case": "real-list-seeded",
+        "equal": true
+      }
+    ]
+  }
+}

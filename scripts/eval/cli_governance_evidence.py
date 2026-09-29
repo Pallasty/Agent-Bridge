@@ -74,6 +74,7 @@ def bindings(stage):
         result['crates/store/src/lib.rs'] = (section, 'store_source_sha256')
     if stage == 's21':
         result['crates/bridge/src/cli/dream.rs'] = (section, 'candidate_dream_sha256')
+        result['scripts/eval/cli_fixture_paths.py'] = ('cli_parity', 'path_helper_sha256')
     return result
 
 

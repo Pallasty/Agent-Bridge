@@ -5072,11 +5072,15 @@ fn main() -> Result<()> {
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(256);
-    tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .max_blocking_threads(max_blocking)
         .build()?
-        .block_on(real_main())
+        .block_on(real_main());
+    // The runtime and request workers are gone. A detached native model-init
+    // thread must also finish before C++ static destruction at process exit.
+    ab_store::vector::shutdown_embedding_init();
+    result
 }
 
 /// Prepare the embedding backend for a one-shot Skills route/evaluation.

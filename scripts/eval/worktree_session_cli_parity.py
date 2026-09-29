@@ -20,7 +20,9 @@ import tempfile
 import time
 
 
-FAKE_GIT = '''#!/usr/bin/python3
+# The fixture interpreter must not add Apple Python caches to the observed
+# filesystem. Keep effect assertions strict; suppress only fixture bytecode.
+FAKE_GIT = '''#!/usr/bin/python3 -B
 import json, os, sys
 from pathlib import Path
 root = Path(os.environ["FIXTURE_ROOT"])

@@ -17,6 +17,7 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
+from cli_fixture_paths import database_path
 import time
 
 
@@ -42,7 +43,8 @@ def setup(root):
     for name in ["home", "config", "data", "cache", "state", "runtime", "tmp"]:
         (root / name).mkdir(mode=0o700)
     (root / "empty-creds").write_bytes(b"")
-    (root / "data/agent-bridge").mkdir(mode=0o700)
+    db = database_path(root)
+    db.parent.mkdir(mode=0o700, parents=True)
     env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "TZ": "UTC", "RUST_LOG": "off",
            "HOME": str(root / "home"), "TMPDIR": str(root / "tmp"),
            "XDG_CONFIG_HOME": str(root / "config"), "XDG_DATA_HOME": str(root / "data"),
@@ -51,7 +53,7 @@ def setup(root):
            "AGENT_BRIDGE_STATE_DIR": str(root / "state"),
            "AGENT_BRIDGE_CREDS_FILE": str(root / "empty-creds"),
            "AGENT_BRIDGE_EMBED_BACKEND": "hash"}
-    return env, root / "data/agent-bridge/state.db"
+    return env, db
 
 
 def invoke(binary, root, env, argv):
@@ -75,10 +77,10 @@ def business(db):
 
 def filesystem(root):
     result = {}
+    db_key = str(database_path(root).relative_to(root.resolve()))
     for path in sorted(root.rglob("*")):
         key = str(path.relative_to(root))
-        if key in {"data/agent-bridge/state.db", "data/agent-bridge/state.db-wal",
-                   "data/agent-bridge/state.db-shm"}:
+        if key in {db_key, db_key + "-wal", db_key + "-shm"}:
             continue
         result[key] = {"kind": "directory" if path.is_dir() else "file",
                        "mode": stat.S_IMODE(path.stat().st_mode)}
@@ -199,7 +201,7 @@ def execute(binary, root, template, case, anchor):
     changes = {key: value for key, value in filesystem(root).items() if before_fs.get(key) != value}
     deleted = sorted(set(before_fs) - set(filesystem(root)))
     require(not deleted, f"deleted fixture files: {deleted}")
-    lock = "data/agent-bridge/state.db.init.lock"
+    lock = str(db.relative_to(root.resolve())) + ".init.lock"
     if lock in changes:
         require(changes.pop(lock) == {"kind": "file", "mode": 0o600, "sha256": digest(b"")}, "unexpected init lock")
     require(not changes, f"unexpected fixture effects: {changes}")
@@ -244,7 +246,7 @@ def main():
     if not args.baseline_only and args.candidate is None:
         parser.error("--candidate is required unless --baseline-only is selected")
     binaries = [args.baseline.resolve()] + ([] if args.baseline_only else [args.candidate.resolve()])
-    guarded = [*binaries, Path(__file__)]
+    guarded = [*binaries, Path(__file__).with_name('cli_fixture_paths.py'), Path(__file__)]
     hashes_before = [digest(path.read_bytes()) for path in guarded]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     records = []
@@ -282,6 +284,7 @@ def main():
     report = {"schema": "agent_bridge.dream_identity_cli_parity.v1", "comparison_performed": not args.baseline_only,
               "baseline_sha256": hashes_before[0], "candidate_sha256": None if args.baseline_only else hashes_before[1],
               "script_sha256": hashes_before[-1], "inputs_unchanged_during_run": hashes_before == hashes_after,
+              "path_helper_sha256": hashes_before[-2],
               "passed": sum(row["passed"] for row in records), "total": len(records),
               "business_tables": TABLES, "excluded": ["SQLite byte identity", "real credentials/configuration/database",
                                                        "uncontrolled query-boundary timing"], "cases": records}

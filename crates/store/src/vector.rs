@@ -83,11 +83,13 @@ pub(crate) mod onnx {
     // lazily. Callers see `embed → None` until init completes (which
     // makes the outer `OnnxBackend::embed` fall through to HashBackend),
     // then once the model is ready they pick up the higher-quality
-    // path on the next call. Process exit kills the bg thread naturally.
+    // path on the next call. Join the worker before normal process teardown:
+    // native ONNX Runtime static destructors must not race its initialization.
     //
     // INIT_STATE: 0=not started, 1=in progress, 2=done (success xor failure).
     static EMBEDDER: OnceLock<Option<Mutex<TextEmbedding>>> = OnceLock::new();
     static INIT_STARTED: OnceLock<()> = OnceLock::new();
+    static INIT_WORKER: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
     static INIT_STATE: AtomicU8 = AtomicU8::new(0);
 
     /// Embedding-model selection via `AGENT_BRIDGE_ONNX_MODEL`.
@@ -244,7 +246,7 @@ pub(crate) mod onnx {
     fn kickoff_init() {
         INIT_STARTED.get_or_init(|| {
             INIT_STATE.store(1, Ordering::Release);
-            std::thread::Builder::new()
+            let worker = std::thread::Builder::new()
                 .name("fastembed-init".into())
                 .spawn(|| {
                     let started = std::time::Instant::now();
@@ -280,7 +282,12 @@ pub(crate) mod onnx {
                     INIT_STATE.store(2, Ordering::Release);
                 })
                 .expect("fastembed init thread spawn");
+            *INIT_WORKER.lock().unwrap_or_else(|e| e.into_inner()) = Some(worker);
         });
+    }
+
+    pub(super) fn shutdown_init() {
+        super::join_init_worker(&INIT_WORKER);
     }
 
     /// Return the live ONNX embedder *if* init has completed successfully.
@@ -378,6 +385,48 @@ pub fn embed_text(text: &str) -> Vec<f32> {
 /// No-op cost for the hash backend.
 pub fn warmup() {
     let _ = embed_text("warmup");
+}
+
+/// Drain native embedding initialization after request/runtime workers stop,
+/// before normal process teardown runs ONNX Runtime's C++ static destructors.
+/// This does not start initialization, change the backend, or sleep for a fixed
+/// grace period. If initialization is doing I/O, shutdown waits for that I/O.
+pub fn shutdown_embedding_init() {
+    #[cfg(feature = "onnx-embed")]
+    onnx::shutdown_init();
+}
+
+#[cfg(any(feature = "onnx-embed", test))]
+fn join_init_worker(worker: &std::sync::Mutex<Option<std::thread::JoinHandle<()>>>) {
+    let handle = worker.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(handle) = handle {
+        if handle.join().is_err() {
+            tracing::warn!("embedding initialization worker panicked during shutdown");
+        }
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    #[test]
+    fn shutdown_joins_worker_and_is_idempotent() {
+        let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let marker = completed.clone();
+        let worker = std::sync::Mutex::new(Some(std::thread::spawn(move || {
+            marker.store(true, std::sync::atomic::Ordering::Release);
+        })));
+        super::join_init_worker(&worker);
+        assert!(completed.load(std::sync::atomic::Ordering::Acquire));
+        assert!(worker.lock().unwrap().is_none());
+        super::join_init_worker(&worker);
+    }
+
+    #[test]
+    fn shutdown_without_worker_does_not_start_one() {
+        let worker = std::sync::Mutex::new(None);
+        super::join_init_worker(&worker);
+        assert!(worker.lock().unwrap().is_none());
+    }
 }
 
 /// True once the embedding backend has *settled* — the ONNX model finished

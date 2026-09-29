@@ -5,6 +5,77 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+// Do not pin the hash backend here: that hides the native initialization vs
+// process-teardown race. Match the publisher's empty HOME and immediate EOF.
+#[cfg(feature = "onnx-embed")]
+#[test]
+fn mcp_native_initialization_drains_after_immediate_eof() {
+    for _ in 0..3 {
+        let home = tempfile::tempdir().expect("isolated home");
+        let home_path = home.path().canonicalize().expect("canonical isolated home");
+        for dir in ["tmp", "xdg/data", "xdg/config", "xdg/cache", "xdg/state"] {
+            std::fs::create_dir_all(home_path.join(dir)).unwrap();
+        }
+        let mut child = Command::new(env!("CARGO_BIN_EXE_agent-bridge"))
+            .arg("mcp")
+            .env_clear()
+            .env("HOME", &home_path)
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+            .env("TMPDIR", home_path.join("tmp"))
+            .env("XDG_DATA_HOME", home_path.join("xdg/data"))
+            .env("XDG_CONFIG_HOME", home_path.join("xdg/config"))
+            .env("XDG_CACHE_HOME", home_path.join("xdg/cache"))
+            .env("XDG_STATE_HOME", home_path.join("xdg/state"))
+            .env("AGENT_BRIDGE_DB", home_path.join("state.db"))
+            .env("AGENT_BRIDGE_STATE_DIR", home_path.join("state"))
+            .env("AGENT_BRIDGE_TOOLSET", "codex-essential")
+            .env("AGENT_BRIDGE_TERMINAL", "pty")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn native MCP");
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+        let output = thread::spawn(move || {
+            let mut b = Vec::new();
+            stdout.read_to_end(&mut b).unwrap();
+            b
+        });
+        let errors = thread::spawn(move || {
+            let mut b = Vec::new();
+            stderr.read_to_end(&mut b).unwrap();
+            b
+        });
+        child.stdin.take().unwrap().write_all(concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"shutdown-regression\",\"version\":\"1\"}}}\n",
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"capabilities\",\"arguments\":{\"compact\":true}}}\n"
+        ).as_bytes()).unwrap();
+        let status = wait_with_timeout(&mut child, Duration::from_secs(45));
+        let stdout = output.join().unwrap();
+        let stderr = errors.join().unwrap();
+        assert!(
+            status.success(),
+            "native MCP failed: {status:?}: {}",
+            String::from_utf8_lossy(&stderr)
+        );
+        let rows: Vec<Value> = String::from_utf8(stdout)
+            .unwrap()
+            .lines()
+            .map(|s| serde_json::from_str(s).unwrap())
+            .collect();
+        for id in [1, 2, 3] {
+            let row = rows
+                .iter()
+                .find(|r| r["id"] == id)
+                .expect("complete response set");
+            assert!(row.get("error").is_none(), "protocol error: {row}");
+        }
+    }
+}
+
 fn wait_with_timeout(
     child: &mut std::process::Child,
     timeout: Duration,

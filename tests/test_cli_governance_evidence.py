@@ -13,6 +13,29 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts/eval'
 sys.path.insert(0, str(SCRIPTS))
 import cli_governance_evidence as e
+from cli_fixture_paths import database_path
+
+
+class FixturePathTests(unittest.TestCase):
+    def test_platform_mapping_stays_in_fixture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            self.assertEqual(database_path(root, 'darwin'), root / 'home/Library/Application Support/agent-bridge/state.db')
+            self.assertEqual(database_path(root, 'linux'), root / 'data/agent-bridge/state.db')
+            self.assertEqual(list(root.iterdir()), [])  # mapping has no filesystem effects
+
+    def test_unknown_platform_fails_explicitly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, 'unsupported'):
+                database_path(Path(temporary), 'unknown')
+
+    def test_fixture_alias_resolves_without_creating_database_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / 'real').mkdir()
+            (root / 'alias').symlink_to(root / 'real', target_is_directory=True)
+            self.assertEqual(database_path(root / 'alias', 'darwin'), database_path(root / 'real', 'darwin'))
+            self.assertEqual(list((root / 'real').iterdir()), [])
 
 
 class EvidenceTests(unittest.TestCase):
@@ -79,6 +102,16 @@ class EvidenceTests(unittest.TestCase):
         self.git('add', '.')
         with self.assertRaisesRegex(e.g.GovernanceError, 'stale evidence'):
             self.validate()
+
+    def test_shared_path_helper_requires_fresh_bound_evidence(self):
+        self.write('scripts/eval/cli_fixture_paths.py', '# changed path mapping\n')
+        self.git('add', 'scripts/eval/cli_fixture_paths.py')
+        with self.assertRaisesRegex(e.g.GovernanceError, 'stale evidence'):
+            self.validate()
+        self.report('s21')
+        self.save_registry()
+        self.git('add', '.')
+        self.assertEqual(self.validate(), sorted(e.PROFILES))  # registry update selects all
 
     def test_unstaged_report_cannot_authorize_staged_module(self):
         file = 'crates/bridge/src/cli/dream_identity_view.rs'

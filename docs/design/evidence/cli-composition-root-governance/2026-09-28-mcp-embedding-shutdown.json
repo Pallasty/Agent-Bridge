@@ -1,0 +1,24 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "mcp-embedding-shutdown-20260928",
+  "source_base": "e6786a374b0ec68dd7a631d527d547d726a4a8a0",
+  "main_rs_before_sha256": "3a5358236d64994e9c146a484a323570f5473de42f671926f3920aa6b35ebca6",
+  "main_rs_after_sha256": "ef4c38c8ed7ed54c811d399e69d720f493c708e31ce1587f384de04db4ac292a",
+  "changes": [{
+    "region": "main runtime teardown",
+    "category": "startup_or_dependency_injection",
+    "summary": "Join native embedding initialization after runtime shutdown and before native static destruction.",
+    "disposition": "root_visible",
+    "root_reason": "The process composition root owns runtime teardown; worker custody remains in the store vector module.",
+    "evidence": ["crates/store/src/vector.rs shutdown_embedding_init", "crates/bridge/tests/mcp_stdio_eof.rs native immediate EOF regression"]
+  }],
+  "contracts": {
+    "clap_help_and_defaults": {"status": "not_applicable", "evidence": ["No Clap schema, defaults or routing changed."]},
+    "json_and_text_output": {"status": "passed", "evidence": ["Release MCP integration tests: 2 passed; native test checks all three JSON-RPC responses for three isolated executions."]},
+    "dry_run_preview_confirmation": {"status": "not_applicable", "evidence": ["No command execution or confirmation adapter changed."]},
+    "validation_and_error_ordering": {"status": "not_applicable", "evidence": ["real_main result is preserved; the added join follows runtime destruction."]},
+    "authority_and_effect_ordering": {"status": "passed", "evidence": ["Join does not start initialization; unit test verifies no-worker behavior and idempotent join. Native worker completes before process teardown."]},
+    "focused_tests_and_check": {"status": "passed", "evidence": ["Release build succeeded; vector::shutdown_tests 2 passed; mcp_stdio_eof 2 passed in 9.38s with private canonical TMPDIR. Full normal pre-commit checks remain required."]}
+  },
+  "rollback": ["Revert main shutdown call, store worker custody and new EOF regression together. No schema migration. Existing production binary remains available until formal activation."]
+}
