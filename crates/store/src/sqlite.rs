@@ -125,12 +125,89 @@ fn open_private_state_file(path: &Path, create: bool) -> std::io::Result<std::fs
 }
 
 #[cfg(unix)]
-fn restrict_existing_state_file(path: &Path) -> std::io::Result<()> {
-    match open_private_state_file(path, false) {
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+fn restrict_existing_state_file(path: &Path) -> std::io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    // Never open/close an existing SQLite file outside SQLite's VFS: on POSIX
+    // that close can discard every lock this process holds on the same inode,
+    // including WAL's dead-man switch and active transaction locks.
+    // Pin only the parent directory, which cannot carry SQLite file locks.
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(parent)?;
+    let name = std::ffi::CString::new(
+        path.file_name()
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "state path has no filename",
+                )
+            })?
+            .as_bytes(),
+    )
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in state path"))?;
+    let stat = || -> std::io::Result<libc::stat> {
+        let mut value = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: directory owns a live descriptor; name is NUL-terminated;
+        // fstatat initializes value on success and never follows the leaf link.
+        if unsafe {
+            libc::fstatat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                value.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(unsafe { value.assume_init() })
+    };
+    let before = match stat() {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if before.st_mode & libc::S_IFMT != libc::S_IFREG || before.st_uid != unsafe { libc::geteuid() }
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "state path must be an owned regular file, not a symlink",
+        ));
     }
+    if before.st_mode as u32 & 0o777 != PRIVATE_STATE_FILE_MODE {
+        // Do not fall back to chmod/open if a platform rejects NOFOLLOW.
+        if unsafe {
+            libc::fchmodat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                PRIVATE_STATE_FILE_MODE as libc::mode_t,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    let after = stat()?;
+    if after.st_dev != before.st_dev
+        || after.st_ino != before.st_ino
+        || after.st_mode & libc::S_IFMT != libc::S_IFREG
+        || after.st_uid != before.st_uid
+        || after.st_mode as u32 & 0o777 != PRIVATE_STATE_FILE_MODE
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "state identity or private permissions changed during validation",
+        ));
+    }
+    Ok(true)
 }
 
 #[cfg(unix)]
@@ -175,7 +252,7 @@ fn restrict_private_state_directory(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn prepare_sqlite_filesystem(path: &Path) -> Result<()> {
+async fn prepare_sqlite_directory(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
         let parent_was_missing = !parent.exists();
         tokio::fs::create_dir_all(parent)
@@ -194,12 +271,44 @@ async fn prepare_sqlite_filesystem(path: &Path) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn prepare_sqlite_filesystem(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         // Provision/restrict the main file before SQLite can create WAL/SHM;
         // SQLite derives sidecar permissions from the database mode. Existing
         // sidecars are repaired before SQLite is allowed to consume them.
-        open_private_state_file(path, true).map_err(|error| {
+        let prepare = || -> std::io::Result<()> {
+            if !restrict_existing_state_file(path)? {
+                // The initialization lock serializes Store opens. Never use
+                // non-exclusive create: it could open an already-live inode.
+                match OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .mode(PRIVATE_STATE_FILE_MODE)
+                    .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+                    .open(path)
+                {
+                    Ok(file) => file.set_permissions(std::fs::Permissions::from_mode(
+                        PRIVATE_STATE_FILE_MODE,
+                    ))?,
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+                    Err(error) => return Err(error),
+                }
+                if !restrict_existing_state_file(path)? {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "created state file disappeared",
+                    ));
+                }
+            }
+            Ok(())
+        };
+        use std::os::unix::fs::PermissionsExt;
+        prepare().map_err(|error| {
             Error::Backend(format!("secure sqlite file {}: {error}", path.display()))
         })?;
         restrict_sqlite_sidecars(path).map_err(|error| {
@@ -3056,12 +3165,13 @@ impl SqliteStore {
     }
 
     pub async fn open(path: &Path) -> Result<Self> {
-        prepare_sqlite_filesystem(path).await?;
+        prepare_sqlite_directory(path).await?;
         // Schema checks and migrations contain check-then-create sequences. A
         // cross-process advisory lock keeps daemon, daemon-http, Palace, and MCP
         // startup from racing those sequences. The file contains no state and
         // the OS releases the lock automatically if a process exits.
         let _init_lock = acquire_sqlite_init_lock(path).await?;
+        prepare_sqlite_filesystem(path)?;
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -19429,6 +19539,201 @@ mod tests {
             None,
             "non-contention failures must remain fail-fast"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_permission_lock_observer() {
+        use std::os::fd::AsRawFd;
+        let Some(path) = std::env::var_os("AB_SQLITE_LOCK_PROBE_PATH") else {
+            return;
+        };
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+        lock.l_type = libc::F_WRLCK as _;
+        lock.l_whence = libc::SEEK_SET as _;
+        lock.l_start = std::env::var("AB_SQLITE_LOCK_PROBE_OFFSET")
+            .unwrap()
+            .parse()
+            .unwrap();
+        lock.l_len = 1;
+        assert_eq!(
+            unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut lock) },
+            0
+        );
+        let held = lock.l_type as libc::c_int != libc::F_UNLCK as libc::c_int;
+        assert_eq!(
+            held,
+            std::env::var("AB_SQLITE_LOCK_PROBE_HELD").unwrap() == "1"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_permission_repairs_preserve_vfs_locks_with_negative_control() {
+        use std::os::unix::fs::PermissionsExt;
+        for (journal, suffix, offset) in [("DELETE", "", 1_073_741_825i64), ("WAL", "-shm", 120)] {
+            let temp = tempfile::tempdir().unwrap();
+            let database = temp.path().canonicalize().unwrap().join("state.db");
+            let connection = rusqlite::Connection::open(&database).unwrap();
+            connection
+                .execute_batch(&format!(
+                    "PRAGMA journal_mode={journal}; CREATE TABLE probe(v); BEGIN IMMEDIATE;"
+                ))
+                .unwrap();
+            let target = sqlite_path_with_suffix(&database, suffix);
+            let observe = |held: bool| {
+                let output = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "sqlite::tests::sqlite_permission_lock_observer",
+                        "--nocapture",
+                    ])
+                    .env("AB_SQLITE_LOCK_PROBE_PATH", &target)
+                    .env("AB_SQLITE_LOCK_PROBE_OFFSET", offset.to_string())
+                    .env("AB_SQLITE_LOCK_PROBE_HELD", if held { "1" } else { "0" })
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{journal}: {} {}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                    "lock observer must execute"
+                );
+            };
+            observe(true);
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o666)).unwrap();
+            assert!(restrict_existing_state_file(&database).unwrap());
+            restrict_sqlite_sidecars(&database).unwrap();
+            assert_eq!(
+                std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            observe(true);
+            // The previous implementation must actually lose the lock: a
+            // passing no-contention test would not cover this corruption risk.
+            drop(open_private_state_file(&target, false).unwrap());
+            observe(false);
+            connection.execute_batch("ROLLBACK").unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_permission_sidecars_reject_links_without_touching_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        std::fs::write(&target, b"untouched").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let database = temp.path().join("state.db");
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let sidecar = sqlite_path_with_suffix(&database, suffix);
+            symlink(&target, &sidecar).unwrap();
+            assert!(restrict_existing_state_file(&sidecar).is_err());
+        }
+        assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sqlite_permission_concurrent_worker() {
+        let Some(path) = std::env::var_os("AB_SQLITE_CONCURRENT_PROBE") else {
+            return;
+        };
+        for _ in 0..20 {
+            let store = SqliteStore::open(Path::new(&path)).await.unwrap();
+            store
+                .conn
+                .call(|connection| -> RusqliteResult<()> {
+                    connection.execute("INSERT INTO ab_lock_probe(value) VALUES(1)", [])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sqlite_permission_concurrent_store_opens_preserve_integrity() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().canonicalize().unwrap().join("state.db");
+        let store = SqliteStore::open(&database).await.unwrap();
+        store
+            .conn
+            .call(|connection| -> RusqliteResult<()> {
+                connection.execute_batch("CREATE TABLE ab_lock_probe(value INTEGER)")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut children: Vec<_> = (0..3)
+            .map(|_| {
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "sqlite::tests::sqlite_permission_concurrent_worker",
+                        "--nocapture",
+                    ])
+                    .env("AB_SQLITE_CONCURRENT_PROBE", &database)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            if children
+                .iter_mut()
+                .all(|child| child.try_wait().unwrap().is_some())
+            {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                for child in &mut children {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                panic!("concurrent Store opens exceeded the bounded deadline");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        for child in children {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let (rows, integrity) = store
+            .conn
+            .call(|connection| -> RusqliteResult<(i64, String)> {
+                Ok((
+                    connection
+                        .query_row("SELECT COUNT(*) FROM ab_lock_probe", [], |row| row.get(0))?,
+                    connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows, 60);
+        assert_eq!(integrity, "ok");
     }
 
     #[cfg(unix)]
