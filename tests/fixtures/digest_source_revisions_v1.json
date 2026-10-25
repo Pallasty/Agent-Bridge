@@ -1,0 +1,39 @@
+[
+  {
+    "fields": [
+      "row_a",
+      "decision",
+      null,
+      "content of row_a",
+      [],
+      [],
+      100,
+      100,
+      "active",
+      null,
+      null
+    ],
+    "sha256": "914eb7dcdf88bd2bab3e93dd6a9ad4494551ea23fda1ea370774a9a4ff259915"
+  },
+  {
+    "fields": [
+      "源🔑",
+      "fact",
+      "project:/路径",
+      "中文\n\"quoted\"\\\t\u0000 ",
+      [
+        "a",
+        "约束"
+      ],
+      [
+        "other"
+      ],
+      100,
+      101,
+      "active",
+      null,
+      "故障"
+    ],
+    "sha256": "0970737e683bc64ab2399f2314c6eb68ca5d83c2b0318d08c5ddb581eb7aed73"
+  }
+]

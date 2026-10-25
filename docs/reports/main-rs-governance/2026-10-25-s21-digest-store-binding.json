@@ -1,0 +1,220 @@
+{
+  "schema": "agent_bridge.cli_governance_store_binding_refresh.v1",
+  "scope": "Store trait adds readonly memory_peek_many. Fresh pure behavior probes bind the current source; historical CLI statistics below are not a fresh CLI run. Normal pre-commit must execute isolated baseline/candidate CLI comparisons before this commit is admitted.",
+  "previous_report": "docs/reports/main-rs-governance/2026-09-28-s21-path-portability.json",
+  "fresh_probe_report_sha256": "f8ad71c5afa10546e97f52bd859a7d14441d53fc7b96769aa2520e14e151dc59",
+  "fresh_probe_report_local_path": "/Data/CascadeProjects/.analysis-reports/ab-digest-session-closeout-20261025/s21/report.json",
+  "view_parity": {
+    "schema_version": 1,
+    "mode": "identity-view-parity",
+    "scope": "completed real IdentityWindow text presentation; no collection, database, clock, or JSON CLI output",
+    "baseline_commit": "02141eeab7a31ca55b2bc91584848747ea5e1f4e",
+    "baseline_main_sha256": "33fe62062712aa439aeb8ac36643fb2f9585c507719fa5b3b4bba4f28ff8c8be",
+    "baseline_dream_sha256": "898bf65584dfbf12ff9d35cc53ca60d3644123ab1a837b3006ed035b3a4b28cb",
+    "candidate_head": "9e2f22c53a9495c7ba9c9d7e24cb436cde4bf4c1",
+    "harness_sha256": "95bda6f75da57bfc6a325df89aae74b6f1796d6457d6b076fe8def35b331d5d3",
+    "candidate_main_sha256": "ef4c38c8ed7ed54c811d399e69d720f493c708e31ce1587f384de04db4ac292a",
+    "candidate_dream_sha256": "898bf65584dfbf12ff9d35cc53ca60d3644123ab1a837b3006ed035b3a4b28cb",
+    "store_source_sha256": "0f76176c745995fd95310fad4d31e6765654c780f6820fd69ef9b58292fee779",
+    "candidate_module_sha256": "e2d312fc16ac20203ae2782398e78245cc3582c7f486fe009d8e6566c040c2b0",
+    "baseline_extraction": {
+      "pct_delta": {
+        "first_line": 20222,
+        "last_line": 20233,
+        "original_function_sha256": "10404181518fd7288dba161ba2ee12fe4a8088e35800046133999a071ad9a814",
+        "original_function_bytes": 310
+      },
+      "print_identity_section": {
+        "first_line": 20235,
+        "last_line": 20324,
+        "original_function_sha256": "fa20afa80a7633fa17d36c24ec507c5c239bb7b374b6e9db64b88a9bc495f2bd",
+        "original_function_bytes": 2936
+      },
+      "short_key": {
+        "first_line": 234,
+        "last_line": 241,
+        "original_function_sha256": "730478cae081ab90bae9afe66f9fe81d8bca58fcddb49eda6702da2a87b18ce1",
+        "original_function_bytes": 235
+      }
+    },
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)\nbinary: rustc\ncommit-hash: 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd\ncommit-date: 2026-06-26\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.1\nLLVM version: 22.1.2",
+    "candidate_short_key_extraction": {
+      "first_line": 234,
+      "last_line": 241,
+      "original_function_sha256": "730478cae081ab90bae9afe66f9fe81d8bca58fcddb49eda6702da2a87b18ce1",
+      "original_function_bytes": 235
+    },
+    "negative_control": {
+      "case": "empty-windows",
+      "comparison": {
+        "equal": false,
+        "equal_fields": {
+          "exit_code": true,
+          "stdout": false,
+          "stderr": true
+        }
+      },
+      "candidate": {
+        "exit_code": 0,
+        "stdout_sha256": "2999420692c0fe5b0614a937df65d9ded2922cdb394f0a17966ffeb92b699368",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_bytes": 338,
+        "stderr_bytes": 0,
+        "stdout_file": "negative-control.candidate.stdout",
+        "stderr_file": "negative-control.candidate.stderr"
+      },
+      "caught": true
+    },
+    "source_unchanged_during_run": true,
+    "dependencies_unchanged_during_run": true,
+    "total": 44,
+    "baseline_successes": 44,
+    "passed": 44,
+    "success": true
+  },
+  "cli_parity": {
+    "schema": "agent_bridge.dream_identity_cli_parity.v1",
+    "comparison_performed": true,
+    "baseline_sha256": "937230761762e917eac59f76ae098c0a53f468792618692de9de53233fa178a8",
+    "candidate_sha256": "578dedb7478603b984ce2ae38fd8a85707008fef5d24dfad11458e5aece417e8",
+    "script_sha256": "e2a833c1b1b0ea5881e64ed906a4c6c4cdf82ad09b708c7716db8b4e3009a4ae",
+    "inputs_unchanged_during_run": true,
+    "path_helper_sha256": "210cd47e68502d23db2ec797b586e7db573ba4cf4fe81fbed025891a6c5847b3",
+    "passed": 30,
+    "total": 30,
+    "business_tables": [
+      "mcp_tool_calls",
+      "forum_threads",
+      "forum_posts",
+      "memories"
+    ],
+    "excluded": [
+      "SQLite byte identity",
+      "real credentials/configuration/database",
+      "uncontrolled query-boundary timing"
+    ],
+    "cases": [
+      {
+        "case": "root-help",
+        "passed": true
+      },
+      {
+        "case": "dream-help",
+        "passed": true
+      },
+      {
+        "case": "identity-help",
+        "passed": true
+      },
+      {
+        "case": "invalid-days--1",
+        "passed": true
+      },
+      {
+        "case": "invalid-days-not-a-number",
+        "passed": true
+      },
+      {
+        "case": "invalid-days-4294967296",
+        "passed": true
+      },
+      {
+        "case": "zero-days-none-text",
+        "passed": true
+      },
+      {
+        "case": "zero-days-open-blocked-text",
+        "passed": true
+      },
+      {
+        "case": "default-empty-text",
+        "passed": true
+      },
+      {
+        "case": "one-day-empty-text",
+        "passed": true
+      },
+      {
+        "case": "populated-1-days-text",
+        "passed": true
+      },
+      {
+        "case": "populated-7-days-text",
+        "passed": true
+      },
+      {
+        "case": "current-only-text",
+        "passed": true
+      },
+      {
+        "case": "prior-only-text",
+        "passed": true
+      },
+      {
+        "case": "open-blocked-text",
+        "passed": true
+      },
+      {
+        "case": "open-corrupt-text",
+        "passed": true
+      },
+      {
+        "case": "query-current-text",
+        "passed": true
+      },
+      {
+        "case": "query-prior-text",
+        "passed": true
+      },
+      {
+        "case": "zero-days-none-json",
+        "passed": true
+      },
+      {
+        "case": "zero-days-open-blocked-json",
+        "passed": true
+      },
+      {
+        "case": "default-empty-json",
+        "passed": true
+      },
+      {
+        "case": "one-day-empty-json",
+        "passed": true
+      },
+      {
+        "case": "populated-1-days-json",
+        "passed": true
+      },
+      {
+        "case": "populated-7-days-json",
+        "passed": true
+      },
+      {
+        "case": "current-only-json",
+        "passed": true
+      },
+      {
+        "case": "prior-only-json",
+        "passed": true
+      },
+      {
+        "case": "open-blocked-json",
+        "passed": true
+      },
+      {
+        "case": "open-corrupt-json",
+        "passed": true
+      },
+      {
+        "case": "query-current-json",
+        "passed": true
+      },
+      {
+        "case": "query-prior-json",
+        "passed": true
+      }
+    ]
+  },
+  "cli_parity_evidence_status": "historical retained report; fresh pre-commit execution required separately"
+}

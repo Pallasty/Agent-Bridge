@@ -88,6 +88,23 @@ Rust 验证门（镜像 `parse_verdict`）：JSON 可解析、verdict 合法、k
 
 ## 7. 评测门与晋升（新机制,本设计的核心增量）
 
+2026-10-25 更新：`digest_gate.py` 先对影子库执行只读来源生命周期检查，
+来源缺失、失效、被替代、草稿生成后更新，或来源声明不可核验时，返回
+`BLOCKED_SOURCE_LIFECYCLE`，不启动 MCP。旧草稿实际保存的是来源 key，
+没有来源内容哈希；这一检查不能证明版本字节一致或摘要为真。
+下述排名双门 PASS 只表示影子快照上的检查通过，人工晋升前仍需复核当前来源
+及摘要断言。范围、后续决策与测试见
+[本次有限增量](design/MEMORY-DERIVATION-IMPROVEMENTS-2026-10-25.md)。
+
+同日第二增量：新草稿由 Rust 生成端在现有 JSON 包内写入
+`ab.digest.sources.v1` 绑定，覆盖模型实际接收的全部素材及生命周期元数据。
+晋升脚本逐项比较哈希；缺少绑定的旧草稿保留，但不再通过晋升门，需重新生成。
+匹配只证明影子快照内被绑定字段一致，不能证明摘要正确或活库晋升时仍未变化。
+
+同日第三增量：晋升参数保留 `digest_sources_v1:` 绑定标签；MCP `memory_get`
+在一个只读事务内核验摘要及来源。来源变更、撤回或绑定不可核验时隐藏正文，
+保留历史行。此限制尚未覆盖 search/bootstrap/fetch，也未部署到安装中的 MCP。
+
 晋升是**独立于每晚撰写的步骤**,由 `scripts/eval/digest_gate.py`（待建,复用 ab_eval 机械）离线执行：
 
 1. 拷贝 live `state.db` 到 scratch 目录,`XDG_DATA_HOME=<scratch>` 指向副本（`default_db_path()` 已支持,亲验于 sqlite.rs:764）。

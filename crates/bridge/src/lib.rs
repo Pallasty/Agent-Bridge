@@ -53,6 +53,7 @@ pub mod creds;
 pub mod curate;
 pub mod daemon_http;
 pub mod dream_digest;
+pub(crate) mod digest_read;
 pub mod dream_distill;
 pub mod dream_replay;
 pub mod effect_inventory;

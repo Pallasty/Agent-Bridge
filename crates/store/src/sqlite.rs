@@ -10729,6 +10729,42 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("memory_peek: {e}")))
     }
 
+    async fn memory_peek_many(&self, keys: &[String]) -> Result<Vec<MemoryPeekResult>> {
+        let unique: std::collections::HashSet<_> = keys.iter().collect();
+        if keys.is_empty() || keys.len() > 13 || unique.len() != keys.len()
+            || keys.iter().any(|key| key.is_empty() || key.len() > 4096)
+        {
+            return Err(Error::Backend("memory_peek_many requires 1..=13 unique keys of 1..=4096 bytes".into()));
+        }
+        let keys = keys.to_vec();
+        self.conn.call(move |c| -> RusqliteResult<Vec<MemoryPeekResult>> {
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+            let mut results = Vec::with_capacity(keys.len());
+            for key in keys {
+                let metadata: Option<(String, i64)> = tx.query_row(
+                    "SELECT status, updated_at FROM memories WHERE key=?1", params![key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()?;
+                results.push(match metadata {
+                    None => MemoryPeekResult::Missing,
+                    Some((status, updated_at)) if status == "tombstoned" =>
+                        MemoryPeekResult::Tombstoned { marker: MemoryTombstoneMarker { key, updated_at } },
+                    Some(_) => {
+                        let record = tx.query_row(
+                            "SELECT key, kind, content, tags, related_keys, scope,
+                                    created_at, updated_at, last_accessed_at, access_count,
+                                    importance, status, trigger_pattern, superseded_by
+                               FROM memories WHERE key=?1", params![key], decode_memory_record,
+                        )?;
+                        MemoryPeekResult::Present { record: Box::new(record) }
+                    }
+                });
+            }
+            tx.commit()?;
+            Ok(results)
+        }).await.map_err(|e| Error::Backend(format!("memory_peek_many: {e}")))
+    }
+
     async fn memory_evidence_snapshot(
         &self,
         limits: MemoryEvidenceSnapshotLimits,

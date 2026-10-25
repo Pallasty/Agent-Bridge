@@ -21535,6 +21535,17 @@ fn log_memory_query(
     });
 }
 
+async fn current_digest_tool_result(store: &dyn ab_store::StateStore, initial: &ab_store::MemoryRecord) -> ToolResult {
+    let assessment = crate::digest_read::assess(store, initial).await;
+    let mut response = match assessment.record {
+        Some(record) => memory_record_value_with_continuity(&record),
+        None => json!({"key": initial.key, "kind": "digest", "content": null}),
+    };
+    response["source_validity"] = assessment.validity;
+    response["proactive_hint"] = Value::Null;
+    ToolResult::json_text(&response)
+}
+
 pub struct MemoryGetTool {
     hub: Hub,
 }
@@ -21554,7 +21565,9 @@ impl McpTool for MemoryGetTool {
             description: "Fetch one memory by exact key. Side effect: bumps the row's \
                  access_count and last_accessed_at — this is what gives \
                  `memory_search` ranking and `memory_compact` something to score \
-                 against. Returns null if the key is unknown."
+                 against. Digest reads instead verify bound sources without telemetry writes; \
+                 unverified or withdrawn digests return content=null and source_validity. \
+                 Returns null if the key is unknown."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -21573,7 +21586,20 @@ impl McpTool for MemoryGetTool {
             None => return Ok(ToolResult::error("missing 'key'")),
         };
         let started = Instant::now();
+        if let MemoryPeekResult::Present { record } = store.memory_peek(&key).await? {
+            if record.kind == "digest" {
+                return Ok(current_digest_tool_result(store.as_ref(), &record).await);
+            }
+        }
         let row = store.memory_get(&key).await?;
+        // A concurrent writer can reclassify an ordinary row after the peek.
+        // Never let that race bypass the digest guard. The existing ordinary
+        // get may already have bumped access in this narrow conversion race.
+        if let Some(record) = &row {
+            if record.kind == "digest" {
+                return Ok(current_digest_tool_result(store.as_ref(), record).await);
+            }
+        }
         let elapsed = started.elapsed();
 
         // Phase 0 telemetry: log hit/miss + age. last_accessed_at was just

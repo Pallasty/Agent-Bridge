@@ -4,15 +4,18 @@ digest-author pipeline — docs/DESIGN-nightly-digest-author.md §7).
 
 Everything runs against a SHADOW COPY of state.db (XDG_DATA_HOME override,
 honored by ab_store::default_db_path). The live store is opened read-only
-exactly once, to prove the sentinel write did NOT land there. A candidate
-digest is materialized only in the copy; the two gates are:
+for backup and isolation verification. Before starting MCP, a read-only source
+lifecycle and bound-revision check runs against the frozen copy. A candidate digest is materialized
+only in the copy; the retrieval gates are:
 
   1. hit gate       — the candidate ranks ≤5 in ≥1 mode for ≥1 target query
   2. non-regression — synthesis set_recall any_mode@20, measured PRE vs POST
                       on the SAME frozen copy (paired design: living-corpus
                       drift cannot fake a regression), drops < 0.02
 
-PASS means "safe to promote"; promotion itself stays manual in S1 — an agent
+PASS means only that bound source revisions, lifecycle and retrieval checks
+passed on the copy, not that the answer was verified. Promotion stays manual:
+recheck current sources and review the claims before an agent
 session runs the printed memory_save against the live store and tags the
 draft resolved:promoted. This script never writes to the live store.
 
@@ -21,6 +24,7 @@ Usage:
   python3 scripts/eval/digest_gate.py --draft-key ... --keep-scratch --report out.json
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -28,6 +32,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from pathlib import Path
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, EVAL_DIR)
@@ -39,6 +44,141 @@ HIT_GATE_RANK = 5
 NON_REGRESSION_EPS = 0.02
 MODES = ["fts", "hybrid", "semantic"]
 PIPELINE_TAG = "derived:digest_author"
+# Match the author's primary-material boundary; do not silently certify a
+# digest-of-digest whose ancestors this bounded check does not inspect.
+NON_PRIMARY_KINDS = {"digest", "digest_draft", "distill_draft", "work_memory",
+                     "session_handoff", "retrieval_feedback", "snapshot"}
+
+
+def read_only_db(path):
+    conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+    conn.execute("PRAGMA query_only=ON")
+    return conn
+
+
+def source_revision_hash(row):
+    """v1 UTF-8 compact JSON array; field order shared with dream_digest.rs.
+
+    Bind prompt material and lifecycle metadata, excluding read telemetry,
+    ranking importance, and embeddings. No normalization of text or array order.
+    """
+    tags, related = json.loads(row["tags"]), json.loads(row["related_keys"])
+    for values in (tags, related):
+        if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+            raise ValueError("invalid source array")
+    for name in ("key", "kind", "content", "status"):
+        if not isinstance(row[name], str):
+            raise ValueError("invalid source string")
+    for name in ("scope", "superseded_by", "trigger_pattern"):
+        if row[name] is not None and not isinstance(row[name], str):
+            raise ValueError("invalid nullable source string")
+    for name in ("created_at", "updated_at"):
+        if type(row[name]) is not int or row[name] <= 0:
+            raise ValueError("invalid source timestamp")
+    payload = [row["key"], row["kind"], row["scope"], row["content"], tags, related,
+               row["created_at"], row["updated_at"], row["status"],
+               row["superseded_by"], row["trigger_pattern"]]
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def check_source_lifecycle(db_path, draft_key):
+    """Check declared primary sources in one read transaction, with no telemetry.
+
+    Require producer-generated revision bindings; legacy drafts fail closed.
+    Matching bytes do not establish truth, scope eligibility, authenticated
+    provenance, or freshness outside this snapshot.
+    """
+    result = {"pass": False, "checked_sources": 0, "issues": [],
+              "source_revision_verified": False, "answer_validated": False,
+              "basis": "frozen_snapshot_bound_source_revisions"}
+
+    def issue(key, reason):
+        result["issues"].append({"key": key, "reason": reason})
+
+    def keys(value):
+        if (not isinstance(value, list) or not value
+                or any(not isinstance(k, str) or not k.strip() for k in value)
+                or len(value) != len(set(value))):
+            raise ValueError("source keys must be a nonempty unique string list")
+        return value
+
+    conn = read_only_db(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN")
+        draft = conn.execute("SELECT * FROM memories WHERE key=?", (draft_key,)).fetchone()
+        if draft is None:
+            issue(draft_key, "draft_missing")
+            return result
+        if (draft["kind"] != "digest_draft" or draft["status"] != "active"
+                or draft["superseded_by"]):
+            issue(draft_key, "draft_not_active_candidate")
+            return result
+        model = extract_model_json(draft["content"])
+        if model.get("verdict") != "author":
+            issue(draft_key, "draft_not_author")
+            return result
+        sources = keys(model["draft"]["source_keys"])
+        declared = keys(json.loads(draft["related_keys"]))
+        if set(sources) != set(declared):
+            issue(draft_key, "source_keys_disagree_with_draft")
+            return result
+        binding = model.get("source_bindings")
+        if not isinstance(binding, dict) or binding.get("schema") != "ab.digest.sources.v1":
+            issue(draft_key, "source_binding_missing_or_unsupported")
+            return result
+        entries = binding.get("sources")
+        if not isinstance(entries, list) or not entries or len(entries) > 12:
+            issue(draft_key, "source_binding_invalid")
+            return result
+        hashes = {}
+        for entry in entries:
+            if (not isinstance(entry, dict) or set(entry) != {"key", "sha256"}
+                    or not isinstance(entry["key"], str) or not entry["key"].strip()
+                    or entry["key"] in hashes or not isinstance(entry["sha256"], str)
+                    or re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]) is None):
+                issue(draft_key, "source_binding_invalid")
+                return result
+            hashes[entry["key"]] = entry["sha256"]
+        if not set(sources).issubset(hashes):
+            issue(draft_key, "source_binding_incomplete")
+            return result
+        # The author supplies at most twelve primary rows. Bound work even for
+        # hand-edited drafts rather than traversing arbitrary related_keys.
+        if len(sources) > 12:
+            issue(draft_key, "source_limit_exceeded")
+            return result
+        if type(draft["created_at"]) is not int or draft["created_at"] <= 0:
+            issue(draft_key, "draft_creation_time_unknown")
+            return result
+        # Include uncited material: the author saw the entire manifest, so an
+        # uncited correction can also change what the synthesis should say.
+        for key, expected_hash in hashes.items():
+            source = conn.execute("SELECT * FROM memories WHERE key=?", (key,)).fetchone()
+            result["checked_sources"] += 1
+            if source is None:
+                issue(key, "source_missing")
+                continue
+            if source["status"] != "active" or source["superseded_by"]:
+                issue(key, "source_not_active")
+            if source["kind"] in NON_PRIMARY_KINDS:
+                issue(key, "source_not_primary")
+            updated = source["updated_at"]
+            if type(updated) is not int or updated <= 0:
+                issue(key, "source_update_time_unknown")
+            elif updated > draft["created_at"]:
+                issue(key, "source_updated_after_draft")
+            if source_revision_hash(source) != expected_hash:
+                issue(key, "source_revision_mismatch")
+        result["pass"] = not result["issues"]
+        result["source_revision_verified"] = result["pass"]
+    except (sqlite3.Error, ValueError, TypeError, KeyError, IndexError, AttributeError, SystemExit):
+        # Do not disclose source prose or SQL errors in a provenance report.
+        issue(draft_key, "malformed_or_unverifiable_provenance")
+    finally:
+        conn.close()
+    return result
 
 
 def copy_db_to_shadow(src_db, scratch):
@@ -46,7 +186,7 @@ def copy_db_to_shadow(src_db, scratch):
     data_dir = os.path.join(scratch, "agent-bridge")
     os.makedirs(data_dir, exist_ok=True)
     dest = os.path.join(data_dir, "state.db")
-    src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
+    src = read_only_db(src_db)
     dst = sqlite3.connect(dest)
     with dst:
         src.backup(dst)
@@ -56,7 +196,7 @@ def copy_db_to_shadow(src_db, scratch):
 
 
 def key_in_db(db_path, key):
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = read_only_db(db_path)
     try:
         row = conn.execute("SELECT 1 FROM memories WHERE key = ?", (key,)).fetchone()
         return row is not None
@@ -97,6 +237,11 @@ def main():
 
     report = {"draft_key": args.draft_key, "shadow_db": shadow_db}
     try:
+        report["source_lifecycle"] = check_source_lifecycle(shadow_db, args.draft_key)
+        if not report["source_lifecycle"]["pass"]:
+            report["verdict"] = "BLOCKED_SOURCE_LIFECYCLE"
+            print(json.dumps(report["source_lifecycle"], ensure_ascii=False))
+            raise SystemExit("BLOCKED_SOURCE_LIFECYCLE: refresh/review source evidence before evaluation")
         # ── isolation proof: a write lands in the copy, never in live ──
         sentinel = f"digest_gate_sentinel_{os.getpid()}"
         mcp = McpClient(args.binary)
@@ -136,7 +281,12 @@ def main():
 
         # ── materialize the candidate in the copy (fresh client) ──
         mcp = McpClient(args.binary)
-        tags = sorted(set(d.get("tags", [])) | {"digest", PIPELINE_TAG,
+        binding_tag = "digest_sources_v1:" + json.dumps(
+            model["source_bindings"], ensure_ascii=False, separators=(",", ":"))
+        # Host-verified bindings travel with the live digest, not merely with
+        # its draft. Never preserve model-supplied tags in this reserved namespace.
+        tags = sorted({t for t in d.get("tags", []) if not t.startswith("digest_sources_v1:")} |
+                      {binding_tag, "digest", PIPELINE_TAG,
                                                 "digest:candidate",
                                                 f"promoted_from:{args.draft_key}"})
         save_args = {
@@ -201,9 +351,16 @@ def main():
               f"{'PASS' if nr_pass else 'FAIL'}")
         print(f"\nverdict: {verdict}")
         if verdict == "PASS":
+            report["manual_promotion"] = {
+                "memory_save": save_args,
+                "requires_current_source_and_claim_review": True,
+            }
+            print("Bound source revisions and lifecycle checked on a frozen copy only; "
+                  "answer truth is NOT verified. Recheck current "
+                  "sources and review claims before manual promotion.")
             print("\npromotion (manual, against the LIVE store — S1 keeps a "
                   "human/agent in the loop):")
-            print(f"  memory_save {json.dumps(save_args, ensure_ascii=False)[:400]}…")
+            print(f"  memory_save {json.dumps(save_args, ensure_ascii=False)}")
             print(f"  then tag {args.draft_key} resolved:promoted, and declare "
                   f"the vehicle in fixtures/synthesis_queries.json if this "
                   f"topic came from the eval set")

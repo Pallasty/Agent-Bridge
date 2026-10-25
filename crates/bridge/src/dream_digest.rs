@@ -75,7 +75,7 @@ const SEED_OVERLAP_SKIP: f64 = 0.6;
 /// Bookkeeping kinds never used as digest source material. Live digests are
 /// also excluded: digest-of-digest chains would muddy the citation ledger
 /// (each digest must cite primary rows; refresh goes through supersede).
-const EXCLUDED_MANIFEST_KINDS: &[&str] = &[
+pub(crate) const EXCLUDED_MANIFEST_KINDS: &[&str] = &[
     DRAFT_KIND,
     LIVE_KIND,
     "distill_draft",
@@ -171,7 +171,11 @@ pub async fn run(opts: DigestRunOpts) -> Result<()> {
     match std::fs::read_to_string(&opts.fixtures) {
         Ok(json) => match t1_topics_from_fixture_json(&json) {
             Ok(mut t1) => {
-                println!("T1 fixture gaps: {} topic(s) from {}", t1.len(), opts.fixtures);
+                println!(
+                    "T1 fixture gaps: {} topic(s) from {}",
+                    t1.len(),
+                    opts.fixtures
+                );
                 topics.append(&mut t1);
             }
             Err(e) => println!("T1 skipped (fixture parse: {e})"),
@@ -207,8 +211,7 @@ pub async fn run(opts: DigestRunOpts) -> Result<()> {
         .into_iter()
         .filter(|r| r.status == "active")
         .collect();
-    let mut covered_keys: HashSet<String> =
-        live_digests.iter().map(|r| r.key.clone()).collect();
+    let mut covered_keys: HashSet<String> = live_digests.iter().map(|r| r.key.clone()).collect();
     covered_keys.insert(PORTFOLIO_KEY.to_string());
     let existing_digest_index = if live_digests.is_empty() {
         "(none)".to_string()
@@ -259,7 +262,9 @@ pub async fn run(opts: DigestRunOpts) -> Result<()> {
                         .unwrap_or_default(),
                 };
                 for (i, hit) in hits.into_iter().enumerate() {
-                    if covered_by.is_none() && i < COVERAGE_TOP_N && covered_keys.contains(&hit.record.key)
+                    if covered_by.is_none()
+                        && i < COVERAGE_TOP_N
+                        && covered_keys.contains(&hit.record.key)
                     {
                         covered_by = Some(hit.record.key.clone());
                     }
@@ -272,7 +277,10 @@ pub async fn run(opts: DigestRunOpts) -> Result<()> {
             }
         }
         if let Some(k) = covered_by {
-            println!("  skip {} (already covered by {k} in top-{COVERAGE_TOP_N})", topic.slug);
+            println!(
+                "  skip {} (already covered by {k} in top-{COVERAGE_TOP_N})",
+                topic.slug
+            );
             continue;
         }
         // Seeds outrank everything (rank 0) — they are declared-relevant.
@@ -340,7 +348,10 @@ pub async fn run(opts: DigestRunOpts) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("memory_save {draft_key}: {e}"))?;
         // Best-effort provenance edges; related_keys stays the source of truth.
         for src in &edge_targets {
-            if let Err(e) = store.memory_link(&draft_key, src, "derived_from", 1.0).await {
+            if let Err(e) = store
+                .memory_link(&draft_key, src, "derived_from", 1.0)
+                .await
+            {
                 eprintln!("  edge {draft_key}→{src}: {e}");
             }
         }
@@ -504,8 +515,7 @@ pub fn assemble_manifest(mut ranked: Vec<(usize, MemoryRecord)>) -> Vec<MemoryRe
     let mut chars = 0usize;
     for (_, rec) in ranked {
         let len = rec.content.chars().count();
-        if out.len() >= MAX_MANIFEST_ROWS || (!out.is_empty() && chars + len > MAX_MANIFEST_CHARS)
-        {
+        if out.len() >= MAX_MANIFEST_ROWS || (!out.is_empty() && chars + len > MAX_MANIFEST_CHARS) {
             break;
         }
         chars += len;
@@ -574,7 +584,10 @@ pub fn parse_digest_verdict(stdout: &str, allowed_keys: &HashSet<String>) -> Res
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("author verdict without draft"))?;
         if !d.key.starts_with("digest_") || d.key.len() <= "digest_".len() {
-            return Err(anyhow::anyhow!("draft key `{}` must start with digest_", d.key));
+            return Err(anyhow::anyhow!(
+                "draft key `{}` must start with digest_",
+                d.key
+            ));
         }
         if d.key.chars().any(char::is_whitespace) {
             return Err(anyhow::anyhow!("draft key `{}` contains whitespace", d.key));
@@ -653,8 +666,47 @@ fn parse_proposed_digest(
 
 // ───────────────────────────── draft record ───────────────────────────────
 
+/// v1 compact UTF-8 JSON array, shared with scripts/eval/digest_gate.py.
+/// Bind author material and lifecycle, not access/ranking telemetry. The input
+/// is the same captured record used to build the prompt, never a later DB read.
+pub(crate) fn source_revision_hash(record: &MemoryRecord) -> String {
+    use sha2::{Digest, Sha256};
+    let fields = serde_json::json!([
+        record.key,
+        record.kind,
+        record.scope,
+        record.content,
+        record.tags,
+        record.related_keys,
+        record.created_at,
+        record.updated_at,
+        record.status,
+        record.superseded_by,
+        record.trigger_pattern,
+    ]);
+    format!("{:x}", Sha256::digest(fields.to_string().as_bytes()))
+}
+
+fn bind_model_sources(raw_json: &str, manifest: &[MemoryRecord]) -> String {
+    let Ok(serde_json::Value::Object(mut packet)) = serde_json::from_str(raw_json) else {
+        // The author parser rejects this in the normal path. Never synthesize
+        // valid provenance for a malformed payload supplied by another caller.
+        return raw_json.to_string();
+    };
+    let sources: Vec<_> = manifest
+        .iter()
+        .map(|r| serde_json::json!({"key": r.key, "sha256": source_revision_hash(r)}))
+        .collect();
+    // Replace, rather than trust, any same-named model-generated field.
+    packet.insert(
+        "source_bindings".into(),
+        serde_json::json!({"schema": "ab.digest.sources.v1", "sources": sources}),
+    );
+    serde_json::Value::Object(packet).to_string()
+}
+
 /// Build the queue row for one verdict. The row is both the review packet
-/// and the gate's input (the raw JSON block is what the gate materializes).
+/// and the gate's input (host-bound model JSON is what the gate materializes).
 pub fn build_digest_draft_record(
     topic: &DigestTopic,
     v: &DigestVerdict,
@@ -713,15 +765,19 @@ pub fn build_digest_draft_record(
          ## 素材清单（模型只被允许引用这些 key）\n{}\n\n\
          ## 评审动作\n{}\n（执行后给本行加 resolved:promoted / resolved:declined；\
          删除本行会让主题重新排队）\n\n\
-         ## 模型原始产出\n```json\n{}\n```\n",
+         ## 模型产出与宿主来源绑定\n```json\n{}\n```\n",
         topic.slug,
         source_desc,
         v.verdict,
-        if v.reasoning.is_empty() { "-" } else { &v.reasoning },
+        if v.reasoning.is_empty() {
+            "-"
+        } else {
+            &v.reasoning
+        },
         queries,
         manifest_keys,
         action,
-        v.raw_json,
+        bind_model_sources(&v.raw_json, manifest),
     );
     MemoryRecord {
         key: format!("{DRAFT_KEY_PREFIX}{}", topic.slug),
@@ -788,7 +844,10 @@ mod tests {
             vec!["t1_s3", "t1_s7"],
             "declared-vehicle query S1 must be excluded (portfolio territory)"
         );
-        assert!(topics[0].score > topics[1].score, "earlier fixture entry wins");
+        assert!(
+            topics[0].score > topics[1].score,
+            "earlier fixture entry wins"
+        );
         assert_eq!(topics[0].seed_keys, vec!["c", "d"]);
         assert_eq!(topics[0].target_queries, vec!["哪些图路线被证伪了？"]);
         assert!(matches!(&topics[0].source, TopicSource::FixtureGap(id) if id == "S3"));
@@ -815,7 +874,9 @@ mod tests {
         let slugs: Vec<&str> = topics.iter().map(|t| t.slug.as_str()).collect();
         assert_eq!(topics.len(), 3, "{slugs:?}");
         // bare key excluded even at count 5; CJK below min_count excluded
-        assert!(topics.iter().all(|t| !t.target_queries[0].contains("aiot_seed")));
+        assert!(topics
+            .iter()
+            .all(|t| !t.target_queries[0].contains("aiot_seed")));
         assert!(topics[0].score > 100.0 + 21.0, "count feeds the score");
         assert!(matches!(topics[0].source, TopicSource::TelemetryMiss(22)));
     }
@@ -850,20 +911,23 @@ mod tests {
         ];
         let s = drafted_topic_slugs(&rows);
         assert!(s.contains("t1_s3"));
-        assert!(s.contains("legacy"), "key prefix is the tag-stripped fallback");
+        assert!(
+            s.contains("legacy"),
+            "key prefix is the tag-stripped fallback"
+        );
         assert!(!s.contains("t1_s9"), "non-draft rows don't count");
     }
 
     #[test]
     fn seed_overlap_skips_same_topic_digest() {
         let live = vec![rec("digest_x", LIVE_KIND, &[], &["a", "b", "c"])];
-        let hit = seed_overlap_hit(
-            &["a".into(), "b".into(), "c".into(), "d".into()],
-            &live,
-        );
+        let hit = seed_overlap_hit(&["a".into(), "b".into(), "c".into(), "d".into()], &live);
         assert_eq!(hit.as_deref(), Some("digest_x"), "3/4 jaccard = 0.75 > 0.6");
         assert!(seed_overlap_hit(&["x".into(), "y".into()], &live).is_none());
-        assert!(seed_overlap_hit(&[], &live).is_none(), "seedless topics never match");
+        assert!(
+            seed_overlap_hit(&[], &live).is_none(),
+            "seedless topics never match"
+        );
     }
 
     // ── manifest assembly ──
@@ -975,7 +1039,10 @@ mod tests {
         let err = parse_digest_verdict(&body, &allowed(&["row_a", "row_b"]))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("row_b") && err.contains("never cites"), "{err}");
+        assert!(
+            err.contains("row_b") && err.contains("never cites"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -997,9 +1064,7 @@ mod tests {
         )
         .is_err());
         // empty source_keys
-        assert!(
-            parse_digest_verdict(&author_json("[]", "台账。空白/未定：无"), &ok_keys).is_err()
-        );
+        assert!(parse_digest_verdict(&author_json("[]", "台账。空白/未定：无"), &ok_keys).is_err());
         // unknown verdict / non-JSON
         assert!(parse_digest_verdict(r#"{"verdict":"maybe"}"#, &ok_keys).is_err());
         assert!(parse_digest_verdict("great digest!", &ok_keys).is_err());
@@ -1030,7 +1095,10 @@ mod tests {
 
     #[test]
     fn draft_record_author_shape() {
-        let manifest = vec![rec("row_a", "decision", &[], &[]), rec("row_b", "outcome", &[], &[])];
+        let manifest = vec![
+            rec("row_a", "decision", &[], &[]),
+            rec("row_b", "outcome", &[], &[]),
+        ];
         let v = DigestVerdict {
             verdict: "author".into(),
             reasoning: "why".into(),
@@ -1047,7 +1115,11 @@ mod tests {
         let r = build_digest_draft_record(&topic(), &v, &manifest, "batch:2026-07-13", 95.0);
         assert_eq!(r.key, "digest_draft_t1_s3");
         assert_eq!(r.kind, DRAFT_KIND);
-        assert_eq!(r.related_keys, vec!["row_a", "row_b"], "author → source_keys");
+        assert_eq!(
+            r.related_keys,
+            vec!["row_a", "row_b"],
+            "author → source_keys"
+        );
         for t in [
             "digest_draft",
             PIPELINE_TAG,
@@ -1057,11 +1129,82 @@ mod tests {
             "batch:2026-07-13",
             "proposes:digest_graph_routes_20260713",
         ] {
-            assert!(r.tags.iter().any(|x| x == t), "missing tag {t}: {:?}", r.tags);
+            assert!(
+                r.tags.iter().any(|x| x == t),
+                "missing tag {t}: {:?}",
+                r.tags
+            );
         }
         assert!(r.content.contains("propose-only"));
         assert!(r.content.contains("digest_gate.py"));
         assert!(r.content.contains("哪些图路线被证伪了？"));
+        let payload = r
+            .content
+            .rsplit("```json\n")
+            .next()
+            .unwrap()
+            .split("\n```")
+            .next()
+            .unwrap();
+        let packet: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(packet["source_bindings"]["schema"], "ab.digest.sources.v1");
+        assert_eq!(
+            packet["source_bindings"]["sources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn source_revision_encoding_matches_shared_vectors() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/digest_source_revisions_v1.json"
+        ))
+        .unwrap();
+        for vector in vectors.as_array().unwrap() {
+            let f = &vector["fields"];
+            let record: MemoryRecord = serde_json::from_value(serde_json::json!({
+                "key": f[0], "kind": f[1], "scope": f[2], "content": f[3],
+                "tags": f[4], "related_keys": f[5], "created_at": f[6],
+                "updated_at": f[7], "status": f[8], "superseded_by": f[9],
+                "trigger_pattern": f[10], "last_accessed_at": 0, "access_count": 0,
+            }))
+            .unwrap();
+            assert_eq!(
+                source_revision_hash(&record),
+                vector["sha256"].as_str().unwrap()
+            );
+            let mut read = record.clone();
+            read.access_count += 1;
+            read.last_accessed_at += 1;
+            read.importance = 0.9;
+            assert_eq!(source_revision_hash(&record), source_revision_hash(&read));
+            read.content.push('!');
+            assert_ne!(source_revision_hash(&record), source_revision_hash(&read));
+        }
+    }
+
+    #[test]
+    fn bindings_override_model_metadata_and_include_uncited_material() {
+        let manifest = vec![
+            rec("row_a", "fact", &[], &[]),
+            rec("row_b", "fact", &[], &[]),
+        ];
+        let packet: serde_json::Value = serde_json::from_str(&bind_model_sources(
+            r#"{"draft":{"source_keys":["row_a"]},"source_bindings":{"schema":"forged"}}"#,
+            &manifest,
+        ))
+        .unwrap();
+        assert_eq!(packet["source_bindings"]["schema"], "ab.digest.sources.v1");
+        assert_eq!(packet["source_bindings"]["sources"][1]["key"], "row_b");
+        assert_eq!(
+            packet["source_bindings"]["sources"][0]["sha256"],
+            source_revision_hash(&manifest[0])
+        );
+        assert_eq!(packet["draft"]["source_keys"], serde_json::json!(["row_a"]));
+        assert_eq!(bind_model_sources("not-json", &manifest), "not-json");
     }
 
     #[test]

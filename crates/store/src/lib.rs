@@ -3809,6 +3809,15 @@ pub trait StateStore: Send + Sync {
         ))
     }
 
+    /// Exact keys in caller order, from ONE read transaction. At most 13 unique
+    /// nonempty keys, each at most 4096 bytes. Same tombstone redaction and zero
+    /// telemetry semantics as memory_peek. No sequential fallback: callers need
+    /// a coherent digest-and-sources snapshot, not individually fresh reads.
+    async fn memory_peek_many(&self, keys: &[String]) -> Result<Vec<MemoryPeekResult>> {
+        let _ = keys;
+        Err(ab_core::Error::Backend("memory_peek_many unsupported by this store backend".into()))
+    }
+
     /// Read retained-row markers, content-free tombstones, and timestamped
     /// visible edges in one bounded store snapshot. Implementations must not
     /// mutate access or retrieval telemetry, bulk-load retained content, or

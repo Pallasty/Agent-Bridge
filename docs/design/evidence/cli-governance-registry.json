@@ -10,12 +10,12 @@
       "sha256": "50e61eee9f8a8d55b9127ccdae14a0a30520ed123d7a334c13923a385142e3e8"
     },
     "s20": {
-      "report": "docs/reports/main-rs-governance/2026-09-13-s20-verification.json",
-      "sha256": "67f8615ef0928a646a5f431655a296ac8c170d91393616dfc83d5c6c4888a00e"
+      "report": "docs/reports/main-rs-governance/2026-10-25-s20-digest-store-binding.json",
+      "sha256": "cbd85d1c14dac95d74eb6bff87bd351026966fbd6196f0a19fd90c124e8195ac"
     },
     "s21": {
-      "report": "docs/reports/main-rs-governance/2026-09-28-s21-path-portability.json",
-      "sha256": "a127ecb6d4671ab1eb0d8a67f41a3666256f30fe3368683c337fc47587ee794a"
+      "report": "docs/reports/main-rs-governance/2026-10-25-s21-digest-store-binding.json",
+      "sha256": "8e49eaccb2aef2059df034b3cb0cf83d7659a738e6bd763468d190ab3d4aa3ff"
     }
   }
 }

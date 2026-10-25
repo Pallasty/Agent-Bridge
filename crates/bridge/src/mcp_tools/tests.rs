@@ -26351,6 +26351,25 @@ fn memory_continuity_role_decision_alias_normalizes_to_state() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn memory_get_digest_without_binding_withholds_current_content() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    MemorySaveTool::new(hub.clone())
+        .execute(json!({"key":"unbound_digest", "kind":"digest",
+            "content":"historical conclusion must not be used as current evidence"}), &ToolContext::default())
+        .await.unwrap();
+    let got = MemoryGetTool::new(hub.clone())
+        .execute(json!({"key":"unbound_digest"}), &ToolContext::default()).await.unwrap();
+    let payload = result_text_as_json(&got);
+    assert!(payload["content"].is_null(), "unverified digest body must be withheld");
+    assert_eq!(payload["source_validity"]["status"], "unknown");
+    let original = hub.store.as_ref().unwrap().memory_peek("unbound_digest").await.unwrap();
+    let MemoryPeekResult::Present { record } = original else { panic!("history lost") };
+    assert!(record.content.contains("historical conclusion"));
+    assert_eq!(record.access_count, 0);
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn memory_save_get_and_search_surface_continuity_metadata() {
     let (hub, temp_dir) = mk_test_hub_with_store().await;
     let save_tool = MemorySaveTool::new(hub.clone());
