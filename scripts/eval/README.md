@@ -912,3 +912,11 @@ Its explicit component construction/host integration result is
 `docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_INTEGRATION_RESULT_2026_07_21.md`.
 The harness remains synthetic-only; host integration is explicit-CLI-only and
 does not authorize registry, MCP exposure, or production deployment.
+# Experience execution contrasts
+
+`workflow_experience_contrast.py --experience PATH` reads an existing
+Experience Object v0 plus optional hash-bound before/after execution records.
+It reports observed improvements, regressions, no effect, confounds or missing
+evidence without writing memory or authorizing runtime influence. Valid
+`NO_ENTRY` reviews exit 0; malformed evidence exits 2. See the
+[input contract and runnable example](../../docs/operations/WORKFLOW_EXPERIENCE_CONTRAST.md).

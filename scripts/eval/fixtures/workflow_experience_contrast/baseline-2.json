@@ -1,0 +1,18 @@
+{
+  "run_id": "baseline-2",
+  "conditions": {
+    "task": "synthetic-task-2",
+    "input_sha256": "e9c3c355755856d9eee596a670840f942220f80005d24c513b5e4d1184da2721",
+    "model": "synthetic-no-model",
+    "environment": "unit-fixture-v1"
+  },
+  "execution_status": "completed",
+  "metrics": {
+    "correct": 0
+  },
+  "cost": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "elapsed_ms": 0
+  }
+}

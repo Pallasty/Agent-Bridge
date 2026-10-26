@@ -4,6 +4,13 @@ Date: 2026-06-30
 
 Role: research synthesis / docs-only planning anchor
 
+Implementation update (2026-10-26): the optional offline
+[experience contrast review](../operations/WORKFLOW_EXPERIENCE_CONTRAST.md)
+can check hash-bound edits and paired numeric observations attached to an
+Experience Object v0. It produces review material only; this does not activate
+automatic learning, memory promotion or runtime policy changes. The historical
+research and maturity claims below retain their original date and scope.
+
 Persistence anchors:
 
 - Memory: `workflow_feedback_loop_research_20260630`

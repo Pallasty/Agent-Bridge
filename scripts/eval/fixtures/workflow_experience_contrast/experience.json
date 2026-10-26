@@ -1,0 +1,49 @@
+{
+  "schema": "agent_bridge.experience.v0",
+  "experience_id": "synthetic_contrast_example",
+  "goal": "Synthetic format demonstration only; not observed AB benefit",
+  "execution_contrast": {
+    "changes": [
+      {
+        "component": "query-guidance",
+        "description": "Include the project name in the query (synthetic example)",
+        "before": {
+          "path": "before.txt",
+          "sha256": "3d9193c6d4fb86e9dc46ae5a4a921a741227588b11279b4015c17eb1026d05f7"
+        },
+        "after": {
+          "path": "after.txt",
+          "sha256": "e7950ac1a20b4253aaa43ebf3e43c68269b2a82164fa3ed79481cf32b9d69aec"
+        }
+      }
+    ],
+    "metrics": [
+      {
+        "name": "correct",
+        "direction": "higher"
+      }
+    ],
+    "pairs": [
+      {
+        "baseline": {
+          "path": "baseline-1.json",
+          "sha256": "3ae0c39914c4afb5fc09842a11cdd563e16c5b9164044a15d93527cb65b62279"
+        },
+        "candidate": {
+          "path": "candidate-1.json",
+          "sha256": "8aa27045c0d312887b8461c30971abdb480713957a3e89dc460190500644628e"
+        }
+      },
+      {
+        "baseline": {
+          "path": "baseline-2.json",
+          "sha256": "c93f7bd84edbd196945b92f9d82f84c9278de69127fa16d0c1048ad31b25c06a"
+        },
+        "candidate": {
+          "path": "candidate-2.json",
+          "sha256": "d8338968d0dadb17d957d54e27c429bf409ee253690ece48806eb26c6c074449"
+        }
+      }
+    ]
+  }
+}
