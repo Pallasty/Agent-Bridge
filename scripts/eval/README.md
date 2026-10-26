@@ -927,3 +927,11 @@ evidence without writing memory or authorizing runtime influence. Valid
 checks helper existence and compiles local Python without executing candidates.
 It complements AB skill risk lint; ambiguous references remain `NEEDS_REVIEW`.
 See [scope, exit codes and usage](../../docs/operations/WORKFLOW_CANDIDATE_CHECK.md).
+
+## Provenance-hidden artifact comparison
+
+`workflow_artifact_compare.py prepare` packages existing text artifacts with
+random IDs and a private mapping; `resolve` validates a bound reviewer decision
+against original bytes. Baseline selection and abstention are supported; no
+model calls, acceptance certification or runtime changes occur. See
+[the specification and operating instructions](../../docs/operations/WORKFLOW_ARTIFACT_COMPARE.md).
