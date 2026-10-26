@@ -34,6 +34,10 @@ none of them acts on any third-party system:
   available user-change reference; missing provenance stays unknown. Continue
   authorized route changes without repeated approval or unchanged summaries.
   Reuse existing contracts; see `docs/operations/GOAL_REVIEW.md`.
+  Keep one current delivery priority and retain closed work's reopening conditions.
+  Before extending repair/validation or assigning follow-up work, identify the
+  delivery blocker, sufficient check, and return to mainline. Review cumulative
+  attempts; distinguish accepted evidence from completed user capability.
 
 - **Source sync**: do not trigger CI. Use SSH, include `[skip ci]` in sync
   commits, and use `-o ci.skip` for GitLab pushes. Do not dispatch workflows.

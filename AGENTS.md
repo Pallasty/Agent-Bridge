@@ -12,6 +12,13 @@ reason, and available user-change reference; keep missing provenance unknown.
 Reuse existing authorization for route changes. Do not repeat unchanged goals
 or require a new contract for small tasks. See `docs/operations/GOAL_REVIEW.md`.
 
+- Keep one current delivery priority in the existing plan; retain closed work
+  and its reopening conditions in handoffs. Before extending a repair/validation chain,
+  connect it to the delivery blocker, sufficient check, and return to mainline.
+  Review cumulative attempts; a new task name does not reset the same gap.
+  Report delivered capability separately from accepted evidence; defer optional
+  polish and do not reopen closed work on a generic continuation request.
+
 ## Validation collection status
 
 Follow the current decision board and

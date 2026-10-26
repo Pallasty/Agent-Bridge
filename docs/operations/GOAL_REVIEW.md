@@ -46,6 +46,78 @@ Do not repeat the complete unchanged goal after each tool call.
 
 ## Read the result accurately
 
+### Keep detail work connected to delivery
+
+Keep one current delivery priority in the existing plan: what the user will be
+able to do when this slice is complete. Authorized parallel subtasks may serve
+that priority; unrelated discoveries stay deferred. Before recommending work
+in another project, verify its current task and status rather than selecting
+an old memory merely because it is relevant to the topic.
+
+An unchanged objective does not establish that work is still on track. Before
+another repair/validation round on the same blocker, a follow-up branch, or
+resuming after a handoff/compaction, recover from existing task context:
+
+- the user outcome and current delivery slice;
+- what this subtask blocks, with the evidence that makes it necessary;
+- the sufficient check or stop condition, and the mainline step to return to;
+- the remaining delivery gap and prior attempts on this same blocker.
+
+Keep this in the existing plan or handoff; no new ledger or contract is required.
+If context is missing, inspect the retained request/plan before inferring a new
+goal. A generic "continue" continues the accepted objective and authorized
+route; it does not by itself reopen a closed investigation or make an optional
+improvement mandatory.
+
+When closing or pausing an investigation, retain its conclusion, remaining
+unknowns, and concrete reopening condition in the existing plan or handoff.
+Check that state before proposing follow-up work. Reopening requires the
+specified new evidence or an explicit owner change of scope; repeating the
+same unanswered question is not new evidence.
+
+Use a short progress statement at those decision points: "Outcome: …; this
+work blocks …; enough evidence is …; then return to …; still missing: …".
+Do not repeat it on every tool call or ask the owner to approve routine routing.
+For a long uninterrupted turn, apply the same review when the next action
+extends a repair or verification chain; waiting for another user message is
+not necessary. Three conversation rounds are an owner-reported warning sign,
+not a measured threshold or a reason to stop useful work.
+
+Classify the next detail by its relationship to delivery:
+
+| Situation | Action |
+| --- | --- |
+| A demonstrated blocker of an accepted requirement | Perform the smallest adequate repair/check, then return to that requirement |
+| A necessary safety, data-integrity or correctness repair | Keep the protection; explicitly retain any unresolved delivery gap |
+| Optional polish, broader coverage, or an unrelated finding | Defer it in existing task notes and continue delivery |
+| The same blocker persists without new discriminating evidence | Reassess the route, use an authorized alternative, or report the specific blocker; do not automatically issue another repair task |
+| The owner explicitly changes the outcome | Record the actual change and reference under the procedure above; do not label it drift |
+
+Review the cumulative chain, not only the latest bounded attempt. Renaming a
+branch, shrinking a retry budget, or opening another session does not reset
+the same delivery gap or an exhausted authorization. Further work needs a
+concrete new basis and must remain within the existing budget/authority; a new
+basis alone does not replenish an exhausted budget. Route changes already
+authorized do not require renewed permission. Ask only when a material choice
+cannot be resolved within the retained scope.
+
+Once the accepted checks pass, close the slice. Broaden or repeat validation
+only for a relevant new change, failure, unresolved concern, or required check.
+Never lower acceptance, hide a failure, or skip a required check to claim
+progress. A missing prerequisite for one reference case need not block all
+authorized routes to the outcome.
+
+Lead branch reviews and progress reports with what the user can now do and
+what remains unavailable. Keep "evidence/report accepted" separate from
+"delivery requirement completed". Test counts and archived negative results
+can support decisions but do not automatically authorize the next stage.
+
+The [2026-10-26 retrospective](../reports/2026-10-26-goal-drift-session-review.md)
+motivates this workflow change. It is not an automatic drift detector or proof
+of reduced drift. In subsequent ordinary work, look for earlier mainline
+returns and fewer owner corrections, without suppressing necessary repairs or
+adding confirmation burden. Do not open a separate collection campaign.
+
 ### Carry requirements through an execution handoff
 
 The preview and `agent_spawn` are separate interfaces. `agent_spawn` accepts a
