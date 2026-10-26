@@ -920,3 +920,10 @@ It reports observed improvements, regressions, no effect, confounds or missing
 evidence without writing memory or authorizing runtime influence. Valid
 `NO_ENTRY` reviews exit 0; malformed evidence exits 2. See the
 [input contract and runnable example](../../docs/operations/WORKFLOW_EXPERIENCE_CONTRAST.md).
+
+## Local skill candidate helpers
+
+`workflow_candidate_check.py --skill PATH [--required-script scripts/helper.py]`
+checks helper existence and compiles local Python without executing candidates.
+It complements AB skill risk lint; ambiguous references remain `NEEDS_REVIEW`.
+See [scope, exit codes and usage](../../docs/operations/WORKFLOW_CANDIDATE_CHECK.md).
