@@ -920,6 +920,9 @@ It reports observed improvements, regressions, no effect, confounds or missing
 evidence without writing memory or authorizing runtime influence. Valid
 `NO_ENTRY` reviews exit 0; malformed evidence exits 2. See the
 [input contract and runnable example](../../docs/operations/WORKFLOW_EXPERIENCE_CONTRAST.md).
+Optional `--lesson PATH` packages an explicit caller lesson with a freshly
+verified contrast into a proposed experience draft on stdout. Insufficient or
+confounded evidence produces no draft; no memory write or promotion occurs.
 
 ## Local skill candidate helpers
 

@@ -85,6 +85,44 @@ unknowns and cost; check independent task acceptance and another applicable case
 before claiming transfer. This helper does not promote memory, modify policy,
 change retrieval, or replace existing workflow-feedback promotion requirements.
 
+## Export a proposed experience draft
+
+Add `--lesson path/to/lesson.json` to opt into draft output. Supply the actual
+proposed lesson explicitly; the command does not generate or verify its meaning:
+
+```json
+{
+  "cue": "When a request explicitly names a project",
+  "lesson": "Preserve that project name in the retrieval query.",
+  "counterexample": "Do not invent a project name when none was supplied.",
+  "unknowns": ["Transfer beyond the observed cases is untested."]
+}
+```
+
+The command rereads and verifies the contrast artifacts. Only `helped` or `hurt`
+can produce `DRAFT_PROPOSED`; other valid reviews return `NO_ENTRY` with
+`draft: null`. The JSON envelope contains `review` and an optional `draft` in
+`agent_bridge.experience.v0` format. It prints to stdout; saving this output is
+an explicit caller action. Exit codes are unchanged.
+
+The draft retains the contrast, observations, costs (including unknown costs),
+counterexample and unknowns. Its status is `proposed`, its lesson is marked
+`caller_proposed`, and all promotion/runtime influence flags remain false.
+Previous success or promotion claims are not inherited. A caller's lesson may
+still contradict the observations; semantic review and existing promotion
+requirements remain necessary. Artifact selection is not lesson evidence.
+
+To review a saved draft, extract the envelope's `draft` object into a JSON file,
+then run the original command with `--experience saved-draft.json` and
+`--evidence-root` pointing to the original artifact directory. Relative artifact
+references are preserved; `source_anchors.evidence_root` records that location
+but is not automatically trusted or loaded. The canonical review SHA-256 binds
+the embedded review serialization, not the original experience file or a signed
+acceptance receipt. Keep local paths and private observations private.
+
+Draft validation and limitations are recorded in the
+[draft implementation report](../reports/2026-10-26-harness2-experience-draft.md).
+
 ## Provenance and validation
 
 Method adapted from Harness²'s separation of edits and execution observations,

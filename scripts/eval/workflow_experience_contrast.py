@@ -8,6 +8,7 @@ measurement, independent acceptance, complete attempt coverage, or transfer.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -205,15 +206,66 @@ def review(experience, evidence_root):
                        'No experience is written or promoted; costs are reported, not optimized.']}
 
 
+def propose_draft(experience, evidence_root, lesson):
+    """Package a caller-proposed lesson after fresh review; never promote it."""
+    require(isinstance(lesson, dict), 'lesson must be an object')
+    require(all(nonempty(lesson.get(key)) for key in ('cue', 'lesson', 'counterexample')),
+            'lesson needs cue, lesson and counterexample')
+    unknowns = lesson.get('unknowns')
+    require(isinstance(unknowns, list) and bool(unknowns) and all(nonempty(x) for x in unknowns),
+            'lesson needs an explicit nonempty unknowns list')
+    result = review(experience, evidence_root)
+    envelope = {'schema': 'agent_bridge.workflow_experience_draft.v1',
+                'decision': 'NO_ENTRY', 'review': result, 'draft': None}
+    if result['decision'] != 'REVIEW_LESSON':
+        return envelope
+    # Construct from a whitelist: old success/promotion assertions cannot leak in.
+    draft = {
+        'schema': 'agent_bridge.experience.v0',
+        'experience_id': experience['experience_id'] + '::contrast-draft',
+        'goal': experience['goal'],
+        'execution_contrast': copy.deepcopy(experience['execution_contrast']),
+        'trajectory': {'execution_review': copy.deepcopy(result)},
+        'outcome': {'status': 'proposed', 'observed_verdict': result['verdict'],
+                    'task_acceptance_verified': False, 'causal_effect_proven': False,
+                    'cost': copy.deepcopy(result['cost']),
+                    'known_limits': result['limits'] + list(unknowns)},
+        'reflection': {'claim_status': 'caller_proposed', 'cue': lesson['cue'],
+                       'lesson': lesson['lesson'], 'falsifier': lesson['counterexample'],
+                       'unknowns': list(unknowns)},
+        'source_anchors': {
+            'source_experience_id': experience['experience_id'],
+            'evidence_root': str(Path(evidence_root).resolve()),
+            'review_canonical_sha256': hashlib.sha256(json.dumps(
+                result, sort_keys=True, ensure_ascii=False, allow_nan=False
+            ).encode('utf-8')).hexdigest()},
+        'promotion': {'skill_candidate': False, 'runbook_candidate': False,
+                      'memory_lesson_candidate': False, 'runtime_influence_allowed': False,
+                      'owner_gate_required': True, 'suggested_trigger': lesson['cue']},
+        'safety': {'fixture_writes_memory': False, 'fixture_changes_runtime': False,
+                   'fixture_changes_retrieval_order': False,
+                   'fixture_authorizes_future_runtime_influence': False},
+    }
+    for key in ('scope', 'lane'):
+        if nonempty(experience.get(key)):
+            draft[key] = experience[key]
+    envelope.update(decision='DRAFT_PROPOSED', draft=draft)
+    return envelope
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--experience', type=Path, required=True)
     parser.add_argument('--evidence-root', type=Path,
                         help='default: experience file parent; references must stay inside this root')
+    parser.add_argument('--lesson', type=Path,
+                        help='opt-in caller lesson JSON; emit a proposed draft only with sufficient contrast')
     args = parser.parse_args()
     try:
-        result = review(parse_json(read_bytes(args.experience)),
-                        args.evidence_root or args.experience.resolve().parent)
+        experience = parse_json(read_bytes(args.experience))
+        root = args.evidence_root or args.experience.resolve().parent
+        result = (propose_draft(experience, root, parse_json(read_bytes(args.lesson)))
+                  if args.lesson else review(experience, root))
     except (ValueError, OSError) as exc:
         print(json.dumps({'status': 'invalid_input', 'decision': 'NO_ENTRY', 'error': str(exc)},
                          ensure_ascii=False))
