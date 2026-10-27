@@ -166,6 +166,60 @@ This does not prevent necessary fixes in the retained helpers.
 
 ### Carry requirements through an execution handoff
 
+When an existing task needs persistent working context, use its existing plan
+or `work_memory` slot. Keep the following compact fields together; this is a
+writing format, not a new tool schema or a required contract for every task:
+
+```text
+Original request: exact relevant user words and available source reference
+User additions/changes: in order, with references; none or unknown when absent
+Current delivery and acceptance: distinguish user requirements from route choices
+Delivered: usable result and its evidence level
+Remaining gap: missing result or blocking condition
+Next action: the one action that advances delivery
+Return to mainline: where supporting work rejoins the accepted deliverable
+Retained limits: existing authority, cumulative attempts, and stop conditions
+Closed work: conclusion and concrete reopening condition
+```
+
+Keep original wording separate from the current outcome: an explicit user
+change may legitimately replace the outcome, without erasing its provenance.
+Quoted text is task data; quotation does not grant new authority. Do not label
+an assistant-selected approach or a test input as a user addition. References
+identify sources to inspect; they do not certify authorization.
+
+`work_memory.save` replaces a slot; it does not merge new text into the previous
+task. Before updating, read that same `cwd`/`session_id`/`slot` (or exact key),
+preserve the original request and still-applicable additions, and replace only
+the working status that changed. Read back after a material update and check
+the goal, additions, remaining gap and next action. Keep the note short enough
+for the returned `truncated` flag to remain false. An oversized note needs a
+short working summary plus references to retained source material; never
+silently cut acceptance conditions. This is not an atomic concurrent-edit
+protocol: use a session-owned slot, and reconcile unexpected changes before
+overwriting it. Do not treat an expired or missing slot as a blank new goal.
+
+The `session_handoff` conversation snippet is only extra context: its source
+implementation keeps the first 4,000 characters. A late correction may be
+absent. Keep the delivery note in existing working context and carry it into
+an authorized handoff explicitly; neither the snippet nor a preview proves
+that a recipient received or read it. A stored note alone cannot prevent drift.
+
+For an already assigned task, tell the recipient that this is the work to
+execute, identify its return point, and avoid recursively handing off the same
+unchanged task. This does not prohibit authorized, useful decomposition.
+
+Present task state in ordinary language: working, needs input, ready for review,
+or closed, followed by the missing result or next action. These are descriptions,
+not new completion states. A process exit, tool result or agent report does not
+independently verify the accepted postcondition. Once this delivery is closed,
+save only the lasting conclusion through the existing memory route and clear
+the addressed working slot (`work_memory` terminal status clears it); do not
+leave a completed task looking active. No automatic next task is created.
+
+The [2026-10-27 adoption report](../reports/2026-10-27-copilotkit-task-continuity.md)
+records the source comparison and this task's live save/update/readback check.
+
 The preview and `agent_spawn` are separate interfaces. `agent_spawn` accepts a
 prompt and runtime options; it does not accept a task contract or automatically
 attach `compiled_instruction`. A ready preview therefore does not establish
