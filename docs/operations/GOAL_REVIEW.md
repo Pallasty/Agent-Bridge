@@ -214,7 +214,8 @@ or closed, followed by the missing result or next action. These are descriptions
 not new completion states. A process exit, tool result or agent report does not
 independently verify the accepted postcondition. Once this delivery is closed,
 save only the lasting conclusion through the existing memory route and clear
-the addressed working slot (`work_memory` terminal status clears it); do not
+the addressed working slot (`work_memory` with `op: "clear"`, or a terminal
+`status` save that also supplies a nonempty `summary`/`content`); do not
 leave a completed task looking active. No automatic next task is created.
 
 The [2026-10-27 adoption report](../reports/2026-10-27-copilotkit-task-continuity.md)

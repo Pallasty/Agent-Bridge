@@ -64,6 +64,16 @@ survives. Record actual user additions as absent; do not manufacture one to
 claim a natural correction test. At closure, clear the slot and read it again.
 Keep the tool responses in the private research directory.
 
+Observed closure correction: a save containing only `status: completed` was
+rejected because save requires content or a summary. The row remained active.
+Adding a nonempty closure summary returned `cleared: true, deleted: true`, and
+the subsequent get returned `work memory key not found`. Retain the rejected
+call as well as the successful correction; do not claim the first call cleared
+the slot. The procedure now names both the explicit clear route and the save
+payload requirement. This low-severity caller-input correction during a
+foreground mechanics check supplies no warning/critical owner-cost event or
+inactive-wake evidence for reopening R7 collection.
+
 This demonstrates the existing storage path and application of the new
 procedure by this agent. It does not demonstrate a fresh model recovering the
 goal, process-restart durability, independent user acceptance, reduced owner
