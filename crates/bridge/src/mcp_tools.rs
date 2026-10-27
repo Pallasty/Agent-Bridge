@@ -46256,6 +46256,7 @@ impl McpTool for SessionHandoffBriefTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "task_context": crate::session_handoff::task_context_schema(),
                     "cwd": { "type": "string", "description": "Project directory (defaults to process cwd)." },
                     "max_todos": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
                     "max_handoff_memories": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
@@ -46275,6 +46276,11 @@ impl McpTool for SessionHandoffBriefTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Some(context) = args.get("task_context") {
+            if let Err(error) = crate::session_handoff::validate_task_context(context) {
+                return Ok(ToolResult::error(error));
+            }
+        }
         let store = match &self.hub.store {
             Some(s) => s.clone(),
             None => return Ok(ToolResult::error("no memory store configured")),
@@ -46317,7 +46323,7 @@ impl McpTool for SessionHandoffBriefTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let brief = build_handoff_brief(
+        let mut brief = build_handoff_brief(
             store,
             cwd,
             max_todos,
@@ -46328,6 +46334,11 @@ impl McpTool for SessionHandoffBriefTool {
             conversation_text,
         )
         .await?;
+        if let Some(context) = args.get("task_context") {
+            brief["task_context"] = context.clone();
+            brief["task_context_provenance"] = json!("caller_supplied");
+            brief["task_acceptance_verified"] = json!(false);
+        }
         Ok(ToolResult::json_text(&brief))
     }
 }

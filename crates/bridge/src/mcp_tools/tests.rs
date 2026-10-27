@@ -7,6 +7,7 @@
 use super::*;
 
 include!("plan_actionability_tests.rs");
+include!("session_handoff_task_context_tests.rs");
 
 static RUNTIME_ASSET_ADB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

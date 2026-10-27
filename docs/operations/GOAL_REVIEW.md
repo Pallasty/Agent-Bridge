@@ -201,8 +201,11 @@ overwriting it. Do not treat an expired or missing slot as a blank new goal.
 
 The `session_handoff` conversation snippet is only extra context: its source
 implementation keeps the first 4,000 characters. A late correction may be
-absent. Keep the delivery note in existing working context and carry it into
-an authorized handoff explicitly; neither the snippet nor a preview proves
+absent. Use the optional [structured task context](SESSION_HANDOFF_TASK_CONTEXT.md)
+to carry the original request, later changes and current delivery independently
+of that snippet. This requires a binary containing the additive interface.
+Keep the delivery note in existing working context and carry it into
+an authorized handoff explicitly; neither the structured response nor a preview proves
 that a recipient received or read it. A stored note alone cannot prevent drift.
 
 For an already assigned task, tell the recipient that this is the work to

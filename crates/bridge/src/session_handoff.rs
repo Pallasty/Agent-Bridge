@@ -10,6 +10,121 @@ use std::sync::Arc;
 
 const HANDOFF_CANDIDATE_LIMIT: u32 = 256;
 
+const TASK_TEXT_LIMIT: usize = 4000;
+const TASK_SOURCE_LIMIT: usize = 512;
+const TASK_LIST_LIMIT: usize = 32;
+const TASK_CONTEXT_BYTES: usize = 65536;
+const TASK_CONTEXT_FIELDS: &[&str] = &[
+    "original_request",
+    "user_updates",
+    "current_delivery",
+    "acceptance_criteria",
+    "delivered",
+    "remaining_gap",
+    "next_action",
+    "return_to_mainline",
+];
+
+/// Caller-supplied task narrative; this schema confers no acceptance authority.
+pub(crate) fn task_context_schema() -> Value {
+    let text = json!({"type":"string", "minLength":1, "maxLength":TASK_TEXT_LIMIT});
+    let attributed = json!({
+        "type":"object", "additionalProperties":false,
+        "required":["text", "source_ref"],
+        "properties":{
+            "text":text,
+            "source_ref":{"type":["string","null"], "minLength":1, "maxLength":TASK_SOURCE_LIMIT}
+        }
+    });
+    json!({
+        "type":"object", "additionalProperties":false,
+        "description":"Caller-supplied task context, preserved independently of transcript clipping. All strings must be nonblank; serialized UTF-8 limit 65536 bytes. Does not verify authorization or task acceptance.",
+        "required":TASK_CONTEXT_FIELDS,
+        "properties":{
+            "original_request":attributed,
+            "user_updates":{"type":"array", "maxItems":TASK_LIST_LIMIT, "items":attributed},
+            "current_delivery":text,
+            "acceptance_criteria":{"type":"array", "minItems":1, "maxItems":TASK_LIST_LIMIT, "items":text},
+            "delivered":{"type":"array", "maxItems":TASK_LIST_LIMIT, "items":text},
+            "remaining_gap":text, "next_action":text, "return_to_mainline":text
+        }
+    })
+}
+
+/// Validate without normalizing or discarding any supplied text or fields.
+pub(crate) fn validate_task_context(value: &Value) -> std::result::Result<(), String> {
+    fn object(value: &Value, fields: &[&str], path: &str) -> std::result::Result<(), String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| format!("{path}: expected object"))?;
+        if object.len() != fields.len() || fields.iter().any(|field| !object.contains_key(*field)) {
+            return Err(format!("{path}: requires exactly the documented fields"));
+        }
+        Ok(())
+    }
+    fn text(value: &Value, limit: usize, path: &str) -> std::result::Result<(), String> {
+        match value.as_str() {
+            Some(s) if !s.trim().is_empty() && s.chars().count() <= limit => Ok(()),
+            _ => Err(format!(
+                "{path}: expected nonblank string of at most {limit} characters"
+            )),
+        }
+    }
+    fn attributed(value: &Value, path: &str) -> std::result::Result<(), String> {
+        object(value, &["text", "source_ref"], path)?;
+        text(&value["text"], TASK_TEXT_LIMIT, &format!("{path}.text"))?;
+        if !value["source_ref"].is_null() {
+            text(
+                &value["source_ref"],
+                TASK_SOURCE_LIMIT,
+                &format!("{path}.source_ref"),
+            )?;
+        }
+        Ok(())
+    }
+    object(value, TASK_CONTEXT_FIELDS, "task_context")?;
+    attributed(&value["original_request"], "task_context.original_request")?;
+    for field in [
+        "current_delivery",
+        "remaining_gap",
+        "next_action",
+        "return_to_mainline",
+    ] {
+        text(
+            &value[field],
+            TASK_TEXT_LIMIT,
+            &format!("task_context.{field}"),
+        )?;
+    }
+    for field in ["user_updates", "acceptance_criteria", "delivered"] {
+        let path = format!("task_context.{field}");
+        let list = value[field]
+            .as_array()
+            .ok_or_else(|| format!("{path}: expected array"))?;
+        if list.len() > TASK_LIST_LIMIT || (field == "acceptance_criteria" && list.is_empty()) {
+            return Err(format!(
+                "{path}: invalid number of entries (maximum {TASK_LIST_LIMIT})"
+            ));
+        }
+        for (index, item) in list.iter().enumerate() {
+            let item_path = format!("{path}[{index}]");
+            if field == "user_updates" {
+                attributed(item, &item_path)?;
+            } else {
+                text(item, TASK_TEXT_LIMIT, &item_path)?;
+            }
+        }
+    }
+    let bytes =
+        serde_json::to_vec(value).map_err(|_| "task_context: serialization failed".to_owned())?;
+    if bytes.len() > TASK_CONTEXT_BYTES {
+        return Err(format!(
+            "task_context: serialized UTF-8 exceeds {TASK_CONTEXT_BYTES} bytes"
+        ));
+    }
+    Ok(())
+}
+
 /// Collect a machine-readable handoff brief for the next agent session.
 pub async fn build_handoff_brief(
     store: Arc<dyn StateStore>,
