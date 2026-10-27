@@ -914,6 +914,10 @@ The harness remains synthetic-only; host integration is explicit-CLI-only and
 does not authorize registry, MCP exposure, or production deployment.
 # Experience execution contrasts
 
+Start with the [ordinary-task routing procedure](../../docs/operations/GOAL_REVIEW.md#apply-a-bounded-workflow-improvement-during-a-real-task).
+These helpers are optional alternatives around an actual delivery decision,
+not a pipeline to run on every task or a reason to generate extra trials.
+
 `workflow_experience_contrast.py --experience PATH` reads an existing
 Experience Object v0 plus optional hash-bound before/after execution records.
 It reports observed improvements, regressions, no effect, confounds or missing

@@ -118,6 +118,52 @@ of reduced drift. In subsequent ordinary work, look for earlier mainline
 returns and fewer owner corrections, without suppressing necessary repairs or
 adding confirmation burden. Do not open a separate collection campaign.
 
+### Apply a bounded workflow improvement during a real task
+
+Use the Harness²-inspired helpers only when an ordinary task has exposed a
+specific workflow problem. The current priority remains that task's deliverable.
+Do not turn a request to continue into another helper implementation solely
+because the preceding helper passed its tests.
+
+Before trying an improvement, retain a short note in the existing task context:
+
+> Deliverable: …; observed blocker and source: …; one proposed change: …;
+> baseline: …; unchanged acceptance: …; attempt/time limit: …;
+> stop condition: …; next delivery action: ….
+
+Use an existing authorized limit when present. Otherwise choose one candidate
+and a small task-appropriate check before execution; a failed attempt consumes
+that attempt. Do not reset the budget by renaming the candidate. If no concrete
+blocker exists, skip the experiment and perform the next delivery action.
+
+Select only the helper that answers the actual decision:
+
+| Available task evidence / decision | Existing route | Enough to return to delivery |
+| --- | --- | --- |
+| A local skill edit needs a helper existence or Python syntax check | [Candidate check](WORKFLOW_CANDIDATE_CHECK.md), with actual required scripts named explicitly | Resolve a required-helper defect; static PASS does not establish successful loading or task behavior |
+| Baseline and candidate text outputs already exist and a comparison would resolve a delivery choice | [Artifact comparison](WORKFLOW_ARTIFACT_COMPARE.md), with the original task and unchanged criteria | Select a usable output or abstain; retain the baseline when appropriate, then perform the task's actual acceptance checks |
+| Comparable before/after execution records already exist | [Execution contrast](WORKFLOW_EXPERIENCE_CONTRAST.md), with actual costs and all declared attempts | Retain the observation, including `NO_ENTRY`; do not rerun merely to obtain a favorable label |
+| A verified contrast supports a lesson worth reviewing | The same contrast command's optional `--lesson` | Export a proposed draft; do not treat it as promoted memory or evidence of transfer |
+
+These are alternatives, not four mandatory stages. Do not manufacture extra
+runs to satisfy the contrast tool's two-pair minimum. One useful repair can
+close the user's task while its general lesson remains unsupported. A selected
+artifact does not become a metric or prove that a workflow change helped.
+Reviewer or model invocation still needs the task's existing authorization;
+this procedure grants no new delegation or runtime authority.
+
+At closure, keep the result in the existing task notes: delivered capability,
+observed return to the mainline (or unresolved blocker), owner corrections
+actually observed, available cost, skipped comparisons and remaining unknowns.
+Distinguish agent-reported observation from independent acceptance. Do not
+invent a baseline, missing cost, occurrence count or causal drift reduction.
+No new collection campaign, ledger or mandatory owner confirmation is needed.
+
+The four offline helpers are now available for ordinary use. Further mechanism
+expansion waits for a demonstrated gap in that use and a bounded owner-visible
+closure; a generic continuation or synthetic PASS is not new value evidence.
+This does not prevent necessary fixes in the retained helpers.
+
 ### Carry requirements through an execution handoff
 
 The preview and `agent_spawn` are separate interfaces. `agent_spawn` accepts a
