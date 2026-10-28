@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -110,6 +111,104 @@ class MaintenanceActivationTests(unittest.TestCase):
         self.args.manifest = result["manifest"]
         self.assertEqual(activation.run(self.args)["status"], "rolled_back")
         self.assert_original()
+
+    def test_relocated_local_plan_activate_and_rollback(self):
+        relocated = self.base / "relocated-local"
+        (self.home / ".local").rename(relocated)
+        (self.home / ".local").symlink_to(relocated, target_is_directory=True)
+        before = activation.snapshot(relocated)
+        self.assertEqual(activation.run(self.args)["status"], "ready")
+        self.assertEqual(activation.snapshot(relocated), before)
+        self.args.action = "activate"
+        adopted = activation.run(self.args)
+        self.assertEqual(activation.digest(self.wrapper.with_name("agent-bridge.real")), activation.digest(self.binary))
+        self.args.action = "rollback"
+        self.args.manifest = adopted["manifest"]
+        activation.run(self.args)
+        self.assertEqual(activation.snapshot(relocated), before)
+        self.assertEqual(self.model.read_bytes(), b"keep model untouched")
+
+    def prepare_cross_root_update(self):
+        self.args.action = "activate"
+        activation.run(self.args)
+        previous_root = self.root
+        previous_hash = activation.digest(self.wrapper.with_name("agent-bridge.real"))
+        self.root = self.base / "next-private"
+        self.mkdir(self.root)
+        self.binary = self.root / "maintenance/bin/agent-bridge.real"
+        self.write_binary("next-root")
+        for label, path, mode in activation.assets(self.root):
+            self.write(path, (label + ":" + path.name).encode(), mode)
+        self.receipts = self.root / "publisher-state/maintenance/receipts"
+        self.mkdir(self.receipts)
+        self.write(self.root / "publisher-state/deploy/publisher.kernel.lock", b"", 0o600)
+        self.receipt = self.receipts / "next.fresh-mcp-admitted.meta"
+        self.make_receipt()
+        self.args.deploy_root = str(self.root)
+        self.args.admission_receipt = str(self.receipt)
+        self.args.expected_binary_sha256 = previous_hash
+        self.args.previous_deploy_root = str(previous_root)
+        self.args.action = "plan"
+        return previous_root
+
+    def test_explicit_cross_root_update_and_rollback(self):
+        previous_root = self.prepare_cross_root_update()
+        before = {str(a): activation.snapshot(a) for a, _ in activation.fixed_aliases(self.root, self.wrapper)}
+        self.assertEqual(activation.run(self.args)["status"], "ready")
+        self.args.action = "activate"
+        adopted = activation.run(self.args)
+        manifest = json.loads(Path(adopted["manifest"]).read_text())
+        self.assertEqual(manifest["previous_deploy_root"], str(previous_root))
+        self.assertEqual(activation.digest(self.wrapper.with_name("agent-bridge.real")), activation.digest(self.binary))
+        self.args.action = "rollback"
+        self.args.manifest = adopted["manifest"]
+        activation.run(self.args)
+        for alias, snapshot in before.items():
+            self.assertEqual(activation.snapshot(Path(alias)), snapshot)
+
+    def test_cross_root_update_requires_explicit_previous_root(self):
+        self.prepare_cross_root_update()
+        self.args.previous_deploy_root = None
+        with self.assertRaisesRegex(activation.ActivationError, "fixed maintenance release"):
+            activation.run(self.args)
+
+    def test_relocated_local_rebind_during_freeze_does_not_move_aliases(self):
+        relocated = self.base / "relocated-local"
+        other = self.base / "other-local"
+        (self.home / ".local").rename(relocated)
+        (self.home / ".local").symlink_to(relocated, target_is_directory=True)
+        shutil.copytree(relocated, other)
+        before = activation.snapshot(relocated)
+        freeze = activation.freeze_release
+        def rebind(*args):
+            result = freeze(*args)
+            (self.home / ".local").unlink()
+            (self.home / ".local").symlink_to(other, target_is_directory=True)
+            return result
+        self.args.action = "activate"
+        with mock.patch.object(activation, "freeze_release", side_effect=rebind):
+            with self.assertRaisesRegex(activation.ActivationError, "binding changed"):
+                activation.run(self.args)
+        self.assertEqual(activation.snapshot(relocated), before)
+        self.assertEqual(activation.snapshot(other), before)
+        self.assertEqual(list(self.receipts.glob("*.maintenance-activation.json")), [])
+
+    def test_cross_root_tampered_previous_assets_are_rejected(self):
+        self.prepare_cross_root_update()
+        old_binary = self.wrapper.with_name("agent-bridge.real").resolve()
+        old_payload = old_binary.parent.parent
+        (old_payload / "lib/agent-bridge/scripts/app_control.py").write_bytes(b"tampered previous asset")
+        with self.assertRaisesRegex(activation.ActivationError, "installed_assets_sha256"):
+            activation.run(self.args)
+        self.assertEqual(self.wrapper.with_name("agent-bridge.real").resolve(), old_binary)
+        self.assertEqual(list(self.receipts.glob("*.maintenance-activation.json")), [])
+
+    def test_cross_root_previous_publisher_lock_is_required(self):
+        previous_root = self.prepare_cross_root_update()
+        with activation.publisher_lock(previous_root):
+            with self.assertRaises(BlockingIOError):
+                activation.run(self.args)
+        self.assertEqual(list(self.receipts.glob("*.maintenance-activation.json")), [])
 
     def test_native_exclusive_rename_refuses_existing_empty_directory(self):
         source, destination = self.base / "source", self.base / "destination"

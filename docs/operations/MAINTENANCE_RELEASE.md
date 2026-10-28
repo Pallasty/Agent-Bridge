@@ -68,6 +68,20 @@ the independent fresh-MCP admission. It freezes the declared payload into
 `maintenance/releases/<binary-sha>-<asset-sha>/`; aliases point to that fixed
 release, so a later publication cannot change the active inputs.
 
+The logical `--legacy-wrapper` remains `HOME/.local/bin/agent-bridge`. A
+relocated `HOME/.local` is resolved to physical alias paths; nested links in
+those paths remain refused, and activation rechecks the resolved binding before
+each move. Private deployment roots still must be physical private directories.
+
+When the current aliases belong to a different maintenance root, explicitly
+supply `--previous-deploy-root <old-root>`. Both publisher locks must be available;
+all previous aliases must belong to one validated frozen release under that
+root. Its receipt, assets and the expected active binary hash are checked before
+any move. The activation manifest retains that root for rollback. Keep the old
+root and frozen release; do not substitute a different HOME or manually rewrite
+aliases to bypass these checks. An unspecified or mismatched previous root fails
+closed. Older same-root rollback manifests remain supported.
+
 Quiesce only the services being switched, then run the same arguments with
 `activate`. The wrapper/configuration/state paths are preserved. The helper
 switches the binary, declared audio files/policies and runtime scripts while

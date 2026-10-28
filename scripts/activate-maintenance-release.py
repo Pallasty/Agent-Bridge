@@ -350,16 +350,22 @@ def freeze_release(root, receipt, admitted):
 def fixed_aliases(root, wrapper, payload=None, declared=None):
     home = Path.home()
     require(wrapper == home / ".local/bin/agent-bridge", "legacy wrapper must be the existing HOME/.local/bin/agent-bridge")
-    physical(wrapper)
-    require(wrapper.is_file(), "legacy wrapper must be a regular file")
+    physical(home)
+    # A relocated HOME/.local is an existing legacy entry, not a private
+    # deployment root. Resolve only that directory; nested links remain refused.
+    local = (home / ".local").resolve(strict=True)
+    physical(local)
+    physical_wrapper = local / "bin/agent-bridge"
+    physical(physical_wrapper)
+    require(physical_wrapper.is_file(), "legacy wrapper must be a regular file")
     release = root / "maintenance"
     # Keep the audio directory and its local models. Only publisher-owned files
     # are switched, including the two policy paths resolved through legacy HOME.
-    aliases = [(wrapper.with_name("agent-bridge.real"), release / "bin/agent-bridge.real")]
-    aliases.append((home / ".local/lib/agent-bridge/scripts", release / "lib/agent-bridge/scripts"))
+    aliases = [(physical_wrapper.with_name("agent-bridge.real"), release / "bin/agent-bridge.real")]
+    aliases.append((local / "lib/agent-bridge/scripts", release / "lib/agent-bridge/scripts"))
     for label, target, _mode in declared if declared is not None else assets(root):
         if label in {"adapter", "companion", "policy"}:
-            aliases.append((home / ".local/share" / target.relative_to(release / "share"), target))
+            aliases.append((local / "share" / target.relative_to(release / "share"), target))
     if payload:
         aliases = [(alias, payload_path(root, payload, target)) for alias, target in aliases]
     return aliases
@@ -377,14 +383,16 @@ def frozen_target_payload(root, target, source):
     return payload
 
 
-def validate_existing_aliases(root, source_aliases):
+def validate_existing_aliases(root, source_aliases, previous_root=None):
+    previous_root = previous_root or root
     previous = set()
     link_count = 0
     absent = []
     for alias, source in source_aliases:
         physical(alias.parent)
         if alias.is_symlink():
-            previous.add(frozen_target_payload(root, os.readlink(alias), source))
+            old_source = previous_root / source.relative_to(root)
+            previous.add(frozen_target_payload(previous_root, os.readlink(alias), old_source))
             link_count += 1
         elif alias.exists():
             physical(alias)
@@ -393,11 +401,12 @@ def validate_existing_aliases(root, source_aliases):
     if previous:
         require(len(previous) == 1 and link_count + len(absent) == len(source_aliases), "legacy aliases are a mixed generation; recover the interrupted activation first")
         payload = next(iter(previous))
-        validate_frozen(root, payload)
-        old_sources = {source for _label, source, _mode in assets(root, payload)}
+        validate_frozen(previous_root, payload)
+        old_sources = {root / source.relative_to(previous_root) for _label, source, _mode in assets(previous_root, payload)}
         old_sources.update({root / "maintenance/bin/agent-bridge.real", root / "maintenance/lib/agent-bridge/scripts"})
         require(all(source not in old_sources for source in absent), "a previously declared alias is missing; recover it before updating")
     else:
+        require(previous_root == root, "cross-root adoption requires previous frozen aliases")
         require(not absent and link_count == 0, "initial adoption requires existing legacy files")
 
 
@@ -450,7 +459,7 @@ def restore(entries):
 def run(args):
     root, wrapper = absolute(args.deploy_root), absolute(args.legacy_wrapper)
     require(re.fullmatch(r"[0-9a-f]{64}", args.expected_binary_sha256) and re.fullmatch(r"[0-9a-f]{64}", args.expected_wrapper_sha256), "expected hashes must be lowercase SHA-256")
-    with publisher_lock(root):
+    with publisher_lock(root), contextlib.ExitStack() as previous_locks:
         aliases = fixed_aliases(root, wrapper)
         require(digest(wrapper) == args.expected_wrapper_sha256, "legacy wrapper changed")
         if args.action == "rollback":
@@ -460,6 +469,11 @@ def run(args):
             data = json.loads(manifest.read_text())
             require(data["status"] in {"prepared", "activated", "rollback_started", "recovery_required"} and data["deploy_root"] == str(root) and data["legacy_wrapper"] == str(wrapper), "manifest does not describe an active matching adoption")
             require(data["expected_binary_sha256"] == args.expected_binary_sha256 and data["expected_wrapper_sha256"] == args.expected_wrapper_sha256, "manifest baseline mismatch")
+            previous_root = absolute(data.get("previous_deploy_root", str(root)))
+            requested_previous = getattr(args, "previous_deploy_root", None)
+            require(not requested_previous or absolute(requested_previous) == previous_root, "manifest previous deployment root mismatch")
+            if previous_root != root:
+                previous_locks.enter_context(publisher_lock(previous_root))
             payload = absolute(data["release_root"])
             require(payload.parent == root / "maintenance/releases" and re.fullmatch(r"[0-9a-f]{64}-[0-9a-f]{64}", payload.name), "invalid rollback release path")
             # The outgoing payload may be damaged or absent. Its protected
@@ -478,7 +492,8 @@ def run(args):
                 alias, backup = Path(entry["alias"]), Path(entry["backup"])
                 require(backup == alias.with_name(alias.name + ".bak-maintenance-" + data["id"]), "manifest backup path escapes the fixed sibling")
                 if entry["before"]["kind"] == "symlink":
-                    previous_payloads.add(frozen_target_payload(root, entry["before"]["target"], source_by_alias[alias]))
+                    old_source = previous_root / source_by_alias[alias].relative_to(root)
+                    previous_payloads.add(frozen_target_payload(previous_root, entry["before"]["target"], old_source))
                 if entry["before"]["kind"] == "absent":
                     require(not os.path.lexists(backup), "unexpected backup for newly declared alias")
                     require((alias.is_symlink() and os.readlink(alias) == entry["target"]) or not os.path.lexists(alias), f"new alias was changed after activation: {alias}")
@@ -490,7 +505,7 @@ def run(args):
                 else:
                     require(snapshot(alias) == entry["before"], f"alias was changed after activation: {alias}")
             for previous in previous_payloads:
-                validate_frozen(root, previous)
+                validate_frozen(previous_root, previous)
             data["status"] = "rollback_started"
             save_manifest(manifest, data)
             restore(restore_entries)
@@ -502,30 +517,36 @@ def run(args):
         admitted = validate_release(root, receipt)
         payload = release_path(root, admitted)
         aliases = fixed_aliases(root, wrapper, payload)
-        validate_existing_aliases(root, fixed_aliases(root, wrapper))
+        previous_root = absolute(getattr(args, "previous_deploy_root", None) or str(root))
+        if previous_root != root:
+            previous_locks.enter_context(publisher_lock(previous_root))
+        validate_existing_aliases(root, fixed_aliases(root, wrapper), previous_root)
         require(digest(aliases[0][0]) == args.expected_binary_sha256, "legacy binary changed")
         entries = [{"alias": str(alias), "target": str(target), "before": snapshot(alias)} for alias, target in aliases]
         if args.action == "plan":
             return {"status": "ready", "action": "plan", "candidate_commit": admitted["candidate_commit"], "aliases": entries, "atomicity": "not atomic: each path is briefly absent between backup rename and symlink creation; services and SQLite backup are caller responsibilities"}
         freeze_release(root, receipt, admitted)
+        require(fixed_aliases(root, wrapper, payload) == aliases, "legacy .local binding changed")
         identity = uuid.uuid4().hex
         manifest = root / "publisher-state/maintenance/receipts" / (identity + ".maintenance-activation.json")
         for entry in entries:
             alias = Path(entry["alias"])
             entry["backup"] = str(alias.with_name(alias.name + ".bak-maintenance-" + identity))
             require(not os.path.lexists(entry["backup"]), "backup path already exists")
-        data = {"id": identity, "status": "prepared", "deploy_root": str(root), "legacy_wrapper": str(wrapper), "expected_binary_sha256": args.expected_binary_sha256, "expected_wrapper_sha256": args.expected_wrapper_sha256, "admission_receipt": str(receipt), "release_root": str(payload), "asset_list": [{"label": label, "source": str(source), "mode": mode} for label, source, mode in assets(root)], "entries": entries}
+        data = {"id": identity, "status": "prepared", "deploy_root": str(root), "previous_deploy_root": str(previous_root), "legacy_wrapper": str(wrapper), "expected_binary_sha256": args.expected_binary_sha256, "expected_wrapper_sha256": args.expected_wrapper_sha256, "admission_receipt": str(receipt), "release_root": str(payload), "asset_list": [{"label": label, "source": str(source), "mode": mode} for label, source, mode in assets(root)], "entries": entries}
         save_manifest(manifest, data)
         moved = []
         try:
             for entry in entries:
                 alias, backup = Path(entry["alias"]), Path(entry["backup"])
                 require(digest(wrapper) == args.expected_wrapper_sha256, "legacy wrapper changed during activation")
+                require(fixed_aliases(root, wrapper, payload) == aliases, "legacy .local binding changed")
                 require(snapshot(alias) == entry["before"], f"legacy target changed during activation: {alias}")
                 if entry["before"]["kind"] != "absent":
                     os.rename(alias, backup)
                 moved.append(entry)
                 os.symlink(entry["target"], alias)
+            require(fixed_aliases(root, wrapper, payload) == aliases, "legacy .local binding changed")
             data["status"] = "activated"
             save_manifest(manifest, data)
         except BaseException:
@@ -550,6 +571,7 @@ def main():
     parser.add_argument("--expected-wrapper-sha256", required=True)
     parser.add_argument("--admission-receipt")
     parser.add_argument("--manifest")
+    parser.add_argument("--previous-deploy-root", help="explicit private root of the previously admitted frozen release; recorded for rollback")
     args = parser.parse_args()
     try:
         require(args.action != "rollback" or args.manifest, "rollback requires --manifest")
