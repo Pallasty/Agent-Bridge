@@ -1,0 +1,67 @@
+{
+  "schema": "agent_bridge.cli_composition_root_governance_receipt.v0",
+  "change_id": "mcp-empty-store-warmup-20261028",
+  "source_base": "7f382efc592e14b812328fdbd4c33d68432cacba",
+  "main_rs_before_sha256": "ef4c38c8ed7ed54c811d399e69d720f493c708e31ce1587f384de04db4ac292a",
+  "main_rs_after_sha256": "53e8ba9497f20a267aea954966fa4f292a3070637a1b636898e1a964f44b9995",
+  "changes": [
+    {
+      "region": "real_main Cmd::Mcp embedding startup",
+      "category": "startup_or_dependency_injection",
+      "summary": "Avoid speculative model initialization only for an MCP SQLite store with no active embedding profiles; retain warmup on lookup errors and populated stores.",
+      "disposition": "root_visible",
+      "root_reason": "The MCP entry owns store-dependent eager startup and the ordering of its existing dimension guards.",
+      "evidence": [
+        "docs/reports/2026-10-28-mcp-task-context-activation.md",
+        "crates/bridge/src/main.rs"
+      ]
+    }
+  ],
+  "contracts": {
+    "clap_help_and_defaults": {
+      "status": "not_applicable",
+      "evidence": [
+        "No CLI schema or defaults changed.",
+        "docs/reports/2026-10-28-mcp-task-context-activation.md"
+      ]
+    },
+    "json_and_text_output": {
+      "status": "passed",
+      "evidence": [
+        "The unchanged default-backend fresh MCP probe validated initialize, tools/list and capabilities response envelopes, identity and manifest count.",
+        "docs/reports/2026-10-28-mcp-task-context-activation.md"
+      ]
+    },
+    "dry_run_preview_confirmation": {
+      "status": "not_applicable",
+      "evidence": [
+        "No command confirmation or dry-run path changed.",
+        "docs/reports/2026-10-28-mcp-task-context-activation.md"
+      ]
+    },
+    "validation_and_error_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Source review: dimension preflight and guard ordering retained; profile lookup errors retain warmup. Default empty-state protocol/exit probe passed. Lookup-error behavior is source-reviewed, not fault-injected.",
+        "docs/reports/2026-10-28-mcp-task-context-activation.md"
+      ]
+    },
+    "authority_and_effect_ordering": {
+      "status": "passed",
+      "evidence": [
+        "Source review: only speculative model initialization for an empty SQLite embedding profile is skipped; actual embedding use and native shutdown join remain. Cold MCP probe exits without backend override.",
+        "docs/reports/2026-10-28-mcp-task-context-activation.md"
+      ]
+    },
+    "focused_tests_and_check": {
+      "status": "passed",
+      "evidence": [
+        "11 session_handoff tests and existing bounded voice policy test passed; cargo build --locked -p ab-bridge --bin agent-bridge passed with default features; unchanged 45-second default-backend probe passed in 4.20 seconds.",
+        "docs/reports/2026-10-28-mcp-task-context-activation.md"
+      ]
+    }
+  },
+  "rollback": [
+    "Revert the empty-profile condition to restore unconditional MCP warmup; retain the native initialization join. Installed release rollback remains governed by its activation manifest."
+  ]
+}

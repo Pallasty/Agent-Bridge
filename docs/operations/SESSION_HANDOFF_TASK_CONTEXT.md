@@ -61,3 +61,8 @@ The additive interface needs a binary containing this change and a refreshed
 MCP connection before live clients can use it. Repository tests exercise the
 MCP implementation directly; they do not establish installed-runtime support
 or a reduction in goal drift.
+
+The `codex-voice` toolset explicitly exposes `session_handoff`, including its
+`task_context` schema. This does not enable the full tool catalog or change
+`codex-essential`. Check the current connection's tool manifest after an update;
+publishing source or a candidate binary alone does not refresh that connection.

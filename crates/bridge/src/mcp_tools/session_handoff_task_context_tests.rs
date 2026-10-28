@@ -198,3 +198,16 @@ async fn session_handoff_task_context_checks_unicode_and_aggregate_limits() {
     assert!(result_text(&result).contains("source_ref"));
     tokio::fs::remove_dir_all(dir).await.unwrap();
 }
+
+#[test]
+fn session_handoff_is_available_in_codex_voice_with_task_context() {
+    let policy = ToolPolicy::from_values(Some("codex-voice"), None, None, None);
+    let schemas = build_registry_with_policy(Hub::builder().build(), policy).list();
+    let handoff = schemas
+        .iter()
+        .find(|s| s.name == "session_handoff")
+        .expect("codex-voice must expose the readonly task continuity tool");
+    assert!(handoff.input_schema["properties"]["task_context"].is_object());
+    assert!(!schemas.iter().any(|s| s.name == "browser_navigate"));
+    assert!(policy.extras().contains(&"session_handoff"));
+}

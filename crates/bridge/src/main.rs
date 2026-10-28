@@ -8591,14 +8591,15 @@ async fn real_main() -> Result<()> {
                 }
             }
             let registry = build_registry(hub);
-            // Eagerly warm the embedding model on a bg thread so the first
-            // semantic query after (re)connect doesn't fall to the hash backend
-            // and return garbage cosines against the real-model store. Only when
-            // memory is enabled (otherwise the encoder is never used). When
-            // delegation is active, warmup() routes through RemoteEmbedBackend
-            // (a cheap HTTP round-trip), NOT a local 2.8GB model load.
+            // Warm populated stores before semantic queries compare against
+            // existing vectors. An empty store needs no speculative model I/O:
+            // metadata-only MCP startup must not download a model then wait for
+            // it at shutdown. Actual embedding use still initializes lazily.
+            // On a profile-read error retain the previous warmup behavior.
             if let Some(s) = store.clone() {
-                ab_store::vector::warmup();
+                if !matches!(s.embedding_profile_buckets().await, Ok(buckets) if buckets.is_empty()) {
+                    ab_store::vector::warmup();
+                }
                 // Embedding dim-guard (#4282): flag a query/store dim mismatch
                 // (stale env / silent model fallback) instead of silently
                 // serving all-zero cosines. Strict class-1 preflight aborts here
