@@ -52,6 +52,11 @@ See `default-probe/result.json` and `default-probe/stdout` in the private
 evidence directory. This local development build binds source digests and
 reports the pre-commit HEAD; it is not a governed published candidate.
 
-Required commit checks and release remain pending. Publication, admission,
+Implementation commit: `9e48e7a75906e885671a76f1216369c7b0e3c5be`.
+Its normal commit gate passed: 405 exact S18–S21 cases, 143 fresh isolated
+CLI comparisons, and default-feature `cargo check -p ab-bridge --all-targets`.
+Fresh CLI evidence: `governance-live/run-5h_9v91g` under the native validation
+root `/home/pallasting/.agent-bridge-secure/research/copilotkit-four-20261027/cargo-validation`.
+Release remains pending at this source-validation checkpoint. Publication, admission,
 activation, service health, current-client visibility and a real handoff are
 separate acceptance steps. Long-term drift reduction is not claimed.
