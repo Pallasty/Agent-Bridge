@@ -942,3 +942,12 @@ random IDs and a private mapping; `resolve` validates a bound reviewer decision
 against original bytes. Baseline selection and abstention are supported; no
 model calls, acceptance certification or runtime changes occur. See
 [the specification and operating instructions](../../docs/operations/WORKFLOW_ARTIFACT_COMPARE.md).
+
+## Offline handoff companion
+
+`handoff_work_digest.py --packet PATH` preserves supplied task context and
+selects explicitly current, source-referenced notes for the same task/revision.
+`--replay fixtures/handoff_work_digest_cases.json` checks six source-bound
+historical examples. Neither mode invokes models, writes memory, forwards
+context or certifies task completion. Use only when a real handoff needs this
+selection; see [contract, costs and limits](../../docs/reports/2026-10-29-agensh-handoff-digest.md).

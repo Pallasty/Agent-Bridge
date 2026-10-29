@@ -1,0 +1,283 @@
+{
+  "schema": "handoff_work_digest_cases_v1",
+  "source": "docs/reports/2026-10-26-goal-drift-evidence.json",
+  "source_sha256": "56ced5b7574fade6498515a6521bfb3d7d5a87dc85bc0657ea533a7af0103b74",
+  "cutoff": "2026-10-28 retrospective of published 2026-10-26 evidence",
+  "provenance": "Six manually reconstructed scenarios, not original historical handoffs. Task context, task/revision labels, statuses, expected selection and reopening conditions are current author annotations. All notes are exact published excerpts. No counterfactual or blinded model trial.",
+  "cases": [
+    {
+      "id": "closed-research",
+      "packet": {
+        "task_id": "closed-research",
+        "revision": "retrospective-20261028",
+        "task_context": {
+          "original_request": {
+            "text": "原始请求全文未随公开摘录提供；不得由此重建用户授权。",
+            "source_ref": null
+          },
+          "user_updates": [],
+          "current_delivery": "保留 MemT 已关闭筛选的结论。",
+          "acceptance_criteria": [
+            "本回放只检查历史摘录与显式标注是否被保留，不认证历史任务完成。"
+          ],
+          "delivered": [],
+          "remaining_gap": "真实价值仍未知，旧建议不构成重新启动依据。",
+          "next_action": "保留关闭；普通继续不重开。",
+          "return_to_mainline": "本例摘要检查后停止。"
+        },
+        "records": [
+          {
+            "id": "M01",
+            "task_id": "closed-research",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "superseded",
+            "text": "MemT 暂时保留为研究备选",
+            "source_ref": "M01",
+            "reopen_condition": null
+          },
+          {
+            "id": "M02",
+            "task_id": "closed-research",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "superseded",
+            "text": "然后继续 MemT 的",
+            "source_ref": "M02",
+            "reopen_condition": null
+          },
+          {
+            "id": "M03",
+            "task_id": "closed-research",
+            "revision": "retrospective-20261028",
+            "kind": "CLOSED",
+            "status": "current",
+            "text": "关闭筛选",
+            "source_ref": "M03",
+            "reopen_condition": "出现新的真实任务需求和可验证收益依据，或用户明确改变范围。"
+          }
+        ]
+      },
+      "expected_selected": [
+        "M03"
+      ]
+    },
+    {
+      "id": "current-project",
+      "packet": {
+        "task_id": "current-project",
+        "revision": "retrospective-20261028",
+        "task_context": {
+          "original_request": {
+            "text": "原始请求全文未随公开摘录提供；不得由此重建用户授权。",
+            "source_ref": null
+          },
+          "user_updates": [],
+          "current_delivery": "建议应对接当前开发线。",
+          "acceptance_criteria": [
+            "本回放只检查历史摘录与显式标注是否被保留，不认证历史任务完成。"
+          ],
+          "delivered": [],
+          "remaining_gap": "公开摘录不包含完整开发线任务。",
+          "next_action": "先恢复当前任务，再判断线索是否适用。",
+          "return_to_mainline": "恢复已有任务，停止推荐旧项目支线。"
+        },
+        "records": [
+          {
+            "id": "R01",
+            "task_id": "historical-onsen",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "Onsen 的常客记忆连续性",
+            "source_ref": "R01",
+            "reopen_condition": null
+          },
+          {
+            "id": "R02",
+            "task_id": "current-project",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "但我并不知道如何将你的要求应用到开发线中",
+            "source_ref": "R02",
+            "reopen_condition": null
+          },
+          {
+            "id": "R03",
+            "task_id": "current-project",
+            "revision": "retrospective-20261028",
+            "kind": "CLOSED",
+            "status": "current",
+            "text": "上一轮的 Onsen 线索暂时放下",
+            "source_ref": "R03",
+            "reopen_condition": "当前开发线明确需要该线索。"
+          }
+        ]
+      },
+      "expected_selected": [
+        "R02",
+        "R03"
+      ]
+    },
+    {
+      "id": "cumulative-repair",
+      "packet": {
+        "task_id": "cumulative-repair",
+        "revision": "retrospective-20261028",
+        "task_context": {
+          "original_request": {
+            "text": "原始请求全文未随公开摘录提供；不得由此重建用户授权。",
+            "source_ref": null
+          },
+          "user_updates": [],
+          "current_delivery": "将细节工作重新连接到用户交付。",
+          "acceptance_criteria": [
+            "本回放只检查历史摘录与显式标注是否被保留，不认证历史任务完成。"
+          ],
+          "delivered": [],
+          "remaining_gap": "单轮有界不代表累计链条已收束。",
+          "next_action": "检查累计尝试、当前阻塞和足够检查，再回交付。",
+          "return_to_mainline": "足够检查完成即回主线；不得用新任务名重置预算。"
+        },
+        "records": [
+          {
+            "id": "G02",
+            "task_id": "cumulative-repair",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "每轮有界，累计投入却缺少退出判断",
+            "source_ref": "G02",
+            "reopen_condition": null
+          },
+          {
+            "id": "G05",
+            "task_id": "cumulative-repair",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "一个局部缺口接一个新任务",
+            "source_ref": "G05",
+            "reopen_condition": null
+          }
+        ]
+      },
+      "expected_selected": [
+        "G02",
+        "G05"
+      ]
+    },
+    {
+      "id": "authorized-change",
+      "packet": {
+        "task_id": "authorized-change",
+        "revision": "retrospective-20261028",
+        "task_context": {
+          "original_request": {
+            "text": "原始请求全文未随公开摘录提供；不得由此重建用户授权。",
+            "source_ref": null
+          },
+          "user_updates": [],
+          "current_delivery": "保留历史记录中的阶段授权说明。",
+          "acceptance_criteria": [
+            "本回放只检查历史摘录与显式标注是否被保留，不认证历史任务完成。"
+          ],
+          "delivered": [],
+          "remaining_gap": "该摘要不是授权原文，不能据它新增执行权限。",
+          "next_action": "需要执行时查原始授权，不把范围变化一律判为漂移。",
+          "return_to_mainline": "不要新增审批或自动撤销既有授权。"
+        },
+        "records": [
+          {
+            "id": "G03",
+            "task_id": "authorized-change",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "重写、网页和多人研究本身都有阶段授权",
+            "source_ref": "G03",
+            "reopen_condition": null
+          }
+        ]
+      },
+      "expected_selected": [
+        "G03"
+      ]
+    },
+    {
+      "id": "necessary-repair",
+      "packet": {
+        "task_id": "necessary-repair",
+        "revision": "retrospective-20261028",
+        "task_context": {
+          "original_request": {
+            "text": "原始请求全文未随公开摘录提供；不得由此重建用户授权。",
+            "source_ref": null
+          },
+          "user_updates": [],
+          "current_delivery": "保留实际消费字节需要校验的正确性要求。",
+          "acceptance_criteria": [
+            "本回放只检查历史摘录与显式标注是否被保留，不认证历史任务完成。"
+          ],
+          "delivered": [],
+          "remaining_gap": "历史记录报告 WASM 绕过校验；本轮未复现。",
+          "next_action": "必要修复不能被回主线口号跳过。",
+          "return_to_mainline": "完成必要检查后回交付，不继续泛化验证。"
+        },
+        "records": [
+          {
+            "id": "G08",
+            "task_id": "necessary-repair",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "第二次下载的 WASM 绕过哈希校验",
+            "source_ref": "G08",
+            "reopen_condition": null
+          }
+        ]
+      },
+      "expected_selected": [
+        "G08"
+      ]
+    },
+    {
+      "id": "incomplete-window",
+      "packet": {
+        "task_id": "incomplete-window",
+        "revision": "retrospective-20261028",
+        "task_context": {
+          "original_request": {
+            "text": "原始请求全文未随公开摘录提供；不得由此重建用户授权。",
+            "source_ref": null
+          },
+          "user_updates": [],
+          "current_delivery": "保留研究观察窗未完成这一事实。",
+          "acceptance_criteria": [
+            "本回放只检查历史摘录与显式标注是否被保留，不认证历史任务完成。"
+          ],
+          "delivered": [],
+          "remaining_gap": "最终结果未知，不是已失败，也不是已完成。",
+          "next_action": "保留未决，不能依据轮次宣布漂移。",
+          "return_to_mainline": "不因这个历史节点新开实验。"
+        },
+        "records": [
+          {
+            "id": "S01",
+            "task_id": "incomplete-window",
+            "revision": "retrospective-20261028",
+            "kind": "OBSERVED",
+            "status": "current",
+            "text": "完整机制判据尚未通过",
+            "source_ref": "S01",
+            "reopen_condition": null
+          }
+        ]
+      },
+      "expected_selected": [
+        "S01"
+      ]
+    }
+  ]
+}
