@@ -789,7 +789,7 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3; Niche since the 2026-07 prune — `session_lifecycle_step` is the live successor) |
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
-| meta | `capabilities` | Report what agent-bridge can do in this environment |
+| meta | `capabilities` | Report environment capabilities; optional `sections` selects topics and provides omission/follow-up hints |
 | | `readiness_audit` | Read-only readiness snapshot over setup/tool profiles, hooks, skills, audit surfaces, and ECC-derived non-goals |
 | | `mcp_config_audit` | Audit Codex / Gemini CLI / Claude Code MCP config and direct stdio connectivity |
 | | `mcp_dispatch_audit` | Audit MCP tool traffic by source, client, profile, model, and reasoning effort |
@@ -1051,6 +1051,33 @@ source selection and derived output; each saved result keeps source keys in
 local runs; scoped derived keys include a stable scope digest so identical text
 cannot collide across projects. Automatic curation never upgrades extracted
 text to `verified`.
+
+### Topic-focused capability queries
+
+Call `capabilities({"compact":true,"sections":["browser"]})` to return one or
+more topics while retaining complete `security`, `version`, and `build` data.
+The `sections` schema enumerates the accepted names. `_selection.omitted_sections`
+lists the topics excluded from this response; `_selection.follow_up` contains
+ready-to-call `capabilities` arguments for the omitted topics or the full report.
+When no topics are omitted, the omitted-topic follow-up is `null`.
+
+Omission does not mean unsupported. Selection filters response fields only:
+existing diagnostics still run, nested compact-mode limitations remain visible,
+and the report never grants execution permission. Omit `sections` for the
+unchanged legacy shape. Empty, unknown, and wrongly typed selectors return a
+tool error with accepted topic names and recovery arguments.
+
+Regression checks (Python 3 stdlib is required by the MCP integration client):
+
+```sh
+cargo test -p ab-bridge --lib capabilities_sections
+cargo test -p ab-bridge --test capabilities_sections_mcp
+python3 scripts/check-capabilities-sections-mcp.py --binary /path/to/agent-bridge --output /path/to/evidence
+```
+
+The integration check starts a real server with isolated state, verifies the
+advertised schema and every topic, executes returned follow-ups, and checks
+invalid requests and clean EOF shutdown in compact and all-tools profiles.
 
 ### `WarpBackend` capabilities
 

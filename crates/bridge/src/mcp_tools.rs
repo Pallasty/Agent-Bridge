@@ -32712,7 +32712,8 @@ impl McpTool for CapabilitiesTool {
             description: "Return what the agent-bridge backend can do here: terminal \
                  backend, browser availability, memory store status, configured hooks, \
                  detected frontend, security policy, binary version. Call at session \
-                 start to avoid wasted tokens on unavailable features."
+                 start to avoid wasted tokens on unavailable features. Use sections for topic-focused \
+                 output with explicit omissions and follow-up calls; security and build identity stay included."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -32720,6 +32721,12 @@ impl McpTool for CapabilitiesTool {
                     "compact": {
                         "type": "boolean",
                         "description": "Use compact diagnostics. Omitted = true for Codex compact toolsets, false otherwise. Compact mode defers live Android device enumeration."
+                    },
+                    "sections": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string", "enum": crate::capabilities_sections::SECTION_NAMES },
+                        "description": "Return only these top-level topics plus full security, version, and build. Omit for the legacy response. Reports omitted sections with follow-up arguments. This filters the response only; existing diagnostics still run."
                     },
                     "include_instinct_sessions": {
                         "type": "boolean",
@@ -32730,6 +32737,10 @@ impl McpTool for CapabilitiesTool {
         }
     }
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let selection = match crate::capabilities_sections::parse_sections(&args) {
+            Ok(selection) => selection,
+            Err(error) => return Ok(ToolResult::error(error.to_string())),
+        };
         let compact = args
             .get("compact")
             .and_then(|v| v.as_bool())
@@ -32944,7 +32955,7 @@ impl McpTool for CapabilitiesTool {
             crate::instinct::observer_status_json(),
             include_instinct_sessions,
         );
-        Ok(ToolResult::json_text(&json!({
+        let report = json!({
             "mcp": {
                 "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
                 "source": std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok(),
@@ -33035,7 +33046,16 @@ impl McpTool for CapabilitiesTool {
                 "runtime_profile_marker": crate::build_identity::RUNTIME_PROFILE_MARKER,
                 "r9_workload_receipts_enabled": crate::build_identity::R9_WORKLOAD_RECEIPTS_ENABLED
             }
-        })))
+        });
+        match crate::capabilities_sections::project_report(
+            report,
+            selection.as_deref(),
+            compact,
+            include_instinct_sessions,
+        ) {
+            Ok(report) => Ok(ToolResult::json_text(&report)),
+            Err(error) => Ok(ToolResult::error(error.to_string())),
+        }
     }
 }
 
