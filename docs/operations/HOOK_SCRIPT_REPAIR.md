@@ -58,9 +58,25 @@ is added to this log.
 `requested`, `actual`, and `dropped` distinguish a successful process exit from the
 requested retrieval effect. `verification_scope=hook_payload_only` is deliberate:
 a receipt does not prove host ingestion, model use, retrieval quality, or task value.
-The existing Rust `hook_status` and `readiness_audit` projections still expose legacy
-run metadata; inspect the JSONL for the new effect fields. No MCP schema change is
-claimed by this scripts-only repair.
+MCP `capabilities` with `sections:["hooks"]` exposes `hooks.recent_runs`;
+`hook_status` and `readiness_audit(include_local_install=true)` include the same
+`last_effect_feedback`, `last_effect_feedback_state`, and `last_session_id_sha256`
+fields per hook. `reported` preserves the producer's payload-only outcome;
+`unreported` means a missing/legacy receipt, and `invalid` means an unsupported or
+malformed effect object. Neither missing nor invalid feedback is inferred from an
+exit code. Only known effect fields and vocabulary are forwarded; private extension
+fields and malformed session hashes are not exposed.
+
+These are the latest appended records per event across the machine, not necessarily
+the caller's session. Compare the session hash before making a session-specific claim.
+Readiness's overall `ready` remains an installation/source-coverage result, not an
+assertion that memory was emitted or used. `include_local_install=false` continues
+to omit local run evidence.
+
+A binary rebuilt from this source embeds all four repaired Hook templates. The
+real-MCP integration test executes `setup --frontend codex` twice in an isolated
+HOME and compares the installed bytes with source, so a newly deployed binary's
+setup must not regress this repair. Historical binaries retain their old templates.
 
 Codex may deliver large additional context as a preview plus a reference to the
 full output file. Validate the native hook notification and assembled model input;
@@ -72,6 +88,7 @@ claim the model read that file merely because the reference was present.
 ```sh
 python3 scripts/eval/hook_effect_feedback.py --output-dir /private/effect-test-output
 python3 scripts/eval/hook_environment_paths.py --output-dir /private/path-test-output
+python3 scripts/check-hook-effects-mcp.py --binary /path/to/candidate --output /private/mcp-test-output
 ```
 
 These are synthetic process tests, not native Codex or model-quality evidence.

@@ -29931,6 +29931,25 @@ fn last_hook_run(event: &str, log_path: &std::path::Path) -> Option<Value> {
         .find(|v| v.get("event").and_then(|e| e.as_str()) == Some(event))
 }
 
+/// Shared log projection for capabilities topic queries. Missing or legacy
+/// records remain explicitly unreported; process success is not effect success.
+fn hook_recent_run_rows() -> Vec<Value> {
+    let path = hook_run_log_path();
+    known_hooks().into_iter().map(|(event, _)| {
+        let run = last_hook_run(event, &path);
+        let mut row = json!({
+            "event": event,
+            "last_run_ts": run.as_ref().and_then(|v| v.get("ts")),
+            "last_exit_code": run.as_ref().and_then(|v| v.get("exit_code")),
+            "last_output_bytes": run.as_ref().and_then(|v| v.get("output_bytes")),
+        });
+        row.as_object_mut().expect("recent hook object").extend(
+            crate::hook_effect_feedback::fields(run.as_ref()),
+        );
+        row
+    }).collect()
+}
+
 /// Well-known hook configurations: (event_name, default_script_path)
 fn known_hooks() -> Vec<(&'static str, &'static str)> {
     let home = dirs_home();
@@ -29982,7 +30001,8 @@ impl McpTool for HookStatusTool {
         ToolSchema {
             name: self.name().into(),
             description: "Return the status of each agent-bridge hook script: existence, \
-                 executability, last run time, exit code, output bytes, and whether \
+                 executability, last run time, exit code, output bytes, payload-only effect feedback, \
+                 session hash (latest record per event, not necessarily this session), and whether \
                  the installed script is in sync with the repo source. \
                  Use this to diagnose hook configuration problems."
                 .into(),
@@ -30080,7 +30100,7 @@ impl McpTool for HookStatusTool {
                 json!({ "in_sync": null, "note": "provide repo_hooks_dir for sync check" })
             };
 
-            hook_statuses.push(json!({
+            let mut row = json!({
                 "event": event,
                 "script": installed_path.display().to_string(),
                 "exists": exists,
@@ -30089,13 +30109,18 @@ impl McpTool for HookStatusTool {
                 "last_exit_code": last_exit_code,
                 "last_output_bytes": last_output_bytes,
                 "sync": sync_info
-            }));
+            });
+            row.as_object_mut().expect("hook status object").extend(
+                crate::hook_effect_feedback::fields(last_run.as_ref()),
+            );
+            hook_statuses.push(row);
         }
 
         Ok(ToolResult::json_text(&json!({
             "hooks": hook_statuses,
             "log_path": log_path.display().to_string(),
-            "log_exists": log_path.exists()
+            "log_exists": log_path.exists(),
+            "run_scope": "latest_record_per_event_not_current_session"
         })))
     }
 }
@@ -33025,6 +33050,9 @@ impl McpTool for CapabilitiesTool {
             "hooks": {
                 "configured": configured_hooks,
                 "frontend": frontend,
+                "run_scope": "latest_record_per_event_not_current_session",
+                "log_path": hook_run_log_path().display().to_string(),
+                "recent_runs": hook_recent_run_rows(),
                 "instinct_observer": instinct_observer
             },
             "security": {
@@ -34668,6 +34696,7 @@ fn readiness_audit_payload(args: &Value, hub: &Hub) -> Value {
         "tool_profiles": profile_rows,
         "tool_surfaces": tool_rows,
         "hooks": hook_rows,
+        "hook_run_scope": "latest_record_per_event_not_current_session",
         "setup_state": setup_state,
         "source_assets": source_rows,
         "tool_profile_divergence": collab_drift,
@@ -34907,7 +34936,7 @@ fn readiness_hook_rows(
             } else {
                 None
             };
-            json!({
+            let mut row = json!({
                 "event": event,
                 "script": script_basename,
                 "source_path": source_path.as_ref().map(|p| p.display().to_string()),
@@ -34932,7 +34961,11 @@ fn readiness_hook_rows(
                     .and_then(|v| v.get("exit_code"))
                     .cloned()
                     .unwrap_or(Value::Null),
-            })
+            });
+            row.as_object_mut().expect("readiness hook object").extend(
+                crate::hook_effect_feedback::fields(last_run.as_ref()),
+            );
+            row
         })
         .collect()
 }

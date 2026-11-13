@@ -84,6 +84,7 @@ pub mod g14_component_runtime;
 pub mod github_api;
 pub mod gitlab_api;
 pub mod gos_lite;
+mod hook_effect_feedback;
 pub mod hub;
 pub mod ide;
 pub mod instinct;
