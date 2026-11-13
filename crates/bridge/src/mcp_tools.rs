@@ -26376,6 +26376,33 @@ pub(crate) fn bootstrap_handoff_priority_eligible(row: &MemoryRecord, cwd: &str)
     )
 }
 
+// Match session_handoff's bounded newest-candidate read. Recent means
+// last_accessed_at: unrelated global recall can otherwise evict current state
+// before exact-project eligibility is evaluated. A full window stays explicit.
+const BOOTSTRAP_HANDOFF_CANDIDATE_LIMIT: u32 = 256;
+
+async fn bootstrap_handoff_candidates(
+    store: &dyn StateStore,
+    cwd: &str,
+) -> (Vec<MemoryRecord>, bool) {
+    let project_path = cwd.trim_end_matches('/');
+    let candidates = store
+        .list_memories_in_scope(
+            &format!("{project_path}/"),
+            Some("session_handoff"),
+            MemoryListSort::Newest,
+            BOOTSTRAP_HANDOFF_CANDIDATE_LIMIT,
+        )
+        .await
+        .unwrap_or_default();
+    let candidate_limit_reached = candidates.len() == BOOTSTRAP_HANDOFF_CANDIDATE_LIMIT as usize;
+    let eligible = candidates
+        .into_iter()
+        .filter(|row| bootstrap_handoff_priority_eligible(row, project_path))
+        .collect();
+    (eligible, candidate_limit_reached)
+}
+
 fn prioritize_bootstrap_handoffs(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<MemoryRecord> {
     let (priority, rest): (Vec<_>, Vec<_>) = rows
         .into_iter()
@@ -26460,6 +26487,38 @@ mod bootstrap_handoff_priority_tests {
                 row.key
             );
         }
+    }
+
+    #[tokio::test]
+    async fn bootstrap_candidates_survive_recent_global_accesses() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().canonicalize().unwrap().join("state.db");
+        let store = ab_store::SqliteStore::open(&db_path).await.unwrap();
+        let mut current = handoff(
+            "current",
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+            &["continuity_role:state", "continuity_confidence:observed"],
+        );
+        current.created_at = 1000;
+        current.updated_at = 1000;
+        current.last_accessed_at = 1;
+        let mut records = vec![current];
+        for index in 0..12 {
+            let mut global = handoff(&format!("global-{index}"), None, &[]);
+            global.created_at = 100;
+            global.updated_at = 100;
+            global.last_accessed_at = 2000;
+            records.push(global);
+        }
+        let path = dir.path().join("records.jsonl");
+        let content = records.iter().map(|row| serde_json::to_string(row).unwrap()).collect::<Vec<_>>().join("\n");
+        tokio::fs::write(&path, content).await.unwrap();
+        store.memory_import(&path, ImportConflictPolicy::Skip, None).await.unwrap();
+        let old = store.list_memories_in_scope(CWD, Some("session_handoff"), MemoryListSort::Recent, 8).await.unwrap();
+        assert!(!old.iter().any(|row| bootstrap_handoff_priority_eligible(row, CWD)));
+        let (rows, limited) = bootstrap_handoff_candidates(&store, CWD).await;
+        assert_eq!(rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(), vec!["current"]);
+        assert!(!limited);
     }
 
     #[test]
@@ -27401,6 +27460,9 @@ impl McpTool for SessionBootstrapTool {
         // letters/research/curation panels that compact recovery omits.
         let recovery_candidates_block = bootstrap_recovery_candidates_block(is_compact).await;
 
+        let (priority_handoffs, handoff_candidate_limit_reached) =
+            bootstrap_handoff_candidates(store.as_ref(), &cwd).await;
+
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
             // Semantic path: cosine-ranked results, with only current,
             // actionable, exact-project handoffs prepended.
@@ -27415,14 +27477,7 @@ impl McpTool for SessionBootstrapTool {
             // Handoffs that fail the priority gate remain eligible for normal
             // semantic ranking; they simply cannot displace current state by
             // kind alone.
-            let handoff = store
-                .list_memories_in_scope(&cwd, Some("session_handoff"), MemoryListSort::Recent, 8)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|r| r.status == "active")
-                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
-                .collect::<Vec<_>>();
+            let handoff = priority_handoffs.iter().take(8).cloned().collect::<Vec<_>>();
             let handoff_keys: std::collections::HashSet<_> =
                 handoff.iter().map(|r| r.key.clone()).collect();
             ranked.retain(|h| !handoff_keys.contains(&h.record.key));
@@ -27499,7 +27554,11 @@ impl McpTool for SessionBootstrapTool {
             }
         }
 
-        if rows.is_empty() && error_section.is_empty() && recovery_candidates_block.is_none() {
+        if rows.is_empty()
+            && error_section.is_empty()
+            && recovery_candidates_block.is_none()
+            && !handoff_candidate_limit_reached
+        {
             let lifecycle_hint = session_lifecycle_hint();
             // SSB lifecycle producer: an empty-scope bootstrap injected nothing,
             // so it is honestly Unknown (ran, no effect) — not laundered green.
@@ -27522,6 +27581,16 @@ impl McpTool for SessionBootstrapTool {
                 String::new(),
             ]
         };
+
+        if handoff_candidate_limit_reached {
+            lines.extend([
+                "=== Handoff candidate window limited ===".to_string(),
+                "Scanned the newest 256 visible handoffs before exact-project filtering; older candidates may be omitted. This is not proof that no current handoff exists.".to_string(),
+                format!("Follow up: session_handoff {}", json!({"cwd": cwd, "max_todos": 0, "max_handoff_memories": 8})),
+                "session_handoff also uses a bounded candidate window; use memory_get with a known key when needed.".to_string(),
+                String::new(),
+            ]);
+        }
 
         // Agent-facing orientation guard. This is read-only and deliberately
         // uses only local refs: bootstrap must never fetch, switch, reset, or
@@ -27837,15 +27906,8 @@ impl McpTool for SessionBootstrapTool {
                 .filter(|r| r.status == "active" && r.importance >= 0.6)
                 .take(3)
                 .collect();
-            let handoff_pool = store
-                .list_memories_in_scope(&cwd, Some("session_handoff"), MemoryListSort::Recent, 5)
-                .await
-                .unwrap_or_default();
-            let handoffs_picked: Vec<MemoryRecord> = handoff_pool
-                .into_iter()
-                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
-                .take(1)
-                .collect();
+            let handoffs_picked: Vec<MemoryRecord> =
+                priority_handoffs.iter().take(1).cloned().collect();
             let project_pool = store
                 .list_memories_in_scope(&cwd, Some("project"), MemoryListSort::Recent, 12)
                 .await
