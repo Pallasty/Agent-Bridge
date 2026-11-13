@@ -42,6 +42,14 @@
 # v2.0: semantic re-ranking (broken after 512→384 dim migration; reverted).
 # v1.0: pure-SQL static sort.
 
+# Match the MCP wrapper's trusted per-machine configuration. Direct IDE hooks
+# do not inherit the wrapper environment. Never print this file (may contain keys).
+_AB_MACHINE_ENV="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}"
+if [[ -f "$_AB_MACHINE_ENV" ]]; then
+    . "$_AB_MACHINE_ENV" >/dev/null 2>&1
+fi
+unset _AB_MACHINE_ENV
+
 _ab_state_dir() {
     if [[ -n "${XDG_DATA_HOME:-}" ]]; then
         printf '%s/agent-bridge' "$XDG_DATA_HOME"
@@ -95,16 +103,38 @@ DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
 
 _AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"
 _AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+# Additive effect feedback; this records emitted payloads, not host ingestion.
+_AB_EFFECT_STATUS=unknown
+_AB_EFFECT_CODE=hook_did_not_reach_outcome
+_AB_EFFECT_ACTUAL=none
+_AB_EFFECT_REQUESTED=bootstrap_context
+[[ "${AB_MEMORY_HOOK_STATIC:-}" == "1" ]] && _AB_EFFECT_REQUESTED=static_context
 _ab_log_hook_run() {
-    local exit_code="$1" output_bytes="$2"
     mkdir -p "$(dirname "$_AB_HOOK_LOG")"
-    printf '{"event":"beforeSubmitPrompt","ts":"%s","exit_code":%d,"output_bytes":%d}\n' \
-        "$_AB_HOOK_START" "$exit_code" "$output_bytes" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+    python3 - "$_AB_HOOK_LOG" "$_AB_HOOK_START" "$1" "$2" \
+        "$_AB_EFFECT_STATUS" "$_AB_EFFECT_CODE" "$_AB_EFFECT_REQUESTED" \
+        "$_AB_EFFECT_ACTUAL" "${SESSION_ID:-}" <<'PY_RECEIPT' 2>/dev/null || true
+import hashlib, json, sys
+path, ts, exit_code, output_bytes, status, code, requested, actual, session = sys.argv[1:]
+feedback = {
+    "status": status, "code": code, "requested": requested, "actual": actual,
+    "dropped": ["bootstrap_context_selection"] if requested == "bootstrap_context" and actual == "static_context_payload" else [],
+    "verification_scope": "hook_payload_only",
+}
+row = {"event": "beforeSubmitPrompt", "ts": ts, "exit_code": int(exit_code),
+       "output_bytes": int(output_bytes), "effect_feedback": feedback,
+       "session_id_sha256": hashlib.sha256(session.encode()).hexdigest() if session else None}
+with open(path, "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+PY_RECEIPT
 }
 trap '_ab_log_hook_run $? 0' EXIT
 
 # Skip inside memory-curator sub-agents to avoid recursive context bloat.
-[[ "${AB_MEMORY_CURATOR:-}" == "1" ]] && exit 0
+if [[ "${AB_MEMORY_CURATOR:-}" == "1" ]]; then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=curator_guard
+    exit 0
+fi
 
 HOOK_PAYLOAD=$(cat 2>/dev/null || true)
 SESSION_ID=$(printf '%s' "$HOOK_PAYLOAD" | python3 -c '
@@ -184,7 +214,10 @@ PY
 }
 _ab_pet_state_write
 
-[[ -f "$DB" ]] || exit 0
+if [[ ! -f "$DB" ]]; then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=database_missing
+    exit 0
+fi
 
 LOCK="/tmp/ab-mem-injected-${SESSION_ID}"
 COOLDOWN_TURNS="${AB_MEMORY_COOLDOWN_TURNS:-8}"
@@ -196,6 +229,7 @@ COUNT=$((COUNT + 1))
 printf '%s\n' "$COUNT" > "$LOCK"
 # Fire on turns 1, 1+N, 1+2N, ... (cooldown softening per A1 v0; drift dim dropped).
 if (( COOLDOWN_TURNS > 0 )) && (( (COUNT - 1) % COOLDOWN_TURNS != 0 )); then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=cooldown
     exit 0
 fi
 
@@ -204,6 +238,7 @@ CWD="${PWD:-/}"
 # ── v5.0 primary path: session_bootstrap via local MCP (semantic ranking) ─────
 AB_BIN="${AB_MEMORY_HOOK_AB_BIN:-$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")}"
 OUTPUT=""
+_AB_STATIC_EXIT=0
 if [[ "${AB_MEMORY_HOOK_STATIC:-}" != "1" && -x "$AB_BIN" ]]; then
     OUTPUT=$(AB_HOOK_PAYLOAD="$HOOK_PAYLOAD" \
         AB_RECOVERY_HINT_SESSION_ID="$SESSION_ID" \
@@ -286,6 +321,11 @@ PY
     ) || OUTPUT=""
 fi
 
+if [[ -n "$OUTPUT" ]]; then
+    _AB_EFFECT_STATUS=emitted; _AB_EFFECT_CODE=bootstrap_context_emitted
+    _AB_EFFECT_ACTUAL=bootstrap_context_payload
+fi
+
 # ── Fallback: v4 pure-SQL static ranking (daemon-free, ~10-50 ms) ─────────────
 if [[ -z "$OUTPUT" ]]; then
 OUTPUT=$(python3 - "$DB" "$CWD" <<'PY'
@@ -298,7 +338,7 @@ try:
     con = sqlite3.connect(DB_PATH, timeout=3)
     con.row_factory = sqlite3.Row
 except Exception:
-    sys.exit(0)
+    sys.exit(1)
 
 # Static score: folds in importance so a high-importance lesson beats
 # a low-importance todo of similar age.
@@ -373,6 +413,19 @@ print(json.dumps({
 }))
 PY
 )
+_AB_STATIC_EXIT=$?
+if [[ -n "$OUTPUT" ]]; then
+    _AB_EFFECT_ACTUAL=static_context_payload
+    if [[ "$_AB_EFFECT_REQUESTED" == static_context ]]; then
+        _AB_EFFECT_STATUS=emitted; _AB_EFFECT_CODE=static_requested_emitted
+    else
+        _AB_EFFECT_STATUS=degraded; _AB_EFFECT_CODE=static_fallback_emitted
+    fi
+elif [[ "$_AB_STATIC_EXIT" -ne 0 ]]; then
+    _AB_EFFECT_STATUS=failed; _AB_EFFECT_CODE=static_query_failed
+else
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=no_context_emitted
+fi
 fi
 
 _OUT_BYTES=${#OUTPUT}

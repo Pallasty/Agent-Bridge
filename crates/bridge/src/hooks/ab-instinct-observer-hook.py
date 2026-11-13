@@ -20,6 +20,38 @@ import os
 import sys
 import json
 import time
+import subprocess
+
+def _load_machine_env():
+    """Read only observer knobs from the same trusted file as the MCP wrapper.
+
+    A subshell keeps unrelated credentials out of this process and its output.
+    If configuration fails, stop the probe instead of creating a different log.
+    """
+    path = os.environ.get("AGENT_BRIDGE_MACHINE_ENV") or os.path.expanduser(
+        "~/.config/agent-bridge/machine.env"
+    )
+    if not os.path.isfile(path):
+        return True
+    keys = ("AB_INSTINCT_OBSERVER", "AB_INSTINCT_OBSERVER_LOG")
+    try:
+        result = subprocess.run(
+            ["/bin/bash", "-c", '. "$1" >/dev/null 2>&1 || exit 1; shift; '
+             'for key in "$@"; do printf "%s\\0%s\\0" "$key" "${!key}"; done',
+             "ab-observer-env", path, *keys],
+            capture_output=True, timeout=1, check=True,
+        )
+        fields = result.stdout.decode().split("\0")
+        for key, value in zip(fields[0::2], fields[1::2]):
+            if key in keys and value:
+                os.environ[key] = value
+        return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+_MACHINE_ENV_OK = _load_machine_env()
+
 
 def _default_log_path():
     explicit = os.environ.get("AB_INSTINCT_OBSERVER_LOG", "").strip()
@@ -103,6 +135,8 @@ def _append_private_jsonl(record):
 
 
 def main():
+    if not _MACHINE_ENV_OK:
+        return
     if os.environ.get("AB_INSTINCT_OBSERVER", "1") == "0":
         return
     raw = sys.stdin.read()

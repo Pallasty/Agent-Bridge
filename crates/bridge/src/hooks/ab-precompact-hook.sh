@@ -15,6 +15,14 @@
 #   5. Return systemMessage summary for the IDE.
 
 # ── Logging ────────────────────────────────────────────────────────────────────
+# Match the MCP wrapper's trusted per-machine configuration. Direct IDE hooks
+# do not inherit the wrapper environment. Never print this file (may contain keys).
+_AB_MACHINE_ENV="${AGENT_BRIDGE_MACHINE_ENV:-$HOME/.config/agent-bridge/machine.env}"
+if [[ -f "$_AB_MACHINE_ENV" ]]; then
+    . "$_AB_MACHINE_ENV" >/dev/null 2>&1
+fi
+unset _AB_MACHINE_ENV
+
 _ab_state_dir() {
     if [[ -n "${XDG_DATA_HOME:-}" ]]; then
         printf '%s/agent-bridge' "$XDG_DATA_HOME"
