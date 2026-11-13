@@ -101,6 +101,29 @@ def exercise(binary, output, state):
         hidden = call('readiness_audit', {'include_local_install':False,'repo_root':str(ROOT)})
         assert all(r['last_effect_feedback_state']=='unreported' and r['last_session_id_sha256'] is None for r in hidden['hooks'])
         checks.append('local_diagnostics_opt_out')
+        # Lifecycle receipts use their own vocabulary and verification boundary.
+        for status, code, actual in [
+                ('skipped','transcript_missing','none'),
+                ('failed','lifecycle_tool_error','not_confirmed'),
+                ('unknown','lifecycle_timeout','not_confirmed'),
+                ('degraded','lifecycle_partial_result','lifecycle_response'),
+                ('completed','lifecycle_completed','lifecycle_response')]:
+            feedback={'status':status,'code':code,'requested':'session_lifecycle_precompact',
+                'actual':actual,'dropped':[],'verification_scope':'hook_and_mcp_response_only'}
+            row={'event':'preCompact','ts':'2026-11-12T00:00:01Z','exit_code':0,
+                'output_bytes':20,'effect_feedback':{**feedback,'private_error':'DO_NOT_FORWARD'},
+                'session_id_sha256':'b'*64}
+            with path.open('a') as stream:stream.write(json.dumps(row)+'\n')
+            cap=call('capabilities',{'compact':True,'sections':['hooks']})
+            audit=call('readiness_audit',{'include_local_install':True,'repo_root':str(ROOT)})
+            hooks=call('hook_status',{'repo_hooks_dir':str(ROOT/'crates/bridge/src/hooks')})
+            for group in [cap['hooks']['recent_runs'],audit['hooks'],hooks['hooks']]:
+                item=next(r for r in group if r['event']=='preCompact')
+                assert item['last_effect_feedback_state']=='reported'
+                assert item['last_effect_feedback']==feedback
+                assert item['last_session_id_sha256']=='b'*64
+                assert 'DO_NOT_FORWARD' not in json.dumps(item)
+            checks.append('lifecycle_'+status)
     finally:
         client.close()
     return {'status':'PASS','build':build,'cases':checks,'mcp_surfaces':3,

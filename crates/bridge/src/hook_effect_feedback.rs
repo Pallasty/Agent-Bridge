@@ -27,36 +27,71 @@ fn project_feedback(raw: &Value) -> Option<Value> {
     // Strict vocabulary prevents a future/free-form payload (prompt or memory
     // body) from accidentally becoming a status response. Unknown schemas remain
     // explicitly invalid, rather than silently reporting success or old effects.
-    let vocabularies: &[(&str, &[&str])] = &[
-        (
-            "status",
-            &["emitted", "degraded", "skipped", "failed", "unknown"],
-        ),
-        (
-            "code",
-            &[
-                "bootstrap_context_emitted",
-                "static_fallback_emitted",
-                "static_requested_emitted",
-                "cooldown",
-                "curator_guard",
-                "database_missing",
-                "no_context_emitted",
-                "static_query_failed",
-                "hook_did_not_reach_outcome",
-            ],
-        ),
-        ("requested", &["bootstrap_context", "static_context"]),
-        (
-            "actual",
-            &[
-                "bootstrap_context_payload",
-                "static_context_payload",
-                "none",
-            ],
-        ),
-        ("verification_scope", &["hook_payload_only"]),
-    ];
+    let lifecycle =
+        raw.get("requested").and_then(Value::as_str) == Some("session_lifecycle_precompact");
+    let vocabularies: &[(&str, &[&str])] = if lifecycle {
+        &[
+            (
+                "status",
+                &["completed", "degraded", "skipped", "failed", "unknown"],
+            ),
+            (
+                "code",
+                &[
+                    "session_id_missing",
+                    "binary_missing",
+                    "transcript_missing",
+                    "temporary_workspace_failed",
+                    "transcript_read_failed",
+                    "conversation_empty",
+                    "request_build_failed",
+                    "hook_did_not_reach_outcome",
+                    "lifecycle_timeout",
+                    "lifecycle_process_failed",
+                    "lifecycle_response_missing",
+                    "lifecycle_response_invalid",
+                    "lifecycle_rpc_error",
+                    "lifecycle_tool_error",
+                    "lifecycle_partial_result",
+                    "lifecycle_completed",
+                ],
+            ),
+            ("requested", &["session_lifecycle_precompact"]),
+            ("actual", &["none", "not_confirmed", "lifecycle_response"]),
+            ("verification_scope", &["hook_and_mcp_response_only"]),
+        ]
+    } else {
+        &[
+            (
+                "status",
+                &["emitted", "degraded", "skipped", "failed", "unknown"],
+            ),
+            (
+                "code",
+                &[
+                    "bootstrap_context_emitted",
+                    "static_fallback_emitted",
+                    "static_requested_emitted",
+                    "cooldown",
+                    "curator_guard",
+                    "database_missing",
+                    "no_context_emitted",
+                    "static_query_failed",
+                    "hook_did_not_reach_outcome",
+                ],
+            ),
+            ("requested", &["bootstrap_context", "static_context"]),
+            (
+                "actual",
+                &[
+                    "bootstrap_context_payload",
+                    "static_context_payload",
+                    "none",
+                ],
+            ),
+            ("verification_scope", &["hook_payload_only"]),
+        ]
+    };
     let mut projected = Map::new();
     for (key, allowed) in vocabularies {
         let value = raw.get(*key)?.as_str()?;
@@ -66,7 +101,8 @@ fn project_feedback(raw: &Value) -> Option<Value> {
         projected.insert((*key).into(), json!(value));
     }
     let dropped = raw.get("dropped")?.as_array()?;
-    if dropped.len() > 1
+    if (lifecycle && !dropped.is_empty())
+        || dropped.len() > 1
         || dropped
             .iter()
             .any(|v| v.as_str() != Some("bootstrap_context_selection"))
@@ -173,5 +209,30 @@ mod tests {
         let result = fields(Some(&row));
         assert_eq!(result["last_effect_feedback_state"], "invalid");
         assert_eq!(result["last_session_id_sha256"], Value::Null);
+    }
+
+    #[test]
+    fn lifecycle_feedback_preserves_unknown_partial_and_completed_distinctions() {
+        for (status, code, actual) in [
+            ("skipped", "transcript_missing", "none"),
+            ("failed", "lifecycle_tool_error", "not_confirmed"),
+            ("unknown", "lifecycle_timeout", "not_confirmed"),
+            ("unknown", "lifecycle_response_missing", "not_confirmed"),
+            ("degraded", "lifecycle_partial_result", "lifecycle_response"),
+            ("completed", "lifecycle_completed", "lifecycle_response"),
+        ] {
+            let mut row = receipt(status, code, actual);
+            row["effect_feedback"]["requested"] = json!("session_lifecycle_precompact");
+            row["effect_feedback"]["verification_scope"] = json!("hook_and_mcp_response_only");
+            let result = fields(Some(&row));
+            assert_eq!(result["last_effect_feedback_state"], "reported");
+            assert_eq!(result["last_effect_feedback"], row["effect_feedback"]);
+            row["effect_feedback"]["private_error"] = json!("secret transcript");
+            assert!(!serde_json::to_string(&fields(Some(&row)))
+                .unwrap()
+                .contains("secret"));
+            row["effect_feedback"]["verification_scope"] = json!("hook_payload_only");
+            assert_eq!(fields(Some(&row))["last_effect_feedback_state"], "invalid");
+        }
     }
 }

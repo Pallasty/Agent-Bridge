@@ -83,12 +83,37 @@ full output file. Validate the native hook notification and assembled model inpu
 for spilled output, compare the referenced file with the exact hook context. Do not
 claim the model read that file merely because the reference was present.
 
+## PreCompact and sessionEndCurate receipts
+
+Both events execute `ab-precompact-hook`. Its receipt now distinguishes missing
+prerequisites (`skipped`), explicit process/MCP errors (`failed`), timeout or
+missing/invalid response (`unknown`), response-reported partial work (`degraded`),
+and a complete successful lifecycle response (`completed`). All remain nonblocking
+to the host. Errors/timeouts use `actual=not_confirmed`: partial writes may already
+have happened, so this is not proof that nothing changed.
+
+The response must match JSON-RPC id 2, must not be an error, and must contain the
+expected non-dry-run work-memory, curate and finalize results. Zero newly curated
+memories is valid. Work-memory save failure or curation errors are partial results.
+The summary uses response counts instead of the difference between two global
+database counts, and no longer prints an unconditional `session_finalize done`.
+Existing hook output is still a JSON `systemMessage`; new receipts do not include
+transcript text, raw server errors, memory keys, or plaintext session ids.
+
+`requested=session_lifecycle_precompact` has its own strict MCP vocabulary.
+`verification_scope=hook_and_mcp_response_only` means a local Hook observation and
+server response, not independent storage durability, successful model use, or
+task completion. In particular, unreported errors inside an upstream tool cannot
+be recovered from its successful response. Stop's background sync and its compact
+call are outside this slice; legacy/missing receipts remain `unreported`.
+
 ## Bounded verification
 
 ```sh
 python3 scripts/eval/hook_effect_feedback.py --output-dir /private/effect-test-output
 python3 scripts/eval/hook_environment_paths.py --output-dir /private/path-test-output
 python3 scripts/check-hook-effects-mcp.py --binary /path/to/candidate --output /private/mcp-test-output
+python3 scripts/eval/precompact_effect_feedback.py --binary /path/to/candidate --output /private/precompact-test-output
 ```
 
 These are synthetic process tests, not native Codex or model-quality evidence.

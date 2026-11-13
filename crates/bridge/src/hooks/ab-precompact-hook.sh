@@ -37,16 +37,27 @@ _AB_STATE_DIR="$(_ab_state_dir)"
 _AB_HOOK_EVENT="${AB_HOOK_EVENT:-preCompact}"
 _AB_HOOK_LOG="$_AB_STATE_DIR/hook-runs.jsonl"
 _AB_HOOK_START=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+_AB_HOOK_OUTPUT_BYTES=0
+_AB_EFFECT_STATUS=unknown
+_AB_EFFECT_CODE=hook_did_not_reach_outcome
+_AB_EFFECT_ACTUAL=none
 _ab_log_hook_run() {
     mkdir -p "$(dirname "$_AB_HOOK_LOG")"
-    printf '{"event":"%s","ts":"%s","exit_code":%d,"output_bytes":0}\n' \
-        "$_AB_HOOK_EVENT" "$_AB_HOOK_START" "$1" >> "$_AB_HOOK_LOG" 2>/dev/null || true
+    python3 - "$_AB_HOOK_LOG" "$_AB_HOOK_EVENT" "$_AB_HOOK_START" "$1" \
+        "$_AB_HOOK_OUTPUT_BYTES" "$_AB_EFFECT_STATUS" "$_AB_EFFECT_CODE" \
+        "$_AB_EFFECT_ACTUAL" "${SESSION_ID:-}" <<'PY_RECEIPT' 2>/dev/null || true
+import hashlib, json, sys
+path, event, ts, exit_code, size, status, code, actual, session = sys.argv[1:]
+row = {"event": event, "ts": ts, "exit_code": int(exit_code), "output_bytes": int(size),
+       "session_id_sha256": hashlib.sha256(session.encode()).hexdigest() if session else None,
+       "effect_feedback": {"status": status, "code": code,
+           "requested": "session_lifecycle_precompact", "actual": actual, "dropped": [],
+           "verification_scope": "hook_and_mcp_response_only"}}
+with open(path, "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(row) + "\n")
+PY_RECEIPT
 }
 trap '_ab_log_hook_run $?' EXIT
-
-# ── Locate agent-bridge binary ─────────────────────────────────────────────────
-AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")
-[[ -x "$AB" ]] || exit 0
 
 # ── Parse session_id ──────────────────────────────────────────────────────────
 HOOK_PAYLOAD=$(cat 2>/dev/null || true)
@@ -54,21 +65,42 @@ SESSION_ID=$(printf '%s' "$HOOK_PAYLOAD" | python3 -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print(d.get("session_id", ""))
+    session = d.get("session_id") or d.get("sessionId") or ""
+    if isinstance(session, str): print(session)
 except Exception:
     pass
 ' 2>/dev/null)
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
-[[ -z "$SESSION_ID" ]] && exit 0
+if [[ -z "$SESSION_ID" ]]; then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=session_id_missing
+    exit 0
+fi
+
+AB=$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")
+if [[ ! -x "$AB" ]]; then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=binary_missing
+    exit 0
+fi
 
 # ── Locate transcript ─────────────────────────────────────────────────────────
 TRANSCRIPT=$(find "$HOME/.claude/projects" "$HOME/.cursor/projects" "$HOME/.codex/sessions" \
     \( -name "${SESSION_ID}.jsonl" -o -name "*${SESSION_ID}*.jsonl" \) 2>/dev/null | head -1)
-[[ -f "$TRANSCRIPT" ]] || exit 0
+if [[ ! -f "$TRANSCRIPT" ]]; then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=transcript_missing
+    exit 0
+fi
 
 # ── Temp workspace ────────────────────────────────────────────────────────────
-TMPDIR_HOOK=$(mktemp -d /tmp/ab-precompact-XXXXXX)
-trap 'rm -rf "$TMPDIR_HOOK"; _ab_log_hook_run $?' EXIT
+TMPDIR_HOOK=$(mktemp -d /tmp/ab-precompact-XXXXXX) || {
+    _AB_EFFECT_STATUS=failed; _AB_EFFECT_CODE=temporary_workspace_failed
+    exit 0
+}
+_ab_cleanup() {
+    local code=$?
+    rm -rf "$TMPDIR_HOOK"
+    _ab_log_hook_run "$code"
+}
+trap _ab_cleanup EXIT
 
 CONVO_FILE="$TMPDIR_HOOK/convo.txt"
 MCP_IN="$TMPDIR_HOOK/mcp-input.jsonl"
@@ -77,7 +109,7 @@ MCP_OUT="$TMPDIR_HOOK/mcp-output.txt"
 # ── Extract + pre-process conversation ────────────────────────────────────────
 # Produces a text file where bullet items under recognised section headers are
 # rewritten to explicit marker prefixes so session_curate can detect them.
-python3 - "$TRANSCRIPT" "$CONVO_FILE" <<'PY'
+python3 - "$TRANSCRIPT" "$CONVO_FILE" <<'PY' 2>/dev/null
 import sys, json, re
 
 SECTION_KINDS = {
@@ -206,7 +238,14 @@ with open(out_path, 'w', encoding='utf-8') as f:
     f.write('\n'.join(out_lines))
 PY
 
-[[ -s "$CONVO_FILE" ]] || exit 0
+if [[ $? -ne 0 ]]; then
+    _AB_EFFECT_STATUS=failed; _AB_EFFECT_CODE=transcript_read_failed
+    exit 0
+fi
+if [[ ! -s "$CONVO_FILE" ]]; then
+    _AB_EFFECT_STATUS=skipped; _AB_EFFECT_CODE=conversation_empty
+    exit 0
+fi
 
 # ── Build MCP JSON-RPC messages ───────────────────────────────────────────────
 python3 - "$CONVO_FILE" "$SESSION_ID" "$MCP_IN" <<'PY'
@@ -246,18 +285,19 @@ with open(out_path, 'w') as f:
     for m in messages:
         f.write(json.dumps(m) + '\n')
 PY
+if [[ $? -ne 0 ]]; then
+    _AB_EFFECT_STATUS=failed; _AB_EFFECT_CODE=request_build_failed
+    exit 0
+fi
 
 # ── Run agent-bridge MCP ──────────────────────────────────────────────────────
-DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
-COUNT_BEFORE=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
-
 # The curator only runs the LOCAL `agent-bridge mcp` server against the on-disk
 # store (session_lifecycle_step → curate/finalize); it makes no Anthropic API
 # call, so it must NOT inherit the parent session's OAuth/API credentials.
 # Start from an empty environment (env -i) and pass through only a safe base
 # plus agent-bridge's own non-secret config (AGENT_BRIDGE_*, including the
 # AGENT_BRIDGE_CURATE_* tuning knobs, and XDG_* so the child resolves the same
-# store path the COUNT queries use). CLAUDE_*, ANTHROPIC_*, *_TOKEN, *_KEY drop.
+# store path as the hook). CLAUDE_*, ANTHROPIC_*, *_TOKEN, *_KEY drop.
 # Enumerate via bash builtins (${!PREFIX@}) — never via `env`, which a user
 # PATH shim (~/.local/bin/env) can shadow with a non-coreutils wrapper. Use the
 # absolute /usr/bin/env (real coreutils on Linux + macOS) for `-i` isolation.
@@ -278,33 +318,79 @@ done
     AGENT_BRIDGE_TOOLSET=hook-lifecycle \
     AGENT_BRIDGE_TOOL_PROFILE=standard \
     timeout 25 "$AB" mcp < "$MCP_IN" > "$MCP_OUT" 2>/dev/null
+_AB_MCP_EXIT=$?
 
-COUNT_AFTER=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
-SAVED=$(( COUNT_AFTER - COUNT_BEFORE ))
-
-# ── Parse curate result for summary ──────────────────────────────────────────
-CURATE_SUMMARY=$(python3 - "$MCP_OUT" <<'PY'
+# ── Inspect the matching response, never infer completion from process exit. ──
+# A timeout/error can follow partial writes: "not_confirmed" does not mean none.
+# Counts come from this call's result, not a delta in a concurrently written DB.
+python3 - "$MCP_OUT" "$_AB_MCP_EXIT" > "$TMPDIR_HOOK/outcome.txt" <<'PY'
 import json, sys
-try:
-    for line in open(sys.argv[1]):
-        d = json.loads(line)
-        if d.get("id") == 2:
-            result = d.get("result", {})
-            content = result.get("content", [])
-            for item in content:
-                text = item.get("text", "")
-                try:
-                    obj = json.loads(text)
-                    cur = obj.get("session_curate") or obj
-                    saved = cur.get("saved_count", 0)
-                    skipped = cur.get("skipped_duplicates", 0)
-                    print(f"curated={saved} skipped={skipped}")
-                except Exception:
-                    pass
-except Exception:
-    pass
+
+def outcome(status, code, actual="not_confirmed", summary=None):
+    return status, code, actual, summary or f"lifecycle completion not confirmed ({code})"
+
+def count(value):
+    return type(value) is int and value >= 0
+
+def inspect():
+    rc = int(sys.argv[2])
+    if rc in (124, 137): return outcome("unknown", "lifecycle_timeout")
+    if rc != 0: return outcome("failed", "lifecycle_process_failed")
+    replies = []
+    for line in open(sys.argv[1], encoding="utf-8"):
+        try: item = json.loads(line)
+        except ValueError: continue
+        if isinstance(item, dict) and item.get("id") == 2: replies.append(item)
+    if not replies: return outcome("unknown", "lifecycle_response_missing")
+    if len(replies) != 1: return outcome("unknown", "lifecycle_response_invalid")
+    reply = replies[0]
+    if "error" in reply: return outcome("failed", "lifecycle_rpc_error")
+    result = reply.get("result")
+    if not isinstance(result, dict): return outcome("unknown", "lifecycle_response_invalid")
+    if result.get("isError") is True: return outcome("failed", "lifecycle_tool_error")
+    if result.get("isError", False) is not False:
+        return outcome("unknown", "lifecycle_response_invalid")
+    objects = []
+    for item in result.get("content", []):
+        if not isinstance(item, dict) or item.get("type") != "text": continue
+        try: objects.append(json.loads(item.get("text", "")))
+        except (ValueError, TypeError): continue
+    if len(objects) != 1 or not isinstance(objects[0], dict):
+        return outcome("unknown", "lifecycle_response_invalid")
+    obj = objects[0]
+    cur, fin, work = (obj.get(k) for k in ("session_curate", "session_finalize", "work_memory"))
+    if obj.get("step") != "precompact" or not all(isinstance(v, dict) for v in (cur, fin, work)):
+        return outcome("unknown", "lifecycle_response_invalid")
+    if (cur.get("dry_run") is not False or fin.get("dry_run") is not False
+            or not all(count(cur.get(k)) for k in ("saved_count", "skipped_duplicates"))
+            or not isinstance(cur.get("errors"), list) or type(work.get("saved")) is not bool
+            or not count(fin.get("removed_count")) or not isinstance(fin.get("decay"), dict)
+            or not count(fin["decay"].get("archived_count"))):
+        return outcome("unknown", "lifecycle_response_invalid")
+    counts = (f"curated={cur['saved_count']} skipped={cur['skipped_duplicates']} "
+              f"removed={fin['removed_count']} decay_archived={fin['decay']['archived_count']}")
+    if cur['errors'] or not work['saved']:
+        return outcome("degraded", "lifecycle_partial_result", "lifecycle_response",
+                       "lifecycle reported partial result; " + counts + "; completion not confirmed")
+    return outcome("completed", "lifecycle_completed", "lifecycle_response",
+                   "lifecycle response confirmed; " + counts)
+
+try: values = inspect()
+except Exception: values = outcome("unknown", "lifecycle_response_invalid")
+print("\n".join(values))
 PY
-)
+if [[ $? -eq 0 ]]; then
+    {
+        IFS= read -r _AB_EFFECT_STATUS
+        IFS= read -r _AB_EFFECT_CODE
+        IFS= read -r _AB_EFFECT_ACTUAL
+        IFS= read -r CURATE_SUMMARY
+    } < "$TMPDIR_HOOK/outcome.txt"
+else
+    _AB_EFFECT_STATUS=unknown; _AB_EFFECT_CODE=lifecycle_response_invalid
+    _AB_EFFECT_ACTUAL=not_confirmed
+    CURATE_SUMMARY="lifecycle completion not confirmed (lifecycle_response_invalid)"
+fi
 
 # ── γ' wiring (2026-05-10): identity drift signal ────────────────────────────
 # Surface "self-drift" in the systemMessage so the next-cold-start me sees
@@ -400,4 +486,10 @@ if bits:
 ' 2>/dev/null)
 fi
 
-echo "{\"systemMessage\": \"Memory precompact: +${SAVED} memories | ${CURATE_SUMMARY:-session_curate done} | session_finalize done${DRIFT_SUMMARY}${CROSS_DRIFT}\"}"
+_AB_OUTPUT=$(python3 - "$CURATE_SUMMARY" "$DRIFT_SUMMARY" "$CROSS_DRIFT" <<'PY'
+import json, sys
+print(json.dumps({"systemMessage": "Memory precompact: " + "".join(sys.argv[1:])}))
+PY
+)
+_AB_HOOK_OUTPUT_BYTES=$(printf '%s\n' "$_AB_OUTPUT" | wc -c | tr -d ' ')
+printf '%s\n' "$_AB_OUTPUT"
