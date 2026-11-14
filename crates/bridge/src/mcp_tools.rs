@@ -28317,7 +28317,7 @@ impl McpTool for SessionCurateTool {
                     "dry_run": {
                         "type": "boolean",
                         "default": false,
-                        "description": "If true, return what would be saved without writing."
+                        "description": "If true, preview candidates without saving them, with extraction signals, scores and source lines. Role labels are input-text hints, not verified identity, authorization or task state. Existing curation telemetry may still be recorded."
                     },
                     "implicit_score_threshold": {
                         "type": "number",
@@ -28365,12 +28365,25 @@ impl McpTool for SessionCurateTool {
         let curate_opts =
             crate::curate::CurateOptions::from_env_or_defaults().with_overrides(score_ov, dedup_ov);
 
-        let mut candidates = crate::curate::curate_conversation_with_options(
-            &text,
-            session_id.as_deref(),
-            max_items,
-            curate_opts.clone(),
-        );
+        let (mut candidates, explanations) = if dry_run {
+            let preview = crate::curate::curate_conversation_with_explanations(
+                &text,
+                session_id.as_deref(),
+                max_items,
+                curate_opts.clone(),
+            );
+            (preview.candidates, Some(preview.explanations))
+        } else {
+            (
+                crate::curate::curate_conversation_with_options(
+                    &text,
+                    session_id.as_deref(),
+                    max_items,
+                    curate_opts.clone(),
+                ),
+                None,
+            )
+        };
         c2c_live_lab_phase!("candidates_ready");
         for candidate in &mut candidates {
             apply_curated_memory_governance(
@@ -28389,7 +28402,7 @@ impl McpTool for SessionCurateTool {
             if let Some(store) = &store_opt {
                 record_session_curate_event(store, true, 0, 0, 0, candidates.len()).await;
             }
-            return Ok(ToolResult::json_text(&json!({
+            let mut response = json!({
                 "dry_run": true,
                 "scope": target_scope.as_deref().unwrap_or("global"),
                 "options": {
@@ -28404,7 +28417,21 @@ impl McpTool for SessionCurateTool {
                     "related_keys": m.related_keys,
                     "scope": m.scope,
                 })).collect::<Vec<_>>()
-            })));
+            });
+            if let Some(mut explanations) = explanations {
+                // Governance may suffix keys for scope. Keep one explanation
+                // per candidate in the same order, with the final public key.
+                for (explanation, candidate) in explanations.iter_mut().zip(&candidates) {
+                    explanation.key.clone_from(&candidate.key);
+                }
+                response["explanations"] = json!({
+                    "schema": "agent_bridge.session_curate.explanations.v1",
+                    "role_attribution": "input_text_headers_only",
+                    "task_state_assessed": false,
+                    "items": explanations,
+                });
+            }
+            return Ok(ToolResult::json_text(&response));
         }
 
         let store = store_opt.unwrap();

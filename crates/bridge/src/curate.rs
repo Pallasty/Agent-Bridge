@@ -20,6 +20,7 @@
 //! Public entry points: [`curate_conversation`], [`curate_conversation_with_options`].
 
 use ab_store::MemoryRecord;
+use serde::Serialize;
 
 // ── Thresholds & limits ────────────────────────────────────────────────────
 
@@ -508,13 +509,140 @@ pub(crate) fn push_curated(
 
 // ── Phase 1: explicit marker extraction ───────────────────────────────────
 
-fn curate_explicit(text: &str, sid_suffix: &str, max_items: usize, now: i64) -> Vec<MemoryRecord> {
+/// Read-only diagnostics aligned with the selected candidates, not a task-state
+/// assessment. Role labels come only from headers in the caller's input text.
+#[derive(Clone, Debug, Serialize)]
+pub struct CurateExplanation {
+    pub key: String,
+    pub extraction: &'static str,
+    pub source: CurateSource,
+    pub matched_signals: Vec<CurateSignal>,
+    pub score: f32,
+    pub kind_votes: CurateVotes,
+    pub threshold: f32,
+    pub score_applied: bool,
+    pub marker: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CurateSource {
+    /// One-based line in conversation_text; raw_line excludes its line ending.
+    pub line_number: usize,
+    pub raw_line: String,
+    pub role: Option<&'static str>,
+    pub role_header_line: Option<usize>,
+    pub section_header_line: Option<usize>,
+    pub content_clipped: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CurateSignal {
+    pub keyword: &'static str,
+    pub weight: f32,
+    pub kind_vote: &'static str,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct CurateVotes {
+    pub lesson: f32,
+    pub decision: f32,
+    pub todo: f32,
+}
+
+pub struct CuratePreview {
+    pub candidates: Vec<MemoryRecord>,
+    pub explanations: Vec<CurateExplanation>,
+}
+
+#[derive(Default)]
+struct InputRole {
+    role: Option<&'static str>,
+    header_line: Option<usize>,
+}
+
+impl InputRole {
+    fn observe(&mut self, line: &str, line_number: usize) {
+        for role in ["user", "assistant", "system", "developer", "tool"] {
+            if line.trim().eq_ignore_ascii_case(&format!("[{role}]")) {
+                self.role = Some(role);
+                self.header_line = Some(line_number);
+                break;
+            }
+        }
+    }
+}
+
+fn explain_selected(
+    record: &MemoryRecord,
+    raw_line: &str,
+    line_number: usize,
+    role: &InputRole,
+    extraction: &'static str,
+    marker: Option<&'static str>,
+    section_header_line: Option<usize>,
+    opts: &CurateOptions,
+) -> CurateExplanation {
+    let lower = raw_line.trim().to_lowercase();
+    let mut matched_signals = Vec::new();
+    let mut score = 0.0;
+    let mut kind_votes = CurateVotes::default();
+    // Mirror the scoring tables without changing the classifier or its tie rule.
+    for table in [EPISTEMIC, NORMATIVE, CAUSAL, DECISION_KW, TODO_KW] {
+        for &(keyword, weight, kind_vote) in table {
+            if lower.contains(keyword) {
+                matched_signals.push(CurateSignal {
+                    keyword,
+                    weight,
+                    kind_vote,
+                });
+                score += weight;
+                match kind_vote {
+                    "decision" => kind_votes.decision += weight,
+                    "todo" => kind_votes.todo += weight,
+                    _ => kind_votes.lesson += weight,
+                }
+            }
+        }
+    }
+    CurateExplanation {
+        key: record.key.clone(),
+        extraction,
+        source: CurateSource {
+            line_number,
+            raw_line: raw_line.to_string(),
+            role: role.role,
+            role_header_line: role.header_line,
+            section_header_line,
+            content_clipped: extraction == "implicit" && record.content != raw_line.trim(),
+        },
+        matched_signals,
+        score,
+        kind_votes,
+        threshold: opts.implicit_score_threshold,
+        score_applied: extraction == "implicit",
+        marker,
+    }
+}
+
+fn curate_explicit(
+    text: &str,
+    sid_suffix: &str,
+    max_items: usize,
+    now: i64,
+    opts: &CurateOptions,
+    mut explanations: Option<&mut Vec<CurateExplanation>>,
+) -> Vec<MemoryRecord> {
     let mut results: Vec<MemoryRecord> = Vec::new();
     let mut section_kind: Option<&'static str> = None;
+    let mut section_header_line = None;
+    let mut role = InputRole::default();
 
     for (idx, line) in text.lines().enumerate() {
         if results.len() >= max_items {
             break;
+        }
+        if explanations.is_some() {
+            role.observe(line, idx + 1);
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -524,6 +652,7 @@ fn curate_explicit(text: &str, sid_suffix: &str, max_items: usize, now: i64) -> 
         // Section header check
         if let Some(kind) = is_section_header(trimmed) {
             section_kind = Some(kind);
+            section_header_line = Some(idx + 1);
             continue;
         }
 
@@ -536,6 +665,18 @@ fn curate_explicit(text: &str, sid_suffix: &str, max_items: usize, now: i64) -> 
                     let content = trimmed[marker.len()..].trim();
                     if content.len() >= 5 {
                         push_curated(&mut results, kind, content, sid_suffix, idx, now);
+                        if let Some(items) = explanations.as_deref_mut() {
+                            items.push(explain_selected(
+                                results.last().unwrap(),
+                                line,
+                                idx + 1,
+                                &role,
+                                "explicit_marker",
+                                Some(marker),
+                                None,
+                                opts,
+                            ));
+                        }
                         matched = true;
                     }
                     break;
@@ -549,9 +690,22 @@ fn curate_explicit(text: &str, sid_suffix: &str, max_items: usize, now: i64) -> 
                 if let Some(payload) = strip_bullet(trimmed) {
                     if payload.len() >= 8 {
                         push_curated(&mut results, kind, payload, sid_suffix, idx, now);
+                        if let Some(items) = explanations.as_deref_mut() {
+                            items.push(explain_selected(
+                                results.last().unwrap(),
+                                line,
+                                idx + 1,
+                                &role,
+                                "explicit_section",
+                                None,
+                                section_header_line,
+                                opts,
+                            ));
+                        }
                     }
                 } else if !trimmed.starts_with('[') {
                     section_kind = None;
+                    section_header_line = None;
                 }
             }
         }
@@ -605,13 +759,18 @@ fn curate_implicit(
     max_items: usize,
     now: i64,
     opts: &CurateOptions,
+    mut explanations: Option<&mut Vec<CurateExplanation>>,
 ) -> Vec<MemoryRecord> {
     let mut results: Vec<MemoryRecord> = Vec::new();
     let mut local_bags: Vec<std::collections::HashSet<String>> = seen_bags.to_vec();
 
-    for line in text.lines() {
+    let mut role = InputRole::default();
+    for (idx, line) in text.lines().enumerate() {
         if results.len() >= max_items {
             break;
+        }
+        if explanations.is_some() {
+            role.observe(line, idx + 1);
         }
         let trimmed = line.trim();
         if trimmed.chars().count() < MIN_CHARS {
@@ -662,6 +821,18 @@ fn curate_implicit(
             trigger_pattern: None,
             superseded_by: None,
         });
+        if let Some(items) = explanations.as_deref_mut() {
+            items.push(explain_selected(
+                results.last().unwrap(),
+                line,
+                idx + 1,
+                &role,
+                "implicit",
+                None,
+                None,
+                opts,
+            ));
+        }
     }
     results
 }
@@ -698,17 +869,59 @@ pub fn curate_conversation_with_options(
     max_items: usize,
     opts: CurateOptions,
 ) -> Vec<MemoryRecord> {
+    curate_conversation_impl(text, session_id, max_items, opts, None)
+}
+
+/// The same extraction with explanations captured at selection time. No text
+/// matching after clipping/dedup is used to guess a candidate's source line.
+pub fn curate_conversation_with_explanations(
+    text: &str,
+    session_id: Option<&str>,
+    max_items: usize,
+    opts: CurateOptions,
+) -> CuratePreview {
+    let mut explanations = Vec::new();
+    let candidates =
+        curate_conversation_impl(text, session_id, max_items, opts, Some(&mut explanations));
+    CuratePreview {
+        candidates,
+        explanations,
+    }
+}
+
+fn curate_conversation_impl(
+    text: &str,
+    session_id: Option<&str>,
+    max_items: usize,
+    opts: CurateOptions,
+    mut explanations: Option<&mut Vec<CurateExplanation>>,
+) -> Vec<MemoryRecord> {
     let now = now_secs();
     let sid = mk_sid_suffix(session_id);
 
     // Pass 1
-    let mut results = curate_explicit(text, &sid, max_items, now);
+    let mut results = curate_explicit(
+        text,
+        &sid,
+        max_items,
+        now,
+        &opts,
+        explanations.as_deref_mut(),
+    );
 
     // Pass 2 — fills remaining budget, deduplicates against Pass-1 content
     let budget = max_items.saturating_sub(results.len());
     if budget > 0 {
         let seen: Vec<_> = results.iter().map(|r| word_bag(&r.content)).collect();
-        results.extend(curate_implicit(text, &sid, &seen, budget, now, &opts));
+        results.extend(curate_implicit(
+            text,
+            &sid,
+            &seen,
+            budget,
+            now,
+            &opts,
+            explanations,
+        ));
     }
 
     results
@@ -717,6 +930,145 @@ pub fn curate_conversation_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stable_records(records: &[MemoryRecord]) -> serde_json::Value {
+        let mut value = serde_json::to_value(records).unwrap();
+        for row in value.as_array_mut().unwrap() {
+            for field in ["created_at", "updated_at", "last_accessed_at"] {
+                row.as_object_mut().unwrap().remove(field);
+            }
+        }
+        value
+    }
+
+    #[test]
+    fn explanations_preserve_false_positive_and_true_task_candidates() {
+        // Classification is intentionally unchanged, including the observed
+        // false positives. Consent/condition words must not hide concrete tasks.
+        for text in [
+            "我先看已完成的验收和现有待办边界，再把下一步压成一个小验证，避免重复做已经收口的修复。",
+            "很好！那我们按照你的思路规划并落地下一步建议的目标黑容。",
+            "下一步建议做**一次真实跨会话恢复验证**，确认这些修复能否减少你重复交代任务的负担。当前 `f104854c0b40` 保持为稳定基线。",
+            "下一步先检查 Hook 的状态路径，避免读错数据库，再完成集成测试。",
+            "下一步建议为 capabilities 增加主题查询，请现在实现并运行集成测试。",
+            "很好！下一步请修复自动提取器的分类错误并保留每条记录的原文与来源。",
+            "如果核验通过，下一步立即部署这次修复；当前门禁已经通过，请继续。",
+            "我先修复 Hook 状态路径，下一步补齐真实 MCP 集成测试并记录结果。",
+        ] {
+            let opts = CurateOptions::default();
+            let normal = curate_conversation_with_options(text, None, 8, opts.clone());
+            let preview = curate_conversation_with_explanations(text, None, 8, opts);
+            assert_eq!(stable_records(&normal), stable_records(&preview.candidates));
+            assert_eq!(preview.candidates.len(), 1);
+            assert_eq!(preview.candidates[0].kind, "todo");
+            let e = &preview.explanations[0];
+            assert_eq!(e.key, preview.candidates[0].key);
+            assert_eq!(e.source.raw_line, text);
+            assert_eq!(e.source.line_number, 1);
+            assert_eq!(e.source.role, None);
+            assert!(e.score_applied);
+            assert_eq!(e.score, score_sentence(&text.to_lowercase(), 0.45).unwrap().0);
+        }
+    }
+
+    #[test]
+    fn explanations_capture_roles_and_pass_order_at_selection() {
+        let text = "[USER]\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。\n[ASSISTANT]\n  todo: 核验实际数据路径并保留测试回执  \nTodos:\n- 补齐实际调用验证并记录回执";
+        let preview = curate_conversation_with_explanations(
+            text,
+            Some("source"),
+            8,
+            CurateOptions::default(),
+        );
+        assert_eq!(preview.candidates.len(), 3);
+        let e = &preview.explanations;
+        assert_eq!(
+            e.iter().map(|e| e.source.line_number).collect::<Vec<_>>(),
+            vec![4, 6, 2]
+        );
+        assert_eq!(e[0].extraction, "explicit_marker");
+        assert_eq!(e[0].marker, Some("todo:"));
+        assert_eq!(
+            e[0].source.raw_line,
+            "  todo: 核验实际数据路径并保留测试回执  "
+        );
+        assert_eq!(e[0].source.role, Some("assistant"));
+        assert_eq!(e[0].source.role_header_line, Some(3));
+        assert!(!e[0].score_applied);
+        assert_eq!(e[1].extraction, "explicit_section");
+        assert_eq!(e[1].source.section_header_line, Some(5));
+        assert_eq!(e[2].source.role, Some("user"));
+        assert_eq!(e[2].source.role_header_line, Some(1));
+        for (record, explanation) in preview.candidates.iter().zip(e) {
+            assert_eq!(record.key, explanation.key);
+        }
+    }
+
+    #[test]
+    fn explanations_keep_full_cjk_source_after_content_clipping() {
+        let line = format!("  {}下一步核验真实调用并保留回执  ", "测试".repeat(230));
+        let preview =
+            curate_conversation_with_explanations(&line, None, 8, CurateOptions::default());
+        assert_eq!(preview.candidates.len(), 1);
+        assert!(preview.candidates[0].content.ends_with('…'));
+        assert!(!preview.candidates[0].content.contains("下一步"));
+        let e = &preview.explanations[0];
+        assert_eq!(e.source.raw_line, line);
+        assert!(e.source.content_clipped);
+        assert_eq!(e.matched_signals[0].keyword, "下一步");
+    }
+
+    #[test]
+    fn explanations_follow_dedup_and_max_items() {
+        let task = "下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。";
+        let text = format!("[USER]\n{task}\n[ASSISTANT]\n{task}");
+        let preview =
+            curate_conversation_with_explanations(&text, None, 8, CurateOptions::default());
+        assert_eq!(preview.explanations.len(), 1);
+        assert_eq!(preview.explanations[0].source.line_number, 2);
+        assert_eq!(preview.explanations[0].source.role, Some("user"));
+        let text = format!("{text}\ntodo: 补齐明确待办的测试与回执");
+        let preview =
+            curate_conversation_with_explanations(&text, None, 1, CurateOptions::default());
+        assert_eq!(preview.candidates.len(), 1);
+        assert_eq!(preview.explanations[0].source.line_number, 5);
+        assert_eq!(preview.explanations[0].extraction, "explicit_marker");
+    }
+
+    #[test]
+    fn explanations_do_not_apply_lexical_threshold_to_explicit_tasks() {
+        let opts = CurateOptions::default().with_overrides(Some(0.95), None);
+        let text = "todo: 下一步核验明确任务并保留真实调用的完整回执";
+        let preview = curate_conversation_with_explanations(text, None, 8, opts.clone());
+        let e = &preview.explanations[0];
+        assert_eq!(preview.candidates[0].kind, "todo");
+        assert_eq!(e.score, 0.45);
+        assert_eq!(e.threshold, 0.95);
+        assert!(!e.score_applied);
+        assert_eq!(e.kind_votes.todo, 0.45);
+        assert_eq!(e.kind_votes.lesson, 0.0);
+        let preview = curate_conversation_with_explanations(
+            "下一步请核验明确任务并保留真实调用的完整回执",
+            None,
+            8,
+            opts,
+        );
+        assert!(preview.candidates.is_empty() && preview.explanations.is_empty());
+    }
+
+    #[test]
+    fn explanations_do_not_infer_role_from_prose_or_nonheader_text() {
+        let task = "我先修复 Hook 状态路径，下一步补齐真实 MCP 集成测试并记录结果。";
+        let text = format!("[ASSISTANT] quoted label\n{task}");
+        let preview =
+            curate_conversation_with_explanations(&text, None, 8, CurateOptions::default());
+        assert_eq!(preview.explanations[0].source.role, None);
+        let text = format!("[USER]\n[SYSTEM]\n{task}");
+        let preview =
+            curate_conversation_with_explanations(&text, None, 8, CurateOptions::default());
+        assert_eq!(preview.explanations[0].source.role, Some("system"));
+        assert_eq!(preview.explanations[0].source.role_header_line, Some(2));
+    }
 
     // ── score_sentence ────────────────────────────────────────────────────
 

@@ -1,0 +1,186 @@
+{
+  "schema": "session-curate-explanations-fixtures-v1",
+  "cases": [
+    {
+      "id": "N1",
+      "group": "observed_false_current_todo",
+      "text": "我先看已完成的验收和现有待办边界，再把下一步压成一个小验证，避免重复做已经收口的修复。",
+      "expected_current_todo": false,
+      "reason": "process_narration"
+    },
+    {
+      "id": "N2",
+      "group": "observed_false_current_todo",
+      "text": "很好！那我们按照你的思路规划并落地下一步建议的目标黑容。",
+      "expected_current_todo": false,
+      "reason": "consent_without_task"
+    },
+    {
+      "id": "N3",
+      "group": "observed_false_current_todo",
+      "text": "下一步建议做**一次真实跨会话恢复验证**，确认这些修复能否减少你重复交代任务的负担。当前 `f104854c0b40` 保持为稳定基线。",
+      "expected_current_todo": false,
+      "reason": "waiting_natural_boundary"
+    },
+    {
+      "id": "P1",
+      "group": "synthetic_true_task_control",
+      "text": "下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。",
+      "expected_current_todo": true,
+      "reason": "user_request"
+    },
+    {
+      "id": "P2",
+      "group": "synthetic_true_task_control",
+      "text": "下一步先检查 Hook 的状态路径，避免读错数据库，再完成集成测试。",
+      "expected_current_todo": true,
+      "reason": "user_request"
+    },
+    {
+      "id": "P3",
+      "group": "synthetic_true_task_control",
+      "text": "下一步建议为 capabilities 增加主题查询，请现在实现并运行集成测试。",
+      "expected_current_todo": true,
+      "reason": "user_request"
+    },
+    {
+      "id": "P4",
+      "group": "synthetic_true_task_control",
+      "text": "很好！下一步请修复自动提取器的分类错误并保留每条记录的原文与来源。",
+      "expected_current_todo": true,
+      "reason": "user_request_with_ack"
+    },
+    {
+      "id": "P5",
+      "group": "synthetic_true_task_control",
+      "text": "如果核验通过，下一步立即部署这次修复；当前门禁已经通过，请继续。",
+      "expected_current_todo": true,
+      "reason": "conditional_user_commitment_due"
+    },
+    {
+      "id": "P6",
+      "group": "synthetic_true_task_control",
+      "text": "我先修复 Hook 状态路径，下一步补齐真实 MCP 集成测试并记录结果。",
+      "expected_current_todo": true,
+      "reason": "assistant_concrete_commitment_in_authorized_task"
+    },
+    {
+      "id": "P7",
+      "group": "synthetic_true_task_control",
+      "text": "todo: 先核验 Hook 实际路径，再运行 MCP 集成测试并保留回执。",
+      "expected_current_todo": true,
+      "reason": "explicit_todo"
+    },
+    {
+      "id": "P8",
+      "group": "synthetic_true_task_control",
+      "text": "Todos:\n- 先核验 Hook 实际路径，再运行 MCP 集成测试并保留回执。",
+      "expected_current_todo": true,
+      "reason": "explicit_section"
+    },
+    {
+      "id": "R1",
+      "group": "role_header_control",
+      "text": "[ASSISTANT]\n我先看已完成的验收和现有待办边界，再把下一步压成一个小验证，避免重复做已经收口的修复。",
+      "expected_current_todo": false,
+      "reason": "same_original_with_hook_role_header"
+    },
+    {
+      "id": "R2",
+      "group": "role_header_control",
+      "text": "[USER]\n很好！那我们按照你的思路规划并落地下一步建议的目标黑容。",
+      "expected_current_todo": false,
+      "reason": "same_original_with_hook_role_header"
+    },
+    {
+      "id": "R3",
+      "group": "role_header_control",
+      "text": "[ASSISTANT]\n下一步建议做**一次真实跨会话恢复验证**，确认这些修复能否减少你重复交代任务的负担。当前 `f104854c0b40` 保持为稳定基线。",
+      "expected_current_todo": false,
+      "reason": "same_original_with_hook_role_header"
+    },
+    {
+      "id": "C1",
+      "group": "unmet_condition_control",
+      "text": "[USER]\n真实跨会话边界尚未发生，保持等待，不能主动制造样本。\n[ASSISTANT]\n下一步建议做**一次真实跨会话恢复验证**，确认这些修复能否减少你重复交代任务的负担。当前 `f104854c0b40` 保持为稳定基线。",
+      "expected_current_todo": false,
+      "reason": "condition_is_on_separate_line"
+    },
+    {
+      "id": "C2",
+      "group": "completed_context_control",
+      "text": "[USER]\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。\n[ASSISTANT]\n这项检查已经完成并已验收，当前没有剩余事项。",
+      "expected_current_todo": false,
+      "reason": "completion_is_on_separate_line"
+    },
+    {
+      "id": "U1",
+      "group": "actual_user_task",
+      "source": "Current chat: user request authorizing this implementation; verbatim.",
+      "text": "[USER]\n可以，先把候选解释和逐条来源接入 session_curate 的 dry_run，展示命中词、分数、角色和来源行，保持现有任务分类与待办输出不变，补齐真实任务对照和隔离 MCP 验证。保留原文、来源和回滚方案，渲染继续暂缓。",
+      "original_text": "可以，先把候选解释和逐条来源接入 session_curate 的 dry_run，展示命中词、分数、角色和来源行，保持现有任务分类与待办输出不变，补齐真实任务对照和隔离 MCP 验证。保留原文、来源和回滚方案，渲染继续暂缓。",
+      "role_framing": "Synthetic input header; original user text retained verbatim."
+    },
+    {
+      "id": "U2",
+      "group": "actual_user_task",
+      "source": "Current chat: earlier user Hook repair request; verbatim.",
+      "text": "[USER]\n可以，先修复 Hook 与 MCP 的状态路径和安装版本不一致，再集成效果反馈补丁，验证真实 Codex 中的记忆注入、冷却跳过和降级回退。保留现有数据和回滚方案，渲染接入继续暂缓。",
+      "original_text": "可以，先修复 Hook 与 MCP 的状态路径和安装版本不一致，再集成效果反馈补丁，验证真实 Codex 中的记忆注入、冷却跳过和降级回退。保留现有数据和回滚方案，渲染接入继续暂缓。",
+      "role_framing": "Synthetic input header; original user text retained verbatim."
+    },
+    {
+      "id": "U3",
+      "group": "actual_user_task",
+      "source": "Current chat: preceding user extractor diagnosis request; verbatim.",
+      "text": "[USER]\n很好，接下来检查自动提取器为何把过程叙述、同意句和待条件建议误列为当前待办，先做最小验证，避免误伤真实任务。保留原文、来源和回滚方案，渲染继续暂缓。",
+      "original_text": "很好，接下来检查自动提取器为何把过程叙述、同意句和待条件建议误列为当前待办，先做最小验证，避免误伤真实任务。保留原文、来源和回滚方案，渲染继续暂缓。",
+      "role_framing": "Synthetic input header; original user text retained verbatim."
+    },
+    {
+      "id": "E1",
+      "group": "source_boundary",
+      "text": "[USER]\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。\n[ASSISTANT]\n  todo: 核验实际数据路径并保留测试回执  \nTodos:\n- 补齐实际调用验证并记录回执",
+      "expected_source_lines": [
+        4,
+        6,
+        2
+      ]
+    },
+    {
+      "id": "E2",
+      "group": "dedup_boundary",
+      "text": "[USER]\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。\n[ASSISTANT]\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。",
+      "expected_source_lines": [
+        2
+      ]
+    },
+    {
+      "id": "E3",
+      "group": "clipping_boundary",
+      "text": "[ASSISTANT]\n  测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试下一步核验真实调用并保留回执  ",
+      "expected_source_lines": [
+        2
+      ]
+    },
+    {
+      "id": "E4",
+      "group": "threshold_override",
+      "text": "todo: 下一步核验明确任务并保留真实调用的完整回执\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。",
+      "threshold": 0.95,
+      "expected_source_lines": [
+        1
+      ]
+    },
+    {
+      "id": "E5",
+      "group": "budget_boundary",
+      "text": "[USER]\n下一步请修复 Hook 的状态路径并核验 MCP 实际读取的数据库。\n[ASSISTANT]\n  todo: 核验实际数据路径并保留测试回执  \nTodos:\n- 补齐实际调用验证并记录回执",
+      "max_items": 1,
+      "expected_source_lines": [
+        4
+      ]
+    }
+  ],
+  "note": "Comparison corpus, not task authorization or a natural-recovery sample. Actual-user inputs may have baseline omissions; preserve and report them."
+}
